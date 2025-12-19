@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from repositories.supabase.common import BaseRepository
 
 
+@pytest.mark.unit
 class TestBaseRepository:
     @pytest.fixture
     def mock_client(self):

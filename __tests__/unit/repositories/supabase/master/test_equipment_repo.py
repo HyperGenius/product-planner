@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from repositories.supabase import EquipmentRepository, SupabaseTableName
 
 
+@pytest.mark.unit
 class TestEquipmentRepository:
     @pytest.fixture
     def mock_client(self):
