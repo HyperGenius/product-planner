@@ -6,3 +6,7 @@ __queuestorage__
 local.settings.json
 test
 .venv
+
+# 一時的に退避
+scheduler_logic.py
+routers/transaction/**
