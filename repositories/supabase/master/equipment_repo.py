@@ -1,5 +1,5 @@
 # repositories/supabase/master/equipment_repo.py
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from repositories.supabase.common import BaseRepository, SupabaseTableName
 
 
@@ -18,16 +18,49 @@ class EquipmentRepository(BaseRepository):
         )
         return res.data or []
 
-    def create_group(self, name: str) -> Dict[str, Any]:
+    def create_group(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """設備グループを新規作成"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
-            .insert({"name": name})
+            .insert(data)
             .select()
             .single()
             .execute()
         )
         return res.data
+
+    def get_group_by_id(self, group_id: int) -> Optional[Dict[str, Any]]:
+        """設備グループID検索"""
+        res = (
+            self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
+            .select("*")
+            .eq("id", group_id)
+            .single()
+            .execute()
+        )
+        return res.data
+
+    def update_group(self, group_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        """設備グループ更新"""
+        res = (
+            self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
+            .update(data)
+            .eq("id", group_id)
+            .select()
+            .single()
+            .execute()
+        )
+        return res.data
+
+    def delete_group(self, group_id: int) -> bool:
+        """設備グループ削除"""
+        res = (
+            self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
+            .delete(count="exact")
+            .eq("id", group_id)
+            .execute()
+        )
+        return res.count is not None and res.count > 0
 
     # --- Group Members (交差テーブル操作) ---
 
