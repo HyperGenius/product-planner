@@ -1,4 +1,5 @@
 import pytest
+import uuid
 
 
 def pytest_addoption(parser):
@@ -22,3 +23,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip_integration)
+
+
+@pytest.fixture
+def headers():
+    """共通のヘッダーフィクスチャ"""
+    return {"x-tenant-id": str(uuid.uuid4())}

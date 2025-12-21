@@ -9,6 +9,7 @@ from routers.master import (
     equipment_group_router,
     process_routing_router,
 )
+from routers.transaction import orders_router
 
 # --- FastAPIのセットアップ ---
 prod_planner_api = FastAPI(
@@ -26,6 +27,7 @@ prod_planner_api.include_router(product_router)
 prod_planner_api.include_router(equipment_router)
 prod_planner_api.include_router(equipment_group_router)
 prod_planner_api.include_router(process_routing_router)
+prod_planner_api.include_router(orders_router)
 
 
 @prod_planner_api.get("/health", tags=["Health"])
