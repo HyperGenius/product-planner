@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 from repositories.supabase import EquipmentRepository, SupabaseTableName
 
 
+@pytest.mark.unit
 class TestEquipmentRepository:
     @pytest.fixture
     def mock_client(self):
@@ -45,7 +46,7 @@ class TestEquipmentRepository:
             mock_client.table.return_value.insert.return_value.select.return_value.single.return_value.execute.return_value.data
         ) = expected
 
-        result = equipment_repo.create_group(group_name)
+        result = equipment_repo.create_group({"name": group_name})
 
         assert result == expected
         mock_client.table.assert_called_with(SupabaseTableName.EQUIPMENT_GROUPS.value)
@@ -71,7 +72,7 @@ class TestEquipmentRepository:
 
         result = equipment_repo.add_machine_to_group(group_id, equipment_id)
 
-        assert result == mock_response
+        assert result == mock_response.data
         mock_client.table.assert_called_with(
             SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value
         )

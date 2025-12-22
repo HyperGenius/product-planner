@@ -7,6 +7,9 @@ local.settings.json
 test
 .venv
 
+# 開発用
+scripts/**
+
 # 一時的に退避
 scheduler_logic.py
 routers/transaction/**

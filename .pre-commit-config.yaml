@@ -12,3 +12,7 @@ repos:
         - pytest
         - pytest-mock
         - pydantic
+        - dotenv
+        - azure.functions
+        - fastapi
+        - supabase

@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from repositories.supabase.master.product_repo import ProductRepository
 from models.master import ProductCreateSchema, ProductUpdateSchema
-from dependencies import get_product_repo
+from dependencies import get_product_repo, get_current_tenant_id
 from utils.logger import get_logger
 
 product_router = APIRouter(prefix="/products", tags=["Master (Products)"])
@@ -13,11 +13,12 @@ logger = get_logger(__name__)
 @product_router.post("/")
 def create_product(
     product_data: ProductCreateSchema,  # Pydanticモデル
+    tenant_id: str = Depends(get_current_tenant_id),
     repo: ProductRepository = Depends(get_product_repo),
 ):
     """製品を新規作成"""
     logger.info(f"Creating product {product_data}")
-    return repo.create(product_data.model_dump())
+    return repo.create(product_data.with_tenant_id(tenant_id))
 
 
 @product_router.get("/")

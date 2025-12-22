@@ -1,5 +1,5 @@
 # repositories/supabase/master/product_repo.py
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from repositories.supabase.common import BaseRepository, SupabaseTableName
 
 
@@ -17,6 +17,17 @@ class ProductRepository(BaseRepository):
             .execute()
         )
         return res.data or []
+
+    def get_routing_by_id(self, routing_id: int) -> Optional[Dict[str, Any]]:
+        """工程順序ID検索"""
+        res = (
+            self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+            .select("*")
+            .eq("id", routing_id)
+            .single()
+            .execute()
+        )
+        return res.data
 
     def create_routing(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """工程順序を新規作成"""
