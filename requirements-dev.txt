@@ -58,3 +58,5 @@ urllib3==2.6.2
 websockets==15.0.1
 Werkzeug==3.1.4
 yarl==1.22.0
+dotenv==0.9.9
+python-dotenv==1.2.1
