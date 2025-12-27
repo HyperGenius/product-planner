@@ -1,2 +1,6 @@
 -r requirements.txt
 deptry
+ruff
+mypy
+pre-commit
+types-requests

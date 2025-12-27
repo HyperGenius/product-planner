@@ -1,0 +1,38 @@
+[tool.ruff]
+# 対象のPythonバージョン
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+# 有効にするルールセット
+# E, W: Pycodestyle (標準的なスタイル)
+# F: Pyflakes (エラー検出)
+# I: Isort (import順序の自動整理)
+# B: Flake8-bugbear (バグの温床になりやすいコードの検出)
+# UP: Pyupgrade (古い構文のアップデート)
+# N: PEP8-naming (命名規則)
+select = ["E", "W", "F", "I", "B", "UP", "N"]
+
+# 無視するルール
+# E501: 行長制限 (Ruffのformatterに任せるためlintでは無視)
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+# 型チェックの設定
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true  # すべての関数に型ヒントを必須にする
+disallow_incomplete_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true # 外部ライブラリの型定義がない場合の警告を抑制
+
+[tool.pytest.ini_options]
+addopts = "-ra -q"
+testpaths = [
+    "__tests__",
+]
