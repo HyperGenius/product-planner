@@ -1,8 +1,9 @@
 # routers/master/products.py
-from fastapi import APIRouter, HTTPException, Depends
-from repositories.supabase.master.product_repo import ProductRepository
+from fastapi import APIRouter, Depends, HTTPException
+
+from dependencies import get_current_tenant_id, get_product_repo
 from models.master import ProductCreateSchema, ProductUpdateSchema
-from dependencies import get_product_repo, get_current_tenant_id
+from repositories.supa_infra.master.product_repo import ProductRepository
 from utils.logger import get_logger
 
 product_router = APIRouter(prefix="/products", tags=["Master (Products)"])

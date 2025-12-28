@@ -4,22 +4,23 @@ seed_scenario.py のユニットテスト
 主にロジックの検証を行う。実際のデータベース接続は行わない。
 """
 
+import json
 import os
 import sys
-import json
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from scripts.seed_scenario import (
-    load_json,
-    resolve_path,
     import_groups,
+    import_orders,
     import_products,
     import_routings,
-    import_orders,
+    load_json,
+    resolve_path,
 )
 
 

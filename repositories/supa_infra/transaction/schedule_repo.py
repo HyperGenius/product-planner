@@ -1,7 +1,8 @@
 # repositories/supabase_repo.py
-from supabase import Client
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any
+
+from supabase import Client  # type: ignore
 
 
 class ScheduleRepository:
@@ -10,7 +11,7 @@ class ScheduleRepository:
     def __init__(self, client: Client):
         self.client = client
 
-    def get_last_end_time(self, equipment_id: int) -> Optional[datetime]:
+    def get_last_end_time(self, equipment_id: int) -> datetime | None:
         """指定された設備IDに関連する最後のスケジュールの終了日時を取得する。
 
         Args:
@@ -35,7 +36,7 @@ class ScheduleRepository:
             )
         return None
 
-    def create(self, schedule_data: Dict[str, Any]) -> None:
+    def create(self, schedule_data: dict[str, Any]) -> None:
         """指定されたスケジュールデータをデータベースに挿入する。
 
         Args:

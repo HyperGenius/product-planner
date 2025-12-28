@@ -1,7 +1,9 @@
 # __tests__/repositories/supabase/common/test_base_repo.py
-import pytest
 from unittest.mock import MagicMock
-from repositories.supabase.common import BaseRepository
+
+import pytest
+
+from repositories.supa_infra.common import BaseRepository
 
 
 @pytest.mark.unit

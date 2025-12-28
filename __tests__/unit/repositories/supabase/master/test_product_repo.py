@@ -1,7 +1,9 @@
 # __tests__/repositories/supabase/master/test_product_repo.py
-import pytest
 from unittest.mock import MagicMock
-from repositories.supabase import ProductRepository, SupabaseTableName
+
+import pytest
+
+from repositories.supa_infra import ProductRepository, SupabaseTableName
 
 
 @pytest.mark.unit

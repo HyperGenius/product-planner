@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
-from repositories.supabase.master.product_repo import ProductRepository
+# routers/master/process_routings.py
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from dependencies import get_current_tenant_id, get_product_repo
 from models.master import RoutingCreate, RoutingUpdate
-from dependencies import get_product_repo, get_current_tenant_id
+from repositories.supa_infra.master.product_repo import ProductRepository
 from utils.logger import get_logger
 
 process_routing_router = APIRouter(

@@ -1,8 +1,10 @@
 # __tests__/integration/test_rls_scenarios.py
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
+
 from function_app import prod_planner_api
-import uuid
 
 # 本物のAPIサーバーとして動作させる（Dependency Overrideしない）
 client = TestClient(prod_planner_api)

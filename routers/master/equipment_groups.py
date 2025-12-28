@@ -1,11 +1,12 @@
 # routers/master/equipment_groups.py
-from fastapi import APIRouter, HTTPException, Depends
-from repositories.supabase.master.equipment_repo import EquipmentRepository
+from fastapi import APIRouter, Depends, HTTPException
+
+from dependencies import get_current_tenant_id, get_equipment_repo
 from models.master.equipment_schemas import (
     EquipmentGroupCreate,
     EquipmentGroupUpdate,
 )
-from dependencies import get_equipment_repo, get_current_tenant_id
+from repositories.supa_infra.master.equipment_repo import EquipmentRepository
 from utils.logger import get_logger
 
 equipment_group_router = APIRouter(

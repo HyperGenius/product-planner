@@ -1,13 +1,14 @@
-# repositories/supabase/master/product_repo.py
-from typing import List, Dict, Any, Optional
-from repositories.supabase.common import BaseRepository, SupabaseTableName
+# repositories/supa_infra/master/product_repo.py
+from typing import Any
+
+from repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
 
 class ProductRepository(BaseRepository):
     def __init__(self, client):
         super().__init__(client, SupabaseTableName.PRODUCTS.value)
 
-    def get_routings_by_product(self, product_id: int) -> List[Dict[str, Any]]:
+    def get_routings_by_product(self, product_id: int) -> list[dict[str, Any]]:
         """製品IDに紐づく工程順序を取得"""
         res = (
             self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
@@ -18,7 +19,7 @@ class ProductRepository(BaseRepository):
         )
         return res.data or []
 
-    def get_routing_by_id(self, routing_id: int) -> Optional[Dict[str, Any]]:
+    def get_routing_by_id(self, routing_id: int) -> dict[str, Any] | None:
         """工程順序ID検索"""
         res = (
             self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
@@ -29,7 +30,7 @@ class ProductRepository(BaseRepository):
         )
         return res.data
 
-    def create_routing(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_routing(self, data: dict[str, Any]) -> dict[str, Any]:
         """工程順序を新規作成"""
         res = (
             self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
@@ -40,7 +41,7 @@ class ProductRepository(BaseRepository):
         )
         return res.data
 
-    def update_routing(self, routing_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    def update_routing(self, routing_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """工程順序を更新"""
         res = (
             self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)

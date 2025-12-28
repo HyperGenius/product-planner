@@ -1,6 +1,9 @@
-# repositories/supabase/master/equipment_repo.py
-from typing import List, Dict, Any, Optional
-from repositories.supabase.common import BaseRepository, SupabaseTableName
+# repositories/supa_infra/master/equipment_repo.py
+from typing import Any
+
+from postgrest.exceptions import APIError
+
+from repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
 
 class EquipmentRepository(BaseRepository):
@@ -9,7 +12,7 @@ class EquipmentRepository(BaseRepository):
 
     # --- Equipment Groups (別テーブル操作) ---
 
-    def get_all_groups(self) -> List[Dict[str, Any]]:
+    def get_all_groups(self) -> list[dict[str, Any]]:
         """設備グループのリストを取得する。"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
@@ -18,7 +21,7 @@ class EquipmentRepository(BaseRepository):
         )
         return res.data or []
 
-    def create_group(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_group(self, data: dict[str, Any]) -> dict[str, Any]:
         """設備グループを新規作成"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
@@ -29,7 +32,7 @@ class EquipmentRepository(BaseRepository):
         )
         return res.data
 
-    def get_group_by_id(self, group_id: int) -> Optional[Dict[str, Any]]:
+    def get_group_by_id(self, group_id: int) -> dict[str, Any] | None:
         """設備グループID検索"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
@@ -40,7 +43,7 @@ class EquipmentRepository(BaseRepository):
         )
         return res.data
 
-    def update_group(self, group_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    def update_group(self, group_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """設備グループ更新"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)

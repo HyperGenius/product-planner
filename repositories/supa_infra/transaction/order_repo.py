@@ -1,5 +1,5 @@
-# repositories/supabase/transaction/order_repo.py
-from repositories.supabase.common import BaseRepository, SupabaseTableName
+# repositories/supa_infra/transaction/order_repo.py
+from repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
 
 class OrderRepository(BaseRepository):

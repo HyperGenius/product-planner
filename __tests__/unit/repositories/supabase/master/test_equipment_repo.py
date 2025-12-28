@@ -1,7 +1,9 @@
 # __tests__/repositories/supabase/master/test_equipment_repo.py
-import pytest
 from unittest.mock import MagicMock
-from repositories.supabase import EquipmentRepository, SupabaseTableName
+
+import pytest
+
+from repositories.supa_infra import EquipmentRepository, SupabaseTableName
 
 
 @pytest.mark.unit
@@ -66,9 +68,9 @@ class TestEquipmentRepository:
         # 返り値をモック
         mock_response = MagicMock()
         mock_response.data = [expected]  # insertの戻り値構造に合わせて調整
-        (mock_client.table.return_value.insert.return_value.execute.return_value) = (
-            mock_response
-        )
+        (
+            mock_client.table.return_value.insert.return_value.execute.return_value
+        ) = mock_response
 
         result = equipment_repo.add_machine_to_group(group_id, equipment_id)
 

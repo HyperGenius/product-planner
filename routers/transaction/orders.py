@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends
-from repositories.supabase.transaction.order_repo import OrderRepository
+# routers/transaction/orders.py
+from fastapi import APIRouter, Depends, HTTPException
+
+from dependencies import get_current_tenant_id, get_order_repo
 from models.transaction.order_schema import (
     OrderCreate,
     OrderUpdate,
 )
-from dependencies import get_order_repo, get_current_tenant_id
+from repositories.supa_infra.transaction.order_repo import OrderRepository
 from utils.logger import get_logger
 
 orders_router = APIRouter(prefix="/orders", tags=["Transaction (Orders)"])

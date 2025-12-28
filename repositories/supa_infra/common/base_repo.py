@@ -1,8 +1,8 @@
-# repositories/supabase/common/base_repo.py
-from typing import List, Dict, Any, Optional
-from supabase import Client
-from utils.logger import get_logger
+# repositories/supa_infra/common/base_repo.py
+from typing import Any
 
+from supabase import Client  # type: ignore
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -15,13 +15,13 @@ class BaseRepository:
         self.client = client
         self.table_name = table_name
 
-    def get_all(self) -> List[Dict[str, Any]]:
+    def get_all(self) -> list[dict[str, Any]]:
         """全件取得"""
         logger.info(f"Fetching all records from {self.table_name}")
         res = self.client.table(self.table_name).select("*").execute()
         return res.data or []
 
-    def get_by_id(self, id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, id: int) -> dict[str, Any] | None:
         """ID指定で1件取得"""
         logger.info(f"Fetching record {id} from {self.table_name}")
         res = (
@@ -33,16 +33,14 @@ class BaseRepository:
         )
         return res.data
 
-    def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def create(self, data: dict[str, Any]) -> dict[str, Any]:
         """新規作成 (Create)"""
         logger.info(f"Creating record in {self.table_name}")
         # select()を付けることで、生成されたIDを含むデータを返す
-        res = (
-            self.client.table(self.table_name).insert(data).execute()
-        )
+        res = self.client.table(self.table_name).insert(data).execute()
         return res.data
 
-    def update(self, id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    def update(self, id: int, data: dict[str, Any]) -> dict[str, Any]:
         """更新 (Update / Patch) - 指定したフィールドのみ更新される"""
         logger.info(f"Updating record {id} in {self.table_name}")
 

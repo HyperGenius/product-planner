@@ -1,14 +1,16 @@
 # dependencies.py
 import os
+
 from fastapi import Depends, Header, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from supabase import create_client, Client, ClientOptions
-from repositories.supabase import (
-    ProductRepository,
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from repositories.supa_infra import (
     EquipmentRepository,
     OrderRepository,
+    ProductRepository,
     ScheduleRepository,
 )
+from supabase import Client, ClientOptions, create_client  # type: ignore
 
 # Bearer Token (JWT) を取得するためのスキーム
 security = HTTPBearer()
@@ -51,7 +53,7 @@ def get_supabase_client(token: str = Depends(get_current_user_token)) -> Client:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
-        )
+        ) from e
 
 
 # --- Dependency Injection用の関数 ---

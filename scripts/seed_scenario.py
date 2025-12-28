@@ -5,39 +5,40 @@ Usage:
     python scripts/seed_scenario.py standard_demo
 """
 
+import argparse
 import json
 import os
 import sys
-import argparse
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
 
 # プロジェクトルートへのパス追加
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
-from supabase import create_client, Client
+
+from supabase import Client, create_client  # type: ignore
 
 load_dotenv()
 
 
-def load_json(base_path: str, filename: str) -> Optional[List[Dict[str, Any]]]:
+def load_json(base_path: str, filename: str) -> list[dict[str, Any]] | None:
     """JSONファイルを読み込む"""
     path = os.path.join(base_path, filename)
     if not os.path.exists(path):
         print(f"⚠️  File not found: {path}")
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def init_client() -> Tuple[Client, str]:
+def init_client() -> tuple[Client, str]:
     """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す"""
     # 環境変数から取得
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_API_KEY")
-    test_user_email = os.environ.get("TEST_USER_EMAIL")
-    test_user_pass = os.environ.get("TEST_USER_PASS")
-    tenant_id = os.environ.get("TEST_TENANT_ID")
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_API_KEY", "")
+    test_user_email = os.environ.get("TEST_USER_EMAIL", "")
+    test_user_pass = os.environ.get("TEST_USER_PASS", "")
+    tenant_id = os.environ.get("TEST_TENANT_ID", "")
 
     if not all([url, key, test_user_email, test_user_pass, tenant_id]):
         raise ValueError(
@@ -72,12 +73,10 @@ def resolve_path(scenario_name: str) -> str:
     return base_path
 
 
-def import_groups(
-    client: Client, tenant_id: str, base_path: str
-) -> Dict[str, int]:
+def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, int]:
     """
     設備グループと設備をインポートする
-    
+
     Returns:
         group_name -> group_id のマッピング辞書
     """
@@ -88,8 +87,8 @@ def import_groups(
         print("⚠️  No groups data found, skipping...")
         return {}
 
-    group_map: Dict[str, int] = {}
-    equipment_map: Dict[str, int] = {}
+    group_map: dict[str, int] = {}
+    equipment_map: dict[str, int] = {}
 
     for group_data in data:
         group_name = group_data["name"]
@@ -133,12 +132,10 @@ def import_groups(
     return group_map
 
 
-def import_products(
-    client: Client, tenant_id: str, base_path: str
-) -> Dict[str, int]:
+def import_products(client: Client, tenant_id: str, base_path: str) -> dict[str, int]:
     """
     製品をインポートする
-    
+
     Returns:
         product_code -> product_id のマッピング辞書
     """
@@ -149,7 +146,7 @@ def import_products(
         print("⚠️  No products data found, skipping...")
         return {}
 
-    product_map: Dict[str, int] = {}
+    product_map: dict[str, int] = {}
 
     for product_data in data:
         product_code = product_data["code"]
@@ -165,7 +162,7 @@ def import_products(
             )
             .execute()
         )
-        product_id = response.data[0]["id"]
+        product_id = int(response.data[0]["id"])
         product_map[product_code] = product_id
         print(
             f"  ✓ Created product: {product_data['name']} ({product_code}, ID: {product_id})"
@@ -179,8 +176,8 @@ def import_routings(
     client: Client,
     tenant_id: str,
     base_path: str,
-    group_map: Dict[str, int],
-    product_map: Dict[str, int],
+    group_map: dict[str, int],
+    product_map: dict[str, int],
 ) -> None:
     """
     工程定義をインポートする
@@ -209,9 +206,7 @@ def import_routings(
             group_name = routing["group_name"]
 
             if group_name not in group_map:
-                print(
-                    f"  ⚠️  Group name not found: {group_name}, skipping routing..."
-                )
+                print(f"  ⚠️  Group name not found: {group_name}, skipping routing...")
                 continue
 
             group_id = group_map[group_name]
@@ -242,7 +237,7 @@ def import_orders(
     client: Client,
     tenant_id: str,
     base_path: str,
-    product_map: Dict[str, int],
+    product_map: dict[str, int],
 ) -> None:
     """
     注文データをインポートする
