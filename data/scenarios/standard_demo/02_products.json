@@ -1,0 +1,17 @@
+[
+  {
+    "name": "製品A",
+    "code": "PROD-A",
+    "type": "standard"
+  },
+  {
+    "name": "製品B",
+    "code": "PROD-B",
+    "type": "custom"
+  },
+  {
+    "name": "製品C",
+    "code": "PROD-C",
+    "type": "standard"
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "product_code": "PROD-A",
+    "routings": [
+      {
+        "process_name": "切断工程",
+        "group_name": "切断グループ",
+        "sequence_order": 1,
+        "unit_time_seconds": 600,
+        "setup_time_seconds": 1800
+      },
+      {
+        "process_name": "組立工程",
+        "group_name": "組立グループ",
+        "sequence_order": 2,
+        "unit_time_seconds": 900,
+        "setup_time_seconds": 2400
+      },
+      {
+        "process_name": "検査工程",
+        "group_name": "検査グループ",
+        "sequence_order": 3,
+        "unit_time_seconds": 300,
+        "setup_time_seconds": 600
+      }
+    ]
+  },
+  {
+    "product_code": "PROD-B",
+    "routings": [
+      {
+        "process_name": "切断工程",
+        "group_name": "切断グループ",
+        "sequence_order": 1,
+        "unit_time_seconds": 720,
+        "setup_time_seconds": 2000
+      },
+      {
+        "process_name": "組立工程",
+        "group_name": "組立グループ",
+        "sequence_order": 2,
+        "unit_time_seconds": 1200,
+        "setup_time_seconds": 3000
+      }
+    ]
+  },
+  {
+    "product_code": "PROD-C",
+    "routings": [
+      {
+        "process_name": "組立工程",
+        "group_name": "組立グループ",
+        "sequence_order": 1,
+        "unit_time_seconds": 800,
+        "setup_time_seconds": 2200
+      },
+      {
+        "process_name": "検査工程",
+        "group_name": "検査グループ",
+        "sequence_order": 2,
+        "unit_time_seconds": 400,
+        "setup_time_seconds": 800
+      }
+    ]
+  }
+]

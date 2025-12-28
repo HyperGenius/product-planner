@@ -1,0 +1,26 @@
+[
+  {
+    "order_number": "ORD-001",
+    "product_code": "PROD-A",
+    "quantity": 100,
+    "deadline_date": "2025-01-15"
+  },
+  {
+    "order_number": "ORD-002",
+    "product_code": "PROD-B",
+    "quantity": 50,
+    "deadline_date": "2025-01-20"
+  },
+  {
+    "order_number": "ORD-003",
+    "product_code": "PROD-C",
+    "quantity": 75,
+    "deadline_date": "2025-01-18"
+  },
+  {
+    "order_number": "ORD-004",
+    "product_code": "PROD-A",
+    "quantity": 150,
+    "deadline_date": "2025-01-25"
+  }
+]
