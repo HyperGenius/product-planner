@@ -9,14 +9,13 @@ import json
 import os
 import sys
 import argparse
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 # プロジェクトルートへのパス追加
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from scripts.get_token import get_access_token
 
 load_dotenv()
 
@@ -31,7 +30,7 @@ def load_json(base_path: str, filename: str) -> Optional[List[Dict[str, Any]]]:
         return json.load(f)
 
 
-def init_client() -> tuple[Client, str]:
+def init_client() -> Tuple[Client, str]:
     """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す"""
     # 環境変数から取得
     url = os.environ.get("SUPABASE_URL")
@@ -49,13 +48,12 @@ def init_client() -> tuple[Client, str]:
     # Supabaseクライアントを作成
     client = create_client(url, key)
 
-    # 認証トークンを取得
-    token = get_access_token(test_user_email, test_user_pass)
-    if not token:
-        raise ValueError("Failed to get access token")
-
-    # クライアントにトークンを設定（RLS準拠）
-    client.auth.set_session(token, token)
+    # 認証してセッションを取得
+    res = client.auth.sign_in_with_password(
+        {"email": test_user_email, "password": test_user_pass}
+    )
+    if not res.session:
+        raise ValueError("Failed to authenticate")
 
     print(f"✅ Authenticated as {test_user_email}")
     return client, tenant_id
