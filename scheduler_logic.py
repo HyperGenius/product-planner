@@ -20,6 +20,7 @@ def schedule_order(
     product_repo: ProductRepository,
     schedule_repo: ScheduleRepository,
     tenant_id: str,
+    start_time: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """
     注文に対してスケジュールを作成する。
@@ -31,6 +32,7 @@ def schedule_order(
         product_repo: 製品リポジトリ
         schedule_repo: スケジュールリポジトリ
         tenant_id: テナントID
+        start_time: スケジュール開始基準時刻（指定なしの場合は現在時刻）
 
     Returns:
         作成されたスケジュールのリスト
@@ -45,8 +47,8 @@ def schedule_order(
         raise ValueError(f"製品ID {product_id} に対する工程が見つかりません")
 
     created_schedules = []
-    # 最初の工程の開始基準時間は現在時刻
-    current_process_start = datetime.now().astimezone()
+    # 最初の工程の開始基準時間（指定がない場合は現在時刻）
+    current_process_start = start_time if start_time else datetime.now().astimezone()
 
     for routing in routings:
         # 工程の情報を取得
@@ -72,8 +74,8 @@ def schedule_order(
             # 設備の最終終了時刻を取得
             last_end = schedule_repo.get_last_end_time(machine_id)
 
-            # 設備が空く時間（最終終了時刻がない場合は現在時刻）
-            machine_free_at = last_end if last_end else datetime.now().astimezone()
+            # 設備が空く時間（最終終了時刻がない場合は開始基準時刻）
+            machine_free_at = last_end if last_end else current_process_start
 
             # 前工程が終わった時間と設備が空く時間の遅い方を基準とする
             base_start = max(machine_free_at, current_process_start)
