@@ -58,7 +58,7 @@ class TestProductRepository:
         """工程作成テスト (独自メソッド)"""
 
         (
-            mock_client.table.return_value.insert.return_value.select.return_value.single.return_value.execute.return_value.data
+            mock_client.table.return_value.insert.return_value.execute.return_value.data
         ) = expected
 
         result = product_repo.create_routing(data)

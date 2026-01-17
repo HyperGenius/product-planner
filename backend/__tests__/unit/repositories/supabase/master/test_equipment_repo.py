@@ -44,7 +44,7 @@ class TestEquipmentRepository:
     def test_create_group(self, equipment_repo, mock_client, group_name, expected):
         """設備グループ作成テスト"""
         (
-            mock_client.table.return_value.insert.return_value.select.return_value.single.return_value.execute.return_value.data
+            mock_client.table.return_value.insert.return_value.execute.return_value.data
         ) = expected
 
         result = equipment_repo.create_group({"name": group_name})
