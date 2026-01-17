@@ -3,11 +3,14 @@ name: Deploy Python project to Azure Function App
 on:
   push:
     branches: ["main"]
+    paths:
+      - 'backend/**'  # backend配下の変更時のみトリガー
   workflow_dispatch:
 
 env:
   AZURE_FUNCTIONAPP_NAME: 'product-planner-api'
   PYTHON_VERSION: '3.11'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'backend' 
 
 jobs:
   build-and-deploy:
@@ -21,23 +24,23 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      # 依存関係のインストールとテスト (オプション)
       - name: Install dependencies
         run: |
+          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
-      
-      # ここでテストを実行し、失敗したらデプロイを止める
+          popd
+
       - name: Run Tests
         run: |
+          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
           pytest
+          popd
 
-      # デプロイアクション
       - name: 'Run Azure Functions Action'
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-          package: '.'
+          package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-          # build-remote: true # Linux Consumptionプランの場合、Azure側でビルドさせるのが一般的

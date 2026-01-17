@@ -5,26 +5,23 @@ repos:
   hooks:
     # Linter (修正可能なものは自動修正)
     - id: ruff
-      args: [--fix]
+      # 設定ファイルのパスを明示的に指定
+      args: [--fix, --config=backend/pyproject.toml]
+      # backendディレクトリ配下のファイルのみを対象にする
+      files: ^backend/
     # Formatter
     - id: ruff-format
+      args: [--config=backend/pyproject.toml]
+      files: ^backend/
 
 - repo: https://github.com/pre-commit/mirrors-mypy
   rev: v1.19.0
   hooks:
     - id: mypy
+      # 設定ファイルのパスを明示的に指定
+      args: [--config-file=backend/pyproject.toml]
+      files: ^backend/
       # 依存関係の型情報を解決するために追加の依存が必要な場合はここに記述
-      additional_dependencies: [pydantic, types-requests]
-
-# 既存のpytest設定は重いので、pre-commitではなくCIで回す運用も検討
-- repo: local
-  hooks:
-    - id: pytest
-      name: pytest
-      entry: pytest
-      language: python
-      types: [python]
-      pass_filenames: false
       additional_dependencies:
         - pytest
         - pytest-mock
