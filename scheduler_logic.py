@@ -92,8 +92,13 @@ def schedule_order(
             )
 
         # 最も早く開始できる設備を選定
-        best = min(candidates, key=lambda x: x["start"])
-        start_time = best["start"]
+        best = min(candidates, key=lambda x: x["start"])  # type: ignore
+        start_time = best["start"]  # type: ignore
+
+        if start_time is None:
+            raise ValueError("開始時刻が取得できません")
+        elif type(start_time) is not datetime:
+            raise ValueError("開始時刻の型が正しくありません")
 
         # 終了時刻を計算
         end_time = calculate_end_time(start_time, total_duration_min)
@@ -135,4 +140,4 @@ def _get_equipment_ids_by_group(
         .eq("equipment_group_id", group_id)
         .execute()
     )
-    return [row["equipment_id"] for row in res.data] if res.data else []
+    return [row["equipment_id"] for row in res.data] if res.data else []  # type: ignore
