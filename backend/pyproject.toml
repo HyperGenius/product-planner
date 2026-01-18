@@ -66,8 +66,6 @@ filterwarnings = [
     # pyiceberg ライブラリ内部の非推奨警告を無視する
     "ignore::DeprecationWarning:pyiceberg.*",
     "ignore:.*PydanticDeprecatedSince212.*:DeprecationWarning:pyiceberg.*",
-    # Pydanticの特定の警告カテゴリーを無視（モジュール指定が効きにくい場合用）
-    "ignore::pydantic.warnings.PydanticDeprecatedSince212",
     # storage3の古いPydantic記法への警告を無視する
     "ignore:`pydantic.config.Extra` is deprecated:DeprecationWarning",
 ]

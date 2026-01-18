@@ -2,7 +2,7 @@
 import uuid
 
 import pytest
-from app.main import product_planner_api as app
+from app.main import app
 from fastapi.testclient import TestClient
 
 # 本物のAPIサーバーとして動作させる（Dependency Overrideしない）

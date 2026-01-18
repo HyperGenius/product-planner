@@ -5,7 +5,7 @@ import pytest
 from app.dependencies import get_equipment_repo
 
 # テスト対象のAPIインスタンス
-from app.main import product_planner_api as app
+from app.main import app
 from fastapi.testclient import TestClient
 
 # テストクライアントの作成

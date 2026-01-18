@@ -1,0 +1,17 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: product-planner-backend
+    ports:
+      - "8081:8000"
+    volumes:
+      - ./backend/app:/src/app
+    env_file:
+      - ./backend/.env
+    environment:
+      - SUPABASE_URL=http://host.docker.internal:54321
+      - PORT=8000
+      - WATCHFILES_FORCE_POLLING=true
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
