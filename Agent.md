@@ -115,3 +115,22 @@
 * **既存コードの尊重**: 既存のファイル構成や命名規則（スネークケース、ディレクトリ構造）に従う。
 * **解説の付与**: コードブロックのみを出力せず、なぜその変更が必要か、特にセキュリティやマルチテナント観点での影響を簡潔に説明すること。
 * **テストの更新**: ロジックを変更した場合は、対応するテストコードの修正または新規作成もセットで提案すること。
+
+
+# Role: Frontend Developer (Next.js)
+
+## Frontend Architecture
+- **Framework**: Next.js 14+ (App Router)
+- **State Management**: TanStack Query (React Query) v5
+    - Server Stateの管理に使用。`useEffect`でのfetchは禁止。
+- **UI Components**: shadcn/ui (Radix UI + Tailwind CSS)
+    - 新しいコンポーネントが必要な場合は `npx shadcn-ui@latest add <component>` を提案すること。
+- **API Client**:
+    - バックエンドは Python/FastAPI です。
+    - リクエスト時は必ず `Authorization` ヘッダー (Supabase JWT) と `x-tenant-id` ヘッダーを付与すること。
+    - データ型は backend の Pydantic schema と一致させること（TypeScript interface を定義する）。
+
+## Coding Style
+- **Functional Components**: 全て関数コンポーネントで記述。
+- **Hooks**: ロジックはカスタムフックに切り出す (`hooks/useEquipments.ts` 等)。
+- **Validation**: フォーム送信時は `zod` と `react-hook-form` を使用してバリデーションを行う。
