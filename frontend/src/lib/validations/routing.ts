@@ -3,7 +3,7 @@ import { z } from "zod"
 /**
  * 1行ごとの工程ルーティングスキーマ
  */
-const routingItemSchema = z.object({
+export const routingItemSchema = z.object({
   process_name: z.string().min(1, "工程名は必須です"),
   equipment_group_id: z.number().min(1, "設備グループを選択してください"),
   sequence_order: z.number().int().min(1, "順序は1以上の整数です"),
