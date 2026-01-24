@@ -129,9 +129,10 @@ export function ProductRoutingsDialog({
       return
     }
 
+    // この時点で sequenceOrder, setupTime, unitTime は number 型であることが保証される
     // 重複する順序番号のチェック
     const duplicateRouting = routings?.find(
-      (r) => r.sequence_order === sequenceOrder && r.id !== editingRouting?.id
+      (r) => r.sequence_order === (sequenceOrder as number) && r.id !== editingRouting?.id
     )
     if (duplicateRouting) {
       toast.error(`順序 ${sequenceOrder} は既に工程「${duplicateRouting.process_name}」で使用されています`)
