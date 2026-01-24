@@ -133,7 +133,7 @@ export default function EquipmentGroupsPage() {
     return (
       <div className="container mx-auto py-10">
         <div className="flex items-center justify-center">
-          <p className="text-destructive">エラーが発生しました</p>
+          <p className="text-destructive">エラーが発生しました: {error?.message || "不明なエラー"}</p>
         </div>
       </div>
     )
