@@ -1,8 +1,20 @@
 """
 シナリオベースのデモデータ投入スクリプト.
 
+このスクリプトは冪等性を保証しており、複数回実行してもエラーになりません。
+既存のデータがある場合は更新、なければ作成されます (UPSERT)。
+
 Usage:
     python scripts/seed_scenario.py standard_demo
+
+Note:
+    各テーブルのユニーク制約に基づいてupsertを実行します:
+    - equipment_groups: (tenant_id, name)
+    - equipments: (tenant_id, name)
+    - equipment_group_members: (equipment_group_id, equipment_id)
+    - products: (tenant_id, code)
+    - process_routings: (product_id, sequence_order)
+    - orders: (tenant_id, order_number)
 """
 
 import argparse
