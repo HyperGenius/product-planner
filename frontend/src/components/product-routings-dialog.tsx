@@ -129,6 +129,15 @@ export function ProductRoutingsDialog({
       return
     }
 
+    // 重複する順序番号のチェック
+    const duplicateRouting = routings?.find(
+      (r) => r.sequence_order === sequenceOrder && r.id !== editingRouting?.id
+    )
+    if (duplicateRouting) {
+      toast.error(`順序 ${sequenceOrder} は既に工程「${duplicateRouting.process_name}」で使用されています`)
+      return
+    }
+
     try {
       if (editingRouting) {
         // 更新
