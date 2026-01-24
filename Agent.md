@@ -151,3 +151,11 @@
   - `equipment_group_id` (number) -> Select from `useEquipmentGroups`
   - `setup_time_seconds` (number)
   - `unit_time_seconds` (number)
+
+### Order Registration & Simulation UI
+- **State Management**:
+  - 入力フォームの状態 (`formState`) とシミュレーション結果 (`simulationResult`) を分けて管理する。
+  - 「シミュレーション実行」を押すまでは「確定」ボタンを押せないように制御する（整合性担保のため）。
+- **UX**:
+  - シミュレーション中はローディング表示 (`Skeleton` 等) を行い、計算している感を出す。
+  - 希望納期遅延時は、単なるエラーではなく「最短でXX日なら可能です」というポジティブな提示を行うUIにする。

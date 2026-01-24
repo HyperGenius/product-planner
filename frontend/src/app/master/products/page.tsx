@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Pencil, Trash2 } from "lucide-react"
+import { Plus, Pencil, Trash2, Settings } from "lucide-react"
 import { toast } from "sonner"
 import {
   useProducts,
@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 
 /**
  * 製品マスタ画面
@@ -38,6 +39,7 @@ export default function ProductsPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isRoutingsDialogOpen, setIsRoutingsDialogOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [productName, setProductName] = useState("")
   const [productCode, setProductCode] = useState("")
@@ -70,6 +72,12 @@ export default function ProductsPage() {
   const handleOpenDeleteDialog = (product: Product) => {
     setSelectedProduct(product)
     setIsDeleteDialogOpen(true)
+  }
+
+  // 工程管理ダイアログを開く
+  const handleOpenRoutingsDialog = (product: Product) => {
+    setSelectedProduct(product)
+    setIsRoutingsDialogOpen(true)
   }
 
   // 製品を作成
@@ -193,7 +201,7 @@ export default function ProductsPage() {
                 <TableHead>製品コード</TableHead>
                 <TableHead>製品名</TableHead>
                 <TableHead>種別</TableHead>
-                <TableHead className="w-[150px] text-right">操作</TableHead>
+                <TableHead className="w-[180px] text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -206,6 +214,15 @@ export default function ProductsPage() {
                     <TableCell>{product.type}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => handleOpenRoutingsDialog(product)}
+                          aria-label={`${product.name}の工程管理`}
+                          title="工程管理"
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -375,6 +392,13 @@ export default function ProductsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 工程管理ダイアログ */}
+      <ProductRoutingsDialog
+        product={selectedProduct}
+        open={isRoutingsDialogOpen}
+        onOpenChange={setIsRoutingsDialogOpen}
+      />
     </div>
   )
 }
