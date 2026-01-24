@@ -129,7 +129,7 @@ export default function EquipmentsPage() {
     return (
       <div className="container mx-auto py-10">
         <div className="text-red-500">
-          エラーが発生しました: {(error as Error).message}
+          エラーが発生しました: {error?.message || "不明なエラー"}
         </div>
       </div>
     )
@@ -174,6 +174,7 @@ export default function EquipmentsPage() {
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => handleOpenEditDialog(equipment)}
+                          aria-label={`${equipment.name}を編集`}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -181,6 +182,7 @@ export default function EquipmentsPage() {
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => handleOpenDeleteDialog(equipment)}
+                          aria-label={`${equipment.name}を削除`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

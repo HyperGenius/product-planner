@@ -4,12 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import type { Equipment, EquipmentCreate, EquipmentUpdate } from "@/types/equipment"
 
+// クエリキーを定数化
+const EQUIPMENTS_QUERY_KEY = ["equipments"]
+
 /**
  * 設備一覧を取得するフック
  */
 export function useEquipments() {
   return useQuery<Equipment[]>({
-    queryKey: ["equipments"],
+    queryKey: EQUIPMENTS_QUERY_KEY,
     queryFn: () => apiClient<Equipment[]>("/equipments"),
   })
 }
@@ -28,7 +31,7 @@ export function useCreateEquipment() {
       }),
     onSuccess: () => {
       // 設備一覧を再取得
-      queryClient.invalidateQueries({ queryKey: ["equipments"] })
+      queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
     },
   })
 }
@@ -47,7 +50,7 @@ export function useUpdateEquipment() {
       }),
     onSuccess: () => {
       // 設備一覧を再取得
-      queryClient.invalidateQueries({ queryKey: ["equipments"] })
+      queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
     },
   })
 }
@@ -65,7 +68,7 @@ export function useDeleteEquipment() {
       }),
     onSuccess: () => {
       // 設備一覧を再取得
-      queryClient.invalidateQueries({ queryKey: ["equipments"] })
+      queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
     },
   })
 }
