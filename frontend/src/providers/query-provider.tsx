@@ -14,7 +14,8 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 60 * 1000, // 1分
-            refetchOnWindowFocus: false,
+            refetchOnWindowFocus: false, // マスタデータの頻繁な再取得を防ぐ
+            retry: 1, // エラー時のリトライ回数
           },
         },
       })
