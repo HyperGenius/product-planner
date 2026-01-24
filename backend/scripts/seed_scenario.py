@@ -35,7 +35,7 @@ def init_client() -> tuple[Client, str]:
     """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す."""
     # 環境変数から取得
     url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_API_KEY", "")
+    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
     test_user_email = os.environ.get("TEST_USER_EMAIL", "")
     test_user_pass = os.environ.get("TEST_USER_PASS", "")
     tenant_id = os.environ.get("TEST_TENANT_ID", "")
@@ -43,13 +43,14 @@ def init_client() -> tuple[Client, str]:
     if not all([url, key, test_user_email, test_user_pass, tenant_id]):
         raise ValueError(
             "Required environment variables are missing: "
-            "SUPABASE_URL, SUPABASE_API_KEY, TEST_USER_EMAIL, TEST_USER_PASS, TEST_TENANT_ID"
+            "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEST_USER_EMAIL, TEST_USER_PASS, TEST_TENANT_ID"
         )
 
     # Supabaseクライアントを作成
     client = create_client(url, key)
 
-    # 認証してセッションを取得
+    # メール/パスワードでサインイン
+    print(test_user_email, test_user_pass)
     res = client.auth.sign_in_with_password(
         {"email": test_user_email, "password": test_user_pass}
     )

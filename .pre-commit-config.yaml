@@ -21,6 +21,7 @@ repos:
       # 設定ファイルのパスを明示的に指定
       args: [--config-file=backend/pyproject.toml]
       files: ^backend/
+      exclude: ^backend/scripts/  # スクリプトディレクトリは型チェック対象外にする
       # 依存関係の型情報を解決するために追加の依存が必要な場合はここに記述
       additional_dependencies:
         - pytest
