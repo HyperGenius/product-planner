@@ -16,7 +16,7 @@ export async function fetchMyTenantId(userId: string): Promise<string | null> {
         .single()
 
     if (error) {
-        console.error('Failed to fetch tenant:', error)
+        console.error('Failed to fetch tenant: %s, user_id: %s', error.message, userId)
         return null
     }
 

@@ -1,65 +1,159 @@
 [
   {
-    "product_code": "PROD-A",
+    "product_code": "PRD-A001",
     "routings": [
       {
-        "process_name": "切断工程",
-        "group_name": "切断グループ",
         "sequence_order": 1,
-        "unit_time_seconds": 600,
-        "setup_time_seconds": 1800
+        "process_name": "粗加工",
+        "group_name": "切削工程",
+        "setup_time_seconds": 600,
+        "unit_time_seconds": 120
       },
       {
-        "process_name": "組立工程",
-        "group_name": "組立グループ",
         "sequence_order": 2,
-        "unit_time_seconds": 900,
-        "setup_time_seconds": 2400
+        "process_name": "組立",
+        "group_name": "組立工程",
+        "setup_time_seconds": 300,
+        "unit_time_seconds": 180
       },
       {
-        "process_name": "検査工程",
-        "group_name": "検査グループ",
         "sequence_order": 3,
-        "unit_time_seconds": 300,
-        "setup_time_seconds": 600
+        "process_name": "品質検査",
+        "group_name": "検査工程",
+        "setup_time_seconds": 0,
+        "unit_time_seconds": 60
+      },
+      {
+        "sequence_order": 4,
+        "process_name": "梱包",
+        "group_name": "梱包工程",
+        "setup_time_seconds": 300,
+        "unit_time_seconds": 30
       }
     ]
   },
   {
-    "product_code": "PROD-B",
+    "product_code": "PRD-B002",
     "routings": [
       {
-        "process_name": "切断工程",
-        "group_name": "切断グループ",
         "sequence_order": 1,
-        "unit_time_seconds": 720,
-        "setup_time_seconds": 2000
+        "process_name": "精密加工",
+        "group_name": "切削工程",
+        "setup_time_seconds": 900,
+        "unit_time_seconds": 240
       },
       {
-        "process_name": "組立工程",
-        "group_name": "組立グループ",
         "sequence_order": 2,
-        "unit_time_seconds": 1200,
-        "setup_time_seconds": 3000
+        "process_name": "塗装",
+        "group_name": "塗装工程",
+        "setup_time_seconds": 1200,
+        "unit_time_seconds": 300
+      },
+      {
+        "sequence_order": 3,
+        "process_name": "組立",
+        "group_name": "組立工程",
+        "setup_time_seconds": 600,
+        "unit_time_seconds": 300
+      },
+      {
+        "sequence_order": 4,
+        "process_name": "最終検査",
+        "group_name": "検査工程",
+        "setup_time_seconds": 0,
+        "unit_time_seconds": 120
       }
     ]
   },
   {
-    "product_code": "PROD-C",
+    "product_code": "PRD-C003",
     "routings": [
       {
-        "process_name": "組立工程",
-        "group_name": "組立グループ",
         "sequence_order": 1,
-        "unit_time_seconds": 800,
-        "setup_time_seconds": 2200
+        "process_name": "成形",
+        "group_name": "切削工程",
+        "setup_time_seconds": 300,
+        "unit_time_seconds": 60
       },
       {
-        "process_name": "検査工程",
-        "group_name": "検査グループ",
         "sequence_order": 2,
-        "unit_time_seconds": 400,
-        "setup_time_seconds": 800
+        "process_name": "簡易検査",
+        "group_name": "検査工程",
+        "setup_time_seconds": 0,
+        "unit_time_seconds": 30
+      }
+    ]
+  },
+  {
+    "product_code": "PRD-D004",
+    "routings": [
+      {
+        "sequence_order": 1,
+        "process_name": "部品加工",
+        "group_name": "切削工程",
+        "setup_time_seconds": 1200,
+        "unit_time_seconds": 300
+      },
+      {
+        "sequence_order": 2,
+        "process_name": "前処理塗装",
+        "group_name": "塗装工程",
+        "setup_time_seconds": 900,
+        "unit_time_seconds": 240
+      },
+      {
+        "sequence_order": 3,
+        "process_name": "組立調整",
+        "group_name": "組立工程",
+        "setup_time_seconds": 900,
+        "unit_time_seconds": 420
+      },
+      {
+        "sequence_order": 4,
+        "process_name": "出荷検査",
+        "group_name": "検査工程",
+        "setup_time_seconds": 0,
+        "unit_time_seconds": 180
+      }
+    ]
+  },
+  {
+    "product_code": "PRD-E005",
+    "routings": [
+      {
+        "sequence_order": 1,
+        "process_name": "大型加工",
+        "group_name": "切削工程",
+        "setup_time_seconds": 1800,
+        "unit_time_seconds": 600
+      },
+      {
+        "sequence_order": 2,
+        "process_name": "大型組立",
+        "group_name": "組立工程",
+        "setup_time_seconds": 1200,
+        "unit_time_seconds": 900
+      },
+      {
+        "sequence_order": 3,
+        "process_name": "塗装仕上げ",
+        "group_name": "塗装工程",
+        "setup_time_seconds": 1500,
+        "unit_time_seconds": 600
+      },
+      {
+        "sequence_order": 4,
+        "process_name": "詳細検査",
+        "group_name": "検査工程",
+        "setup_time_seconds": 300,
+        "unit_time_seconds": 240
+      },
+      {
+        "sequence_order": 5,
+        "process_name": "特殊梱包",
+        "group_name": "梱包工程",
+        "setup_time_seconds": 600,
+        "unit_time_seconds": 120
       }
     ]
   }
