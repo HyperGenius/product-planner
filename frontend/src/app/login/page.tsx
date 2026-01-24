@@ -10,10 +10,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from "sonner"
 
+const DEFAULT_USER = process.env.NODE_ENV === 'development' ? process.env.NEXT_PUBLIC_TEST_USER : ''
+const DEFAULT_PASSWORD = process.env.NODE_ENV === 'development' ? process.env.NEXT_PUBLIC_TEST_PASSWORD : ''
+
 export default function LoginPage() {
     const router = useRouter()
-    const [email, setEmail] = useState('')
-    const [password, setPassword] = useState('')
+    const [email, setEmail] = useState(DEFAULT_USER || '')
+    const [password, setPassword] = useState(DEFAULT_PASSWORD || '')
     const [loading, setLoading] = useState(false)
 
     const handleLogin = async (e: React.FormEvent) => {
