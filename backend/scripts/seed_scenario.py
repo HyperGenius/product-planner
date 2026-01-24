@@ -1,5 +1,5 @@
 """
-シナリオベースのデモデータ投入スクリプト
+シナリオベースのデモデータ投入スクリプト.
 
 Usage:
     python scripts/seed_scenario.py standard_demo
@@ -22,7 +22,7 @@ load_dotenv()
 
 
 def load_json(base_path: str, filename: str) -> list[dict[str, Any]] | None:
-    """JSONファイルを読み込む"""
+    """JSONファイルを読み込む."""
     path = os.path.join(base_path, filename)
     if not os.path.exists(path):
         print(f"⚠️  File not found: {path}")
@@ -32,7 +32,7 @@ def load_json(base_path: str, filename: str) -> list[dict[str, Any]] | None:
 
 
 def init_client() -> tuple[Client, str]:
-    """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す"""
+    """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す."""
     # 環境変数から取得
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_API_KEY", "")
@@ -61,7 +61,7 @@ def init_client() -> tuple[Client, str]:
 
 
 def resolve_path(scenario_name: str) -> str:
-    """シナリオディレクトリのパスを解決する"""
+    """シナリオディレクトリのパスを解決する."""
     # スクリプトの親ディレクトリ（プロジェクトルート）を取得
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
@@ -100,8 +100,8 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
             .insert({"name": group_name, "tenant_id": tenant_id})
             .execute()
         )
-        group_id = group_response.data[0]["id"]
-        group_map[group_name] = group_id
+        group_id = group_response.data[0]["id"]  # type: ignore
+        group_map[group_name] = group_id  # type: ignore
         print(f"  ✓ Created group: {group_name} (ID: {group_id})")
 
         # 各設備を作成してグループに追加
@@ -113,8 +113,8 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
                     .insert({"name": machine_name, "tenant_id": tenant_id})
                     .execute()
                 )
-                equipment_id = equipment_response.data[0]["id"]
-                equipment_map[machine_name] = equipment_id
+                equipment_id = equipment_response.data[0]["id"]  # type: ignore
+                equipment_map[machine_name] = equipment_id  # type: ignore
                 print(f"    ✓ Created equipment: {machine_name} (ID: {equipment_id})")
             else:
                 equipment_id = equipment_map[machine_name]
@@ -134,7 +134,7 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
 
 def import_products(client: Client, tenant_id: str, base_path: str) -> dict[str, int]:
     """
-    製品をインポートする
+    製品をインポートする.
 
     Returns:
         product_code -> product_id のマッピング辞書
@@ -162,7 +162,7 @@ def import_products(client: Client, tenant_id: str, base_path: str) -> dict[str,
             )
             .execute()
         )
-        product_id = int(response.data[0]["id"])
+        product_id = int(response.data[0]["id"])  # type: ignore
         product_map[product_code] = product_id
         print(
             f"  ✓ Created product: {product_data['name']} ({product_code}, ID: {product_id})"
@@ -180,7 +180,7 @@ def import_routings(
     product_map: dict[str, int],
 ) -> None:
     """
-    工程定義をインポートする
+    工程定義をインポートする.
     製品コードと設備グループ名からIDを解決して登録する
     """
     print("\n📦 Importing process routings...")
@@ -240,7 +240,7 @@ def import_orders(
     product_map: dict[str, int],
 ) -> None:
     """
-    注文データをインポートする
+    注文データをインポートする.
     製品コードからIDを解決して登録する
     """
     print("\n📦 Importing orders...")
@@ -282,7 +282,7 @@ def import_orders(
 
 
 def seed_scenario(scenario_name: str):
-    """シナリオデータを投入するメイン関数"""
+    """シナリオデータを投入するメイン関数."""
     print(f"\n{'=' * 60}")
     print(f"🚀 Seeding scenario: {scenario_name}")
     print(f"{'=' * 60}")

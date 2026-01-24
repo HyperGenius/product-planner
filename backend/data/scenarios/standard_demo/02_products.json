@@ -1,17 +1,27 @@
 [
   {
-    "name": "製品A",
-    "code": "PROD-A",
+    "code": "PRD-A001",
+    "name": "スタンダード・ウィジェット",
     "type": "standard"
   },
   {
-    "name": "製品B",
-    "code": "PROD-B",
+    "code": "PRD-B002",
+    "name": "プレミアム・ガジェット",
+    "type": "premium"
+  },
+  {
+    "code": "PRD-C003",
+    "name": "エコノミー・パーツ",
+    "type": "economy"
+  },
+  {
+    "code": "PRD-D004",
+    "name": "カスタム・モジュール",
     "type": "custom"
   },
   {
-    "name": "製品C",
-    "code": "PROD-C",
-    "type": "standard"
+    "code": "PRD-E005",
+    "name": "ヘビーデューティー・ユニット",
+    "type": "heavy"
   }
 ]

@@ -1,14 +1,40 @@
 [
   {
-    "name": "切断グループ",
-    "machines": ["切断機A", "切断機B"]
+    "name": "切削工程",
+    "machines": [
+      "MC-001",
+      "MC-002",
+      "MC-003"
+    ]
   },
   {
-    "name": "組立グループ",
-    "machines": ["組立ロボット1", "組立ロボット2"]
+    "name": "組立工程",
+    "machines": [
+      "ASSY-001",
+      "ASSY-002",
+      "ASSY-003",
+      "ASSY-004"
+    ]
   },
   {
-    "name": "検査グループ",
-    "machines": ["検査装置1"]
+    "name": "検査工程",
+    "machines": [
+      "INSP-001",
+      "INSP-002"
+    ]
+  },
+  {
+    "name": "塗装工程",
+    "machines": [
+      "PAINT-001",
+      "PAINT-002"
+    ]
+  },
+  {
+    "name": "梱包工程",
+    "machines": [
+      "PACK-001",
+      "PACK-002"
+    ]
   }
 ]
