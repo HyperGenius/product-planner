@@ -10,6 +10,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -52,6 +62,10 @@ export function ProductRoutingsDialog({
   const [sequenceOrder, setSequenceOrder] = useState<number | "">(1)
   const [setupTime, setSetupTime] = useState<number | "">(0)
   const [unitTime, setUnitTime] = useState<number | "">(0)
+  
+  // 削除確認ダイアログの状態
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [routingToDelete, setRoutingToDelete] = useState<ProcessRouting | null>(null)
 
   // データ取得
   const { data: routings, isLoading: isLoadingRoutings } = useProcessRoutings(product?.id ?? null)
@@ -148,28 +162,33 @@ export function ProductRoutingsDialog({
     }
   }
 
-  // 削除ハンドラ
-  const handleDelete = async (routing: ProcessRouting) => {
-    if (!product) return
-    
-    if (!confirm(`工程「${routing.process_name}」を削除してもよろしいですか？`)) {
-      return
-    }
+  // 削除ボタンのハンドラ（確認ダイアログを開く）
+  const handleDeleteClick = (routing: ProcessRouting) => {
+    setRoutingToDelete(routing)
+    setDeleteConfirmOpen(true)
+  }
+
+  // 削除の実行
+  const handleDeleteConfirm = async () => {
+    if (!product || !routingToDelete) return
 
     try {
       await deleteMutation.mutateAsync({
-        id: routing.id,
+        id: routingToDelete.id,
         productId: product.id,
       })
       toast.success("工程を削除しました")
       
       // 削除した工程を編集中だった場合はフォームをリセット
-      if (editingRouting?.id === routing.id) {
+      if (editingRouting?.id === routingToDelete.id) {
         resetForm()
       }
     } catch (error) {
       toast.error("工程の削除に失敗しました")
       console.error(error)
+    } finally {
+      setDeleteConfirmOpen(false)
+      setRoutingToDelete(null)
     }
   }
 
@@ -182,6 +201,7 @@ export function ProductRoutingsDialog({
   const isPending = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl h-[700px] flex flex-col">
         <DialogHeader>
@@ -239,7 +259,7 @@ export function ProductRoutingsDialog({
                               <Button
                                 variant="ghost"
                                 size="icon-sm"
-                                onClick={() => handleDelete(routing)}
+                                onClick={() => handleDeleteClick(routing)}
                                 disabled={isPending}
                                 aria-label={`${routing.process_name}を削除`}
                               >
@@ -368,5 +388,23 @@ export function ProductRoutingsDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* 削除確認ダイアログ */}
+    <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>工程の削除</AlertDialogTitle>
+          <AlertDialogDescription>
+            本当に工程「{routingToDelete?.process_name}」を削除しますか？
+            この操作は取り消せません。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>キャンセル</AlertDialogCancel>
+          <AlertDialogAction onClick={handleDeleteConfirm}>削除</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
