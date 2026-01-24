@@ -77,11 +77,12 @@ def delete_equipment_group(
 def add_equipment_to_group(
     group_id: int,
     member_data: EquipmentGroupMemberAdd,
+    tenant_id: str = Depends(get_current_tenant_id),
     repo: EquipmentRepository = Depends(get_equipment_repo),
 ):
     """設備グループに設備を追加"""
     logger.info(f"Adding equipment {member_data.equipment_id} to group {group_id}")
-    result = repo.add_machine_to_group(group_id, member_data.equipment_id)
+    result = repo.add_machine_to_group(group_id, member_data.equipment_id, tenant_id)
     if result is None:
         raise HTTPException(status_code=409, detail="Equipment already in group")
     return result

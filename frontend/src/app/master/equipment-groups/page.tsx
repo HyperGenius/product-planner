@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,7 @@ import {
   useDeleteEquipmentGroup,
   type EquipmentGroup,
 } from '@/lib/hooks/use-equipment-groups'
+import { EquipmentGroupMembersDialog } from '@/components/equipment-group-members-dialog'
 
 type DialogMode = 'create' | 'edit' | null
 
@@ -50,6 +51,8 @@ export default function EquipmentGroupsPage() {
   const [groupName, setGroupName] = useState('')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [groupToDelete, setGroupToDelete] = useState<EquipmentGroup | null>(null)
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false)
+  const [groupForMembers, setGroupForMembers] = useState<EquipmentGroup | null>(null)
 
   const { data: groups, isLoading, error } = useEquipmentGroups()
   const createMutation = useCreateEquipmentGroup()
@@ -119,6 +122,11 @@ export default function EquipmentGroupsPage() {
     }
   }
 
+  const handleOpenMembersDialog = (group: EquipmentGroup) => {
+    setGroupForMembers(group)
+    setMembersDialogOpen(true)
+  }
+
   if (isLoading) {
     return (
       <div className="container mx-auto py-10">
@@ -155,7 +163,7 @@ export default function EquipmentGroupsPage() {
             <TableRow>
               <TableHead className="w-[100px]">ID</TableHead>
               <TableHead>グループ名</TableHead>
-              <TableHead className="w-[150px] text-right">操作</TableHead>
+              <TableHead className="w-[200px] text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -166,6 +174,14 @@ export default function EquipmentGroupsPage() {
                   <TableCell>{group.name}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleOpenMembersDialog(group)}
+                        title="メンバー管理"
+                      >
+                        <Users className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -265,6 +281,13 @@ export default function EquipmentGroupsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* メンバー管理ダイアログ */}
+      <EquipmentGroupMembersDialog
+        group={groupForMembers}
+        open={membersDialogOpen}
+        onOpenChange={setMembersDialogOpen}
+      />
     </div>
   )
 }

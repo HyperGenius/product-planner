@@ -65,13 +65,14 @@ class EquipmentRepository(BaseRepository[T]):
 
     # --- Group Members (交差テーブル操作) ---
 
-    def add_machine_to_group(self, group_id: int, equipment_id: int):
+    def add_machine_to_group(self, group_id: int, equipment_id: int, tenant_id: str):
         """グループに機械を追加"""
         try:
             response = (
                 self.client.table(SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value)
                 .insert(
                     {
+                        "tenant_id": tenant_id,
                         "equipment_group_id": group_id,
                         "equipment_id": equipment_id,
                     }
@@ -93,7 +94,7 @@ class EquipmentRepository(BaseRepository[T]):
         """グループから機械を削除"""
         return (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value)
-            .delete()
+            .delete(count="exact")  # type: ignore
             .eq("equipment_group_id", group_id)
             .eq("equipment_id", equipment_id)
             .execute()
@@ -103,8 +104,13 @@ class EquipmentRepository(BaseRepository[T]):
         """設備グループに所属する設備一覧を取得"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value)
-            .select("*")
+            .select("equipments(*)")
             .eq("equipment_group_id", group_id)
             .execute()
         )
-        return cast(list[T], res.data)
+
+        # ネストされたequipmentsを展開して返す
+        # RLSなどで参照できない場合はNoneになる可能性があるためチェックする
+        data = cast(list[dict[str, Any]], res.data)
+        equipments = [item["equipments"] for item in data if item.get("equipments")]
+        return cast(list[T], equipments)
