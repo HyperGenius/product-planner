@@ -55,7 +55,8 @@ class ProductRepository(BaseRepository[T]):
         """工程順序を削除"""
         res = (
             self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
-            .delete()
+            # postgrest-pyの型定義ではCountMethod enumが要求されるが、文字列でも動作するためignoreする
+            .delete(count="exact")  # type: ignore
             .eq("id", routing_id)
             .execute()
         )
