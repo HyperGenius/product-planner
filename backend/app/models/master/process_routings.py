@@ -14,7 +14,7 @@ class RoutingCreate(BaseSchema):
     equipment_group_id: int = Field(default=..., description="設備グループID")
     setup_time_seconds: int = Field(default=0, description="セットアップ時間")
     unit_time_seconds: float = Field(default=0, description="単位時間")
-    setup_method_id: int | None = Field(default=None, description="段取り方法ID")
+    # setup_method_id: int | None = Field(default=None, description="段取り方法ID")
 
 
 class RoutingUpdate(BaseSchema):
@@ -25,4 +25,4 @@ class RoutingUpdate(BaseSchema):
     equipment_group_id: int | None = Field(default=None, description="設備グループID")
     setup_time_seconds: int | None = Field(default=None, description="セットアップ時間")
     unit_time_seconds: float | None = Field(default=None, description="単位時間")
-    setup_method_id: int | None = Field(default=None, description="段取り方法ID")
+    # setup_method_id: int | None = Field(default=None, description="段取り方法ID")
