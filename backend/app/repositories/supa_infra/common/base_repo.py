@@ -61,6 +61,12 @@ class BaseRepository(Generic[T]):
         """削除 (Delete)"""
         logger.info(f"Deleting record {id} from {self.table_name}")
         # count="exact" で削除された行数を確認できる
-        res = self.client.table(self.table_name).delete().eq("id", id).execute()
+        # postgrest-pyの型定義ではCountMethod enumが要求されるが、文字列でも動作するためignoreする
+        res = (
+            self.client.table(self.table_name)
+            .delete(count="exact")  # type: ignore
+            .eq("id", id)
+            .execute()
+        )
         # countが1以上なら削除成功とみなす
         return res.count is not None and res.count > 0

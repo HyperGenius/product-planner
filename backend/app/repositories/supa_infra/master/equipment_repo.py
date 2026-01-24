@@ -57,7 +57,8 @@ class EquipmentRepository(BaseRepository[T]):
         """設備グループ削除"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
-            .delete()
+            # postgrest-pyの型定義ではCountMethod enumが要求されるが、文字列でも動作するためignoreする
+            .delete(count="exact")  # type: ignore
             .eq("id", group_id)
             .execute()
         )
@@ -94,6 +95,7 @@ class EquipmentRepository(BaseRepository[T]):
         """グループから機械を削除"""
         return (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value)
+            # postgrest-pyの型定義ではCountMethod enumが要求されるが、文字列でも動作するためignoreする
             .delete(count="exact")  # type: ignore
             .eq("equipment_group_id", group_id)
             .eq("equipment_id", equipment_id)
