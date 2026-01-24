@@ -134,3 +134,20 @@
 - **Functional Components**: 全て関数コンポーネントで記述。
 - **Hooks**: ロジックはカスタムフックに切り出す (`hooks/useEquipments.ts` 等)。
 - **Validation**: フォーム送信時は `zod` と `react-hook-form` を使用してバリデーションを行う。
+
+## Domain Models (Frontend Types Hint)
+
+### Product
+- **Endpoints**: `/products`
+- **Fields**: `id` (number), `name` (string), `code` (string), `type` (string), `tenant_id` (string)
+
+### Process Routing
+- **Endpoints**: `/process-routings`
+- **Fields**: 
+  - `id` (number)
+  - `product_id` (number)
+  - `sequence_order` (number)
+  - `process_name` (string)
+  - `equipment_group_id` (number) -> Select from `useEquipmentGroups`
+  - `setup_time_seconds` (number)
+  - `unit_time_seconds` (number)
