@@ -161,7 +161,7 @@ export function EquipmentGroupMembersDialog({
                       <input
                         type="checkbox"
                         checked={selectedUnassigned.has(equipment.id)}
-                        onChange={() => {}}
+                        onChange={() => toggleUnassignedSelection(equipment.id)}
                         className="cursor-pointer"
                       />
                       <span className="text-sm">{equipment.name}</span>
@@ -215,7 +215,7 @@ export function EquipmentGroupMembersDialog({
                       <input
                         type="checkbox"
                         checked={selectedAssigned.has(equipment.id)}
-                        onChange={() => {}}
+                        onChange={() => toggleAssignedSelection(equipment.id)}
                         className="cursor-pointer"
                       />
                       <span className="text-sm">{equipment.name}</span>
