@@ -13,6 +13,7 @@ def mock_db():
 
     client.table.return_value = table
     table.insert.return_value = execute
+    table.upsert.return_value = execute  # upsertもサポート
     # デフォルトの返り値 (必要に応じてテスト内で上書き可能)
     execute.execute.return_value.data = [{"id": 1}]
 
