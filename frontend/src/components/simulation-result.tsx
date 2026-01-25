@@ -30,7 +30,18 @@ export function SimulationResult({
     )
   }
 
+  // 日付の検証
   const calculatedDate = new Date(result.calculated_deadline)
+  if (isNaN(calculatedDate.getTime())) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        <div className="text-center">
+          <p>日付データが不正です</p>
+        </div>
+      </div>
+    )
+  }
+
   const formattedDate = format(calculatedDate, "yyyy年MM月dd日 HH:mm", { locale: ja })
 
   // 希望納期と比較
@@ -67,6 +78,12 @@ export function SimulationResult({
           {result.process_schedules.map((schedule, index) => {
             const startDate = new Date(schedule.start_time)
             const endDate = new Date(schedule.end_time)
+
+            // 日付の検証
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+              return null
+            }
+
             const startFormatted = format(startDate, "MM/dd HH:mm", { locale: ja })
             const endFormatted = format(endDate, "MM/dd HH:mm", { locale: ja })
 

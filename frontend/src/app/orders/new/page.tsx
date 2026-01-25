@@ -36,6 +36,12 @@ export default function NewOrderPage() {
       return
     }
 
+    const productIdNum = parseInt(productId)
+    if (isNaN(productIdNum)) {
+      toast.error("製品IDが無効です")
+      return
+    }
+
     const quantityNum = parseInt(quantity)
     if (!quantity || isNaN(quantityNum) || quantityNum < 1) {
       toast.error("数量は1以上の整数を入力してください")
@@ -44,7 +50,7 @@ export default function NewOrderPage() {
 
     try {
       const result = await simulateMutation.mutateAsync({
-        product_id: parseInt(productId),
+        product_id: productIdNum,
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
       })
@@ -70,11 +76,19 @@ export default function NewOrderPage() {
       return
     }
 
+    const productIdNum = parseInt(productId)
+    const quantityNum = parseInt(quantity)
+
+    if (isNaN(productIdNum) || isNaN(quantityNum)) {
+      toast.error("製品IDまたは数量が無効です")
+      return
+    }
+
     try {
       await createMutation.mutateAsync({
         order_no: orderNo,
-        product_id: parseInt(productId),
-        quantity: parseInt(quantity),
+        product_id: productIdNum,
+        quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
       })
       toast.success("注文を登録しました")
