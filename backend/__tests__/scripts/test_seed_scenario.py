@@ -57,8 +57,8 @@ class TestImporters:
             result = import_groups(mock_db["client"], "tenant-1", "/path")
 
         assert "Group1" in result
-        # モックが呼ばれたかも確認できる
-        assert mock_db["table"].insert.called
+        # upsertが呼ばれたかを確認
+        assert mock_db["table"].upsert.called
 
     def test_import_products(self, mock_db):
         # このテスト固有のID設定
@@ -91,7 +91,7 @@ class TestImporters:
                 mock_db["client"], "tenant-1", "/path", {"Group1": 5}, {"PROD-A": 10}
             )
 
-        assert mock_db["table"].insert.called
+        assert mock_db["table"].upsert.called
 
     def test_import_routings_skips_missing_product(self, mock_db):
         test_data = [
@@ -106,4 +106,4 @@ class TestImporters:
                 mock_db["client"], "tenant-1", "/path", {"Group1": 5}, {"PROD-A": 10}
             )
 
-        assert not mock_db["table"].insert.called
+        assert not mock_db["table"].upsert.called

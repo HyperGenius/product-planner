@@ -1,8 +1,20 @@
 """
 シナリオベースのデモデータ投入スクリプト.
 
+このスクリプトは冪等性を保証しており、複数回実行してもエラーになりません。
+既存のデータがある場合は更新、なければ作成されます (UPSERT)。
+
 Usage:
     python scripts/seed_scenario.py standard_demo
+
+Note:
+    各テーブルのユニーク制約に基づいてupsertを実行します:
+    - equipment_groups: (tenant_id, name)
+    - equipments: (tenant_id, name)
+    - equipment_group_members: (equipment_group_id, equipment_id)
+    - products: (tenant_id, code)
+    - process_routings: (product_id, sequence_order)
+    - orders: (tenant_id, order_number)
 """
 
 import argparse
@@ -50,7 +62,6 @@ def init_client() -> tuple[Client, str]:
     client = create_client(url, key)
 
     # メール/パスワードでサインイン
-    print(test_user_email, test_user_pass)
     res = client.auth.sign_in_with_password(
         {"email": test_user_email, "password": test_user_pass}
     )
@@ -95,10 +106,13 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
         group_name = group_data["name"]
         machine_names = group_data.get("machines", [])
 
-        # グループを作成
+        # グループを作成（upsert）
         group_response = (
             client.table("equipment_groups")
-            .insert({"name": group_name, "tenant_id": tenant_id})
+            .upsert(
+                {"name": group_name, "tenant_id": tenant_id},
+                on_conflict="tenant_id, name",
+            )
             .execute()
         )
         group_id = group_response.data[0]["id"]  # type: ignore
@@ -107,11 +121,14 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
 
         # 各設備を作成してグループに追加
         for machine_name in machine_names:
-            # 設備を作成（重複チェック）
+            # 設備を作成（重複チェック、upsert）
             if machine_name not in equipment_map:
                 equipment_response = (
                     client.table("equipments")
-                    .insert({"name": machine_name, "tenant_id": tenant_id})
+                    .upsert(
+                        {"name": machine_name, "tenant_id": tenant_id},
+                        on_conflict="tenant_id, name",
+                    )
                     .execute()
                 )
                 equipment_id = equipment_response.data[0]["id"]  # type: ignore
@@ -120,12 +137,14 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
             else:
                 equipment_id = equipment_map[machine_name]
 
-            # グループメンバーシップを作成
-            client.table("equipment_group_members").insert(
+            # グループメンバーシップを作成（upsert）
+            client.table("equipment_group_members").upsert(
                 {
                     "equipment_group_id": group_id,
                     "equipment_id": equipment_id,
-                }
+                    "tenant_id": tenant_id,
+                },
+                on_conflict="equipment_group_id, equipment_id",
             ).execute()
             print(f"    ✓ Added {machine_name} to {group_name}")
 
@@ -153,13 +172,14 @@ def import_products(client: Client, tenant_id: str, base_path: str) -> dict[str,
         product_code = product_data["code"]
         response = (
             client.table("products")
-            .insert(
+            .upsert(
                 {
                     "name": product_data["name"],
                     "code": product_code,
                     "type": product_data["type"],
                     "tenant_id": tenant_id,
-                }
+                },
+                on_conflict="tenant_id, code",
             )
             .execute()
         )
@@ -212,8 +232,8 @@ def import_routings(
 
             group_id = group_map[group_name]
 
-            # 工程を登録
-            client.table("process_routings").insert(
+            # 工程を登録（upsert）
+            client.table("process_routings").upsert(
                 {
                     "product_id": product_id,
                     "sequence_order": routing["sequence_order"],
@@ -222,7 +242,8 @@ def import_routings(
                     "setup_time_seconds": routing.get("setup_time_seconds", 0),
                     "unit_time_seconds": routing.get("unit_time_seconds", 0),
                     "tenant_id": tenant_id,
-                }
+                },
+                on_conflict="product_id, sequence_order",
             ).execute()
 
             routing_count += 1
@@ -262,15 +283,16 @@ def import_orders(
 
         product_id = product_map[product_code]
 
-        # 注文を登録
-        client.table("orders").insert(
+        # 注文を登録（upsert）
+        client.table("orders").upsert(
             {
                 "order_number": order_data["order_number"],
                 "product_id": product_id,
                 "quantity": order_data["quantity"],
                 "deadline_date": order_data.get("deadline_date"),
                 "tenant_id": tenant_id,
-            }
+            },
+            on_conflict="tenant_id, order_number",
         ).execute()
 
         order_count += 1
