@@ -42,9 +42,7 @@ def build_simulate_response(
     is_feasible = is_schedule_feasible(desired_deadline, calculated_deadline)
 
     # process_schedulesを構築（process_nameと equipment_nameを含める）
-    process_schedules = build_process_schedules(
-        schedules, product_repo, equipment_repo
-    )
+    process_schedules = build_process_schedules(schedules, product_repo, equipment_repo)
 
     return {
         "calculated_deadline": calculated_deadline,

@@ -71,14 +71,18 @@ class TestEquipmentRepository:
             mock_client.table.return_value.insert.return_value.execute.return_value
         ) = mock_response
 
-        result = equipment_repo.add_machine_to_group(group_id, equipment_id)
+        result = equipment_repo.add_machine_to_group(group_id, equipment_id, "tenant_1")
 
         assert result == mock_response.data
         mock_client.table.assert_called_with(
             SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value
         )
         mock_client.table.return_value.insert.assert_called_with(
-            {"equipment_group_id": group_id, "equipment_id": equipment_id}
+            {
+                "tenant_id": "tenant_1",
+                "equipment_group_id": group_id,
+                "equipment_id": equipment_id,
+            }
         )
 
     @pytest.mark.parametrize(
@@ -126,8 +130,8 @@ class TestEquipmentRepository:
             ) = mock_data
         else:
             # データが取得できない場合は例外を発生させる
-            mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = (
-                Exception("Not found")
+            mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = Exception(
+                "Not found"
             )
 
         result = equipment_repo.get_equipment_name(equipment_id)

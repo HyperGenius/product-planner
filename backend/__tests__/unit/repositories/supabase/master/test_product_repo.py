@@ -89,8 +89,8 @@ class TestProductRepository:
             ) = mock_data
         else:
             # データが取得できない場合は例外を発生させる
-            mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = (
-                Exception("Not found")
+            mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = Exception(
+                "Not found"
             )
 
         result = product_repo.get_process_name(routing_id)

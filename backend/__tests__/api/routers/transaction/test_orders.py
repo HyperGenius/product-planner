@@ -144,7 +144,12 @@ class TestOrderRouter:
         assert response.json()["detail"] == "Not found"
 
     def test_simulate_schedule(
-        self, headers, mock_repo, mock_product_repo, mock_equipment_repo, mock_schedule_repo
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
     ):
         """POST /{order_id}/simulate: シミュレーション実行のテスト"""
         order_id = 1
@@ -203,7 +208,12 @@ class TestOrderRouter:
         assert response.json()["detail"] == "Order not found"
 
     def test_confirm_order(
-        self, headers, mock_repo, mock_product_repo, mock_equipment_repo, mock_schedule_repo
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
     ):
         """POST /{order_id}/confirm: 注文確定のテスト"""
         order_id = 1

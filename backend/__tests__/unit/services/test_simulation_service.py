@@ -20,23 +20,17 @@ class TestSimulationService:
 
     def test_is_schedule_feasible_within_deadline(self):
         """計算納期が希望納期より早い場合はTrue"""
-        result = is_schedule_feasible(
-            "2024-12-31T17:00:00", "2024-12-30T17:00:00"
-        )
+        result = is_schedule_feasible("2024-12-31T17:00:00", "2024-12-30T17:00:00")
         assert result is True
 
     def test_is_schedule_feasible_exact_deadline(self):
         """計算納期が希望納期と同じ場合はTrue"""
-        result = is_schedule_feasible(
-            "2024-12-31T17:00:00", "2024-12-31T17:00:00"
-        )
+        result = is_schedule_feasible("2024-12-31T17:00:00", "2024-12-31T17:00:00")
         assert result is True
 
     def test_is_schedule_feasible_exceeds_deadline(self):
         """計算納期が希望納期より遅い場合はFalse"""
-        result = is_schedule_feasible(
-            "2024-12-31T17:00:00", "2025-01-01T17:00:00"
-        )
+        result = is_schedule_feasible("2024-12-31T17:00:00", "2025-01-01T17:00:00")
         assert result is False
 
     def test_is_schedule_feasible_invalid_format(self):
