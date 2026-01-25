@@ -12,6 +12,14 @@ class OrderCreate(BaseSchema):
     deadline_date: str | None = None
 
 
+class OrderSimulateRequest(BaseSchema):
+    """注文シミュレーションのリクエストスキーマ"""
+
+    product_id: int
+    quantity: int
+    deadline_date: str | None = None
+
+
 class OrderUpdate(BaseSchema):
     """注文を更新するためのスキーマ"""
 
