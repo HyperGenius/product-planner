@@ -116,3 +116,19 @@ class EquipmentRepository(BaseRepository[T]):
         data = cast(list[dict[str, Any]], res.data)
         equipments = [item["equipments"] for item in data if item.get("equipments")]
         return cast(list[T], equipments)
+
+    def get_equipment_name(self, equipment_id: int) -> str | None:
+        """設備IDから設備名を取得"""
+        try:
+            res = (
+                self.client.table(SupabaseTableName.EQUIPMENTS.value)
+                .select("equipment_name")
+                .eq("id", equipment_id)
+                .single()
+                .execute()
+            )
+            if res.data and isinstance(res.data, dict):
+                return str(res.data.get("equipment_name"))
+            return None
+        except Exception:
+            return None

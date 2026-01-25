@@ -105,3 +105,32 @@ class TestEquipmentRepository:
             SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value
         )
         mock_client.table.return_value.delete.assert_called()
+
+    @pytest.mark.parametrize(
+        "equipment_id, mock_data, expected",
+        [
+            (1, {"equipment_name": "CNC Machine"}, "CNC Machine"),
+            (2, {"equipment_name": "Lathe"}, "Lathe"),
+            (3, None, None),  # データが取得できない場合
+            (4, {}, None),  # equipment_nameが含まれていない場合
+        ],
+    )
+    def test_get_equipment_name(
+        self, equipment_repo, mock_client, equipment_id, mock_data, expected
+    ):
+        """設備名取得テスト (独自メソッド)"""
+        # Mockの設定
+        if mock_data is not None:
+            (
+                mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data
+            ) = mock_data
+        else:
+            # データが取得できない場合は例外を発生させる
+            mock_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.side_effect = (
+                Exception("Not found")
+            )
+
+        result = equipment_repo.get_equipment_name(equipment_id)
+
+        assert result == expected
+        mock_client.table.assert_called_with(SupabaseTableName.EQUIPMENTS.value)
