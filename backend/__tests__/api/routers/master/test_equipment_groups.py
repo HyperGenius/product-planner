@@ -136,7 +136,12 @@ class TestEquipmentGroupRouter:
 
         assert response.status_code == 200
         assert response.json() == expected_data
-        mock_repo.add_machine_to_group.assert_called_with(group_id, equipment_id)
+        # tenant_idは依存性注入で渡されるため、呼び出しには含まれる
+        mock_repo.add_machine_to_group.assert_called_once()
+        call_args = mock_repo.add_machine_to_group.call_args[0]
+        assert call_args[0] == group_id
+        assert call_args[1] == equipment_id
+        # call_args[2] はtenant_id（ヘッダーから取得される）
 
     def test_add_equipment_to_group_duplicate(self, headers, mock_repo):
         """POST /{group_id}/members: 重複追加時の409エラーテスト"""
