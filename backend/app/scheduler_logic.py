@@ -14,25 +14,27 @@ from app.utils.calendar import calculate_end_time, get_next_available_start_time
 
 
 def schedule_order(
-    order_id: int,
+    order_id: int | None,
     product_id: int,
     quantity: int,
     product_repo: ProductRepository,
     schedule_repo: ScheduleRepository,
     tenant_id: str,
     start_time: datetime | None = None,
+    dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     """
     注文に対してスケジュールを作成する。
 
     Args:
-        order_id: 注文ID
+        order_id: 注文ID（dry_run時はNoneでも可）
         product_id: 製品ID
         quantity: 数量
         product_repo: 製品リポジトリ
         schedule_repo: スケジュールリポジトリ
         tenant_id: テナントID
         start_time: スケジュール開始基準時刻（指定なしの場合は現在時刻）
+        dry_run: Trueの場合、DBに保存せずに計算結果のみを返す
 
     Returns:
         作成されたスケジュールのリスト
@@ -103,7 +105,7 @@ def schedule_order(
         # 終了時刻を計算
         end_time = calculate_end_time(start_time, total_duration_min)
 
-        # スケジュールを保存
+        # スケジュールデータを作成
         schedule_data = {
             "tenant_id": tenant_id,
             "order_id": order_id,
@@ -112,7 +114,11 @@ def schedule_order(
             "start_datetime": start_time.isoformat(),
             "end_datetime": end_time.isoformat(),
         }
-        schedule_repo.create(schedule_data)
+
+        # Dry Runモードでなければデータベースに保存
+        if not dry_run:
+            schedule_repo.create(schedule_data)
+
         created_schedules.append(schedule_data)
 
         # 次工程の開始基準時間は、今回の終了時刻
