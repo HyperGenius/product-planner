@@ -70,6 +70,15 @@ def is_schedule_feasible(
     try:
         deadline_dt = datetime.fromisoformat(desired_deadline)
         calc_dt = datetime.fromisoformat(calculated_deadline)
+
+        # timezone aware/naive を統一する
+        if deadline_dt.tzinfo is None and calc_dt.tzinfo is not None:
+            # deadline を aware に変換
+            deadline_dt = deadline_dt.replace(tzinfo=calc_dt.tzinfo)
+        elif deadline_dt.tzinfo is not None and calc_dt.tzinfo is None:
+            # calc を aware に変換
+            calc_dt = calc_dt.replace(tzinfo=deadline_dt.tzinfo)
+
         return calc_dt <= deadline_dt
     except ValueError:
         return True

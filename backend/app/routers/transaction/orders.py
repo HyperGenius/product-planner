@@ -26,6 +26,19 @@ orders_router = APIRouter(prefix="/orders", tags=["Transaction (Orders)"])
 logger = get_logger(__name__)
 
 
+def _map_order_response(order: dict) -> dict:
+    """
+    データベース形式（order_number, deadline_date）を
+    フロントエンド形式（order_no, desired_deadline）にマッピングする。
+    """
+    mapped = dict(order)
+    if "order_number" in mapped:
+        mapped["order_no"] = mapped.pop("order_number")
+    if "deadline_date" in mapped:
+        mapped["desired_deadline"] = mapped.pop("deadline_date")
+    return mapped
+
+
 @orders_router.post("/")
 def create_order(
     order_data: OrderCreate,
@@ -34,14 +47,16 @@ def create_order(
 ):
     """注文を新規作成"""
     logger.info(f"Creating order {order_data}")
-    return repo.create(order_data.with_tenant_id(tenant_id))
+    result = repo.create(order_data.with_tenant_id(tenant_id))
+    return _map_order_response(result)
 
 
 @orders_router.get("/")
 def get_orders(repo: OrderRepository = Depends(get_order_repo)):
     """注文を全件取得"""
     logger.info("Fetching all orders")
-    return repo.get_all()
+    results = repo.get_all()
+    return [_map_order_response(order) for order in results]
 
 
 @orders_router.get("/{order_id}")
@@ -51,7 +66,7 @@ def get_order(order_id: int, repo: OrderRepository = Depends(get_order_repo)):
     result = repo.get_by_id(order_id)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
-    return result
+    return _map_order_response(result)
 
 
 @orders_router.patch("/{order_id}")
@@ -65,7 +80,7 @@ def update_order(
     result = repo.update(order_id, order_data.model_dump(exclude_unset=True))
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
-    return result
+    return _map_order_response(result)
 
 
 @orders_router.delete("/{order_id}")
