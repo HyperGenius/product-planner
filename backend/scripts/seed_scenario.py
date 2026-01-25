@@ -62,7 +62,6 @@ def init_client() -> tuple[Client, str]:
     client = create_client(url, key)
 
     # メール/パスワードでサインイン
-    print(test_user_email, test_user_pass)
     res = client.auth.sign_in_with_password(
         {"email": test_user_email, "password": test_user_pass}
     )
@@ -112,7 +111,7 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
             client.table("equipment_groups")
             .upsert(
                 {"name": group_name, "tenant_id": tenant_id},
-                on_conflict="tenant_id, name"
+                on_conflict="tenant_id, name",
             )
             .execute()
         )
@@ -128,7 +127,7 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
                     client.table("equipments")
                     .upsert(
                         {"name": machine_name, "tenant_id": tenant_id},
-                        on_conflict="tenant_id, name"
+                        on_conflict="tenant_id, name",
                     )
                     .execute()
                 )
@@ -143,8 +142,9 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
                 {
                     "equipment_group_id": group_id,
                     "equipment_id": equipment_id,
+                    "tenant_id": tenant_id,
                 },
-                on_conflict="equipment_group_id, equipment_id"
+                on_conflict="equipment_group_id, equipment_id",
             ).execute()
             print(f"    ✓ Added {machine_name} to {group_name}")
 
@@ -179,7 +179,7 @@ def import_products(client: Client, tenant_id: str, base_path: str) -> dict[str,
                     "type": product_data["type"],
                     "tenant_id": tenant_id,
                 },
-                on_conflict="tenant_id, code"
+                on_conflict="tenant_id, code",
             )
             .execute()
         )
@@ -243,7 +243,7 @@ def import_routings(
                     "unit_time_seconds": routing.get("unit_time_seconds", 0),
                     "tenant_id": tenant_id,
                 },
-                on_conflict="product_id, sequence_order"
+                on_conflict="product_id, sequence_order",
             ).execute()
 
             routing_count += 1
@@ -292,7 +292,7 @@ def import_orders(
                 "deadline_date": order_data.get("deadline_date"),
                 "tenant_id": tenant_id,
             },
-            on_conflict="tenant_id, order_number"
+            on_conflict="tenant_id, order_number",
         ).execute()
 
         order_count += 1
