@@ -1,12 +1,20 @@
 # routers/transaction/orders.py
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.dependencies import get_current_tenant_id, get_order_repo
+from app.dependencies import (
+    get_current_tenant_id,
+    get_order_repo,
+    get_product_repo,
+    get_schedule_repo,
+)
 from app.models.transaction.order_schema import (
     OrderCreate,
     OrderUpdate,
 )
+from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
+from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
+from app.scheduler_logic import schedule_order
 from app.utils.logger import get_logger
 
 orders_router = APIRouter(prefix="/orders", tags=["Transaction (Orders)"])
@@ -64,3 +72,71 @@ def delete_order(order_id: int, repo: OrderRepository = Depends(get_order_repo))
     if not success:
         raise HTTPException(status_code=404, detail="Not found")
     return {"status": "deleted"}
+
+
+@orders_router.post("/{order_id}/simulate")
+def simulate_schedule(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    order_repo: OrderRepository = Depends(get_order_repo),
+    product_repo: ProductRepository = Depends(get_product_repo),
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+):
+    """
+    スケジュールのシミュレーションを行う（DB保存なし）。
+    """
+    logger.info(f"Simulating schedule for order {order_id}")
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    try:
+        # dry_run=True で実行
+        result = schedule_order(
+            order_id=order["id"],
+            product_id=order["product_id"],
+            quantity=order["quantity"],
+            product_repo=product_repo,
+            schedule_repo=schedule_repo,
+            tenant_id=tenant_id,
+            dry_run=True,
+        )
+        return {"schedules": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@orders_router.post("/{order_id}/confirm")
+def confirm_order(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    order_repo: OrderRepository = Depends(get_order_repo),
+    product_repo: ProductRepository = Depends(get_product_repo),
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+):
+    """
+    スケジュールを確定・保存し、注文ステータスをconfirmedにする。
+    """
+    logger.info(f"Confirming order {order_id}")
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    try:
+        # 1. 実際に保存 (dry_run=False)
+        result = schedule_order(
+            order_id=order["id"],
+            product_id=order["product_id"],
+            quantity=order["quantity"],
+            product_repo=product_repo,
+            schedule_repo=schedule_repo,
+            tenant_id=tenant_id,
+            dry_run=False,
+        )
+
+        # 2. ステータス更新 & is_scheduled フラグ更新
+        order_repo.update(order_id, {"status": "confirmed", "is_scheduled": True})
+
+        return {"status": "confirmed", "schedules": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
