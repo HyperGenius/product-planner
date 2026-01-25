@@ -61,3 +61,19 @@ class ProductRepository(BaseRepository[T]):
             .execute()
         )
         return res.count is not None and res.count > 0
+
+    def get_process_name(self, routing_id: int) -> str:
+        """Routing IDから工程名を取得"""
+        try:
+            res = (
+                self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+                .select("process_name")
+                .eq("id", routing_id)
+                .single()
+                .execute()
+            )
+            if res.data and isinstance(res.data, dict):
+                return str(res.data.get("process_name", "不明"))
+            return "不明"
+        except Exception:
+            return "不明"

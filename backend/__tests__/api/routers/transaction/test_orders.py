@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from app.dependencies import (
+    get_equipment_repo,
     get_order_repo,
     get_product_repo,
     get_schedule_repo,
@@ -33,18 +34,27 @@ class TestOrderRouter:
         return mock
 
     @pytest.fixture
+    def mock_equipment_repo(self):
+        """設備リポジトリのモックを作成するフィクスチャ"""
+        mock = MagicMock()
+        return mock
+
+    @pytest.fixture
     def mock_schedule_repo(self):
         """スケジュールリポジトリのモックを作成するフィクスチャ"""
         mock = MagicMock()
         return mock
 
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo, mock_product_repo, mock_schedule_repo):
+    def override_dependency(
+        self, mock_repo, mock_product_repo, mock_equipment_repo, mock_schedule_repo
+    ):
         """
         テスト実行中だけ依存関係を mock に差し替える。
         """
         app.dependency_overrides[get_order_repo] = lambda: mock_repo
         app.dependency_overrides[get_product_repo] = lambda: mock_product_repo
+        app.dependency_overrides[get_equipment_repo] = lambda: mock_equipment_repo
         app.dependency_overrides[get_schedule_repo] = lambda: mock_schedule_repo
         yield
         app.dependency_overrides = {}
@@ -134,7 +144,12 @@ class TestOrderRouter:
         assert response.json()["detail"] == "Not found"
 
     def test_simulate_schedule(
-        self, headers, mock_repo, mock_product_repo, mock_schedule_repo
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
     ):
         """POST /{order_id}/simulate: シミュレーション実行のテスト"""
         order_id = 1
@@ -168,12 +183,17 @@ class TestOrderRouter:
         # 設備の最終終了時刻
         mock_schedule_repo.get_last_end_time.return_value = None
 
+        # 新しいRepositoryメソッドのモック
+        mock_product_repo.get_process_name.return_value = "テスト工程"
+        mock_equipment_repo.get_equipment_name.return_value = "テスト設備"
+
         response = client.post(f"/orders/{order_id}/simulate", headers=headers)
 
         assert response.status_code == 200
         result = response.json()
-        assert "schedules" in result
-        assert isinstance(result["schedules"], list)
+        assert "calculated_deadline" in result
+        assert "is_feasible" in result
+        assert "process_schedules" in result
         # dry_run=True のため、schedule_repo.create は呼ばれない
         mock_schedule_repo.create.assert_not_called()
 
@@ -188,7 +208,12 @@ class TestOrderRouter:
         assert response.json()["detail"] == "Order not found"
 
     def test_confirm_order(
-        self, headers, mock_repo, mock_product_repo, mock_schedule_repo
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
     ):
         """POST /{order_id}/confirm: 注文確定のテスト"""
         order_id = 1
