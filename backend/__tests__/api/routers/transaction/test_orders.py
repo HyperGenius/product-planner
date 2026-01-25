@@ -2,7 +2,11 @@
 from unittest.mock import MagicMock
 
 import pytest
-from app.dependencies import get_order_repo
+from app.dependencies import (
+    get_order_repo,
+    get_product_repo,
+    get_schedule_repo,
+)
 
 # テスト対象のAPIインスタンス
 from app.main import app
@@ -22,12 +26,26 @@ class TestOrderRouter:
         mock = MagicMock()
         return mock
 
+    @pytest.fixture
+    def mock_product_repo(self):
+        """製品リポジトリのモックを作成するフィクスチャ"""
+        mock = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_schedule_repo(self):
+        """スケジュールリポジトリのモックを作成するフィクスチャ"""
+        mock = MagicMock()
+        return mock
+
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo):
+    def override_dependency(self, mock_repo, mock_product_repo, mock_schedule_repo):
         """
-        テスト実行中だけ get_order_repo を mock_repo に差し替える。
+        テスト実行中だけ依存関係を mock に差し替える。
         """
         app.dependency_overrides[get_order_repo] = lambda: mock_repo
+        app.dependency_overrides[get_product_repo] = lambda: mock_product_repo
+        app.dependency_overrides[get_schedule_repo] = lambda: mock_schedule_repo
         yield
         app.dependency_overrides = {}
 
@@ -114,3 +132,122 @@ class TestOrderRouter:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Not found"
+
+    def test_simulate_schedule(
+        self, headers, mock_repo, mock_product_repo, mock_schedule_repo
+    ):
+        """POST /{order_id}/simulate: シミュレーション実行のテスト"""
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+        }
+
+        # Mockの設定
+        mock_repo.get_by_id.return_value = order_data
+
+        # 工程データ
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,
+                "unit_time_seconds": 600,
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 設備グループのメンバー
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+
+        # 設備の最終終了時刻
+        mock_schedule_repo.get_last_end_time.return_value = None
+
+        response = client.post(f"/orders/{order_id}/simulate", headers=headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert "schedules" in result
+        assert isinstance(result["schedules"], list)
+        # dry_run=True のため、schedule_repo.create は呼ばれない
+        mock_schedule_repo.create.assert_not_called()
+
+    def test_simulate_schedule_not_found(self, headers, mock_repo):
+        """POST /{order_id}/simulate: 注文が存在しない場合の404エラーテスト"""
+        order_id = 999
+        mock_repo.get_by_id.return_value = None
+
+        response = client.post(f"/orders/{order_id}/simulate", headers=headers)
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Order not found"
+
+    def test_confirm_order(
+        self, headers, mock_repo, mock_product_repo, mock_schedule_repo
+    ):
+        """POST /{order_id}/confirm: 注文確定のテスト"""
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "draft",
+        }
+
+        # Mockの設定
+        mock_repo.get_by_id.return_value = order_data
+
+        # 工程データ
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,
+                "unit_time_seconds": 600,
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 設備グループのメンバー
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+
+        # 設備の最終終了時刻
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.create.return_value = None
+
+        # 更新のMock
+        updated_order = {**order_data, "status": "confirmed", "is_scheduled": True}
+        mock_repo.update.return_value = updated_order
+
+        response = client.post(f"/orders/{order_id}/confirm", headers=headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "confirmed"
+        assert "schedules" in result
+        assert isinstance(result["schedules"], list)
+        # dry_run=False のため、schedule_repo.create が呼ばれる
+        mock_schedule_repo.create.assert_called_once()
+        # ステータスが更新される
+        mock_repo.update.assert_called_once_with(
+            order_id, {"status": "confirmed", "is_scheduled": True}
+        )
+
+    def test_confirm_order_not_found(self, headers, mock_repo):
+        """POST /{order_id}/confirm: 注文が存在しない場合の404エラーテスト"""
+        order_id = 999
+        mock_repo.get_by_id.return_value = None
+
+        response = client.post(f"/orders/{order_id}/confirm", headers=headers)
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Order not found"

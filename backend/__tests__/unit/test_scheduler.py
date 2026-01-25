@@ -278,3 +278,93 @@ class TestScheduleOrder:
         # 16:00から2時間作業は17:00を超えるため、翌営業日に延期される
         # 土日の場合は月曜日、金曜日の場合も月曜日になる
         assert start_dt > now.replace(hour=16, minute=0, second=0, microsecond=0)
+
+    def test_schedule_with_dry_run_true(self) -> None:
+        """dry_run=True の場合、DBに保存せずに計算結果のみを返す"""
+        # Mockの準備
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        # 工程データ（1工程のみ）
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,  # 30分
+                "unit_time_seconds": 600,  # 10分/個
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 設備グループに属する設備
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+
+        # 設備の最終終了時刻
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.create.return_value = None
+
+        # テスト実行（dry_run=True）
+        result = schedule_order(
+            order_id=1,
+            product_id=1,
+            quantity=10,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            dry_run=True,
+        )
+
+        # 検証：結果は返されるが、DBには保存されない
+        assert len(result) == 1
+        assert result[0]["order_id"] == 1
+        assert result[0]["equipment_id"] == 1
+        # dry_run=True のため、create は呼ばれないはず
+        mock_schedule_repo.create.assert_not_called()
+
+    def test_schedule_with_dry_run_false(self) -> None:
+        """dry_run=False の場合、DBに保存する"""
+        # Mockの準備
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        # 工程データ（1工程のみ）
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,  # 30分
+                "unit_time_seconds": 600,  # 10分/個
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 設備グループに属する設備
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+
+        # 設備の最終終了時刻
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.create.return_value = None
+
+        # テスト実行（dry_run=False）
+        result = schedule_order(
+            order_id=1,
+            product_id=1,
+            quantity=10,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            dry_run=False,
+        )
+
+        # 検証：結果は返され、DBにも保存される
+        assert len(result) == 1
+        assert result[0]["order_id"] == 1
+        assert result[0]["equipment_id"] == 1
+        # dry_run=False のため、create が呼ばれるはず
+        mock_schedule_repo.create.assert_called_once()
