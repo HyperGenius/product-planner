@@ -15,6 +15,7 @@ import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
+import { getProductName, getStatusLabel } from "@/lib/order-utils"
 
 /**
  * 注文一覧画面
@@ -24,23 +25,6 @@ export default function OrdersPage() {
   const router = useRouter()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
-
-  // 製品IDから製品名を取得
-  const getProductName = (productId: number) => {
-    const product = products?.find((p) => p.id === productId)
-    return product ? `${product.code} - ${product.name}` : "不明"
-  }
-
-  // ステータスの表示
-  const getStatusLabel = (status: string) => {
-    const statusLabels: Record<string, string> = {
-      pending: "保留中",
-      confirmed: "確定",
-      in_progress: "進行中",
-      completed: "完了",
-    }
-    return statusLabels[status] || status
-  }
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -78,7 +62,7 @@ export default function OrdersPage() {
               {orders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell className="font-medium">{order.order_no}</TableCell>
-                  <TableCell>{getProductName(order.product_id)}</TableCell>
+                  <TableCell>{getProductName(order.product_id, products)}</TableCell>
                   <TableCell className="text-right">{order.quantity}</TableCell>
                   <TableCell>
                     {order.desired_deadline
