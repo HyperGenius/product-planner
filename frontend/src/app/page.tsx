@@ -7,28 +7,12 @@ import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
+import { getProductName, getStatusLabel } from "@/lib/order-utils"
 
 export default function Home() {
   const router = useRouter()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
-
-  // 製品IDから製品名を取得
-  const getProductName = (productId: number) => {
-    const product = products?.find((p) => p.id === productId)
-    return product ? `${product.code} - ${product.name}` : "不明"
-  }
-
-  // ステータスの表示
-  const getStatusLabel = (status: string) => {
-    const statusLabels: Record<string, string> = {
-      pending: "保留中",
-      confirmed: "確定",
-      in_progress: "進行中",
-      completed: "完了",
-    }
-    return statusLabels[status] || status
-  }
 
   // 今日の日付（時刻を00:00:00に設定）
   const today = new Date()
@@ -36,8 +20,8 @@ export default function Home() {
   const tomorrow = new Date(today)
   tomorrow.setDate(tomorrow.getDate() + 1)
 
-  // KPI集計
-  const todayCompletedCount = orders?.filter((order) => {
+  // KPI集計: 今日が納期の注文数
+  const todayDueCount = orders?.filter((order) => {
     if (!order.confirmed_deadline) return false
     const deadline = new Date(order.confirmed_deadline)
     return deadline >= today && deadline < tomorrow
@@ -65,10 +49,10 @@ export default function Home() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-muted-foreground mb-1">
-                今日の完了予定
+                今日の納期
               </p>
               <p className="text-3xl font-bold">
-                {ordersLoading ? "..." : todayCompletedCount}
+                {ordersLoading ? "..." : todayDueCount}
               </p>
               <p className="text-sm text-muted-foreground mt-1">件</p>
             </div>
@@ -138,7 +122,7 @@ export default function Home() {
                     </span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {getProductName(order.product_id)} × {order.quantity}
+                    {getProductName(order.product_id, products)} × {order.quantity}
                   </p>
                 </div>
                 <div className="text-right text-sm text-muted-foreground">
