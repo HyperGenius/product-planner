@@ -1,11 +1,12 @@
 "use client"
 
+import { useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { Plus, ClipboardList, Clock, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
-import { format } from "date-fns"
+import { format, startOfDay, addDays } from "date-fns"
 import { ja } from "date-fns/locale"
 import { getProductName, getStatusLabel } from "@/lib/order-utils"
 
@@ -14,25 +15,30 @@ export default function Home() {
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
 
-  // 今日の日付（時刻を00:00:00に設定）
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
+  // 今日の日付範囲
+  const today = useMemo(() => startOfDay(new Date()), [])
+  const tomorrow = useMemo(() => addDays(today, 1), [today])
 
   // KPI集計: 今日が納期の注文数
-  const todayDueCount = orders?.filter((order) => {
-    if (!order.confirmed_deadline) return false
-    const deadline = new Date(order.confirmed_deadline)
-    return deadline >= today && deadline < tomorrow
-  }).length || 0
+  const todayDueCount = useMemo(() => {
+    return orders?.filter((order) => {
+      if (!order.confirmed_deadline) return false
+      const deadline = new Date(order.confirmed_deadline)
+      return deadline >= today && deadline < tomorrow
+    }).length || 0
+  }, [orders, today, tomorrow])
 
-  const draftOrdersCount = orders?.filter((order) => order.status === "pending").length || 0
+  const draftOrdersCount = useMemo(() => {
+    return orders?.filter((order) => order.status === "pending").length || 0
+  }, [orders])
 
   // 最新5件の注文
-  const recentOrders = orders
-    ?.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 5) || []
+  const recentOrders = useMemo(() => {
+    if (!orders) return []
+    return [...orders]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 5)
+  }, [orders])
 
   return (
     <div className="container mx-auto py-6 px-4">
