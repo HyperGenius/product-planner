@@ -83,6 +83,9 @@ class ScheduleRepository:
                 equipment_ids = [item["equipment_id"] for item in equipment_res.data]
                 # equipment_id が設備IDリストに含まれるものでフィルタリング
                 query = query.in_("equipment_id", equipment_ids)
+            else:
+                # 設備グループにメンバーがいない場合は空のリストを返す
+                return []
 
         res = query.execute()
 
@@ -92,8 +95,10 @@ class ScheduleRepository:
         # レスポンスを整形してフラットな構造にする
         schedules = []
         for item in res.data:
-            order = item.get("orders") if item.get("orders") else {}
-            product = order.get("products") if order else None
+            order = item.get("orders") or {}
+            product = order.get("products") if isinstance(order, dict) else None
+            process_routing = item.get("process_routings") or {}
+            equipment = item.get("equipments") or {}
 
             schedule = {
                 "id": item.get("id"),
@@ -102,18 +107,10 @@ class ScheduleRepository:
                 "equipment_id": item.get("equipment_id"),
                 "start_datetime": item.get("start_datetime"),
                 "end_datetime": item.get("end_datetime"),
-                "order_number": order.get("order_number") if order else None,
+                "order_number": order.get("order_number"),
                 "product_name": product.get("name") if product else None,
-                "process_name": (
-                    item.get("process_routings", {}).get("process_name")
-                    if item.get("process_routings")
-                    else None
-                ),
-                "equipment_name": (
-                    item.get("equipments", {}).get("name")
-                    if item.get("equipments")
-                    else None
-                ),
+                "process_name": process_routing.get("process_name"),
+                "equipment_name": equipment.get("name"),
             }
             schedules.append(schedule)
 

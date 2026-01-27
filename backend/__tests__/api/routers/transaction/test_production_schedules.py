@@ -2,11 +2,12 @@
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi.testclient import TestClient
+
 from app.dependencies import get_schedule_repo
 
 # テスト対象のAPIインスタンス
 from app.main import app
-from fastapi.testclient import TestClient
 
 # テストクライアントの作成
 client = TestClient(app)
@@ -121,6 +122,26 @@ class TestProductionSchedulesRouter:
         assert response.json() == []
         mock_repo.get_by_period.assert_called_once_with(
             "2024-12-01", "2024-12-31", None
+        )
+
+    def test_get_production_schedules_empty_equipment_group(self, headers, mock_repo):
+        """GET /: 設備グループにメンバーがいない場合のテスト"""
+        mock_repo.get_by_period.return_value = []
+
+        response = client.get(
+            "/production-schedules/",
+            params={
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "equipment_group_id": 999,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == []
+        mock_repo.get_by_period.assert_called_once_with(
+            "2024-01-01", "2024-01-31", 999
         )
 
     def test_get_production_schedules_missing_required_params(self, headers):
