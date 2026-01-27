@@ -60,13 +60,14 @@ class ScheduleRepository:
         """
         # Supabaseのリレーション解決を使用して関連データを取得
         # orders -> products のネストされた関係も取得する
+        # スケジュールが期間と重複するものを取得: schedule.start <= end_date AND schedule.end >= start_date
         query = (
             self.client.table("production_schedules")
             .select(
                 "*, orders(order_number, products(name)), process_routings(process_name), equipments(name)"
             )
-            .gte("start_datetime", start_date)
-            .lte("end_datetime", end_date)
+            .lte("start_datetime", end_date)
+            .gte("end_datetime", start_date)
         )
 
         # equipment_group_id が指定されている場合、設備グループでフィルタリング

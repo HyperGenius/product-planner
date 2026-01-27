@@ -1,4 +1,6 @@
 # routers/transaction/production_schedules.py
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import get_schedule_repo
@@ -20,7 +22,7 @@ def get_production_schedules(
         None, description="特定の設備グループで絞り込む場合に使用"
     ),
     repo: ScheduleRepository = Depends(get_schedule_repo),
-):
+) -> list[dict[str, Any]]:
     """
     指定された期間内の生産スケジュールを取得する。
 
