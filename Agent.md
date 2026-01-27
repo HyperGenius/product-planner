@@ -159,3 +159,12 @@
 - **UX**:
   - シミュレーション中はローディング表示 (`Skeleton` 等) を行い、計算している感を出す。
   - 希望納期遅延時は、単なるエラーではなく「最短でXX日なら可能です」というポジティブな提示を行うUIにする。
+
+## Gantt Chart Implementation
+- **Library**: `gantt-task-react`
+- **Data Conversion**:
+  - Backend API returns flat list of schedules.
+  - Frontend must convert them to `Task` objects required by the library.
+  - `start` and `end` must be native `Date` objects.
+  - `id` must be string.
+  - Grouping tasks by `equipment` (as 'project' type in library) might be necessary for visualization.
