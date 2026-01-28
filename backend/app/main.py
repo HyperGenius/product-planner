@@ -9,7 +9,7 @@ from app.routers.master import (
     process_routing_router,
     product_router,
 )
-from app.routers.transaction import orders_router
+from app.routers.transaction import orders_router, production_schedules_router
 
 # .envファイルの読み込み
 load_dotenv()
@@ -43,6 +43,7 @@ app.include_router(equipment_router)
 app.include_router(equipment_group_router)
 app.include_router(process_routing_router)
 app.include_router(orders_router)
+app.include_router(production_schedules_router)
 
 
 @app.get("/health")
