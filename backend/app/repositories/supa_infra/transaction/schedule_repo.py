@@ -1,6 +1,6 @@
 # repositories/supabase_repo.py
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from supabase import Client  # type: ignore
 
@@ -81,7 +81,9 @@ class ScheduleRepository:
             )
 
             if equipment_res.data:
-                equipment_ids = [item["equipment_id"] for item in equipment_res.data]
+                # Mypy対応: res.dataを適切な型にキャスト
+                equipment_data = cast(list[dict[str, Any]], equipment_res.data)
+                equipment_ids = [item["equipment_id"] for item in equipment_data]
                 # equipment_id が設備IDリストに含まれるものでフィルタリング
                 query = query.in_("equipment_id", equipment_ids)
             else:
@@ -93,9 +95,12 @@ class ScheduleRepository:
         if not res.data:
             return []
 
+        # Mypy対応: res.dataを適切な型にキャスト
+        schedule_data = cast(list[dict[str, Any]], res.data)
+
         # レスポンスを整形してフラットな構造にする
         schedules = []
-        for item in res.data:
+        for item in schedule_data:
             order = item.get("orders") or {}
             product = order.get("products") if isinstance(order, dict) else None
             process_routing = item.get("process_routings") or {}
