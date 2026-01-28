@@ -102,10 +102,24 @@ class ScheduleRepository:
         schedules = []
         for item in schedule_data:
             # Mypy対応: ネストされたオブジェクトを適切な型にキャスト
-            order = cast(dict[str, Any], item.get("orders")) if item.get("orders") else {}
-            product = cast(dict[str, Any], order.get("products")) if order.get("products") else None
-            process_routing = cast(dict[str, Any], item.get("process_routings")) if item.get("process_routings") else {}
-            equipment = cast(dict[str, Any], item.get("equipments")) if item.get("equipments") else {}
+            order = (
+                cast(dict[str, Any], item.get("orders")) if item.get("orders") else {}
+            )
+            product = (
+                cast(dict[str, Any], order.get("products"))
+                if order.get("products")
+                else None
+            )
+            process_routing = (
+                cast(dict[str, Any], item.get("process_routings"))
+                if item.get("process_routings")
+                else {}
+            )
+            equipment = (
+                cast(dict[str, Any], item.get("equipments"))
+                if item.get("equipments")
+                else {}
+            )
 
             schedule = {
                 "id": item.get("id"),
@@ -116,7 +130,9 @@ class ScheduleRepository:
                 "end_datetime": item.get("end_datetime"),
                 "order_number": order.get("order_number") if order else None,
                 "product_name": product.get("name") if product else None,
-                "process_name": process_routing.get("process_name") if process_routing else None,
+                "process_name": process_routing.get("process_name")
+                if process_routing
+                else None,
                 "equipment_name": equipment.get("name") if equipment else None,
             }
             schedules.append(schedule)
