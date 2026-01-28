@@ -101,10 +101,11 @@ class ScheduleRepository:
         # レスポンスを整形してフラットな構造にする
         schedules = []
         for item in schedule_data:
-            order = item.get("orders") or {}
-            product = order.get("products") if isinstance(order, dict) else None
-            process_routing = item.get("process_routings") or {}
-            equipment = item.get("equipments") or {}
+            # Mypy対応: ネストされたオブジェクトを適切な型にキャスト
+            order = cast(dict[str, Any], item.get("orders")) if item.get("orders") else {}
+            product = cast(dict[str, Any], order.get("products")) if order.get("products") else None
+            process_routing = cast(dict[str, Any], item.get("process_routings")) if item.get("process_routings") else {}
+            equipment = cast(dict[str, Any], item.get("equipments")) if item.get("equipments") else {}
 
             schedule = {
                 "id": item.get("id"),
@@ -113,10 +114,10 @@ class ScheduleRepository:
                 "equipment_id": item.get("equipment_id"),
                 "start_datetime": item.get("start_datetime"),
                 "end_datetime": item.get("end_datetime"),
-                "order_number": order.get("order_number"),
+                "order_number": order.get("order_number") if order else None,
                 "product_name": product.get("name") if product else None,
-                "process_name": process_routing.get("process_name"),
-                "equipment_name": equipment.get("name"),
+                "process_name": process_routing.get("process_name") if process_routing else None,
+                "equipment_name": equipment.get("name") if equipment else None,
             }
             schedules.append(schedule)
 
