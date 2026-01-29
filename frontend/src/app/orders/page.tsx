@@ -1,7 +1,8 @@
 "use client"
 
-import { Plus } from "lucide-react"
+import { CheckCircle, Plus } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -11,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useOrders } from "@/hooks/use-orders"
+import { useConfirmOrder, useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
@@ -25,6 +26,22 @@ export default function OrdersPage() {
   const router = useRouter()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
+  const confirmOrder = useConfirmOrder()
+
+  const handleConfirmOrder = (orderId: number, orderNo: string) => {
+    if (!confirm(`注文「${orderNo}」を確定してスケジュールを作成しますか？`)) {
+      return
+    }
+
+    confirmOrder.mutate(orderId, {
+      onSuccess: () => {
+        toast.success("注文を確定し、スケジュールを作成しました")
+      },
+      onError: (error: Error) => {
+        toast.error(`確定に失敗しました: ${error.message}`)
+      },
+    })
+  }
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -56,6 +73,7 @@ export default function OrdersPage() {
                 <TableHead>希望納期</TableHead>
                 <TableHead>確定納期</TableHead>
                 <TableHead>ステータス</TableHead>
+                <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -79,6 +97,19 @@ export default function OrdersPage() {
                       : "-"}
                   </TableCell>
                   <TableCell>{getStatusLabel(order.status)}</TableCell>
+                  <TableCell className="text-right">
+                    {order.status === "draft" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleConfirmOrder(order.id, order.order_no)}
+                        disabled={confirmOrder.isPending}
+                      >
+                        <CheckCircle className="mr-1 h-3 w-3" />
+                        確定
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

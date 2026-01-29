@@ -14,10 +14,10 @@ export function getProductName(productId: number, products?: Product[]): string 
  */
 export function getStatusLabel(status: Order["status"]): string {
   const statusLabels: Record<Order["status"], string> = {
-    pending: "保留中",
+    draft: "下書き",
     confirmed: "確定",
-    in_progress: "進行中",
     completed: "完了",
+    canceled: "キャンセル",
   }
   return statusLabels[status] || status
 }
