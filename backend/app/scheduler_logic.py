@@ -10,7 +10,10 @@ from typing import Any
 
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
-from app.utils.calendar import calculate_end_time, get_next_available_start_time
+from app.utils.calendar import (
+    get_next_available_start_time,
+    split_work_across_days,
+)
 
 
 def schedule_order(
@@ -102,27 +105,28 @@ def schedule_order(
         elif type(start_time) is not datetime:
             raise ValueError("開始時刻の型が正しくありません")
 
-        # 終了時刻を計算
-        end_time = calculate_end_time(start_time, total_duration_min)
+        # 所要時間が長い場合、複数日に分割してスケジュールを作成
+        schedule_segments = split_work_across_days(start_time, total_duration_min)
 
-        # スケジュールデータを作成
-        schedule_data = {
-            "tenant_id": tenant_id,
-            "order_id": order_id,
-            "process_routing_id": routing["id"],
-            "equipment_id": best["machine_id"],
-            "start_datetime": start_time.isoformat(),
-            "end_datetime": end_time.isoformat(),
-        }
+        # 各セグメント（日別のスケジュール）をデータベースに保存
+        for segment_start, segment_end in schedule_segments:
+            schedule_data = {
+                "tenant_id": tenant_id,
+                "order_id": order_id,
+                "process_routing_id": routing["id"],
+                "equipment_id": best["machine_id"],
+                "start_datetime": segment_start.isoformat(),
+                "end_datetime": segment_end.isoformat(),
+            }
 
-        # Dry Runモードでなければデータベースに保存
-        if not dry_run:
-            schedule_repo.create(schedule_data)
+            # Dry Runモードでなければデータベースに保存
+            if not dry_run:
+                schedule_repo.create(schedule_data)
 
-        created_schedules.append(schedule_data)
+            created_schedules.append(schedule_data)
 
-        # 次工程の開始基準時間は、今回の終了時刻
-        current_process_start = end_time
+        # 次工程の開始基準時間は、最後のセグメントの終了時刻
+        current_process_start = schedule_segments[-1][1]
 
     return created_schedules
 
