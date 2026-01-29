@@ -17,6 +17,34 @@
 			"options": {
 				"cwd": "${workspaceFolder}/backend"
 			}
-		}
+		},
+		{
+            "label": "Backend (Uvicorn)",
+            "type": "shell",
+            // 仮想環境を起動してから uvicorn を実行
+            "command": "source .venv/bin/activate && uvicorn app.main:app --reload",
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": {
+                "group": "dev-servers",
+                "panel": "dedicated"
+            },
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
+        },
+        {
+            "label": "Frontend (npm)",
+            "type": "shell",
+            "command": "npm run dev",
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": {
+                "group": "dev-servers"
+            },
+            "runOptions": {
+                "runOn": "folderOpen"
+            }
+        }
 	]
 }
