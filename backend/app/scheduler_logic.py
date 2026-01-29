@@ -11,6 +11,7 @@ from typing import Any
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.utils.calendar import (
+    CalendarConfig,
     get_next_available_start_time,
     split_work_across_days,
 )
@@ -25,6 +26,7 @@ def schedule_order(
     tenant_id: str,
     start_time: datetime | None = None,
     dry_run: bool = False,
+    calendar_config: CalendarConfig | None = None,
 ) -> list[dict[str, Any]]:
     """
     注文に対してスケジュールを作成する。
@@ -38,6 +40,7 @@ def schedule_order(
         tenant_id: テナントID
         start_time: スケジュール開始基準時刻（指定なしの場合は現在時刻）
         dry_run: Trueの場合、DBに保存せずに計算結果のみを返す
+        calendar_config: カレンダー設定（Noneの場合はデフォルト設定を使用）
 
     Returns:
         作成されたスケジュールのリスト
@@ -86,7 +89,9 @@ def schedule_order(
             base_start = max(machine_free_at, current_process_start)
 
             # カレンダーロジックを適用して実際の開始時刻を決定
-            actual_start = get_next_available_start_time(base_start, total_duration_min)
+            actual_start = get_next_available_start_time(
+                base_start, total_duration_min, calendar_config
+            )
 
             candidates.append(
                 {
@@ -106,7 +111,9 @@ def schedule_order(
             raise ValueError("開始時刻の型が正しくありません")
 
         # 所要時間が長い場合、複数日に分割してスケジュールを作成
-        schedule_segments = split_work_across_days(start_time, total_duration_min)
+        schedule_segments = split_work_across_days(
+            start_time, total_duration_min, calendar_config
+        )
 
         # 各セグメント（日別のスケジュール）をデータベースに保存
         for segment_start, segment_end in schedule_segments:
