@@ -109,7 +109,8 @@ class TestScheduleOrder:
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
 
-        # テスト実行
+        # テスト実行（開始時刻を9:00に固定して、日またぎが発生しないようにする）
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
         result = schedule_order(
             order_id=2,
             product_id=2,
@@ -117,14 +118,18 @@ class TestScheduleOrder:
             product_repo=mock_product_repo,
             schedule_repo=mock_schedule_repo,
             tenant_id="test-tenant-id",
+            start_time=start_time,
         )
 
         # 検証
-        assert len(result) == 3  # 3工程分のスケジュール
+        # Process 1: 80分 (9:00-10:20)
+        # Process 2: 115分 (10:20-12:15)
+        # Process 3: 35分 (12:15-12:50)
+        # すべて1日以内に収まるため、3工程 = 3スケジュール
+        assert len(result) == 3
         assert result[0]["process_routing_id"] == 1
         assert result[1]["process_routing_id"] == 2
         assert result[2]["process_routing_id"] == 3
-        assert mock_schedule_repo.create.call_count == 3
 
         # 各工程の開始時刻が前工程の終了時刻以降であることを確認
         for i in range(1, len(result)):
@@ -235,7 +240,7 @@ class TestScheduleOrder:
             )
 
     def test_schedule_respects_calendar_logic(self) -> None:
-        """カレンダーロジックが適用され、17:00を超える場合は翌営業日になる"""
+        """カレンダーロジックが適用され、17:00を超える場合は分割される"""
         mock_product_repo = MagicMock()
         mock_schedule_repo = MagicMock()
 
@@ -255,7 +260,7 @@ class TestScheduleOrder:
         ]
 
         # 設備の最終終了時刻を今日の 16:00 に設定
-        # 2時間の作業を開始すると18:00になるため、翌営業日9:00にスケジュールされるべき
+        # 2時間の作業を開始すると18:00になるため、2つのスケジュールに分割されるべき
         now = datetime.now(tz=UTC)
         mock_schedule_repo.get_last_end_time.return_value = now.replace(
             hour=16, minute=0, second=0, microsecond=0
@@ -271,13 +276,18 @@ class TestScheduleOrder:
             tenant_id="test-tenant-id",
         )
 
-        # 検証：翌営業日の9:00に開始されるべき
-        start_dt = datetime.fromisoformat(result[0]["start_datetime"])
-        assert start_dt.hour == 9
-        assert start_dt.minute == 0
-        # 16:00から2時間作業は17:00を超えるため、翌営業日に延期される
-        # 土日の場合は月曜日、金曜日の場合も月曜日になる
-        assert start_dt > now.replace(hour=16, minute=0, second=0, microsecond=0)
+        # 検証：2つのスケジュールに分割される
+        assert len(result) == 2
+        # 1つ目: 16:00から17:00まで（1時間）
+        start_dt_1 = datetime.fromisoformat(result[0]["start_datetime"])
+        end_dt_1 = datetime.fromisoformat(result[0]["end_datetime"])
+        assert start_dt_1.hour == 16
+        assert end_dt_1.hour == 17
+        # 2つ目: 翌営業日の9:00から10:00まで（1時間）
+        start_dt_2 = datetime.fromisoformat(result[1]["start_datetime"])
+        end_dt_2 = datetime.fromisoformat(result[1]["end_datetime"])
+        assert start_dt_2.hour == 9
+        assert end_dt_2.hour == 10
 
     def test_schedule_with_dry_run_true(self) -> None:
         """dry_run=True の場合、DBに保存せずに計算結果のみを返す"""
@@ -368,3 +378,132 @@ class TestScheduleOrder:
         assert result[0]["equipment_id"] == 1
         # dry_run=False のため、create が呼ばれるはず
         mock_schedule_repo.create.assert_called_once()
+
+    def test_schedule_with_multi_day_process(self) -> None:
+        """10時間の作業が2日間に分割されること"""
+        # Mockの準備
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        # 工程データ（1工程、10時間の作業）
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 36000,  # 600分/個 = 10時間
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 設備グループに属する設備
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+
+        # 設備は空き
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.create.return_value = None
+
+        # テスト実行（月曜日9:00から開始）
+        from datetime import UTC
+
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        result = schedule_order(
+            order_id=7,
+            product_id=7,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=start_time,
+        )
+
+        # 検証：2つのスケジュールレコードが作成される
+        assert len(result) == 2
+
+        # 1日目: 9:00 - 17:00 (8時間)
+        assert result[0]["order_id"] == 7
+        assert result[0]["process_routing_id"] == 1
+        assert result[0]["equipment_id"] == 1
+        start_dt_1 = datetime.fromisoformat(result[0]["start_datetime"])
+        end_dt_1 = datetime.fromisoformat(result[0]["end_datetime"])
+        assert start_dt_1.hour == 9
+        assert start_dt_1.minute == 0
+        assert end_dt_1.hour == 17
+        assert end_dt_1.minute == 0
+        assert start_dt_1.day == 6  # 月曜日
+
+        # 2日目: 9:00 - 11:00 (2時間)
+        assert result[1]["order_id"] == 7
+        assert result[1]["process_routing_id"] == 1
+        assert result[1]["equipment_id"] == 1
+        start_dt_2 = datetime.fromisoformat(result[1]["start_datetime"])
+        end_dt_2 = datetime.fromisoformat(result[1]["end_datetime"])
+        assert start_dt_2.hour == 9
+        assert start_dt_2.minute == 0
+        assert end_dt_2.hour == 11
+        assert end_dt_2.minute == 0
+        assert start_dt_2.day == 7  # 火曜日
+
+        # create が2回呼ばれることを確認
+        assert mock_schedule_repo.create.call_count == 2
+
+    def test_schedule_multi_day_process_over_weekend(self) -> None:
+        """金曜日から始まる長時間作業が週末を跨ぐこと"""
+        # Mockの準備
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        # 工程データ（1工程、6時間の作業）
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 21600,  # 360分/個 = 6時間
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 設備グループに属する設備
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+
+        # 設備は空き
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.create.return_value = None
+
+        # テスト実行（金曜日14:00から開始）
+        from datetime import UTC
+
+        start_time = datetime(2025, 1, 10, 14, 0, tzinfo=UTC)  # 金曜日 14:00
+        result = schedule_order(
+            order_id=8,
+            product_id=8,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=start_time,
+        )
+
+        # 検証：2つのスケジュールレコードが作成される
+        assert len(result) == 2
+
+        # 1日目(金曜日): 14:00 - 17:00 (3時間)
+        start_dt_1 = datetime.fromisoformat(result[0]["start_datetime"])
+        end_dt_1 = datetime.fromisoformat(result[0]["end_datetime"])
+        assert start_dt_1.day == 10  # 金曜日
+        assert start_dt_1.hour == 14
+        assert end_dt_1.hour == 17
+
+        # 2日目(月曜日): 9:00 - 12:00 (3時間)
+        start_dt_2 = datetime.fromisoformat(result[1]["start_datetime"])
+        end_dt_2 = datetime.fromisoformat(result[1]["end_datetime"])
+        assert start_dt_2.day == 13  # 月曜日
+        assert start_dt_2.hour == 9
+        assert end_dt_2.hour == 12

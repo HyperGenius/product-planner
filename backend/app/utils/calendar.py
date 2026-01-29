@@ -52,7 +52,9 @@ def get_next_available_start_time(
 ) -> datetime:
     """
     現在時刻と所要時間から、開始可能な日時を判定する。
-    17:00をはみ出す場合は翌営業日の9:00を返す。
+    日をまたぐ作業にも対応しており、その日に少しでも開始できる場合は開始時刻を返す。
+
+    注意: 実際のスケジュール分割は split_work_across_days 関数で行います。
 
     Args:
         current_dt: 現在の日時
@@ -60,38 +62,19 @@ def get_next_available_start_time(
 
     Returns:
         datetime: 作業を開始可能な日時
-
-    Raises:
-        ValueError: 所要時間が1日の稼働時間（8時間）を超える場合
     """
-    # MVPでは日をまたぐ作業（所要時間 > 8時間）は考慮しない
-    if duration_minutes > MAX_DAILY_WORK_HOURS * 60:
-        raise ValueError(
-            f"所要時間が1日の稼働時間（{MAX_DAILY_WORK_HOURS}時間）を超えています: "
-            f"{duration_minutes}分"
-        )
-
     # 1. まず基本的な稼働時間帯に乗せる
     if not is_workday(current_dt) or current_dt.time() >= time(WORK_END_HOUR, 0):
+        # 土日または終業後の場合は、翌営業日の朝
         start_dt = get_next_work_start(current_dt)
     elif current_dt.time() < time(WORK_START_HOUR, 0):
+        # 始業前の場合は、その日の9:00
         start_dt = current_dt.replace(
             hour=WORK_START_HOUR, minute=0, second=0, microsecond=0
         )
     else:
+        # 稼働時間内の場合は、そのまま
         start_dt = current_dt
-
-    # 2. 終了時刻を仮計算
-    end_dt = start_dt + timedelta(minutes=duration_minutes)
-
-    # 3. 17:00 を超えるかチェック
-    work_end_limit = start_dt.replace(
-        hour=WORK_END_HOUR, minute=0, second=0, microsecond=0
-    )
-
-    if end_dt > work_end_limit:
-        # はみ出すので翌営業日の朝にする
-        return get_next_work_start(start_dt)
 
     return start_dt
 
@@ -137,3 +120,93 @@ def calculate_end_time(start_dt: datetime, duration_minutes: float) -> datetime:
         )
 
     return end_dt
+
+
+def calculate_remaining_work_minutes(start_dt: datetime) -> float:
+    """
+    指定された開始時刻から、その日の稼働終了時刻(17:00)までの残り時間（分）を計算する。
+
+    Args:
+        start_dt: 作業開始日時
+
+    Returns:
+        float: 残り稼働時間（分）
+
+    Raises:
+        ValueError: 開始時刻が稼働時間外の場合
+    """
+    # 開始時刻が稼働日かつ稼働時間内であることを確認
+    if not is_workday(start_dt):
+        raise ValueError(f"開始日時が平日ではありません: {start_dt}")
+
+    if start_dt.time() < time(WORK_START_HOUR, 0) or start_dt.time() >= time(
+        WORK_END_HOUR, 0
+    ):
+        raise ValueError(
+            f"開始時刻が稼働時間（{WORK_START_HOUR}:00 - {WORK_END_HOUR}:00）外です: "
+            f"{start_dt.time()}"
+        )
+
+    # その日の17:00までの残り時間を計算
+    work_end_limit = start_dt.replace(
+        hour=WORK_END_HOUR, minute=0, second=0, microsecond=0
+    )
+    remaining_minutes = (work_end_limit - start_dt).total_seconds() / 60
+
+    return remaining_minutes
+
+
+def split_work_across_days(
+    start_dt: datetime, duration_minutes: float
+) -> list[tuple[datetime, datetime]]:
+    """
+    所要時間が長い場合、複数の営業日に分割してスケジュールを作成する。
+    各日は9:00-17:00の稼働時間内で作業を行い、17:00を超える場合は翌営業日に繰り越す。
+
+    Args:
+        start_dt: 作業開始日時
+        duration_minutes: 作業の所要時間（分）
+
+    Returns:
+        list[tuple[datetime, datetime]]: (開始日時, 終了日時) のタプルのリスト
+
+    Raises:
+        ValueError: 開始時刻が稼働時間外の場合
+    """
+    # 開始時刻が稼働日かつ稼働時間内であることを確認
+    if not is_workday(start_dt):
+        raise ValueError(f"開始日時が平日ではありません: {start_dt}")
+
+    if start_dt.time() < time(WORK_START_HOUR, 0) or start_dt.time() >= time(
+        WORK_END_HOUR, 0
+    ):
+        raise ValueError(
+            f"開始時刻が稼働時間（{WORK_START_HOUR}:00 - {WORK_END_HOUR}:00）外です: "
+            f"{start_dt.time()}"
+        )
+
+    schedules = []
+    remaining_duration = duration_minutes
+    current_start = start_dt
+
+    while remaining_duration > 0:
+        # その日の残り稼働時間を計算
+        remaining_today = calculate_remaining_work_minutes(current_start)
+
+        if remaining_duration <= remaining_today:
+            # 残りの作業が今日の稼働時間内に収まる場合
+            end_dt = current_start + timedelta(minutes=remaining_duration)
+            schedules.append((current_start, end_dt))
+            remaining_duration = 0
+        else:
+            # 今日の稼働時間を超える場合、17:00まで作業して翌営業日に繰り越す
+            end_of_day = current_start.replace(
+                hour=WORK_END_HOUR, minute=0, second=0, microsecond=0
+            )
+            schedules.append((current_start, end_of_day))
+            remaining_duration -= remaining_today
+
+            # 翌営業日の9:00から再開
+            current_start = get_next_work_start(end_of_day)
+
+    return schedules
