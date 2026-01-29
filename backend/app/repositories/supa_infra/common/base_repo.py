@@ -1,6 +1,8 @@
 # repositories/supa_infra/common/base_repo.py
 from typing import Any, Generic, TypeVar, cast
 
+from postgrest.exceptions import APIError
+
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
 
@@ -42,9 +44,23 @@ class BaseRepository(Generic[T]):
     def create(self, data: dict[str, Any]) -> T:
         """新規作成 (Create)"""
         logger.info(f"Creating record in {self.table_name}")
-        # select()を付けることで、生成されたIDを含むデータを返す
-        res = self.client.table(self.table_name).insert(data).execute()
-        return cast(T, res.data)
+        try:
+            # select()を付けることで、生成されたIDを含むデータを返す
+            res = self.client.table(self.table_name).insert(data).execute()
+            # insertは配列を返すので、最初の要素を返す
+            if res.data and len(res.data) > 0:
+                return cast(T, res.data[0])
+            raise ValueError("Failed to create record")
+        except APIError as e:
+            # 一意制約違反の場合は分かりやすいエラーメッセージを投げる
+            if e.code == "23505":  # unique_violation
+                # エラーメッセージから制約名を抽出
+                error_msg = e.message or ""
+                if "order_number" in error_msg:
+                    raise ValueError("この注文番号は既に使用されています") from e
+                raise ValueError(f"重複データ: {error_msg}") from e
+            # その他のAPIエラーはそのまま再送出
+            raise
 
     def update(self, id: int, data: dict[str, Any]) -> T:
         """更新 (Update / Patch) - 指定したフィールドのみ更新される"""
@@ -55,7 +71,10 @@ class BaseRepository(Generic[T]):
         # 厳密にはここでも戻り値チェックが必要ですが、まずは今のままで十分動きます。
 
         res = self.client.table(self.table_name).update(data).eq("id", id).execute()
-        return cast(T, res.data)
+        # updateも配列を返すので、最初の要素を返す
+        if res.data and len(res.data) > 0:
+            return cast(T, res.data[0])
+        raise ValueError(f"Failed to update record {id}")
 
     def delete(self, id: int) -> bool:
         """削除 (Delete)"""

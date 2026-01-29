@@ -39,7 +39,10 @@ class ProductRepository(BaseRepository[T]):
             .insert(data)
             .execute()
         )
-        return cast(T, res.data)
+        # insertは配列を返すので、最初の要素を返す
+        if res.data and len(res.data) > 0:
+            return cast(T, res.data[0])
+        raise ValueError("Failed to create routing")
 
     def update_routing(self, routing_id: int, data: dict[str, Any]) -> T:
         """工程順序を更新"""
@@ -49,7 +52,10 @@ class ProductRepository(BaseRepository[T]):
             .eq("id", routing_id)
             .execute()
         )
-        return cast(T, res.data)
+        # updateも配列を返すので、最初の要素を返す
+        if res.data and len(res.data) > 0:
+            return cast(T, res.data[0])
+        raise ValueError(f"Failed to update routing {routing_id}")
 
     def delete_routing(self, routing_id: int) -> bool:
         """工程順序を削除"""

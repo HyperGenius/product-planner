@@ -47,8 +47,11 @@ def create_order(
 ):
     """注文を新規作成"""
     logger.info(f"Creating order {order_data}")
-    result = repo.create(order_data.with_tenant_id(tenant_id))
-    return _map_order_response(result)
+    try:
+        result = repo.create(order_data.with_tenant_id(tenant_id))
+        return _map_order_response(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
 
 
 @orders_router.get("/")
