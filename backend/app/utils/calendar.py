@@ -18,16 +18,22 @@ class CalendarConfig:
     稼働カレンダーの設定を保持するクラス。
 
     デフォルトでは平日（月〜金）を稼働日、土日を休日とするが、
-    データベースから取得した休日情報で上書き可能。
+    データベースから取得した休日情報と稼働日情報で上書き可能。
     """
 
-    def __init__(self, holidays: set[date] | None = None):
+    def __init__(
+        self, holidays: set[date] | None = None, workdays: set[date] | None = None
+    ):
         """
         Args:
-            holidays: 休日の日付セット（DBから取得した休日情報）
-                     Noneの場合、デフォルト（土日のみ休日）を使用
+            holidays: 休日の日付セット（DBから取得した is_holiday=True の日付）
+                     Noneの場合、空のセットを使用
+            workdays: 稼働日の日付セット（DBから取得した is_holiday=False の日付、
+                     土日を稼働日にする場合などに使用）
+                     Noneの場合、空のセットを使用
         """
         self.holidays = holidays if holidays is not None else set()
+        self.workdays = workdays if workdays is not None else set()
 
     def is_holiday(self, dt: datetime) -> bool:
         """
@@ -41,7 +47,11 @@ class CalendarConfig:
         """
         target_date = dt.date()
 
-        # DBに休日情報がある場合はそれを優先
+        # 明示的に稼働日として設定されている場合（土日出勤など）
+        if target_date in self.workdays:
+            return False
+
+        # 明示的に休日として設定されている場合
         if target_date in self.holidays:
             return True
 
@@ -55,14 +65,14 @@ _default_config = CalendarConfig()
 
 def is_workday(dt: datetime, calendar_config: CalendarConfig | None = None) -> bool:
     """
-    指定された日時が平日（月曜日～金曜日）かどうかを判定する。
+    指定された日時が稼働日かどうかを判定する。
 
     Args:
         dt: 判定対象の日時
         calendar_config: カレンダー設定（Noneの場合はデフォルト設定を使用）
 
     Returns:
-        bool: 平日の場合True、土日の場合False
+        bool: 稼働日の場合True、休日の場合False
     """
     config = calendar_config if calendar_config is not None else _default_config
     return not config.is_holiday(dt)
@@ -152,7 +162,7 @@ def calculate_end_time(
     """
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt, calendar_config):
-        raise ValueError(f"開始日時が平日ではありません: {start_dt}")
+        raise ValueError(f"開始日時が稼働日ではありません: {start_dt}")
 
     if start_dt.time() < time(WORK_START_HOUR, 0) or start_dt.time() >= time(
         WORK_END_HOUR, 0
@@ -197,7 +207,7 @@ def calculate_remaining_work_minutes(
     """
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt, calendar_config):
-        raise ValueError(f"開始日時が平日ではありません: {start_dt}")
+        raise ValueError(f"開始日時が稼働日ではありません: {start_dt}")
 
     if start_dt.time() < time(WORK_START_HOUR, 0) or start_dt.time() >= time(
         WORK_END_HOUR, 0
@@ -242,7 +252,7 @@ def split_work_across_days(
 
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt, calendar_config):
-        raise ValueError(f"開始日時が平日ではありません: {start_dt}")
+        raise ValueError(f"開始日時が稼働日ではありません: {start_dt}")
 
     if start_dt.time() < time(WORK_START_HOUR, 0) or start_dt.time() >= time(
         WORK_END_HOUR, 0

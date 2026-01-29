@@ -214,7 +214,7 @@ class TestCalculateEndTime:
         """週末の開始はエラー"""
         start_dt = datetime(2025, 1, 11, 10, 0)  # 土曜日 10:00
         duration = 60  # 1時間
-        with pytest.raises(ValueError, match="開始日時が平日ではありません"):
+        with pytest.raises(ValueError, match="開始日時が稼働日ではありません"):
             calculate_end_time(start_dt, duration)
 
     def test_end_time_exceeds_work_end_raises_error(self) -> None:
@@ -328,7 +328,7 @@ class TestSplitWorkAcrossDays:
         start_dt = datetime(2025, 1, 11, 10, 0)  # 土曜日 10:00
         duration = 60  # 1時間
 
-        with pytest.raises(ValueError, match="開始日時が平日ではありません"):
+        with pytest.raises(ValueError, match="開始日時が稼働日ではありません"):
             split_work_across_days(start_dt, duration)
 
     def test_zero_duration_raises_error(self) -> None:

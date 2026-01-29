@@ -52,6 +52,24 @@ class TestCalendarConfig:
         monday = datetime(2025, 1, 6, 10, 0)
         assert config.is_holiday(monday)
 
+    def test_workday_override_for_weekend(self):
+        """土曜日を稼働日として設定"""
+        workdays = {date(2025, 1, 11)}  # 土曜日を稼働日に
+        config = CalendarConfig(workdays=workdays)
+
+        saturday = datetime(2025, 1, 11, 10, 0)
+        assert not config.is_holiday(saturday)  # 稼働日なのでFalse
+
+    def test_workday_override_takes_precedence(self):
+        """稼働日設定が休日設定より優先される"""
+        # 同じ日付を両方に含める（実際には起こらないが、優先順位の確認）
+        holidays = {date(2025, 1, 11)}
+        workdays = {date(2025, 1, 11)}
+        config = CalendarConfig(holidays=holidays, workdays=workdays)
+
+        saturday = datetime(2025, 1, 11, 10, 0)
+        assert not config.is_holiday(saturday)  # workdaysが優先される
+
     def test_no_custom_holiday_weekday(self):
         """カスタム休日設定があっても、通常の平日は稼働日"""
         holidays = {date(2025, 1, 13)}  # 別の日を休日に
@@ -163,6 +181,26 @@ class TestSplitWorkAcrossDaysWithConfig:
         assert result[1][0] == datetime(2025, 1, 7, 9, 0)  # 火曜日
         assert result[1][1] == datetime(2025, 1, 7, 12, 0)
 
+    def test_split_with_saturday_workday(self):
+        """土曜出勤日を含む作業の分割"""
+        # 2025-01-11（土曜日）を稼働日に設定
+        workdays = {date(2025, 1, 11)}
+        config = CalendarConfig(workdays=workdays)
+
+        # 金曜日の午後から6時間の作業（土曜も稼働なので2日で完了）
+        start_dt = datetime(2025, 1, 10, 14, 0)  # 金曜日 14:00
+        duration = 6 * 60  # 6時間
+
+        result = split_work_across_days(start_dt, duration, config)
+
+        # 1日目（金曜）: 14:00 - 17:00 (3時間)
+        # 2日目（土曜）: 9:00 - 12:00 (3時間) ※土曜も稼働
+        assert len(result) == 2
+        assert result[0][0] == datetime(2025, 1, 10, 14, 0)
+        assert result[0][1] == datetime(2025, 1, 10, 17, 0)
+        assert result[1][0] == datetime(2025, 1, 11, 9, 0)  # 土曜日
+        assert result[1][1] == datetime(2025, 1, 11, 12, 0)
+
 
 @pytest.mark.unit
 class TestGetNextAvailableStartTimeWithConfig:
@@ -192,7 +230,7 @@ class TestCalculateEndTimeWithConfig:
         start_dt = datetime(2025, 1, 6, 10, 0)  # 月曜日（休日）
         duration = 60
 
-        with pytest.raises(ValueError, match="開始日時が平日ではありません"):
+        with pytest.raises(ValueError, match="開始日時が稼働日ではありません"):
             calculate_end_time(start_dt, duration, config)
 
 
@@ -207,5 +245,5 @@ class TestCalculateRemainingWorkMinutesWithConfig:
 
         start_dt = datetime(2025, 1, 6, 10, 0)  # 月曜日（休日）
 
-        with pytest.raises(ValueError, match="開始日時が平日ではありません"):
+        with pytest.raises(ValueError, match="開始日時が稼働日ではありません"):
             calculate_remaining_work_minutes(start_dt, config)

@@ -26,7 +26,7 @@ def build_calendar_config(
         days_ahead: start_dateがNoneの場合に使用する期間（デフォルト90日）
 
     Returns:
-        CalendarConfig: 休日情報が設定されたカレンダー設定
+        CalendarConfig: 休日情報と稼働日情報が設定されたカレンダー設定
     """
     # デフォルトの期間を設定
     if start_date is None:
@@ -37,11 +37,17 @@ def build_calendar_config(
     # データベースから休日情報を取得
     holidays_data = calendar_repo.get_holidays_in_range(start_date, end_date)
 
-    # is_holiday=True の日付だけを抽出してセットを作成
+    # is_holiday=True の日付を休日セット、is_holiday=False の日付を稼働日セットに分類
     holidays = {
         date.fromisoformat(item["date"])
         for item in holidays_data
-        if item.get("is_holiday", False)
+        if item.get("is_holiday", False) is True
     }
 
-    return CalendarConfig(holidays=holidays)
+    workdays = {
+        date.fromisoformat(item["date"])
+        for item in holidays_data
+        if item.get("is_holiday", False) is False
+    }
+
+    return CalendarConfig(holidays=holidays, workdays=workdays)

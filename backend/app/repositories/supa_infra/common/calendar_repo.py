@@ -68,12 +68,17 @@ class CalendarRepository(BaseRepository[T]):
         return None
 
     def create_or_update_holiday(
-        self, target_date: date, is_holiday: bool, note: str | None = None
+        self,
+        tenant_id: str,
+        target_date: date,
+        is_holiday: bool,
+        note: str | None = None,
     ) -> dict[str, Any]:
         """
         指定日の休日情報を作成または更新する。
 
         Args:
+            tenant_id: テナントID
             target_date: 対象日
             is_holiday: 休日フラグ
             note: 備考
@@ -84,6 +89,7 @@ class CalendarRepository(BaseRepository[T]):
         logger.info(f"Upserting holiday for {target_date} in {self.table_name}")
 
         data = {
+            "tenant_id": tenant_id,
             "date": target_date.isoformat(),
             "is_holiday": is_holiday,
             "note": note,
