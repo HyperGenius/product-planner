@@ -29,7 +29,7 @@ export default function Home() {
   }, [orders, today, tomorrow])
 
   const draftOrdersCount = useMemo(() => {
-    return orders?.filter((order) => order.status === "pending").length || 0
+    return orders?.filter((order) => order.status === "draft").length || 0
   }, [orders])
 
   // 最新5件の注文

@@ -8,7 +8,7 @@ export interface Order {
   quantity: number
   desired_deadline?: string // ISO 8601形式
   confirmed_deadline?: string // ISO 8601形式
-  status: 'pending' | 'confirmed' | 'in_progress' | 'completed'
+  status: 'draft' | 'confirmed' | 'completed' | 'canceled'
   tenant_id: string
   created_at: string
   updated_at: string

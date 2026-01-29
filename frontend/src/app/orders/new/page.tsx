@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { SimulationResult } from "@/components/simulation-result"
-import { useSimulateOrder, useCreateOrder } from "@/hooks/use-orders"
+import { useSimulateOrder, useCreateOrder, useConfirmOrder } from "@/hooks/use-orders"
 import type { OrderSimulateResponse } from "@/types/order"
 
 /**
@@ -27,6 +27,7 @@ export default function NewOrderPage() {
   // API呼び出し用のフック
   const simulateMutation = useSimulateOrder()
   const createMutation = useCreateOrder()
+  const confirmMutation = useConfirmOrder()
 
   // シミュレーション実行ハンドラ
   const handleSimulate = async () => {
@@ -85,22 +86,27 @@ export default function NewOrderPage() {
     }
 
     try {
-      await createMutation.mutateAsync({
+      // 1. 注文を作成
+      const createdOrder = await createMutation.mutateAsync({
         order_no: orderNo,
         product_id: productIdNum,
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
       })
-      toast.success("注文を登録しました")
+      
+      // 2. 作成した注文を確定（スケジュール作成）
+      await confirmMutation.mutateAsync(createdOrder.id)
+      
+      toast.success("注文を確定し、スケジュールを作成しました")
       router.push("/orders")
     } catch (error) {
-      console.error("Create order error:", error)
-      toast.error("注文の登録に失敗しました")
+      console.error("Create/Confirm order error:", error)
+      toast.error("注文の登録または確定に失敗しました")
     }
   }
 
   // シミュレーション未実行の場合は確定ボタンを無効化
-  const isConfirmDisabled = !simulationResult || createMutation.isPending
+  const isConfirmDisabled = !simulationResult || createMutation.isPending || confirmMutation.isPending
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -178,7 +184,7 @@ export default function NewOrderPage() {
               className="flex-1"
             >
               <Save className="mr-2 h-4 w-4" />
-              {createMutation.isPending ? "登録中..." : "注文確定"}
+              {createMutation.isPending || confirmMutation.isPending ? "処理中..." : "注文確定"}
             </Button>
           </div>
         </div>

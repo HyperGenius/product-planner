@@ -53,3 +53,23 @@ export function useCreateOrder() {
     },
   })
 }
+
+/**
+ * 注文を確定するフック
+ * スケジュールを作成し、注文ステータスをconfirmedにする
+ */
+export function useConfirmOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient(`/orders/${orderId}/confirm`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      // 注文一覧とスケジュール一覧を再取得
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      queryClient.invalidateQueries({ queryKey: ["schedules"] })
+    },
+  })
+}
