@@ -5,11 +5,13 @@
 from datetime import datetime
 
 import pytest
+
 from app.utils.calendar import (
     calculate_end_time,
     get_next_available_start_time,
     get_next_work_start,
     is_workday,
+    split_work_across_days,
 )
 
 
@@ -238,7 +240,6 @@ class TestSplitWorkAcrossDays:
         """作業が1日以内に収まる場合"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 4 * 60  # 4時間
-        from app.utils.calendar import split_work_across_days
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 1
@@ -249,7 +250,6 @@ class TestSplitWorkAcrossDays:
         """作業がちょうど1日（8時間）の場合"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 8 * 60  # 8時間
-        from app.utils.calendar import split_work_across_days
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 1
@@ -260,7 +260,6 @@ class TestSplitWorkAcrossDays:
         """作業が2日間にまたがる場合（10時間）"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 10 * 60  # 10時間
-        from app.utils.calendar import split_work_across_days
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 2
@@ -275,7 +274,6 @@ class TestSplitWorkAcrossDays:
         """作業が3日間にまたがる場合（20時間）"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 20 * 60  # 20時間
-        from app.utils.calendar import split_work_across_days
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 3
@@ -293,7 +291,6 @@ class TestSplitWorkAcrossDays:
         """作業が日中から開始する場合"""
         start_dt = datetime(2025, 1, 6, 14, 0)  # 月曜日 14:00
         duration = 6 * 60  # 6時間
-        from app.utils.calendar import split_work_across_days
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 2
@@ -308,7 +305,6 @@ class TestSplitWorkAcrossDays:
         """金曜日から始まり、週末を跨ぐ場合"""
         start_dt = datetime(2025, 1, 10, 14, 0)  # 金曜日 14:00
         duration = 6 * 60  # 6時間
-        from app.utils.calendar import split_work_across_days
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 2
@@ -323,7 +319,6 @@ class TestSplitWorkAcrossDays:
         """始業前の開始時刻はエラー"""
         start_dt = datetime(2025, 1, 6, 8, 0)  # 月曜日 8:00
         duration = 60  # 1時間
-        from app.utils.calendar import split_work_across_days
 
         with pytest.raises(ValueError, match="開始時刻が稼働時間"):
             split_work_across_days(start_dt, duration)
@@ -332,7 +327,22 @@ class TestSplitWorkAcrossDays:
         """週末の開始はエラー"""
         start_dt = datetime(2025, 1, 11, 10, 0)  # 土曜日 10:00
         duration = 60  # 1時間
-        from app.utils.calendar import split_work_across_days
 
         with pytest.raises(ValueError, match="開始日時が平日ではありません"):
+            split_work_across_days(start_dt, duration)
+
+    def test_zero_duration_raises_error(self) -> None:
+        """所要時間が0の場合はエラー"""
+        start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
+        duration = 0
+
+        with pytest.raises(ValueError, match="所要時間は正の値である必要があります"):
+            split_work_across_days(start_dt, duration)
+
+    def test_negative_duration_raises_error(self) -> None:
+        """所要時間が負の場合はエラー"""
+        start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
+        duration = -60
+
+        with pytest.raises(ValueError, match="所要時間は正の値である必要があります"):
             split_work_across_days(start_dt, duration)

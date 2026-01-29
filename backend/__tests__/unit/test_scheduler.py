@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
+
 from app.scheduler_logic import schedule_order
 
 
@@ -130,6 +131,7 @@ class TestScheduleOrder:
         assert result[0]["process_routing_id"] == 1
         assert result[1]["process_routing_id"] == 2
         assert result[2]["process_routing_id"] == 3
+        assert mock_schedule_repo.create.call_count == 3
 
         # 各工程の開始時刻が前工程の終了時刻以降であることを確認
         for i in range(1, len(result)):

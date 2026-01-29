@@ -51,14 +51,15 @@ def get_next_available_start_time(
     current_dt: datetime, duration_minutes: float
 ) -> datetime:
     """
-    現在時刻と所要時間から、開始可能な日時を判定する。
+    現在時刻から、開始可能な日時を判定する。
     日をまたぐ作業にも対応しており、その日に少しでも開始できる場合は開始時刻を返す。
 
     注意: 実際のスケジュール分割は split_work_across_days 関数で行います。
+    この関数は duration_minutes を使用しませんが、後方互換性のために残しています。
 
     Args:
         current_dt: 現在の日時
-        duration_minutes: 作業の所要時間（分）
+        duration_minutes: 作業の所要時間（分）（使用されないが、後方互換性のため保持）
 
     Returns:
         datetime: 作業を開始可能な日時
@@ -171,8 +172,12 @@ def split_work_across_days(
         list[tuple[datetime, datetime]]: (開始日時, 終了日時) のタプルのリスト
 
     Raises:
-        ValueError: 開始時刻が稼働時間外の場合
+        ValueError: 開始時刻が稼働時間外の場合、または所要時間が0以下の場合
     """
+    # 所要時間の検証
+    if duration_minutes <= 0:
+        raise ValueError(f"所要時間は正の値である必要があります: {duration_minutes}分")
+
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt):
         raise ValueError(f"開始日時が平日ではありません: {start_dt}")
@@ -189,11 +194,14 @@ def split_work_across_days(
     remaining_duration = duration_minutes
     current_start = start_dt
 
-    while remaining_duration > 0:
+    # 浮動小数点誤差を考慮した比較のための閾値（0.01分 = 0.6秒）
+    epsilon = 0.01
+
+    while remaining_duration > epsilon:
         # その日の残り稼働時間を計算
         remaining_today = calculate_remaining_work_minutes(current_start)
 
-        if remaining_duration <= remaining_today:
+        if remaining_duration <= remaining_today + epsilon:
             # 残りの作業が今日の稼働時間内に収まる場合
             end_dt = current_start + timedelta(minutes=remaining_duration)
             schedules.append((current_start, end_dt))
