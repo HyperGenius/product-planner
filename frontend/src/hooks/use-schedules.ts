@@ -31,7 +31,6 @@ export function useSchedules(params: ScheduleQueryParams) {
       
       return apiClient<Schedule[]>(`/production-schedules?${searchParams.toString()}`)
     },
-    // データを自動的に再取得しない（手動で更新ボタンを押すまで）
     staleTime: 5 * 60 * 1000, // 5分
     refetchOnWindowFocus: false,
   })

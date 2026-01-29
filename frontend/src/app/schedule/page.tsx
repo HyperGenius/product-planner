@@ -21,7 +21,7 @@ export default function SchedulePage() {
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
 
   // 設備グループの取得
-  const { data: equipmentGroups, isLoading: equipmentGroupsLoading } = useEquipmentGroups()
+  const { data: equipmentGroups, isLoading: equipmentGroupsLoading, error: equipmentGroupsError } = useEquipmentGroups()
 
   // 表示モードに応じた日付範囲の計算
   const dateRange = useMemo(() => {
@@ -50,15 +50,10 @@ export default function SchedulePage() {
   }, [currentDate, viewMode])
 
   // スケジュールの取得
-  const { data: schedules, isLoading: schedulesLoading } = useSchedules({
+  const { data: schedules, isLoading: schedulesLoading, error: schedulesError } = useSchedules({
     ...dateRange,
     equipment_group_id: equipmentGroupId,
   })
-
-  // 今日に戻る
-  const handleToday = useCallback(() => {
-    setCurrentDate(new Date())
-  }, [])
 
   // 前の期間に移動
   const handlePrevious = useCallback(() => {
@@ -70,6 +65,8 @@ export default function SchedulePage() {
           return addWeeks(prev, -1)
         case "Month":
           return addMonths(prev, -1)
+        default:
+          return prev
       }
     })
   }, [viewMode])
@@ -84,9 +81,16 @@ export default function SchedulePage() {
           return addWeeks(prev, 1)
         case "Month":
           return addMonths(prev, 1)
+        default:
+          return prev
       }
     })
   }, [viewMode])
+
+  // 今日に戻る
+  const handleToday = useCallback(() => {
+    setCurrentDate(new Date())
+  }, [])
 
   // 表示期間のフォーマット
   const displayPeriod = useMemo(() => {
@@ -131,7 +135,7 @@ export default function SchedulePage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">表示:</span>
               <Select value={viewMode} onValueChange={(value) => setViewMode(value as GanttViewMode)}>
-                <SelectTrigger className="w-[120px]">
+                <SelectTrigger className="w-[120px]" aria-label="表示モード選択">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -150,7 +154,7 @@ export default function SchedulePage() {
                 onValueChange={(value) => setEquipmentGroupId(value === "all" ? undefined : Number(value))}
                 disabled={equipmentGroupsLoading}
               >
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-[180px]" aria-label="設備グループ選択">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -169,7 +173,21 @@ export default function SchedulePage() {
 
       {/* メインエリア - ガントチャート */}
       <div className="rounded-lg border bg-card shadow-sm p-4">
-        {schedulesLoading ? (
+        {schedulesError ? (
+          <div className="flex h-96 items-center justify-center">
+            <div className="text-center text-destructive">
+              <p>スケジュールの読み込みに失敗しました</p>
+              <p className="text-sm text-muted-foreground mt-2">{schedulesError.message}</p>
+            </div>
+          </div>
+        ) : equipmentGroupsError ? (
+          <div className="flex h-96 items-center justify-center">
+            <div className="text-center text-destructive">
+              <p>設備グループの読み込みに失敗しました</p>
+              <p className="text-sm text-muted-foreground mt-2">{equipmentGroupsError.message}</p>
+            </div>
+          </div>
+        ) : schedulesLoading ? (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center">
               <div className="text-lg text-muted-foreground">読み込み中...</div>
