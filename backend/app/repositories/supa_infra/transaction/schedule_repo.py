@@ -24,7 +24,7 @@ class ScheduleRepository(BaseRepository):
             Optional[datetime]: 最後のスケジュールの終了日時。存在しない場合はNone。
         """
         res = (
-            self.client.table("production_schedules")
+            self.client.table(self.table_name)
             .select("end_datetime")
             .eq("equipment_id", equipment_id)
             .order("end_datetime", desc=True)
@@ -45,7 +45,7 @@ class ScheduleRepository(BaseRepository):
         Args:
             schedule_data (Dict[str, Any]): 挿入するスケジュールデータ。
         """
-        self.client.table("production_schedules").insert(schedule_data).execute()
+        self.client.table(self.table_name).insert(schedule_data).execute()
 
     def get_by_period(
         self, start_date: str, end_date: str, equipment_group_id: int | None = None
@@ -65,7 +65,7 @@ class ScheduleRepository(BaseRepository):
         # orders -> products のネストされた関係も取得する
         # スケジュールが期間と重複するものを取得: schedule.start <= end_date AND schedule.end >= start_date
         query = (
-            self.client.table("production_schedules")
+            self.client.table(self.table_name)
             .select(
                 "*, orders(order_number, products(name)), process_routings(process_name), equipments(name)"
             )
