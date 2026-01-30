@@ -19,6 +19,7 @@ export default function SchedulePage() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
   const [viewMode, setViewMode] = useState<GanttViewMode>("Day")
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
+  const [isEditMode, setIsEditMode] = useState<boolean>(false)
 
   // 設備グループの取得
   const { data: equipmentGroups, isLoading: equipmentGroupsLoading, error: equipmentGroupsError } = useEquipmentGroups()
@@ -131,6 +132,17 @@ export default function SchedulePage() {
 
           {/* 右側のコントロール */}
           <div className="flex items-center gap-4">
+            {/* 編集モード切替 */}
+            <div className="flex items-center gap-2">
+              <Button 
+                variant={isEditMode ? "default" : "outline"}
+                onClick={() => setIsEditMode(!isEditMode)}
+                size="sm"
+              >
+                {isEditMode ? "編集中" : "編集モード"}
+              </Button>
+            </div>
+
             {/* 表示モード切替 */}
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">表示:</span>
@@ -194,7 +206,7 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : schedules && schedules.length > 0 ? (
-          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" />
+          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} />
         ) : (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-muted-foreground">
