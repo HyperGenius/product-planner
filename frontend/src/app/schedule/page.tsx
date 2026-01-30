@@ -184,7 +184,7 @@ export default function SchedulePage() {
       </div>
 
       {/* メインエリア - ガントチャート */}
-      <div className="rounded-lg border bg-card shadow-sm p-4">
+      <div className="rounded-lg border bg-card shadow-sm p-4 overflow-hidden">
         {schedulesError ? (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-destructive">

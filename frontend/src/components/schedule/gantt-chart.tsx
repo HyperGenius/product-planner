@@ -46,7 +46,7 @@ export function convertScheduleToTask(
   const backgroundColor = getBarColor(schedule, colorMode)
 
   return {
-    id: String(schedule.id),
+    id: `schedule-${schedule.id}`,
     type: 'task',
     name: `${schedule.process_name || '工程'} - ${schedule.order_number || ''}`,
     start: startDate,
@@ -167,8 +167,8 @@ export function GanttChart({
   const handleDateChange = async (task: Task, _children: Task[]): Promise<void | boolean> => {
     if (!isEditable) return
 
-    // タスクIDから元のスケジュールを取得
-    const scheduleId = Number(task.id)
+    // タスクIDから元のスケジュールを取得 (schedule-{id}の形式から抽出)
+    const scheduleId = Number(task.id.replace('schedule-', ''))
     
     // タスクIDの検証
     if (isNaN(scheduleId) || scheduleId <= 0) {
@@ -210,7 +210,7 @@ export function GanttChart({
   }
 
   return (
-    <div className="w-full">
+    <div className="w-full overflow-x-auto">
       <Gantt
         tasks={ganttTasks}
         viewMode={ganttViewMode}

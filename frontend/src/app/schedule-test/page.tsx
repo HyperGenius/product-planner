@@ -128,7 +128,7 @@ export default function ScheduleTestPage() {
       </div>
 
       {/* ガントチャート */}
-      <div className="border rounded-lg p-4 bg-white">
+      <div className="border rounded-lg p-4 bg-white overflow-hidden">
         <GanttChart
           tasks={dummySchedules}
           viewMode={viewMode}
