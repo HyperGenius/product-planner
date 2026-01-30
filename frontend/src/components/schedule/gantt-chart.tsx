@@ -6,6 +6,8 @@ import "gantt-task-react/dist/index.css"
 import { Schedule, GanttViewMode } from "@/types/schedule"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
+import { useUpdateSchedule } from "@/hooks/use-schedules"
+import { toast } from "sonner"
 
 /**
  * ガントチャートコンポーネントのProps
@@ -23,6 +25,10 @@ export interface GanttChartProps {
    * カラーモード: 'product' (製品ごとに色分け) または 'process' (工程ごとに色分け)
    */
   colorMode?: 'product' | 'process'
+  /**
+   * 編集可能かどうか
+   */
+  isEditable?: boolean
 }
 
 /**
@@ -30,7 +36,8 @@ export interface GanttChartProps {
  */
 export function convertScheduleToTask(
   schedule: Schedule,
-  colorMode: 'product' | 'process' = 'product'
+  colorMode: 'product' | 'process' = 'product',
+  isEditable = false
 ): Task {
   const startDate = new Date(schedule.start_datetime)
   const endDate = new Date(schedule.end_datetime)
@@ -45,6 +52,7 @@ export function convertScheduleToTask(
     start: startDate,
     end: endDate,
     progress: 100, // 完了済みとして表示
+    isDisabled: !isEditable, // 編集可能フラグ
     styles: {
       backgroundColor,
       backgroundSelectedColor: backgroundColor,
@@ -134,11 +142,14 @@ export function GanttChart({
   tasks,
   viewMode = 'Day',
   colorMode = 'product',
+  isEditable = false,
 }: GanttChartProps) {
+  const updateSchedule = useUpdateSchedule()
+
   // Schedule型からTask型に変換
   const ganttTasks: Task[] = useMemo(() => {
-    return tasks.map((schedule) => convertScheduleToTask(schedule, colorMode))
-  }, [tasks, colorMode])
+    return tasks.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
+  }, [tasks, colorMode, isEditable])
 
   // ViewModeの変換
   const ganttViewMode = useMemo(() => {
@@ -149,6 +160,44 @@ export function GanttChart({
     }
     return viewModeMap[viewMode]
   }, [viewMode])
+
+  /**
+   * 日時変更のハンドラ（ドラッグ&ドロップ時に呼ばれる）
+   */
+  const handleDateChange = async (task: Task, _children: Task[]): Promise<void | boolean> => {
+    if (!isEditable) return
+
+    // タスクIDから元のスケジュールを取得
+    const scheduleId = Number(task.id)
+    
+    // タスクIDの検証
+    if (isNaN(scheduleId) || scheduleId <= 0) {
+      toast.error("無効なスケジュールIDです")
+      return false
+    }
+
+    try {
+      // ISO 8601形式に変換
+      const startDatetime = task.start.toISOString()
+      const endDatetime = task.end.toISOString()
+
+      // API呼び出し
+      await updateSchedule.mutateAsync({
+        scheduleId,
+        data: {
+          start_datetime: startDatetime,
+          end_datetime: endDatetime,
+        },
+      })
+
+      // 成功は mutation の onSuccess で処理されるため、ここでは何もしない
+    } catch (error) {
+      toast.error("スケジュールの更新に失敗しました")
+      console.error("Failed to update schedule:", error)
+      // エラーの場合は操作を元に戻すため false を返す
+      return false
+    }
+  }
 
   if (ganttTasks.length === 0) {
     return (
@@ -170,6 +219,7 @@ export function GanttChart({
         columnWidth={viewMode === 'Day' ? 60 : viewMode === 'Week' ? 200 : 300}
         listCellWidth=""
         rowHeight={50}
+        onDateChange={isEditable ? handleDateChange as ((task: Task, children: Task[]) => void | boolean | Promise<void> | Promise<boolean>) : undefined}
       />
     </div>
   )
