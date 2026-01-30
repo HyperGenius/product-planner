@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import type { Schedule } from "@/types/schedule"
+import { toast } from "sonner"
 
 /**
  * スケジュール取得のクエリパラメータ
@@ -67,6 +68,11 @@ export function useUpdateSchedule() {
     onSuccess: () => {
       // スケジュール一覧をすべて無効化して再取得
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
+      // 成功メッセージを表示
+      toast.success("スケジュールを更新しました")
+    },
+    onError: (error) => {
+      console.error("Failed to update schedule:", error)
     },
   })
 }

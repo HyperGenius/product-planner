@@ -164,13 +164,19 @@ export function GanttChart({
   /**
    * 日時変更のハンドラ（ドラッグ&ドロップ時に呼ばれる）
    */
-  const handleDateChange = async (task: Task, children: Task[]): Promise<void | boolean> => {
+  const handleDateChange = async (task: Task, _children: Task[]): Promise<void | boolean> => {
     if (!isEditable) return
 
-    try {
-      // タスクIDから元のスケジュールを取得
-      const scheduleId = Number(task.id)
+    // タスクIDから元のスケジュールを取得
+    const scheduleId = Number(task.id)
+    
+    // タスクIDの検証
+    if (isNaN(scheduleId) || scheduleId <= 0) {
+      toast.error("無効なスケジュールIDです")
+      return false
+    }
 
+    try {
       // ISO 8601形式に変換
       const startDatetime = task.start.toISOString()
       const endDatetime = task.end.toISOString()
@@ -184,12 +190,12 @@ export function GanttChart({
         },
       })
 
-      toast.success("スケジュールを更新しました")
+      // 成功は mutation の onSuccess で処理されるため、ここでは何もしない
     } catch (error) {
       toast.error("スケジュールの更新に失敗しました")
       console.error("Failed to update schedule:", error)
       // エラーの場合は操作を元に戻すため false を返す
-      throw error
+      return false
     }
   }
 
