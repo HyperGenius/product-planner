@@ -165,3 +165,139 @@ class TestProductionSchedulesRouter:
         # パラメータなし
         response = client.get("/production-schedules/", headers=headers)
         assert response.status_code == 422  # Unprocessable Entity
+
+    def test_update_production_schedule(self, headers, mock_repo):
+        """PATCH /{schedule_id}: スケジュールの更新テスト"""
+        schedule_id = 10000001
+        update_data = {
+            "start_datetime": "2024-01-01T10:00:00+00:00",
+            "end_datetime": "2024-01-01T14:00:00+00:00",
+            "equipment_id": 102,
+        }
+        expected_response = {
+            "id": schedule_id,
+            "order_id": 1000001,
+            "process_routing_id": 100001,
+            "equipment_id": 102,
+            "start_datetime": "2024-01-01T10:00:00+00:00",
+            "end_datetime": "2024-01-01T14:00:00+00:00",
+        }
+        mock_repo.update.return_value = expected_response
+
+        response = client.patch(
+            f"/production-schedules/{schedule_id}",
+            json=update_data,
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == expected_response
+        mock_repo.update.assert_called_once_with(schedule_id, update_data)
+
+    def test_update_production_schedule_partial_update(self, headers, mock_repo):
+        """PATCH /{schedule_id}: 部分更新のテスト（開始日時のみ）"""
+        schedule_id = 10000001
+        update_data = {"start_datetime": "2024-01-01T08:00:00+00:00"}
+        expected_response = {
+            "id": schedule_id,
+            "order_id": 1000001,
+            "process_routing_id": 100001,
+            "equipment_id": 101,
+            "start_datetime": "2024-01-01T08:00:00+00:00",
+            "end_datetime": "2024-01-01T12:00:00+00:00",
+        }
+        mock_repo.update.return_value = expected_response
+
+        response = client.patch(
+            f"/production-schedules/{schedule_id}",
+            json=update_data,
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == expected_response
+        mock_repo.update.assert_called_once_with(schedule_id, update_data)
+
+    def test_update_production_schedule_equipment_only(self, headers, mock_repo):
+        """PATCH /{schedule_id}: 設備のみ変更するテスト"""
+        schedule_id = 10000001
+        update_data = {"equipment_id": 103}
+        expected_response = {
+            "id": schedule_id,
+            "order_id": 1000001,
+            "process_routing_id": 100001,
+            "equipment_id": 103,
+            "start_datetime": "2024-01-01T09:00:00+00:00",
+            "end_datetime": "2024-01-01T12:00:00+00:00",
+        }
+        mock_repo.update.return_value = expected_response
+
+        response = client.patch(
+            f"/production-schedules/{schedule_id}",
+            json=update_data,
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == expected_response
+        mock_repo.update.assert_called_once_with(schedule_id, update_data)
+
+    def test_update_production_schedule_not_found(self, headers, mock_repo):
+        """PATCH /{schedule_id}: 存在しないスケジュールの更新テスト"""
+        schedule_id = 99999999
+        update_data = {"start_datetime": "2024-01-01T10:00:00+00:00"}
+        mock_repo.update.side_effect = ValueError(
+            f"Failed to update record {schedule_id}"
+        )
+
+        response = client.patch(
+            f"/production-schedules/{schedule_id}",
+            json=update_data,
+            headers=headers,
+        )
+
+        assert response.status_code == 404
+        assert "detail" in response.json()
+        mock_repo.update.assert_called_once_with(schedule_id, update_data)
+
+    def test_update_production_schedule_invalid_datetime_order(self, headers):
+        """PATCH /{schedule_id}: 開始日時が終了日時より後の場合のテスト"""
+        schedule_id = 10000001
+        update_data = {
+            "start_datetime": "2024-01-01T14:00:00+00:00",
+            "end_datetime": "2024-01-01T10:00:00+00:00",
+        }
+
+        response = client.patch(
+            f"/production-schedules/{schedule_id}",
+            json=update_data,
+            headers=headers,
+        )
+
+        assert response.status_code == 422  # Validation error
+        assert "detail" in response.json()
+
+    def test_update_production_schedule_empty_payload(self, headers, mock_repo):
+        """PATCH /{schedule_id}: 空のペイロードの場合のテスト"""
+        schedule_id = 10000001
+        update_data = {}
+        expected_response = {
+            "id": schedule_id,
+            "order_id": 1000001,
+            "process_routing_id": 100001,
+            "equipment_id": 101,
+            "start_datetime": "2024-01-01T09:00:00+00:00",
+            "end_datetime": "2024-01-01T12:00:00+00:00",
+        }
+        mock_repo.update.return_value = expected_response
+
+        response = client.patch(
+            f"/production-schedules/{schedule_id}",
+            json=update_data,
+            headers=headers,
+        )
+
+        # 空のペイロードでも有効（何も更新されないが、リクエストは成功）
+        assert response.status_code == 200
+        assert response.json() == expected_response
+        mock_repo.update.assert_called_once_with(schedule_id, {})
