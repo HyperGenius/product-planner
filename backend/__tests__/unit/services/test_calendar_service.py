@@ -3,7 +3,6 @@ calendar_service の単体テスト
 """
 
 from datetime import date
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,8 +13,6 @@ class TestBuildCalendarConfig:
 
     def test_calendar_config_construction_logic(self):
         """休日データからCalendarConfigを構築するロジックのテスト"""
-        # モックリポジトリの設定
-        repo_mock = MagicMock()
         holidays_data = [
             {"date": "2025-01-01", "is_holiday": True, "note": "元日"},
             {"date": "2025-01-13", "is_holiday": True, "note": "成人の日"},
@@ -24,13 +21,13 @@ class TestBuildCalendarConfig:
 
         # is_holiday=True と is_holiday=False を分類するロジックをテスト
         holidays = {
-            date.fromisoformat(item["date"])
+            date.fromisoformat(item["date"])  # type: ignore
             for item in holidays_data
             if item.get("is_holiday", False) is True
         }
 
         workdays = {
-            date.fromisoformat(item["date"])
+            date.fromisoformat(item["date"])  # type: ignore
             for item in holidays_data
             if item.get("is_holiday", False) is False
         }
@@ -41,11 +38,11 @@ class TestBuildCalendarConfig:
 
     def test_no_holidays_logic(self):
         """休日データがない場合のロジックをテスト"""
-        holidays_data = []
+        holidays_data: list[dict[str, object]] = []
 
         # 空のデータから休日セットを構築
         holidays = {
-            date.fromisoformat(item["date"])
+            date.fromisoformat(item["date"])  # type: ignore
             for item in holidays_data
             if item.get("is_holiday", False)
         }
@@ -62,7 +59,7 @@ class TestBuildCalendarConfig:
 
         # is_holiday=True のみをフィルタ
         holidays = {
-            date.fromisoformat(item["date"])
+            date.fromisoformat(item["date"])  # type: ignore
             for item in holidays_data
             if item.get("is_holiday", False)
         }

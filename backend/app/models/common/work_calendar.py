@@ -1,5 +1,5 @@
-# models/common/work_calendar.py
-from datetime import date
+# backend/app/models/common/work_calendar.py
+import datetime
 
 from pydantic import BaseModel, Field
 
@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class WorkCalendarBase(BaseModel):
     """稼働カレンダーの基本スキーマ"""
 
-    date: date = Field(..., description="日付")
+    date: datetime.date = Field(..., description="日付")
     is_holiday: bool = Field(default=False, description="休日フラグ")
     note: str | None = Field(None, description="備考")
 

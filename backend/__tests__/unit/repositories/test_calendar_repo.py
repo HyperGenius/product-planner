@@ -2,7 +2,6 @@
 CalendarRepository の単体テスト
 """
 
-from datetime import date
 from unittest.mock import MagicMock, Mock
 
 import pytest
