@@ -12,6 +12,13 @@ WORK_START_HOUR = 9
 WORK_END_HOUR = 17
 MAX_DAILY_WORK_HOURS = WORK_END_HOUR - WORK_START_HOUR  # 8時間
 
+# 休憩時間の定義
+BREAK_START_HOUR = 12
+BREAK_START_MINUTE = 0
+BREAK_END_HOUR = 13
+BREAK_END_MINUTE = 0
+BREAK_DURATION_MINUTES = 60  # 1時間
+
 
 class CalendarConfig:
     """
@@ -63,6 +70,38 @@ class CalendarConfig:
 _default_config = CalendarConfig()
 
 
+def is_during_break(dt: datetime) -> bool:
+    """
+    指定された日時が休憩時間中かどうかを判定する。
+
+    Args:
+        dt: 判定対象の日時
+
+    Returns:
+        bool: 休憩時間中の場合True、それ以外の場合False
+    """
+    break_start = time(BREAK_START_HOUR, BREAK_START_MINUTE)
+    break_end = time(BREAK_END_HOUR, BREAK_END_MINUTE)
+    return break_start <= dt.time() < break_end
+
+
+def adjust_start_time_for_break(dt: datetime) -> datetime:
+    """
+    開始時刻が休憩時間中の場合、休憩明けの時刻に調整する。
+
+    Args:
+        dt: 調整対象の日時
+
+    Returns:
+        datetime: 調整後の日時（休憩時間中でない場合はそのまま返す）
+    """
+    if is_during_break(dt):
+        return dt.replace(
+            hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
+        )
+    return dt
+
+
 def is_workday(dt: datetime, calendar_config: CalendarConfig | None = None) -> bool:
     """
     指定された日時が稼働日かどうかを判定する。
@@ -111,6 +150,7 @@ def get_next_available_start_time(
     """
     現在時刻から、開始可能な日時を判定する。
     日をまたぐ作業にも対応しており、その日に少しでも開始できる場合は開始時刻を返す。
+    休憩時間中の開始時刻は、休憩明け（13:00）に調整される。
 
     注意: 実際のスケジュール分割は split_work_across_days 関数で行います。
     この関数は duration_minutes を使用しませんが、後方互換性のために残しています。
@@ -138,6 +178,9 @@ def get_next_available_start_time(
         # 稼働時間内の場合は、そのまま
         start_dt = current_dt
 
+    # 2. 休憩時間中の場合は、休憩明けに調整
+    start_dt = adjust_start_time_for_break(start_dt)
+
     return start_dt
 
 
@@ -148,6 +191,7 @@ def calculate_end_time(
 ) -> datetime:
     """
     開始日時と所要時間から終了日時を算出する。
+    作業が休憩時間をまたぐ場合、終了時刻に休憩時間分（1時間）を加算する。
 
     Args:
         start_dt: 作業開始日時
@@ -172,8 +216,20 @@ def calculate_end_time(
             f"{start_dt.time()}"
         )
 
-    # 終了時刻を計算
+    # 終了時刻を計算（まず休憩時間を考慮せずに計算）
     end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+    # 休憩時間をまたぐかチェック
+    break_start = start_dt.replace(
+        hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
+    )
+    break_end = start_dt.replace(
+        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
+    )
+
+    # 作業が休憩時間をまたぐ場合、終了時刻に休憩時間分を加算
+    if start_dt < break_start and end_dt > break_start:
+        end_dt = end_dt + timedelta(minutes=BREAK_DURATION_MINUTES)
 
     # 17:00を超えないことを確認
     work_end_limit = start_dt.replace(
@@ -194,6 +250,7 @@ def calculate_remaining_work_minutes(
 ) -> float:
     """
     指定された開始時刻から、その日の稼働終了時刻(17:00)までの残り時間（分）を計算する。
+    休憩時間が含まれる場合は、その分を差し引く。
 
     Args:
         start_dt: 作業開始日時
@@ -222,6 +279,18 @@ def calculate_remaining_work_minutes(
         hour=WORK_END_HOUR, minute=0, second=0, microsecond=0
     )
     remaining_minutes = (work_end_limit - start_dt).total_seconds() / 60
+
+    # 休憩時間が残り時間に含まれているかチェック
+    break_start = start_dt.replace(
+        hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
+    )
+    break_end = start_dt.replace(
+        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
+    )
+
+    # 開始時刻が休憩開始前で、休憩時間が含まれる場合、休憩時間分を差し引く
+    if start_dt < break_start:
+        remaining_minutes -= BREAK_DURATION_MINUTES
 
     return remaining_minutes
 

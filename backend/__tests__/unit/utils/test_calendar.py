@@ -346,3 +346,123 @@ class TestSplitWorkAcrossDays:
 
         with pytest.raises(ValueError, match="所要時間は正の値である必要があります"):
             split_work_across_days(start_dt, duration)
+
+
+@pytest.mark.unit
+class TestBreakTimeLogic:
+    """休憩時間考慮ロジックのテスト"""
+
+    def test_work_spans_break_time(self) -> None:
+        """11:30開始、1時間作業 → 休憩時間をまたぐため13:30終了"""
+        start_dt = datetime(2025, 1, 6, 11, 30)  # 月曜日 11:30
+        duration = 60  # 1時間
+        result = calculate_end_time(start_dt, duration)
+        assert result == datetime(2025, 1, 6, 13, 30)  # 月曜日 13:30
+
+    def test_work_starts_before_break_ends_before_break(self) -> None:
+        """11:00開始、30分作業 → 休憩前に終了（11:30）"""
+        start_dt = datetime(2025, 1, 6, 11, 0)  # 月曜日 11:00
+        duration = 30  # 30分
+        result = calculate_end_time(start_dt, duration)
+        assert result == datetime(2025, 1, 6, 11, 30)  # 月曜日 11:30（休憩考慮なし）
+
+    def test_work_starts_before_break_ends_exactly_at_break_start(self) -> None:
+        """11:00開始、60分作業 → 12:00ちょうどまで（休憩開始前）"""
+        start_dt = datetime(2025, 1, 6, 11, 0)  # 月曜日 11:00
+        duration = 60  # 1時間
+        result = calculate_end_time(start_dt, duration)
+        # 12:00ちょうどなので休憩時間はまたがない
+        assert result == datetime(2025, 1, 6, 12, 0)  # 月曜日 12:00
+
+    def test_work_starts_before_break_ends_after_break(self) -> None:
+        """10:00開始、3時間作業 → 休憩1時間を除外して14:00終了"""
+        start_dt = datetime(2025, 1, 6, 10, 0)  # 月曜日 10:00
+        duration = 180  # 3時間
+        result = calculate_end_time(start_dt, duration)
+        assert result == datetime(2025, 1, 6, 14, 0)  # 月曜日 14:00（10:00 + 3h + 1h休憩）
+
+    def test_work_starts_after_break(self) -> None:
+        """13:00開始、2時間作業 → 休憩後のため15:00終了"""
+        start_dt = datetime(2025, 1, 6, 13, 0)  # 月曜日 13:00
+        duration = 120  # 2時間
+        result = calculate_end_time(start_dt, duration)
+        assert result == datetime(2025, 1, 6, 15, 0)  # 月曜日 15:00（休憩考慮なし）
+
+    def test_start_time_during_break_is_adjusted(self) -> None:
+        """休憩時間中の開始時刻は13:00に調整される"""
+        from app.utils.calendar import adjust_start_time_for_break
+
+        # 12:00
+        dt = datetime(2025, 1, 6, 12, 0)
+        result = adjust_start_time_for_break(dt)
+        assert result == datetime(2025, 1, 6, 13, 0)
+
+        # 12:30
+        dt = datetime(2025, 1, 6, 12, 30)
+        result = adjust_start_time_for_break(dt)
+        assert result == datetime(2025, 1, 6, 13, 0)
+
+        # 12:59
+        dt = datetime(2025, 1, 6, 12, 59)
+        result = adjust_start_time_for_break(dt)
+        assert result == datetime(2025, 1, 6, 13, 0)
+
+    def test_start_time_not_during_break_is_unchanged(self) -> None:
+        """休憩時間外の開始時刻は調整されない"""
+        from app.utils.calendar import adjust_start_time_for_break
+
+        # 11:59
+        dt = datetime(2025, 1, 6, 11, 59)
+        result = adjust_start_time_for_break(dt)
+        assert result == dt
+
+        # 13:00
+        dt = datetime(2025, 1, 6, 13, 0)
+        result = adjust_start_time_for_break(dt)
+        assert result == dt
+
+        # 14:00
+        dt = datetime(2025, 1, 6, 14, 0)
+        result = adjust_start_time_for_break(dt)
+        assert result == dt
+
+    def test_get_next_available_start_time_during_break(self) -> None:
+        """休憩時間中の場合、13:00から開始可能"""
+        current_dt = datetime(2025, 1, 6, 12, 30)  # 月曜日 12:30
+        duration = 60  # 1時間
+        result = get_next_available_start_time(current_dt, duration)
+        assert result == datetime(2025, 1, 6, 13, 0)  # 月曜日 13:00
+
+    def test_calculate_remaining_work_minutes_before_break(self) -> None:
+        """9:00開始の場合、17:00までの残り時間は7時間（休憩1時間除外）"""
+        from app.utils.calendar import calculate_remaining_work_minutes
+
+        start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
+        remaining = calculate_remaining_work_minutes(start_dt)
+        # 9:00 - 17:00 = 8時間 = 480分
+        # 休憩1時間（60分）を除外
+        assert remaining == 420  # 7時間
+
+    def test_calculate_remaining_work_minutes_after_break(self) -> None:
+        """13:00開始の場合、17:00までの残り時間は4時間（休憩なし）"""
+        from app.utils.calendar import calculate_remaining_work_minutes
+
+        start_dt = datetime(2025, 1, 6, 13, 0)  # 月曜日 13:00
+        remaining = calculate_remaining_work_minutes(start_dt)
+        # 13:00 - 17:00 = 4時間 = 240分
+        assert remaining == 240  # 4時間（休憩後なので除外なし）
+
+    def test_work_exceeds_work_hours_with_break(self) -> None:
+        """9:00開始、8時間作業 → 休憩1時間を考慮すると18:00になるためエラー"""
+        start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
+        duration = 480  # 8時間
+        # 休憩時間1時間を加算すると18:00になり、17:00を超えるためエラー
+        with pytest.raises(ValueError, match="作業が稼働時間を超えます"):
+            calculate_end_time(start_dt, duration)
+
+    def test_work_fits_with_break_consideration(self) -> None:
+        """9:00開始、7時間作業 → 休憩1時間を考慮して17:00終了"""
+        start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
+        duration = 420  # 7時間
+        result = calculate_end_time(start_dt, duration)
+        assert result == datetime(2025, 1, 6, 17, 0)  # 月曜日 17:00
