@@ -1,9 +1,10 @@
 # routers/transaction/production_schedules.py
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.dependencies import get_schedule_repo
+from app.models.transaction.schedule import ScheduleUpdate
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.utils.logger import get_logger
 
@@ -33,3 +34,24 @@ def get_production_schedules(
         f"{f' for equipment_group_id={equipment_group_id}' if equipment_group_id else ''}"
     )
     return repo.get_by_period(start_date, end_date, equipment_group_id)
+
+
+@production_schedules_router.patch("/{schedule_id}")
+def update_production_schedule(
+    schedule_id: int,
+    schedule_data: ScheduleUpdate,
+    repo: ScheduleRepository = Depends(get_schedule_repo),
+) -> dict[str, Any]:
+    """
+    ガントチャート上でのドラッグ&ドロップによるスケジュール手動調整。
+
+    開始・終了日時、担当設備を変更することができます。
+    """
+    logger.info(f"Updating production schedule {schedule_id}")
+    try:
+        # exclude_unset=True により、指定されたフィールドのみ更新される
+        result = repo.update(schedule_id, schedule_data.model_dump(exclude_unset=True))
+        return result
+    except ValueError as e:
+        # レコードが存在しない、または更新に失敗した場合
+        raise HTTPException(status_code=404, detail=str(e)) from None

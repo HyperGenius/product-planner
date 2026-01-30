@@ -4,11 +4,14 @@ from typing import Any, cast
 
 from supabase import Client  # type: ignore
 
+from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
-class ScheduleRepository:
+
+class ScheduleRepository(BaseRepository):
     """スケジュールを管理するリポジトリクラス。"""
 
     def __init__(self, client: Client):
+        super().__init__(client, SupabaseTableName.PRODUCTION_SCHEDULES.value)
         self.client = client
 
     def get_last_end_time(self, equipment_id: int) -> datetime | None:
