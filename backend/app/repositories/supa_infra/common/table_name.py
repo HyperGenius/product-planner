@@ -1,4 +1,4 @@
-# repositories/supabase/table_name.py
+# backend/app/repositories/supa_infra/common/table_name.py
 from enum import Enum
 
 

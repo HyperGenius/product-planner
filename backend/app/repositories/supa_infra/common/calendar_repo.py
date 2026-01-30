@@ -2,7 +2,8 @@
 from datetime import date
 from typing import Any, TypeVar, cast
 
-from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
+from app.repositories.supa_infra.common.base_repo import BaseRepository
+from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,8 +31,7 @@ class CalendarRepository(BaseRepository[T]):
             休日情報のリスト（date, is_holiday, note を含む）
         """
         logger.info(
-            f"Fetching holidays from {start_date} to {end_date} "
-            f"from {self.table_name}"
+            f"Fetching holidays from {start_date} to {end_date} from {self.table_name}"
         )
 
         res = (
@@ -88,7 +88,7 @@ class CalendarRepository(BaseRepository[T]):
         """
         logger.info(f"Upserting holiday for {target_date} in {self.table_name}")
 
-        data = {
+        data: dict[str, Any] = {
             "tenant_id": tenant_id,
             "date": target_date.isoformat(),
             "is_holiday": is_holiday,
