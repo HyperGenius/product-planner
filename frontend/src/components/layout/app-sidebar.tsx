@@ -75,6 +75,11 @@ const menuItems = [
         url: "/master/equipment-groups",
         icon: Layers,
       },
+      {
+        title: "Work Calendar",
+        url: "/master/calendar",
+        icon: Calendar,
+      },
     ],
   },
 ]
