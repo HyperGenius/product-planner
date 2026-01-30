@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.master import (
+    calendar_router,
     equipment_group_router,
     equipment_router,
     process_routing_router,
@@ -42,6 +43,7 @@ app.include_router(product_router)
 app.include_router(equipment_router)
 app.include_router(equipment_group_router)
 app.include_router(process_routing_router)
+app.include_router(calendar_router)
 app.include_router(orders_router)
 app.include_router(production_schedules_router)
 
