@@ -2,6 +2,7 @@
 稼働カレンダーユーティリティモジュール
 
 工場の稼働時間（平日 9:00 - 17:00）に基づき、作業の開始・終了時刻を計算する。
+休憩時間（12:00 - 13:00）は稼働時間から除外される。
 稼働カレンダー（work_calendars）テーブルからの休日情報をサポート。
 """
 
@@ -10,14 +11,14 @@ from datetime import date, datetime, time, timedelta
 # 定数定義
 WORK_START_HOUR = 9
 WORK_END_HOUR = 17
-MAX_DAILY_WORK_HOURS = WORK_END_HOUR - WORK_START_HOUR  # 8時間
-
 # 休憩時間の定義
 BREAK_START_HOUR = 12
 BREAK_START_MINUTE = 0
 BREAK_END_HOUR = 13
 BREAK_END_MINUTE = 0
 BREAK_DURATION_MINUTES = 60  # 1時間
+# 実際の稼働時間（休憩時間を除く）
+MAX_DAILY_WORK_HOURS = (WORK_END_HOUR - WORK_START_HOUR) - (BREAK_DURATION_MINUTES / 60)  # 7時間
 
 
 class CalendarConfig:
@@ -346,7 +347,18 @@ def split_work_across_days(
 
         if remaining_duration <= remaining_today + epsilon:
             # 残りの作業が今日の稼働時間内に収まる場合
+            # 休憩時間を考慮した終了時刻を計算
             end_dt = current_start + timedelta(minutes=remaining_duration)
+            
+            # 休憩時間をまたぐかチェック
+            break_start = current_start.replace(
+                hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
+            )
+            
+            # 作業が休憩時間をまたぐ場合、終了時刻に休憩時間分を加算
+            if current_start < break_start and end_dt > break_start:
+                end_dt = end_dt + timedelta(minutes=BREAK_DURATION_MINUTES)
+            
             schedules.append((current_start, end_dt))
             remaining_duration = 0
         else:

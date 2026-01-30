@@ -183,9 +183,9 @@ class TestCalculateEndTime:
         assert result == datetime(2025, 1, 6, 16, 0)  # 月曜日 16:00
 
     def test_end_time_exactly_at_work_end(self) -> None:
-        """終了時刻がちょうど17:00の場合"""
+        """終了時刻がちょうど17:00の場合（休憩時間を考慮すると7時間作業）"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
-        duration = 8 * 60  # 8時間
+        duration = 7 * 60  # 7時間（休憩1時間を除いた1日の作業時間）
         result = calculate_end_time(start_dt, duration)
         assert result == datetime(2025, 1, 6, 17, 0)  # 月曜日 17:00
 
@@ -237,19 +237,20 @@ class TestSplitWorkAcrossDays:
     """split_work_across_days関数のテスト"""
 
     def test_work_fits_in_single_day(self) -> None:
-        """作業が1日以内に収まる場合"""
+        """作業が1日以内に収まる場合（休憩時間考慮）"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 4 * 60  # 4時間
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 1
         assert result[0][0] == datetime(2025, 1, 6, 9, 0)  # 開始
-        assert result[0][1] == datetime(2025, 1, 6, 13, 0)  # 終了
+        # 9:00 + 4時間 + 1時間休憩 = 14:00
+        assert result[0][1] == datetime(2025, 1, 6, 14, 0)  # 終了
 
     def test_work_exactly_one_day(self) -> None:
-        """作業がちょうど1日（8時間）の場合"""
+        """作業がちょうど1日（7時間、休憩時間除く）の場合"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
-        duration = 8 * 60  # 8時間
+        duration = 7 * 60  # 7時間（休憩1時間を除いた実稼働時間）
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 1
@@ -257,35 +258,35 @@ class TestSplitWorkAcrossDays:
         assert result[0][1] == datetime(2025, 1, 6, 17, 0)  # 終了
 
     def test_work_splits_across_two_days(self) -> None:
-        """作業が2日間にまたがる場合（10時間）"""
+        """作業が2日間にまたがる場合（10時間 = 7時間 + 3時間）"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 10 * 60  # 10時間
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 2
-        # 1日目: 9:00 - 17:00 (8時間)
+        # 1日目: 9:00 - 17:00 (7時間実働、休憩1時間除く)
         assert result[0][0] == datetime(2025, 1, 6, 9, 0)
         assert result[0][1] == datetime(2025, 1, 6, 17, 0)
-        # 2日目: 9:00 - 11:00 (2時間)
+        # 2日目: 9:00 - 12:00 (3時間実働、休憩時間をまたがない)
         assert result[1][0] == datetime(2025, 1, 7, 9, 0)
-        assert result[1][1] == datetime(2025, 1, 7, 11, 0)
+        assert result[1][1] == datetime(2025, 1, 7, 12, 0)
 
     def test_work_splits_across_three_days(self) -> None:
-        """作業が3日間にまたがる場合（20時間）"""
+        """作業が3日間にまたがる場合（20時間 = 7 + 7 + 6時間）"""
         start_dt = datetime(2025, 1, 6, 9, 0)  # 月曜日 9:00
         duration = 20 * 60  # 20時間
 
         result = split_work_across_days(start_dt, duration)
         assert len(result) == 3
-        # 1日目: 9:00 - 17:00 (8時間)
+        # 1日目: 9:00 - 17:00 (7時間実働)
         assert result[0][0] == datetime(2025, 1, 6, 9, 0)
         assert result[0][1] == datetime(2025, 1, 6, 17, 0)
-        # 2日目: 9:00 - 17:00 (8時間)
+        # 2日目: 9:00 - 17:00 (7時間実働)
         assert result[1][0] == datetime(2025, 1, 7, 9, 0)
         assert result[1][1] == datetime(2025, 1, 7, 17, 0)
-        # 3日目: 9:00 - 13:00 (4時間)
+        # 3日目: 9:00 - 17:00 (6時間実働 -> 休憩含めて16:00)
         assert result[2][0] == datetime(2025, 1, 8, 9, 0)
-        assert result[2][1] == datetime(2025, 1, 8, 13, 0)
+        assert result[2][1] == datetime(2025, 1, 8, 16, 0)
 
     def test_work_starting_mid_day(self) -> None:
         """作業が日中から開始する場合"""
