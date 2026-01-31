@@ -1,5 +1,5 @@
 # repositories/supa_infra/master/customer_repo.py
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
