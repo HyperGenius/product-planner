@@ -5,6 +5,7 @@ from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.repositories.supa_infra import (
+    CustomerRepository,
     EquipmentRepository,
     OrderRepository,
     ProductRepository,
@@ -83,3 +84,10 @@ def get_equipment_repo(
 ) -> EquipmentRepository:
     """設備リポジトリを取得する。"""
     return EquipmentRepository(client)
+
+
+def get_customer_repo(
+    client: Client = Depends(get_supabase_client),
+) -> CustomerRepository:
+    """顧客リポジトリを取得する。"""
+    return CustomerRepository(client)

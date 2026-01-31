@@ -14,6 +14,7 @@ class OrderCreate(BaseSchema):
     product_id: int
     quantity: int
     deadline_date: str | None = Field(None, alias="desired_deadline")
+    customer_id: int | None = None
 
 
 class OrderSimulateRequest(BaseSchema):
@@ -35,3 +36,4 @@ class OrderUpdate(BaseSchema):
     product_id: int | None = None
     quantity: int | None = None
     deadline_date: str | None = Field(None, alias="desired_deadline")
+    customer_id: int | None = None
