@@ -1,3 +1,4 @@
+/* frontend/src/components/schedule/gantt-chart.tsx */
 "use client"
 
 import React, { useMemo } from "react"
@@ -46,7 +47,7 @@ export function convertScheduleToTask(
   const backgroundColor = getBarColor(schedule, colorMode)
 
   return {
-    id: String(schedule.id),
+    id: `schedule-${schedule.id}`,
     type: 'task',
     name: `${schedule.process_name || '工程'} - ${schedule.order_number || ''}`,
     start: startDate,
@@ -140,7 +141,7 @@ function CustomTooltip({ task, fontSize, fontFamily }: {
  */
 export function GanttChart({
   tasks,
-  viewMode = 'Day',
+  viewMode = ViewMode.Day,
   colorMode = 'product',
   isEditable = false,
 }: GanttChartProps) {
@@ -148,7 +149,11 @@ export function GanttChart({
 
   // Schedule型からTask型に変換
   const ganttTasks: Task[] = useMemo(() => {
-    return tasks.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
+    const ganttTasks = tasks.map((schedule) => {
+      console.log("Converting schedule to task:", schedule);
+      return convertScheduleToTask(schedule, colorMode, isEditable)
+    })
+    return ganttTasks
   }, [tasks, colorMode, isEditable])
 
   // ViewModeの変換
@@ -167,8 +172,8 @@ export function GanttChart({
   const handleDateChange = async (task: Task, _children: Task[]): Promise<void | boolean> => {
     if (!isEditable) return
 
-    // タスクIDから元のスケジュールを取得
-    const scheduleId = Number(task.id)
+    // タスクIDから元のスケジュールを取得 (schedule-{id}の形式から抽出)
+    const scheduleId = Number(task.id.replace('schedule-', ''))
     
     // タスクIDの検証
     if (isNaN(scheduleId) || scheduleId <= 0) {
@@ -210,7 +215,7 @@ export function GanttChart({
   }
 
   return (
-    <div className="w-full">
+    <div className="w-full overflow-x-auto">
       <Gantt
         tasks={ganttTasks}
         viewMode={ganttViewMode}

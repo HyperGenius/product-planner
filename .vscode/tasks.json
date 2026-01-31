@@ -22,7 +22,7 @@
             "label": "Backend (Uvicorn)",
             "type": "shell",
             // 仮想環境を起動してから uvicorn を実行
-            "command": "cd backend && source .venv/bin/activate && uvicorn app.main:app --reload",
+            "command": "source .venv/bin/activate && uvicorn app.main:app --reload",
             "isBackground": true,
             "problemMatcher": [],
             "presentation": {
@@ -30,7 +30,7 @@
                 "panel": "dedicated"
             },
             "options": {
-                "cwd": "${workspaceFolder}/frontend"
+                "cwd": "${workspaceFolder}/backend"
             },
             "runOptions": {
                 "runOn": "folderOpen"
@@ -50,6 +50,18 @@
             },
             "runOptions": {
                 "runOn": "folderOpen"
+            }
+        },
+        {
+            "label": "Supabase migration up",
+            "type": "shell",
+            "command": "supabase migration up",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "dev-servers",
+            },
+            "options": {
+                "cwd": "${workspaceFolder}/supabase"
             }
         }
 	]

@@ -1,10 +1,9 @@
-# repositories/supabase_repo.py
+# backend/app/repositories/supa_infra/transaction/schedule_repo.py
 from datetime import datetime
 from typing import Any, cast
 
-from supabase import Client  # type: ignore
-
 from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
+from supabase import Client  # type: ignore
 
 
 class ScheduleRepository(BaseRepository):
@@ -64,13 +63,17 @@ class ScheduleRepository(BaseRepository):
         # Supabaseのリレーション解決を使用して関連データを取得
         # orders -> products のネストされた関係も取得する
         # スケジュールが期間と重複するものを取得: schedule.start <= end_date AND schedule.end >= start_date
+        # 日付をISO8601形式に変換（YYYY-MM-DDをYYYY-MM-DDTHH:MM:SS+00:00形式に）
+        start_datetime_str = f"{start_date}T00:00:00+00:00"
+        end_datetime_str = f"{end_date}T23:59:59.999999+00:00"
+
         query = (
             self.client.table(self.table_name)
             .select(
                 "*, orders(order_number, products(name)), process_routings(process_name), equipments(name)"
             )
-            .lte("start_datetime", end_date)
-            .gte("end_datetime", start_date)
+            .lte("start_datetime", end_datetime_str)
+            .gte("end_datetime", start_datetime_str)
         )
 
         # equipment_group_id が指定されている場合、設備グループでフィルタリング
@@ -82,11 +85,15 @@ class ScheduleRepository(BaseRepository):
                 .eq("equipment_group_id", equipment_group_id)
                 .execute()
             )
+            print(f"[DEBUG] Equipment group members: {equipment_res.data}")
 
             if equipment_res.data:
                 # Mypy対応: res.dataを適切な型にキャスト
                 equipment_data = cast(list[dict[str, Any]], equipment_res.data)
                 equipment_ids = [item["equipment_id"] for item in equipment_data]
+                print(
+                    f"[DEBUG] Equipment IDs for group {equipment_group_id}: {equipment_ids}"
+                )
                 # equipment_id が設備IDリストに含まれるものでフィルタリング
                 query = query.in_("equipment_id", equipment_ids)
             else:
@@ -94,6 +101,11 @@ class ScheduleRepository(BaseRepository):
                 return []
 
         res = query.execute()
+        print(
+            f"[DEBUG] Query before execute - start_date: {start_date}, end_date: {end_date}, equipment_group_id: {equipment_group_id}"
+        )
+        print(f"[DEBUG] Query result data count: {len(res.data) if res.data else 0}")
+        print(f"[DEBUG] Query result data: {res.data}")
 
         if not res.data:
             return []
@@ -139,5 +151,7 @@ class ScheduleRepository(BaseRepository):
                 "equipment_name": equipment.get("name") if equipment else None,
             }
             schedules.append(schedule)
+
+        print(schedules)
 
         return schedules

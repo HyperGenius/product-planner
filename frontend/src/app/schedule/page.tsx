@@ -1,3 +1,4 @@
+/* frontend/src/app/schedule/page.tsx */
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
@@ -108,7 +109,7 @@ export default function SchedulePage() {
   }, [currentDate, viewMode])
 
   return (
-    <div className="container mx-auto py-6 px-4">
+    <div className="flex-1 py-6 px-4" style={{ overflowX: 'hidden' }}>
       {/* ヘッダーエリア */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold mb-4">生産スケジュール</h1>
@@ -184,7 +185,10 @@ export default function SchedulePage() {
       </div>
 
       {/* メインエリア - ガントチャート */}
-      <div className="rounded-lg border bg-card shadow-sm p-4">
+      <div
+        className="rounded-lg border bg-card shadow-sm p-4"
+        style={{ overflowX: 'auto', overflowY: 'hidden', width: '100%' }}
+      >
         {schedulesError ? (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-destructive">
