@@ -149,11 +149,7 @@ export function GanttChart({
 
   // Schedule型からTask型に変換
   const ganttTasks: Task[] = useMemo(() => {
-    const ganttTasks = tasks.map((schedule) => {
-      console.log("Converting schedule to task:", schedule);
-      return convertScheduleToTask(schedule, colorMode, isEditable)
-    })
-    return ganttTasks
+    return tasks.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
   }, [tasks, colorMode, isEditable])
 
   // ViewModeの変換

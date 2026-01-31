@@ -10,6 +10,7 @@ import { GanttChart } from "@/components/schedule/gantt-chart"
 import { useSchedules } from "@/hooks/use-schedules"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
 import type { GanttViewMode } from "@/types/schedule"
+import { useSidebar } from "@/components/ui/sidebar"
 
 /**
  * スケジュール一覧画面
@@ -21,6 +22,9 @@ export default function SchedulePage() {
   const [viewMode, setViewMode] = useState<GanttViewMode>("Day")
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
   const [isEditMode, setIsEditMode] = useState<boolean>(false)
+
+  // state は "expanded" | "collapsed" | "mobile" などを返す
+  const { state, open } = useSidebar()
 
   // 設備グループの取得
   const { data: equipmentGroups, isLoading: equipmentGroupsLoading, error: equipmentGroupsError } = useEquipmentGroups()
@@ -108,10 +112,12 @@ export default function SchedulePage() {
     }
   }, [currentDate, viewMode])
 
+  const viewWidth = open ? '78vw' : '96vw'
+
   return (
-    <div className="flex-1 py-6 px-4" style={{ overflowX: 'hidden' }}>
+    <div className="flex-2 py-6 px-4">
       {/* ヘッダーエリア */}
-      <div className="mb-6">
+      <div className="mb-6" style={{ width: viewWidth }}>
         <h1 className="text-3xl font-bold mb-4">生産スケジュール</h1>
         
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -187,7 +193,7 @@ export default function SchedulePage() {
       {/* メインエリア - ガントチャート */}
       <div
         className="rounded-lg border bg-card shadow-sm p-4"
-        style={{ overflowX: 'auto', overflowY: 'hidden', width: '100%' }}
+        style={{ overflowX: 'auto', overflowY: 'hidden', width: viewWidth }}
       >
         {schedulesError ? (
           <div className="flex h-96 items-center justify-center">

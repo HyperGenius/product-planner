@@ -14,10 +14,16 @@ interface AuthenticatedLayoutProps {
   } | null
 }
 
+/**
+ * アプリケーションの認証済みレイアウトコンポーネント
+ * SidebarProviderで全体をラップして状態を共有可能にする
+ */
 export function AuthenticatedLayout({ children, user }: AuthenticatedLayoutProps) {
   return (
-    <SidebarProvider>
+    <SidebarProvider style={{ overflowX: 'hidden'}}>
+      {/* サイドバー本体 */}
       <AppSidebar user={user} />
+      {/* メインエリア */}
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
