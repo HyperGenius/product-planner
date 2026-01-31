@@ -1,3 +1,4 @@
+/* frontend/src/components/schedule/gantt-chart.tsx */
 "use client"
 
 import React, { useMemo } from "react"
@@ -140,7 +141,7 @@ function CustomTooltip({ task, fontSize, fontFamily }: {
  */
 export function GanttChart({
   tasks,
-  viewMode = 'Day',
+  viewMode = ViewMode.Day,
   colorMode = 'product',
   isEditable = false,
 }: GanttChartProps) {
@@ -148,7 +149,11 @@ export function GanttChart({
 
   // Schedule型からTask型に変換
   const ganttTasks: Task[] = useMemo(() => {
-    return tasks.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
+    const ganttTasks = tasks.map((schedule) => {
+      console.log("Converting schedule to task:", schedule);
+      return convertScheduleToTask(schedule, colorMode, isEditable)
+    })
+    return ganttTasks
   }, [tasks, colorMode, isEditable])
 
   // ViewModeの変換
