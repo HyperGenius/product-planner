@@ -4,7 +4,7 @@
 import React, { useMemo } from "react"
 import { Gantt, Task, ViewMode } from "gantt-task-react"
 import "gantt-task-react/dist/index.css"
-import { Schedule, GanttViewMode } from "@/types/schedule"
+import { Schedule, GanttViewMode, GroupByMode } from "@/types/schedule"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { useUpdateSchedule } from "@/hooks/use-schedules"
@@ -30,6 +30,10 @@ export interface GanttChartProps {
    * 編集可能かどうか
    */
   isEditable?: boolean
+  /**
+   * グルーピングモード: 'none' (フラット表示) | 'order' (オーダー別) | 'equipment_group' (設備グループ別)
+   */
+  groupBy?: GroupByMode
 }
 
 /**
@@ -146,6 +150,120 @@ function CustomTooltip({ task, fontSize, fontFamily }: {
 }
 
 /**
+ * スケジュールをグルーピングモードに応じてガントチャートのTask型に変換する
+ */
+function transformSchedulesToGroupedTasks(
+  schedules: Schedule[],
+  groupBy: GroupByMode,
+  colorMode: 'product' | 'process',
+  isEditable: boolean
+): Task[] {
+  if (groupBy === 'none') {
+    // フラット表示: そのまま変換
+    return schedules.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
+  }
+
+  const tasks: Task[] = []
+
+  if (groupBy === 'order') {
+    // オーダー単位でグルーピング
+    const orderGroups = new Map<string, Schedule[]>()
+    
+    schedules.forEach((schedule) => {
+      const orderKey = schedule.order_number || 'Unknown'
+      if (!orderGroups.has(orderKey)) {
+        orderGroups.set(orderKey, [])
+      }
+      const group = orderGroups.get(orderKey)
+      if (group) {
+        group.push(schedule)
+      }
+    })
+
+    // 各オーダーごとにプロジェクトタスクと子タスクを作成
+    orderGroups.forEach((orderSchedules, orderNumber) => {
+      // 開始日時・終了日時の計算
+      const dates = orderSchedules.map(s => ({
+        start: new Date(s.start_datetime),
+        end: new Date(s.end_datetime)
+      }))
+      const minStart = new Date(Math.min(...dates.map(d => d.start.getTime())))
+      const maxEnd = new Date(Math.max(...dates.map(d => d.end.getTime())))
+
+      // 製品名（最初のスケジュールから取得）
+      const productName = orderSchedules[0]?.product_name || ''
+
+      // 親タスク（プロジェクト）
+      tasks.push({
+        id: `order-${orderNumber}`,
+        type: 'project',
+        name: `注文: ${orderNumber} - ${productName}`,
+        start: minStart,
+        end: maxEnd,
+        progress: 100,
+        isDisabled: true,
+        hideChildren: false,
+      })
+
+      // 子タスク
+      orderSchedules.forEach((schedule) => {
+        tasks.push({
+          ...convertScheduleToTask(schedule, colorMode, isEditable),
+          project: `order-${orderNumber}`,
+        })
+      })
+    })
+  } else if (groupBy === 'equipment_group') {
+    // 設備グループ単位でグルーピング
+    const groupMap = new Map<string, Schedule[]>()
+    
+    schedules.forEach((schedule) => {
+      const groupKey = schedule.equipment_group_name || '未分類'
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, [])
+      }
+      const group = groupMap.get(groupKey)
+      if (group) {
+        group.push(schedule)
+      }
+    })
+
+    // 各設備グループごとにプロジェクトタスクと子タスクを作成
+    groupMap.forEach((groupSchedules, groupName) => {
+      // 開始日時・終了日時の計算
+      const dates = groupSchedules.map(s => ({
+        start: new Date(s.start_datetime),
+        end: new Date(s.end_datetime)
+      }))
+      const minStart = new Date(Math.min(...dates.map(d => d.start.getTime())))
+      const maxEnd = new Date(Math.max(...dates.map(d => d.end.getTime())))
+
+      // 親タスク（プロジェクト）
+      tasks.push({
+        id: `group-${groupName}`,
+        type: 'project',
+        name: `設備グループ: ${groupName}`,
+        start: minStart,
+        end: maxEnd,
+        progress: 100,
+        isDisabled: true,
+        hideChildren: false,
+      })
+
+      // 子タスク
+      groupSchedules.forEach((schedule) => {
+        tasks.push({
+          ...convertScheduleToTask(schedule, colorMode, isEditable),
+          project: `group-${groupName}`,
+        })
+      })
+    })
+  }
+
+  return tasks
+}
+
+/**
  * ガントチャート表示コンポーネント
  * 
  * バックエンドから取得したスケジュールデータを視覚的に表示します。
@@ -156,13 +274,14 @@ export function GanttChart({
   viewMode = ViewMode.Day,
   colorMode = 'product',
   isEditable = false,
+  groupBy = 'none',
 }: GanttChartProps) {
   const updateSchedule = useUpdateSchedule()
 
-  // Schedule型からTask型に変換
+  // Schedule型からTask型に変換（グルーピングに対応）
   const ganttTasks: Task[] = useMemo(() => {
-    return tasks.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
-  }, [tasks, colorMode, isEditable])
+    return transformSchedulesToGroupedTasks(tasks, groupBy, colorMode, isEditable)
+  }, [tasks, groupBy, colorMode, isEditable])
 
   // ViewModeの変換
   const ganttViewMode = useMemo(() => {

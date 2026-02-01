@@ -70,7 +70,7 @@ class ScheduleRepository(BaseRepository):
         query = (
             self.client.table(self.table_name)
             .select(
-                "*, orders(order_number, products(name), customers(name)), process_routings(process_name), equipments(name)"
+                "*, orders(order_number, products(name), customers(name)), process_routings(process_name, equipment_group_id), equipments(name)"
             )
             .lte("start_datetime", end_datetime_str)
             .gte("end_datetime", start_datetime_str)
@@ -113,6 +113,27 @@ class ScheduleRepository(BaseRepository):
         # Mypy対応: res.dataを適切な型にキャスト
         schedule_data = cast(list[dict[str, Any]], res.data)
 
+        # 設備グループ名を取得するため、全ての equipment_group_id を収集
+        equipment_group_ids = {
+            group_id
+            for item in schedule_data
+            if (process_routing := item.get("process_routings"))
+            and (group_id := process_routing.get("equipment_group_id")) is not None
+        }
+        
+        # 設備グループ名のマップを作成
+        equipment_group_names = {}
+        if equipment_group_ids:
+            groups_res = (
+                self.client.table("equipment_groups")
+                .select("id, name")
+                .in_("id", list(equipment_group_ids))
+                .execute()
+            )
+            if groups_res.data:
+                for group in groups_res.data:
+                    equipment_group_names[group["id"]] = group["name"]
+        
         # レスポンスを整形してフラットな構造にする
         schedules = []
         for item in schedule_data:
@@ -140,6 +161,13 @@ class ScheduleRepository(BaseRepository):
                 if item.get("equipments")
                 else {}
             )
+            
+            # 設備グループ名を取得
+            equipment_group_name = None
+            if process_routing and process_routing.get("equipment_group_id"):
+                equipment_group_name = equipment_group_names.get(
+                    process_routing["equipment_group_id"]
+                )
 
             schedule = {
                 "id": item.get("id"),
@@ -155,6 +183,7 @@ class ScheduleRepository(BaseRepository):
                 if process_routing
                 else None,
                 "equipment_name": equipment.get("name") if equipment else None,
+                "equipment_group_name": equipment_group_name,
             }
             schedules.append(schedule)
 
