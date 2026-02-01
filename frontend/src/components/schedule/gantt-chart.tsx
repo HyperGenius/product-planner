@@ -158,9 +158,18 @@ function transformSchedulesToGroupedTasks(
   colorMode: 'product' | 'process',
   isEditable: boolean
 ): Task[] {
+  const sortByStartDate = (items: Schedule[]) =>
+    [...items].sort((a, b) => {
+      const startDiff = new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
+      if (startDiff !== 0) return startDiff
+      return new Date(a.end_datetime).getTime() - new Date(b.end_datetime).getTime()
+    })
+
   if (groupBy === 'none') {
     // フラット表示: そのまま変換
-    return schedules.map((schedule) => convertScheduleToTask(schedule, colorMode, isEditable))
+    return sortByStartDate(schedules).map((schedule) =>
+      convertScheduleToTask(schedule, colorMode, isEditable)
+    )
   }
 
   const tasks: Task[] = []
@@ -180,8 +189,18 @@ function transformSchedulesToGroupedTasks(
       }
     })
 
+    const sortedOrderGroups = Array.from(orderGroups.entries())
+      .map(([orderNumber, orderSchedules]) => {
+        const sortedSchedules = sortByStartDate(orderSchedules)
+        const minStart = new Date(
+          Math.min(...sortedSchedules.map((s) => new Date(s.start_datetime).getTime()))
+        )
+        return { orderNumber, orderSchedules: sortedSchedules, minStart }
+      })
+      .sort((a, b) => a.minStart.getTime() - b.minStart.getTime())
+
     // 各オーダーごとにプロジェクトタスクと子タスクを作成
-    orderGroups.forEach((orderSchedules, orderNumber) => {
+    sortedOrderGroups.forEach(({ orderSchedules, orderNumber }) => {
       // 開始日時・終了日時の計算
       const dates = orderSchedules.map(s => ({
         start: new Date(s.start_datetime),
@@ -205,7 +224,7 @@ function transformSchedulesToGroupedTasks(
         hideChildren: false,
       })
 
-      // 子タスク
+      // 子タスク（工程開始日が早い順）
       orderSchedules.forEach((schedule) => {
         tasks.push({
           ...convertScheduleToTask(schedule, colorMode, isEditable),
@@ -228,8 +247,18 @@ function transformSchedulesToGroupedTasks(
       }
     })
 
+    const sortedGroupEntries = Array.from(groupMap.entries())
+      .map(([groupName, groupSchedules]) => {
+        const sortedSchedules = sortByStartDate(groupSchedules)
+        const minStart = new Date(
+          Math.min(...sortedSchedules.map((s) => new Date(s.start_datetime).getTime()))
+        )
+        return { groupName, groupSchedules: sortedSchedules, minStart }
+      })
+      .sort((a, b) => a.minStart.getTime() - b.minStart.getTime())
+
     // 各設備グループごとにプロジェクトタスクと子タスクを作成
-    groupMap.forEach((groupSchedules, groupName) => {
+    sortedGroupEntries.forEach(({ groupSchedules, groupName }) => {
       // 開始日時・終了日時の計算
       const dates = groupSchedules.map(s => ({
         start: new Date(s.start_datetime),
@@ -250,7 +279,7 @@ function transformSchedulesToGroupedTasks(
         hideChildren: false,
       })
 
-      // 子タスク
+      // 子タスク（工程開始日が早い順）
       groupSchedules.forEach((schedule) => {
         tasks.push({
           ...convertScheduleToTask(schedule, colorMode, isEditable),

@@ -24,12 +24,19 @@ export function AuthenticatedLayout({ children, user }: AuthenticatedLayoutProps
       {/* サイドバー本体 */}
       <AppSidebar user={user} />
       {/* メインエリア */}
-      <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-6" />
+      <SidebarInset className="relative">
+        
+        {/* トリガーボタンを絶対配置 */}
+        <div className="absolute -left-1 top-1/14 z-50 -translate-y-1/2 pl-1">
+          <SidebarTrigger className="bg-background shadow-md border rounded-r-lg" />
+        </div>
+
+        <header className="flex h-15 shrink-0 items-center gap-2 border-b px-4">
+          {/* パンくずリストなど、ヘッダーに残したい要素があればここに記述 */}
+          <div className="font-semibold">Dashboard</div> 
         </header>
-        <div className="flex flex-1 flex-col">
+
+        <div className="flex flex-1 flex-col px-4 py-6 space-y-6">
           {children}
         </div>
       </SidebarInset>

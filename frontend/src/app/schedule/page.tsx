@@ -107,7 +107,7 @@ export default function SchedulePage() {
       case "Week":
         const weekStart = startOfWeek(currentDate, { locale: ja })
         const weekEnd = endOfWeek(currentDate, { locale: ja })
-        return `${format(weekStart, "yyyy/M/d", { locale: ja })} - ${format(weekEnd, "M/d", { locale: ja })}`
+        return `${format(weekStart, "yyyy年M月d", { locale: ja })} - ${format(weekEnd, "M月d日", { locale: ja })}`
       case "Month":
         return format(currentDate, "yyyy年M月", { locale: ja })
     }
@@ -117,40 +117,39 @@ export default function SchedulePage() {
 
   return (
     <div className="flex-2 py-6 px-4">
-      {/* ヘッダーエリア */}
-      <div className="mb-6" style={{ width: viewWidth }}>
-        <h1 className="text-3xl font-bold mb-4">生産スケジュール</h1>
-        
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          {/* 期間操作 */}
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={handleToday}>
-              今日
-            </Button>
-            <Button variant="outline" onClick={handlePrevious}>
-              &lt; 前へ
-            </Button>
-            <div className="text-lg font-semibold min-w-[200px] text-center">
-              {displayPeriod}
-            </div>
-            <Button variant="outline" onClick={handleNext}>
-              次へ &gt;
-            </Button>
-          </div>
+      <div className="flex-2-1 gap-4 py-">
+        {/* ヘッダーエリア */}
+        <div className="mb-6" style={{ width: viewWidth }}>
+          <h1 className="text-3xl font-bold mb-4">生産スケジュール</h1>
 
-          {/* 右側のコントロール */}
-          <div className="flex items-center gap-4">
-            {/* 編集モード切替 */}
-            <div className="flex items-center gap-2">
-              <Button 
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            {/* 期間操作 */}
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={handleToday}>
+                今日
+              </Button>
+              <Button variant="outline" onClick={handlePrevious}>
+                &lt; 前へ
+              </Button>
+              <div className="text-lg font-semibold min-w-[200px] text-center">
+                {displayPeriod}
+              </div>
+              <Button variant="outline" onClick={handleNext}>
+                次へ &gt;
+              </Button>
+              {/* 編集モード切替 */}
+              <Button
                 variant={isEditMode ? "default" : "outline"}
                 onClick={() => setIsEditMode(!isEditMode)}
-                size="sm"
+                style={{ minWidth: '100px' }}
               >
                 {isEditMode ? "編集中" : "編集モード"}
               </Button>
             </div>
+          </div>
 
+          {/* 右側のコントロール */}
+          <div className="flex items-center gap-4 mt-4">
             {/* グルーピングモード切替 */}
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">表示単位:</span>

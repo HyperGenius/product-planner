@@ -212,7 +212,7 @@ export default function CalendarPage() {
       </div>
 
       {/* カレンダー表示 */}
-      <div className="rounded-lg border p-6">
+      <div className="rounded-lg border p-6 max-w-md">
         {/* 月移動ヘッダー */}
         <div className="mb-4 flex items-center justify-between">
           <Button variant="outline" size="sm" onClick={handlePrevMonth}>
@@ -256,7 +256,7 @@ export default function CalendarPage() {
               workday: "bg-blue-200 text-blue-900 font-bold",
             }}
             locale={ja}
-            className="mx-auto"
+            className="px-8"
           />
         )}
       </div>
