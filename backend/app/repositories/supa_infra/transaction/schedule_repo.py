@@ -115,9 +115,10 @@ class ScheduleRepository(BaseRepository):
 
         # 設備グループ名を取得するため、全ての equipment_group_id を収集
         equipment_group_ids = {
-            process_routing.get("equipment_group_id")
+            group_id
             for item in schedule_data
-            if (process_routing := item.get("process_routings")) and process_routing.get("equipment_group_id")
+            if (process_routing := item.get("process_routings"))
+            and (group_id := process_routing.get("equipment_group_id")) is not None
         }
         
         # 設備グループ名のマップを作成
