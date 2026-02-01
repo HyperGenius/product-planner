@@ -17,6 +17,8 @@ interface CustomerSelectorProps {
   disabled?: boolean
 }
 
+const CLEAR_SELECTION_VALUE = "__clear__"
+
 /**
  * 顧客選択用コンボボックスコンポーネント
  */
@@ -26,13 +28,19 @@ export function CustomerSelector({
   disabled = false,
 }: CustomerSelectorProps) {
   const { data: customers, isLoading } = useCustomers()
+  const handleValueChange = React.useCallback(
+    (nextValue: string) => {
+      onValueChange(nextValue === CLEAR_SELECTION_VALUE ? "" : nextValue)
+    },
+    [onValueChange]
+  )
 
   return (
     <div className="space-y-2">
       <Label htmlFor="customer">顧客</Label>
-      <Select 
-        value={value} 
-        onValueChange={onValueChange} 
+      <Select
+        value={value || CLEAR_SELECTION_VALUE}
+        onValueChange={handleValueChange}
         disabled={disabled || isLoading}
       >
         <SelectTrigger id="customer" aria-busy={isLoading}>
@@ -41,7 +49,7 @@ export function CustomerSelector({
         <SelectContent>
           {customers && customers.length > 0 ? (
             <>
-              <SelectItem value="">選択を解除</SelectItem>
+              <SelectItem value={CLEAR_SELECTION_VALUE}>選択を解除</SelectItem>
               {customers.map((customer) => (
                 <SelectItem key={customer.id} value={customer.id.toString()}>
                   {customer.name}
