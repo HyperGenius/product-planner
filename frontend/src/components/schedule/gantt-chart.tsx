@@ -174,7 +174,10 @@ function transformSchedulesToGroupedTasks(
       if (!orderGroups.has(orderKey)) {
         orderGroups.set(orderKey, [])
       }
-      orderGroups.get(orderKey)!.push(schedule)
+      const group = orderGroups.get(orderKey)
+      if (group) {
+        group.push(schedule)
+      }
     })
 
     // 各オーダーごとにプロジェクトタスクと子タスクを作成
@@ -219,7 +222,10 @@ function transformSchedulesToGroupedTasks(
       if (!groupMap.has(groupKey)) {
         groupMap.set(groupKey, [])
       }
-      groupMap.get(groupKey)!.push(schedule)
+      const group = groupMap.get(groupKey)
+      if (group) {
+        group.push(schedule)
+      }
     })
 
     // 各設備グループごとにプロジェクトタスクと子タスクを作成

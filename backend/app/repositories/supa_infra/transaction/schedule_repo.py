@@ -114,11 +114,11 @@ class ScheduleRepository(BaseRepository):
         schedule_data = cast(list[dict[str, Any]], res.data)
 
         # 設備グループ名を取得するため、全ての equipment_group_id を収集
-        equipment_group_ids = set()
-        for item in schedule_data:
-            process_routing = item.get("process_routings")
-            if process_routing and process_routing.get("equipment_group_id"):
-                equipment_group_ids.add(process_routing["equipment_group_id"])
+        equipment_group_ids = {
+            process_routing.get("equipment_group_id")
+            for item in schedule_data
+            if (process_routing := item.get("process_routings")) and process_routing.get("equipment_group_id")
+        }
         
         # 設備グループ名のマップを作成
         equipment_group_names = {}
