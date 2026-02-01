@@ -40,11 +40,14 @@ export function CustomerSelector({
         </SelectTrigger>
         <SelectContent>
           {customers && customers.length > 0 ? (
-            customers.map((customer) => (
-              <SelectItem key={customer.id} value={customer.id.toString()}>
-                {customer.name}
-              </SelectItem>
-            ))
+            <>
+              <SelectItem value="">選択を解除</SelectItem>
+              {customers.map((customer) => (
+                <SelectItem key={customer.id} value={customer.id.toString()}>
+                  {customer.name}
+                </SelectItem>
+              ))}
+            </>
           ) : (
             <div className="px-2 py-1.5 text-sm text-muted-foreground">
               顧客が登録されていません
