@@ -14,9 +14,10 @@ import {
 } from "@/components/ui/table"
 import { useConfirmOrder, useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
+import { useCustomers } from "@/hooks/use-customers"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
-import { getProductName, getStatusLabel } from "@/lib/order-utils"
+import { getProductName, getCustomerName, getStatusLabel } from "@/lib/order-utils"
 
 /**
  * 注文一覧画面
@@ -26,6 +27,7 @@ export default function OrdersPage() {
   const router = useRouter()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
+  const { data: customers, isLoading: customersLoading } = useCustomers()
   const confirmOrder = useConfirmOrder()
 
   const handleConfirmOrder = (orderId: number, orderNo: string) => {
@@ -59,7 +61,7 @@ export default function OrdersPage() {
       </div>
 
       <div className="rounded-lg border bg-card shadow-sm">
-        {ordersLoading || productsLoading ? (
+        {ordersLoading || productsLoading || customersLoading ? (
           <div className="p-8 text-center text-muted-foreground">
             読み込み中...
           </div>
@@ -69,6 +71,7 @@ export default function OrdersPage() {
               <TableRow>
                 <TableHead>注文番号</TableHead>
                 <TableHead>製品</TableHead>
+                <TableHead>顧客</TableHead>
                 <TableHead className="text-right">数量</TableHead>
                 <TableHead>希望納期</TableHead>
                 <TableHead>確定納期</TableHead>
@@ -81,6 +84,7 @@ export default function OrdersPage() {
                 <TableRow key={order.id}>
                   <TableCell className="font-medium">{order.order_no}</TableCell>
                   <TableCell>{getProductName(order.product_id, products)}</TableCell>
+                  <TableCell>{getCustomerName(order.customer_id, customers)}</TableCell>
                   <TableCell className="text-right">{order.quantity}</TableCell>
                   <TableCell>
                     {order.desired_deadline

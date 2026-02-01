@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
+import { CustomerSelector } from "@/components/customer-selector"
 import { SimulationResult } from "@/components/simulation-result"
 import { useSimulateOrder, useCreateOrder, useConfirmOrder } from "@/hooks/use-orders"
 import type { OrderSimulateResponse } from "@/types/order"
@@ -20,6 +21,7 @@ export default function NewOrderPage() {
   const router = useRouter()
   const [orderNo, setOrderNo] = useState("")
   const [productId, setProductId] = useState("")
+  const [customerId, setCustomerId] = useState("")
   const [quantity, setQuantity] = useState("")
   const [desiredDeadline, setDesiredDeadline] = useState("")
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
@@ -90,6 +92,7 @@ export default function NewOrderPage() {
       const createdOrder = await createMutation.mutateAsync({
         order_no: orderNo,
         product_id: productIdNum,
+        customer_id: customerId ? parseInt(customerId) : undefined,
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
       })
@@ -139,6 +142,12 @@ export default function NewOrderPage() {
               <ProductSelector
                 value={productId}
                 onValueChange={setProductId}
+              />
+
+              {/* 顧客選択 */}
+              <CustomerSelector
+                value={customerId}
+                onValueChange={setCustomerId}
               />
 
               {/* 数量 */}
