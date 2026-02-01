@@ -10,6 +10,7 @@ export interface Schedule {
   end_datetime: string // ISO 8601形式
   order_number?: string
   product_name?: string
+  customer_name?: string
   process_name?: string
   equipment_name?: string
 }
