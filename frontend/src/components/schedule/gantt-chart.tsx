@@ -47,6 +47,7 @@ export function convertScheduleToTask(
   const backgroundColor = getBarColor(schedule, colorMode)
 
   // 顧客名を名前に含める（区切り文字として ||| を使用）
+  // Note: 顧客名に ||| が含まれる可能性は極めて低いため、このシンプルな方法を採用
   const customerPart = schedule.customer_name ? `|||${schedule.customer_name}` : ''
 
   return {
