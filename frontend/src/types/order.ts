@@ -5,6 +5,7 @@ export interface Order {
   id: number
   order_no: string
   product_id: number
+  customer_id?: number
   quantity: number
   desired_deadline?: string // ISO 8601形式
   confirmed_deadline?: string // ISO 8601形式
@@ -20,6 +21,7 @@ export interface Order {
 export interface OrderCreate {
   order_no: string
   product_id: number
+  customer_id?: number
   quantity: number
   desired_deadline?: string
 }

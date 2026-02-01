@@ -46,10 +46,14 @@ export function convertScheduleToTask(
   // カラーモードに応じて色を決定
   const backgroundColor = getBarColor(schedule, colorMode)
 
+  // 顧客名を名前に含める（区切り文字として ||| を使用）
+  // Note: 顧客名に ||| が含まれる可能性は極めて低いため、このシンプルな方法を採用
+  const customerPart = schedule.customer_name ? `|||${schedule.customer_name}` : ''
+
   return {
     id: `schedule-${schedule.id}`,
     type: 'task',
-    name: `${schedule.process_name || '工程'} - ${schedule.order_number || ''}`,
+    name: `${schedule.process_name || '工程'} - ${schedule.order_number || ''}${customerPart}`,
     start: startDate,
     end: endDate,
     progress: 100, // 完了済みとして表示
@@ -100,7 +104,10 @@ function CustomTooltip({ task, fontSize, fontFamily }: {
 }) {
   // taskのnameからスケジュール情報を取得するため、元のScheduleオブジェクトを保持する方法が必要
   // ここでは簡易的にtask.nameから情報を抽出
-  const [processName, orderNumber] = task.name.split(' - ')
+  const nameParts = task.name.split('|||')
+  const mainPart = nameParts[0] || ''
+  const customerName = nameParts[1] || null
+  const [processName, orderNumber] = mainPart.split(' - ')
 
   return (
     <div
@@ -121,6 +128,11 @@ function CustomTooltip({ task, fontSize, fontFamily }: {
       {orderNumber && (
         <div style={{ fontSize: '0.875em', color: '#666', marginBottom: '2px' }}>
           注文番号: {orderNumber}
+        </div>
+      )}
+      {customerName && (
+        <div style={{ fontSize: '0.875em', color: '#666', marginBottom: '2px' }}>
+          顧客: {customerName}
         </div>
       )}
       <div style={{ fontSize: '0.875em', color: '#666' }}>

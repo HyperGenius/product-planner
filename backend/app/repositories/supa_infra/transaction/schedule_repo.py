@@ -58,7 +58,7 @@ class ScheduleRepository(BaseRepository):
 
         Returns:
             スケジュールオブジェクトのリスト。
-            各オブジェクトには order_number, product_name, process_name, equipment_name を含む。
+            各オブジェクトには order_number, product_name, customer_name, process_name, equipment_name を含む。
         """
         # Supabaseのリレーション解決を使用して関連データを取得
         # orders -> products のネストされた関係も取得する
@@ -70,7 +70,7 @@ class ScheduleRepository(BaseRepository):
         query = (
             self.client.table(self.table_name)
             .select(
-                "*, orders(order_number, products(name)), process_routings(process_name), equipments(name)"
+                "*, orders(order_number, products(name), customers(name)), process_routings(process_name), equipments(name)"
             )
             .lte("start_datetime", end_datetime_str)
             .gte("end_datetime", start_datetime_str)
@@ -125,6 +125,11 @@ class ScheduleRepository(BaseRepository):
                 if order.get("products")
                 else None
             )
+            customer = (
+                cast(dict[str, Any], order.get("customers"))
+                if order.get("customers")
+                else None
+            )
             process_routing = (
                 cast(dict[str, Any], item.get("process_routings"))
                 if item.get("process_routings")
@@ -145,6 +150,7 @@ class ScheduleRepository(BaseRepository):
                 "end_datetime": item.get("end_datetime"),
                 "order_number": order.get("order_number") if order else None,
                 "product_name": product.get("name") if product else None,
+                "customer_name": customer.get("name") if customer else None,
                 "process_name": process_routing.get("process_name")
                 if process_routing
                 else None,
