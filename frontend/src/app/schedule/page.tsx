@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { GanttChart } from "@/components/schedule/gantt-chart"
 import { useSchedules } from "@/hooks/use-schedules"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
-import type { GanttViewMode } from "@/types/schedule"
+import type { GanttViewMode, GroupByMode } from "@/types/schedule"
 import { useSidebar } from "@/components/ui/sidebar"
 
 /**
@@ -22,6 +22,7 @@ export default function SchedulePage() {
   const [viewMode, setViewMode] = useState<GanttViewMode>("Day")
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
   const [isEditMode, setIsEditMode] = useState<boolean>(false)
+  const [groupBy, setGroupBy] = useState<GroupByMode>("none")
 
   // state は "expanded" | "collapsed" | "mobile" などを返す
   const { state, open } = useSidebar()
@@ -150,9 +151,24 @@ export default function SchedulePage() {
               </Button>
             </div>
 
+            {/* グルーピングモード切替 */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">表示単位:</span>
+              <Select value={groupBy} onValueChange={(value) => setGroupBy(value as GroupByMode)}>
+                <SelectTrigger className="w-[160px]" aria-label="グルーピングモード選択">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">フラット表示</SelectItem>
+                  <SelectItem value="order">オーダー別</SelectItem>
+                  <SelectItem value="equipment_group">設備グループ別</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* 表示モード切替 */}
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">表示:</span>
+              <span className="text-sm font-medium">期間:</span>
               <Select value={viewMode} onValueChange={(value) => setViewMode(value as GanttViewMode)}>
                 <SelectTrigger className="w-[120px]" aria-label="表示モード選択">
                   <SelectValue />
@@ -216,7 +232,7 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : schedules && schedules.length > 0 ? (
-          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} />
+          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} groupBy={groupBy} />
         ) : (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-muted-foreground">

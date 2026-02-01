@@ -13,9 +13,15 @@ export interface Schedule {
   customer_name?: string
   process_name?: string
   equipment_name?: string
+  equipment_group_name?: string
 }
 
 /**
  * ガントチャートの表示モード
  */
 export type GanttViewMode = 'Day' | 'Week' | 'Month'
+
+/**
+ * ガントチャートのグルーピングモード
+ */
+export type GroupByMode = 'none' | 'order' | 'equipment_group'
