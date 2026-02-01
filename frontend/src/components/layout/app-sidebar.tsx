@@ -15,6 +15,7 @@ import {
   User,
   ChevronDown,
   Calendar,
+  Users,
 } from "lucide-react"
 
 import {
@@ -64,6 +65,11 @@ const menuItems = [
         title: "Products",
         url: "/master/products",
         icon: Package,
+      },
+      {
+        title: "Customers",
+        url: "/master/customers",
+        icon: Users,
       },
       {
         title: "Equipments",
