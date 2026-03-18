@@ -1,12 +1,10 @@
 # __tests__/api/routers/master/test_calendars.py
-from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.dependencies import get_supabase_client
 from app.main import app
+from fastapi.testclient import TestClient
 
 # テストクライアントの作成
 client = TestClient(app)
@@ -66,9 +64,7 @@ class TestCalendarRouter:
         # モックの設定
         mock_response = MagicMock()
         mock_response.data = mock_calendar_data
-        mock_client.table.return_value.select.return_value.gte.return_value.lte.return_value.execute.return_value = (
-            mock_response
-        )
+        mock_client.table.return_value.select.return_value.gte.return_value.lte.return_value.execute.return_value = mock_response
 
         response = client.get("/calendars/?year=2024&month=1", headers=headers)
 

@@ -30,7 +30,9 @@ def get_customers(repo: CustomerRepository = Depends(get_customer_repo)):
 
 
 @customer_router.get("/{customer_id}")
-def get_customer(customer_id: int, repo: CustomerRepository = Depends(get_customer_repo)):
+def get_customer(
+    customer_id: int, repo: CustomerRepository = Depends(get_customer_repo)
+):
     """顧客を1件取得"""
     logger.info(f"Fetching customer {customer_id}")
     return repo.get_by_id(customer_id)

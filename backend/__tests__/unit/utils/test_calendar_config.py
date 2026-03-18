@@ -5,7 +5,6 @@ CalendarConfig と休日設定機能の単体テスト
 from datetime import date, datetime
 
 import pytest
-
 from app.utils.calendar import (
     CalendarConfig,
     calculate_end_time,

@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Calendar,
   Users,
+  Settings,
 } from "lucide-react"
 
 import {
@@ -88,6 +89,17 @@ const menuItems = [
       },
     ],
   },
+  {
+    title: "Settings",
+    icon: Settings,
+    items: [
+      {
+        title: "Members",
+        url: "/settings/members",
+        icon: Users,
+      },
+    ],
+  },
 ]
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
@@ -125,7 +137,10 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                 item.items ? (
                   <Collapsible
                     key={item.title}
-                    defaultOpen={pathname.startsWith("/master")}
+                    defaultOpen={
+                      (item.title === "Master Data" && pathname.startsWith("/master")) ||
+                      (item.title === "Settings" && pathname.startsWith("/settings"))
+                    }
                   >
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>

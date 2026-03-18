@@ -2,10 +2,9 @@
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.dependencies import get_equipment_repo
 from app.main import app
+from fastapi.testclient import TestClient
 
 # テストクライアントの作成
 client = TestClient(app)
