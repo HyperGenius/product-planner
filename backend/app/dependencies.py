@@ -3,6 +3,7 @@ import os
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase import Client, ClientOptions, create_client  # type: ignore
 
 from app.repositories.supa_infra import (
     CustomerRepository,
@@ -11,7 +12,6 @@ from app.repositories.supa_infra import (
     ProductRepository,
     ScheduleRepository,
 )
-from supabase import Client, ClientOptions, create_client  # type: ignore
 
 # Bearer Token (JWT) を取得するためのスキーム
 security = HTTPBearer()
@@ -57,6 +57,29 @@ def get_supabase_client(token: str = Depends(get_current_user_token)) -> Client:
         ) from e
 
 
+def get_current_user_id(client: Client = Depends(get_supabase_client)) -> str:
+    """Supabaseクライアントを通じて現在の認証ユーザーIDを取得する。
+
+    JWT署名をSupabaseサーバーサイドで検証済みのセッション情報から取得するため、
+    トークンの改ざんを正しく検出できる。
+    """
+    try:
+        user_response = client.auth.get_user()
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+            )
+        return str(user_response.user.id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        ) from e
+
+
 # --- Dependency Injection用の関数 ---
 
 
@@ -91,3 +114,21 @@ def get_customer_repo(
 ) -> CustomerRepository:
     """顧客リポジトリを取得する。"""
     return CustomerRepository(client)
+
+
+def get_supabase_admin_client() -> Client:
+    """
+    Service Role Key を使ったSupabase管理者クライアントを返す。
+    Admin API の呼び出し（ユーザー作成等）にのみ使用する。
+    この関数は必ず権限チェック後に呼び出すこと。
+    """
+    sb_url = os.environ.get("SUPABASE_URL")
+    sb_service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+    if not sb_url or not sb_service_role_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="サーバー設定エラー: Supabase環境変数が不足しています",
+        )
+
+    return create_client(sb_url, sb_service_role_key)
