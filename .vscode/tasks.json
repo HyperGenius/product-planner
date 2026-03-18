@@ -77,6 +77,15 @@
             }
         },
         {
+            "label": "Pre-commit run all files",
+            "type": "shell",
+            "command": "source backend/.venv/bin/activate && pre-commit run --all-files",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "test-runners"
+            }
+        },
+        {
             "label": "Supabase db reset",
             "type": "shell",
             "command": "supabase db reset",
