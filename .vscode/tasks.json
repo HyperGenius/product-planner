@@ -1,24 +1,24 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "pip install (functions)",
-			"type": "shell",
-			"osx": {
-				"command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
-			},
-			"windows": {
-				"command": "${config:azureFunctions.pythonVenv}\\Scripts\\python -m pip install -r requirements.txt"
-			},
-			"linux": {
-				"command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
-			},
-			"problemMatcher": [],
-			"options": {
-				"cwd": "${workspaceFolder}/backend"
-			}
-		},
-		{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "pip install (functions)",
+            "type": "shell",
+            "osx": {
+                "command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
+            },
+            "windows": {
+                "command": "${config:azureFunctions.pythonVenv}\\Scripts\\python -m pip install -r requirements.txt"
+            },
+            "linux": {
+                "command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
+            },
+            "problemMatcher": [],
+            "options": {
+                "cwd": "${workspaceFolder}/backend"
+            }
+        },
+        {
             "label": "Backend (Uvicorn)",
             "type": "shell",
             // 仮想環境を起動してから uvicorn を実行
@@ -53,6 +53,18 @@
             }
         },
         {
+            "label": "Add seed scenario to supabase",
+            "type": "shell",
+            "command": "source ${workspaceFolder}/backend/.venv/bin/activate && python seed_scenario.py standard_demo",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "supabase",
+            },
+            "options": {
+                "cwd": "${workspaceFolder}/backend/scripts"
+            }
+        },
+        {
             "label": "Supabase migration up",
             "type": "shell",
             "command": "supabase migration up",
@@ -63,6 +75,15 @@
             "options": {
                 "cwd": "${workspaceFolder}/supabase"
             }
+        },
+        {
+            "label": "Supabase db reset",
+            "type": "shell",
+            "command": "supabase db reset",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "supabase",
+            },
         }
-	]
+    ]
 }
