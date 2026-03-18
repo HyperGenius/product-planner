@@ -120,7 +120,7 @@ class ScheduleRepository(BaseRepository):
             if (process_routing := item.get("process_routings"))
             and (group_id := process_routing.get("equipment_group_id")) is not None
         }
-        
+
         # 設備グループ名のマップを作成
         equipment_group_names = {}
         if equipment_group_ids:
@@ -132,8 +132,9 @@ class ScheduleRepository(BaseRepository):
             )
             if groups_res.data:
                 for group in groups_res.data:
-                    equipment_group_names[group["id"]] = group["name"]
-        
+                    g = cast(dict[str, Any], group)
+                    equipment_group_names[g["id"]] = g["name"]
+
         # レスポンスを整形してフラットな構造にする
         schedules = []
         for item in schedule_data:
@@ -161,7 +162,7 @@ class ScheduleRepository(BaseRepository):
                 if item.get("equipments")
                 else {}
             )
-            
+
             # 設備グループ名を取得
             equipment_group_name = None
             if process_routing and process_routing.get("equipment_group_id"):

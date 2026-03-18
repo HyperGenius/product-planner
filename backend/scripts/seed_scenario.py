@@ -27,6 +27,7 @@ from typing import Any
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
+
 from supabase import Client, create_client  # type: ignore
 
 load_dotenv()
@@ -339,7 +340,9 @@ def seed_admin_profile(client: Client, tenant_id: str) -> None:
         print("  ℹ️  Using service role key for profile upsert")
     else:
         upsert_client = client
-        print("  ℹ️  Using user token for profile upsert (SUPABASE_SERVICE_ROLE_KEY not set)")
+        print(
+            "  ℹ️  Using user token for profile upsert (SUPABASE_SERVICE_ROLE_KEY not set)"
+        )
 
     upsert_client.table("profiles").upsert(
         {"id": user_id, "full_name": admin_full_name, "email": user_email},

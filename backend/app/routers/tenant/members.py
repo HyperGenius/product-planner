@@ -1,7 +1,6 @@
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from supabase import Client  # type: ignore
 
 from app.dependencies import (
     get_current_tenant_id,
@@ -11,6 +10,7 @@ from app.dependencies import (
 )
 from app.models.tenant import MemberCreateSchema, MemberResponse, MemberUpdateSchema
 from app.utils.logger import get_logger
+from supabase import Client  # type: ignore
 
 member_router = APIRouter(prefix="/tenant/members", tags=["Tenant (Members)"])
 
@@ -31,7 +31,7 @@ def _require_admin(
         .single()
         .execute()
     )
-    if not res.data or res.data.get("role") != "admin":
+    if not res.data or cast(dict[str, Any], res.data).get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="この操作には admin 権限が必要です",
@@ -48,16 +48,31 @@ def list_members(
     """テナントのメンバー一覧を取得する（admin のみ）"""
     _require_admin(current_user_id, tenant_id, client)
 
-    res = (
+    members_res = (
         admin_client.table("organization_members")
-        .select("user_id, role, profiles(full_name, email)")
+        .select("user_id, role")
         .eq("tenant_id", tenant_id)
         .execute()
     )
 
+    rows: list[dict[str, Any]] = cast(list[dict[str, Any]], members_res.data or [])
+    user_ids = [row["user_id"] for row in rows]
+
+    profiles_map: dict[str, Any] = {}
+    if user_ids:
+        profiles_res = (
+            admin_client.table("profiles")
+            .select("id, full_name, email")
+            .in_("id", user_ids)
+            .execute()
+        )
+        profiles_map = {
+            p["id"]: p for p in cast(list[dict[str, Any]], profiles_res.data or [])
+        }
+
     members: list[MemberResponse] = []
-    for row in res.data or []:
-        profile = row.get("profiles") or {}
+    for row in rows:
+        profile = profiles_map.get(row["user_id"], {})
         members.append(
             MemberResponse(
                 user_id=row["user_id"],
@@ -69,7 +84,9 @@ def list_members(
     return members
 
 
-@member_router.post("/", response_model=MemberResponse, status_code=status.HTTP_201_CREATED)
+@member_router.post(
+    "/", response_model=MemberResponse, status_code=status.HTTP_201_CREATED
+)
 def create_member(
     data: MemberCreateSchema,
     tenant_id: str = Depends(get_current_tenant_id),
@@ -91,7 +108,11 @@ def create_member(
         )
     except Exception as e:
         error_msg = str(e)
-        if "already registered" in error_msg or "duplicate" in error_msg.lower() or "23505" in error_msg:
+        if (
+            "already registered" in error_msg
+            or "duplicate" in error_msg.lower()
+            or "23505" in error_msg
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="このメールアドレスはすでに登録されています",
@@ -157,13 +178,18 @@ def update_member(
         .execute()
     )
     if not member_res.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません"
+        )
 
     # role 変更の場合、admin が0人になることを防ぐ
-    if data.role == "member" and member_res.data.get("role") == "admin":
+    if (
+        data.role == "member"
+        and cast(dict[str, Any], member_res.data).get("role") == "admin"
+    ):
         admin_count_res = (
             client.table("organization_members")
-            .select("user_id", count="exact")
+            .select("user_id", count="exact")  # type: ignore[arg-type]
             .eq("tenant_id", tenant_id)
             .eq("role", "admin")
             .execute()
@@ -179,10 +205,14 @@ def update_member(
         updates["role"] = data.role
 
     if updates:
-        admin_client.table("organization_members").update(updates).eq("user_id", user_id).eq("tenant_id", tenant_id).execute()
+        admin_client.table("organization_members").update(updates).eq(
+            "user_id", user_id
+        ).eq("tenant_id", tenant_id).execute()
 
     if data.full_name is not None:
-        admin_client.table("profiles").upsert({"id": user_id, "full_name": data.full_name}).execute()
+        admin_client.table("profiles").upsert(
+            {"id": user_id, "full_name": data.full_name}
+        ).execute()
 
     # 最新情報を取得して返す
     refreshed = (
@@ -193,8 +223,8 @@ def update_member(
         .single()
         .execute()
     )
-    row = refreshed.data
-    profile = row.get("profiles") or {}
+    row = cast(dict[str, Any], refreshed.data)
+    profile = cast(dict[str, Any], row.get("profiles") or {})
 
     return MemberResponse(
         user_id=row["user_id"],
@@ -231,13 +261,15 @@ def delete_member(
         .execute()
     )
     if not member_res.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません"
+        )
 
     # admin を削除する場合、admin が0人になることを防ぐ
-    if member_res.data.get("role") == "admin":
+    if cast(dict[str, Any], member_res.data).get("role") == "admin":
         admin_count_res = (
             client.table("organization_members")
-            .select("user_id", count="exact")
+            .select("user_id", count="exact")  # type: ignore[arg-type]
             .eq("tenant_id", tenant_id)
             .eq("role", "admin")
             .execute()
@@ -249,4 +281,6 @@ def delete_member(
             )
 
     # organization_members から削除（テナント紐付けを解除）
-    admin_client.table("organization_members").delete().eq("user_id", user_id).eq("tenant_id", tenant_id).execute()
+    admin_client.table("organization_members").delete().eq("user_id", user_id).eq(
+        "tenant_id", tenant_id
+    ).execute()

@@ -5,7 +5,6 @@
 from datetime import datetime
 
 import pytest
-
 from app.utils.calendar import (
     calculate_end_time,
     get_next_available_start_time,
@@ -101,7 +100,9 @@ class TestGetNextAvailableStartTime:
     def test_weekday_afternoon_task_overflows(self) -> None:
         """平日午後、作業が17:00を超える場合でも当日から開始（分割処理に任せる）"""
         current_dt = datetime(2025, 1, 6, 15, 0)  # 月曜日 15:00
-        duration = 150  # 2.5時間 → 17:30になるが、split_work_across_daysで分割処理される
+        duration = (
+            150  # 2.5時間 → 17:30になるが、split_work_across_daysで分割処理される
+        )
         result = get_next_available_start_time(current_dt, duration)
         assert result == current_dt  # 当日から開始
 
@@ -380,7 +381,9 @@ class TestBreakTimeLogic:
         start_dt = datetime(2025, 1, 6, 10, 0)  # 月曜日 10:00
         duration = 180  # 3時間
         result = calculate_end_time(start_dt, duration)
-        assert result == datetime(2025, 1, 6, 14, 0)  # 月曜日 14:00（10:00 + 3h + 1h休憩）
+        assert result == datetime(
+            2025, 1, 6, 14, 0
+        )  # 月曜日 14:00（10:00 + 3h + 1h休憩）
 
     def test_work_starts_after_break(self) -> None:
         """13:00開始、2時間作業 → 休憩後のため15:00終了"""

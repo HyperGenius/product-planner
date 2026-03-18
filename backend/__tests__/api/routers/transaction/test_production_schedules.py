@@ -1,13 +1,13 @@
 # __tests__/api/routers/transaction/test_production_schedules.py
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.dependencies import get_schedule_repo
 
 # テスト対象のAPIインスタンス
 from app.main import app
+from fastapi.testclient import TestClient
 
 # テストクライアントの作成
 client = TestClient(app)
@@ -140,9 +140,7 @@ class TestProductionSchedulesRouter:
 
         assert response.status_code == 200
         assert response.json() == []
-        mock_repo.get_by_period.assert_called_once_with(
-            "2024-01-01", "2024-01-31", 999
-        )
+        mock_repo.get_by_period.assert_called_once_with("2024-01-01", "2024-01-31", 999)
 
     def test_get_production_schedules_missing_required_params(self, headers):
         """GET /: 必須パラメータが不足している場合のテスト"""
@@ -280,7 +278,7 @@ class TestProductionSchedulesRouter:
     def test_update_production_schedule_empty_payload(self, headers, mock_repo):
         """PATCH /{schedule_id}: 空のペイロードの場合のテスト"""
         schedule_id = 10000001
-        update_data = {}
+        update_data: dict[str, Any] = {}
         expected_response = {
             "id": schedule_id,
             "order_id": 1000001,

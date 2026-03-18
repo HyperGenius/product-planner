@@ -1,18 +1,16 @@
 # routers/master/calendars.py
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_tenant_id, get_supabase_client
 from app.models.common.work_calendar import (
-    WorkCalendar,
     WorkCalendarCreate,
-    WorkCalendarUpdate,
 )
 from app.repositories.supa_infra.common.calendar_repo import CalendarRepository
 from app.utils.logger import get_logger
-from pydantic import BaseModel, Field
 from supabase import Client
 
 calendar_router = APIRouter(prefix="/calendars", tags=["Master (Calendars)"])
@@ -35,7 +33,9 @@ class BatchUpdateRequest(BaseModel):
     note: str | None = Field(None, description="備考")
 
 
-def get_calendar_repo(client: Client = Depends(get_supabase_client)) -> CalendarRepository:
+def get_calendar_repo(
+    client: Client = Depends(get_supabase_client),
+) -> CalendarRepository:
     """カレンダーリポジトリを取得する"""
     return CalendarRepository(client)
 

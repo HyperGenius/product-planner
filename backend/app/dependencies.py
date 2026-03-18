@@ -3,7 +3,6 @@ import os
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from supabase import Client, ClientOptions, create_client  # type: ignore
 
 from app.repositories.supa_infra import (
     CustomerRepository,
@@ -12,6 +11,7 @@ from app.repositories.supa_infra import (
     ProductRepository,
     ScheduleRepository,
 )
+from supabase import Client, ClientOptions, create_client  # type: ignore
 
 # Bearer Token (JWT) を取得するためのスキーム
 security = HTTPBearer()
@@ -57,14 +57,17 @@ def get_supabase_client(token: str = Depends(get_current_user_token)) -> Client:
         ) from e
 
 
-def get_current_user_id(client: Client = Depends(get_supabase_client)) -> str:
+def get_current_user_id(
+    token: str = Depends(get_current_user_token),
+    client: Client = Depends(get_supabase_client),
+) -> str:
     """Supabaseクライアントを通じて現在の認証ユーザーIDを取得する。
 
     JWT署名をSupabaseサーバーサイドで検証済みのセッション情報から取得するため、
     トークンの改ざんを正しく検出できる。
     """
     try:
-        user_response = client.auth.get_user()
+        user_response = client.auth.get_user(jwt=token)
         if not user_response or not user_response.user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
