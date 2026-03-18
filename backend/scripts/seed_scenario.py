@@ -27,7 +27,6 @@ from typing import Any
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
-
 from supabase import Client, create_client  # type: ignore
 
 load_dotenv()
@@ -304,6 +303,53 @@ def import_orders(
     print(f"✅ Imported {order_count} orders")
 
 
+def seed_admin_profile(client: Client, tenant_id: str) -> None:
+    """
+    認証済み管理者ユーザーの profiles レコードを作成・更新する.
+
+    サインアップフローでは profiles が自動作成されないため、
+    このシードステップで管理者のプロフィールを登録する。
+    Service Role Key が設定されている場合はそれを使用し、
+    未設定の場合は認証済みユーザーとして upsert を試みる。
+    """
+    print("\n👤 Seeding admin profile...")
+
+    # 認証済みユーザーの情報を取得
+    user_response = client.auth.get_user()
+    if not user_response or not user_response.user:
+        print("  ⚠️  Could not retrieve authenticated user, skipping...")
+        return
+
+    user = user_response.user
+    user_id = str(user.id)
+    user_email = user.email or ""
+
+    # 管理者の氏名を環境変数から取得（未設定時はメールのローカルパートを使用）
+    admin_full_name = os.environ.get(
+        "TEST_ADMIN_FULL_NAME",
+        user_email.split("@")[0] if user_email else "Admin",
+    )
+
+    # Service Role Key が利用可能であれば管理者クライアントを使用（RLSをバイパス）
+    sb_url = os.environ.get("SUPABASE_URL", "")
+    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+    if service_role_key:
+        upsert_client = create_client(sb_url, service_role_key)
+        print("  ℹ️  Using service role key for profile upsert")
+    else:
+        upsert_client = client
+        print("  ℹ️  Using user token for profile upsert (SUPABASE_SERVICE_ROLE_KEY not set)")
+
+    upsert_client.table("profiles").upsert(
+        {"id": user_id, "full_name": admin_full_name, "email": user_email},
+        on_conflict="id",
+    ).execute()
+
+    print(f"  ✓ Upserted profile for {user_email} (full_name: {admin_full_name})")
+    print("✅ Admin profile seeded")
+
+
 def seed_scenario(scenario_name: str):
     """シナリオデータを投入するメイン関数."""
     print(f"\n{'=' * 60}")
@@ -317,6 +363,7 @@ def seed_scenario(scenario_name: str):
     print(f"📂 Scenario path: {base_path}")
 
     # 2. 各ステップの実行（依存順序を守る）
+    seed_admin_profile(client, tenant_id)
     group_map = import_groups(client, tenant_id, base_path)
     product_map = import_products(client, tenant_id, base_path)
     import_routings(client, tenant_id, base_path, group_map, product_map)
