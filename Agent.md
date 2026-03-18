@@ -73,7 +73,45 @@
 * **Supabase Migrations**: DBスキーマの変更は必ず `supabase/migrations/` 配下のSQLファイルで行う。
 * **RLS Policy**: 新規テーブル作成時は、必ず `ENABLE ROW LEVEL SECURITY` を行い、テナント分離ポリシー (`using (is_tenant_member(tenant_id))`) を適用すること。
 
-## 4. テスト実装ルール (Testing Strategy)
+## 4. コーディング規約 (Coding Standards)
+
+### Backend (Python/FastAPI)
+
+1.  **完全な型ヒントの付与 (Type Hints)**
+    * すべての関数・メソッドの**引数**および**戻り値**に型ヒントを明記すること。
+    * 戻り値がない場合は `-> None` を記述すること。
+
+2. **Ruff準拠**
+    * 提案するコードは Ruff のLinterおよびFormatterルールに適合していること。
+
+3.  **`Any` 型の回避**
+    * `typing.Any` の使用は原則禁止とする。
+    * 型が動的に変わる場合や外部ライブラリの制約など、やむを得ない場合のみ使用し、その際は**理由をコメントで明記**すること（例: `# library X returns untyped dict`）。
+
+4.  **Mypy エラーの解消**
+    * 実装コードは `mypy` (Strict mode) のチェックをパスしなければならない。
+    * `disallow_untyped_defs = true` 準拠とし、すべての関数引数と戻り値に型ヒントを記述すること。Any型は極力避け、Pydanticモデルや具体的な型を使用すること
+    * Import整理: 標準ライブラリ、サードパーティ、ローカルモジュールの順序を守ること（Ruffが自動処理するが、AIも意識して出力すること）。
+    * `# type: ignore` の使用は最終手段とし、使用する場合は理由を併記すること。
+
+5.  **Pydantic / SQLModel の活用**
+    * 辞書 (`dict`) をそのまま受け渡しするのではなく、可能な限り Pydantic モデルや SQLModel クラスを使用して構造化データを扱うこと。
+
+6.  **検証**
+    * コード修正後は必ずローカルで `pre-commit run --all-files` (または `mypy .`) を実行し、静的解析エラーがないことを確認してから提案すること。
+
+### Frontend (Next.js/TypeScript)
+
+1. **Server/Client Components**: デフォルトは Server Component。`useState` や `useEffect` が必要な場合のみ `'use client'` を付与する。
+2. **SWR Usage**: データ取得は `useSWR` を使用し、`src/utils/fetcher.ts` を経由する。
+3. **Type Safety**: `any` 型の使用は原則禁止。`src/types` に定義された型を使用する。
+4. **Component Complexity (Logic Extraction)**:
+   - データの整形、フィルタリング、複雑な状態計算ロジックはコンポーネント内に記述せず、必ず **Custom Hooks** (`useLogicName`) に切り出す。
+   - コンポーネントは「描画」に専念し、ロジックを持たないようにする (View vs Logic の分離)。
+5. **Constants & Utils**:
+   - 複数の場所で使用される定数や、3行以上の計算ロジック（色計算など）は `utils/` や `constants.ts` に移動し、純粋関数として定義する。
+
+## 5. テスト実装ルール (Testing Strategy)
 
 `pytest` を使用し、テストピラミッドに基づいた3層のテストを維持する。
 
