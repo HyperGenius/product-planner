@@ -62,7 +62,7 @@ export function ProductSelector({
               {isLoading
                 ? "読み込み中..."
                 : selectedProduct
-                  ? `${selectedProduct.code} - ${selectedProduct.name}`
+                  ? [selectedProduct.code, selectedProduct.name].filter(Boolean).join(" - ")
                   : "製品を選択"}
             </span>
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -74,8 +74,8 @@ export function ProductSelector({
               const product = products?.find((p) => p.id.toString() === itemValue)
               if (!product) return 0
               const searchLower = search.toLowerCase()
-              const matchesName = product.name.toLowerCase().includes(searchLower)
-              const matchesCode = product.code.toLowerCase().includes(searchLower)
+              const matchesName = product.name?.toLowerCase().includes(searchLower) ?? false
+              const matchesCode = product.code?.toLowerCase().includes(searchLower) ?? false
               return matchesName || matchesCode ? 1 : 0
             }}
           >
@@ -95,7 +95,7 @@ export function ProductSelector({
                         value === product.id.toString() ? "opacity-100" : "opacity-0"
                       )}
                     />
-                    {product.code} - {product.name}
+                    {[product.code, product.name].filter(Boolean).join(" - ")}
                   </CommandItem>
                 ))}
               </CommandGroup>
