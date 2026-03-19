@@ -5,7 +5,7 @@ export interface ProcessRouting {
   id: number
   product_id: number
   process_name: string
-  equipment_group_id: number
+  equipment_group_id: number | null
   sequence_order: number
   setup_time_seconds: number
   unit_time_seconds: number
@@ -20,7 +20,7 @@ export interface ProcessRouting {
 export interface ProcessRoutingCreate {
   product_id: number
   process_name: string
-  equipment_group_id: number
+  equipment_group_id: number | null
   sequence_order: number
   setup_time_seconds: number
   unit_time_seconds: number
@@ -31,7 +31,7 @@ export interface ProcessRoutingCreate {
  */
 export interface ProcessRoutingUpdate {
   process_name?: string
-  equipment_group_id?: number
+  equipment_group_id?: number | null
   sequence_order?: number
   setup_time_seconds?: number
   unit_time_seconds?: number

@@ -508,3 +508,95 @@ class TestScheduleOrder:
         assert start_dt_2.day == 13  # 月曜日
         assert start_dt_2.hour == 9
         assert end_dt_2.hour == 12
+
+    def test_schedule_with_no_equipment_process(self) -> None:
+        """equipment_group_id が None の工程（設備なし）は設備制約を無視してスケジュールする"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        # 工程データ（設備なし）
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 1800,  # 30分/個
+                "sequence_order": 1,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+        mock_schedule_repo.create.return_value = None
+
+        # テスト実行
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        result = schedule_order(
+            order_id=10,
+            product_id=10,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=start_time,
+        )
+
+        # 検証: スケジュールが作成され、equipment_id は None
+        assert len(result) == 1
+        assert result[0]["order_id"] == 10
+        assert result[0]["equipment_id"] is None
+        # 設備グループへのアクセスが発生しないことを確認
+        mock_product_repo.client.table.assert_not_called()
+        mock_schedule_repo.get_last_end_time.assert_not_called()
+        mock_schedule_repo.create.assert_called_once()
+
+    def test_schedule_no_equipment_process_does_not_block_parallel(self) -> None:
+        """設備なし工程は前工程終了後すぐに開始できる（設備の空き待ちが発生しない）"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        # 工程1: 設備あり、工程2: 設備なし
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 3600,  # 60分/個
+                "sequence_order": 1,
+            },
+            {
+                "id": 2,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 3600,  # 60分/個
+                "sequence_order": 2,
+            },
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+
+        # 工程1の設備グループに設備1台
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.create.return_value = None
+
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        result = schedule_order(
+            order_id=11,
+            product_id=11,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=start_time,
+        )
+
+        # 2工程分のスケジュールが作成される
+        assert len(result) == 2
+        # 工程1: 設備あり
+        assert result[0]["equipment_id"] == 1
+        # 工程2: 設備なし
+        assert result[1]["equipment_id"] is None
+        # 工程2の開始時刻は工程1の終了時刻以降
+        end_1 = datetime.fromisoformat(result[0]["end_datetime"])
+        start_2 = datetime.fromisoformat(result[1]["start_datetime"])
+        assert start_2 >= end_1

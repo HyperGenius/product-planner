@@ -58,7 +58,7 @@ export function ProductRoutingsDialog({
   // 編集状態
   const [editingRouting, setEditingRouting] = useState<ProcessRouting | null>(null)
   const [processName, setProcessName] = useState("")
-  const [equipmentGroupId, setEquipmentGroupId] = useState<number | "">("")
+  const [equipmentGroupId, setEquipmentGroupId] = useState<number | null | "">("")
   const [sequenceOrder, setSequenceOrder] = useState<number | "">(1)
   const [setupTime, setSetupTime] = useState<number | "">(0)
   const [unitTime, setUnitTime] = useState<number | "">(0)
@@ -113,7 +113,7 @@ export function ProductRoutingsDialog({
       return
     }
     if (equipmentGroupId === "") {
-      toast.error("設備グループを選択してください")
+      toast.error("設備グループまたは「設備なし」を選択してください")
       return
     }
     if (sequenceOrder === "" || sequenceOrder < 0) {
@@ -140,6 +140,7 @@ export function ProductRoutingsDialog({
     }
 
     try {
+      // この時点で equipmentGroupId は "" でないことが保証される（バリデーション済み）
       if (editingRouting) {
         // 更新
         await updateMutation.mutateAsync({
@@ -203,7 +204,8 @@ export function ProductRoutingsDialog({
   }
 
   // 設備グループ名を取得
-  const getEquipmentGroupName = (equipmentGroupId: number) => {
+  const getEquipmentGroupName = (equipmentGroupId: number | null) => {
+    if (equipmentGroupId === null) return "設備なし"
     const group = equipmentGroups?.find((g) => g.id === equipmentGroupId)
     return group?.name || "不明"
   }
@@ -314,12 +316,21 @@ export function ProductRoutingsDialog({
                 ) : (
                   <select
                     id="equipment-group"
-                    value={equipmentGroupId}
-                    onChange={(e) => setEquipmentGroupId(e.target.value === "" ? "" : Number(e.target.value))}
+                    value={equipmentGroupId === null ? "none" : equipmentGroupId}
+                    onChange={(e) => {
+                      if (e.target.value === "") {
+                        setEquipmentGroupId("")
+                      } else if (e.target.value === "none") {
+                        setEquipmentGroupId(null)
+                      } else {
+                        setEquipmentGroupId(Number(e.target.value))
+                      }
+                    }}
                     disabled={isPending}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <option value="">選択してください</option>
+                    <option value="none">設備なし（手作業・自然乾燥など）</option>
                     {equipmentGroups?.map((group) => (
                       <option key={group.id} value={group.id}>
                         {group.name}

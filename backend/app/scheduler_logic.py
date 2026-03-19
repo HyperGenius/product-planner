@@ -68,41 +68,53 @@ def schedule_order(
         total_duration_sec = setup_time_sec + (unit_time_sec * quantity)
         total_duration_min = total_duration_sec / 60
 
-        # 設備グループに属する設備IDを取得
-        machine_ids = _get_equipment_ids_by_group(product_repo, equipment_group_id)
-
-        if not machine_ids:
-            raise ValueError(
-                f"設備グループID {equipment_group_id} に設備が見つかりません"
-            )
-
-        # 各設備について、開始可能な時刻を計算
-        candidates = []
-        for machine_id in machine_ids:
-            # 設備の最終終了時刻を取得
-            last_end = schedule_repo.get_last_end_time(machine_id)
-
-            # 設備が空く時間（最終終了時刻がない場合は開始基準時刻）
-            machine_free_at = last_end if last_end else current_process_start
-
-            # 前工程が終わった時間と設備が空く時間の遅い方を基準とする
-            base_start = max(machine_free_at, current_process_start)
-
-            # カレンダーロジックを適用して実際の開始時刻を決定
+        if equipment_group_id is None:
+            # 設備なしの工程: 設備制約を無視し、前工程終了後すぐに開始（カレンダーのみ考慮）
             actual_start = get_next_available_start_time(
-                base_start, total_duration_min, calendar_config
+                current_process_start, total_duration_min, calendar_config
             )
+            best = {
+                "machine_id": None,
+                "start": actual_start,
+                "duration_sec": total_duration_sec,
+            }
+        else:
+            # 設備グループに属する設備IDを取得
+            machine_ids = _get_equipment_ids_by_group(product_repo, equipment_group_id)
 
-            candidates.append(
-                {
-                    "machine_id": machine_id,
-                    "start": actual_start,
-                    "duration_sec": total_duration_sec,
-                }
-            )
+            if not machine_ids:
+                raise ValueError(
+                    f"設備グループID {equipment_group_id} に設備が見つかりません"
+                )
 
-        # 最も早く開始できる設備を選定
-        best = min(candidates, key=lambda x: x["start"])  # type: ignore
+            # 各設備について、開始可能な時刻を計算
+            candidates = []
+            for machine_id in machine_ids:
+                # 設備の最終終了時刻を取得
+                last_end = schedule_repo.get_last_end_time(machine_id)
+
+                # 設備が空く時間（最終終了時刻がない場合は開始基準時刻）
+                machine_free_at = last_end if last_end else current_process_start
+
+                # 前工程が終わった時間と設備が空く時間の遅い方を基準とする
+                base_start = max(machine_free_at, current_process_start)
+
+                # カレンダーロジックを適用して実際の開始時刻を決定
+                actual_start = get_next_available_start_time(
+                    base_start, total_duration_min, calendar_config
+                )
+
+                candidates.append(
+                    {
+                        "machine_id": machine_id,
+                        "start": actual_start,
+                        "duration_sec": total_duration_sec,
+                    }
+                )
+
+            # 最も早く開始できる設備を選定
+            best = min(candidates, key=lambda x: x["start"])  # type: ignore
+
         start_time = best["start"]  # type: ignore
 
         if start_time is None:
