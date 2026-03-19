@@ -8,6 +8,7 @@ import {
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
+  useToggleProductActive,
 } from "@/hooks/use-products"
 import type { Product } from "@/types/product"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -50,6 +52,7 @@ export default function ProductsPage() {
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
+  const toggleActiveMutation = useToggleProductActive()
 
   // 作成ダイアログを開く
   const handleOpenCreateDialog = () => {
@@ -78,6 +81,21 @@ export default function ProductsPage() {
   const handleOpenRoutingsDialog = (product: Product) => {
     setSelectedProduct(product)
     setIsRoutingsDialogOpen(true)
+  }
+
+  // 製品の有効/無効を切り替える
+  const handleToggleActive = async (product: Product) => {
+    try {
+      await toggleActiveMutation.mutateAsync({
+        id: product.id,
+        is_active: !product.is_active,
+      })
+      toast.success(
+        product.is_active ? `「${product.name}」を無効にしました` : `「${product.name}」を有効にしました`
+      )
+    } catch {
+      toast.error("状態の更新に失敗しました")
+    }
   }
 
   // 製品を作成
@@ -201,6 +219,7 @@ export default function ProductsPage() {
                 <TableHead>製品コード</TableHead>
                 <TableHead>製品名</TableHead>
                 <TableHead>種別</TableHead>
+                <TableHead className="w-[100px]">状態</TableHead>
                 <TableHead className="w-[180px] text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -212,6 +231,14 @@ export default function ProductsPage() {
                     <TableCell>{product.code}</TableCell>
                     <TableCell>{product.name}</TableCell>
                     <TableCell>{product.type}</TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={product.is_active}
+                        onCheckedChange={() => handleToggleActive(product)}
+                        disabled={toggleActiveMutation.isPending}
+                        aria-label={`${product.name}の有効/無効を切り替え`}
+                      />
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
@@ -245,7 +272,7 @@ export default function ProductsPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-10">
+                  <TableCell colSpan={6} className="text-center py-10">
                     製品がありません
                   </TableCell>
                 </TableRow>

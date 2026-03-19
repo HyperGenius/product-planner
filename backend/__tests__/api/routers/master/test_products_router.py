@@ -35,11 +35,11 @@ class TestProductRouter:
         app.dependency_overrides = {}
 
     def test_get_products(self, mock_repo):
-        """GET /: 全件取得のテスト"""
+        """GET /: 全件取得のテスト（is_active=falseも含む全件を返すこと）"""
         # 1. モックの振る舞いを定義
         expected_data = [
-            {"id": 1, "name": "Product A", "code": "P001", "tenant_id": "uuid-1"},
-            {"id": 2, "name": "Product B", "code": "P002", "tenant_id": "uuid-1"},
+            {"id": 1, "name": "Product A", "code": "P001", "tenant_id": "uuid-1", "is_active": True},
+            {"id": 2, "name": "Product B", "code": "P002", "tenant_id": "uuid-1", "is_active": False},
         ]
         mock_repo.get_all.return_value = expected_data
 
@@ -64,7 +64,7 @@ class TestProductRouter:
         mock_repo.get_by_id.assert_called_with(product_id)
 
     def test_create_product(self, mock_repo):
-        """POST /: 新規作成のテスト"""
+        """POST /: 新規作成のテスト（is_activeのデフォルトはTrue）"""
         tenant_id_str = str(uuid.uuid4())
         headers = {"x-tenant-id": tenant_id_str}
         payload = {
@@ -72,8 +72,8 @@ class TestProductRouter:
             "code": "NP001",
             "type": "standard",
         }
-        # 保存後に返される想定のデータ
-        created_data = {**payload, "id": 100}
+        # 保存後に返される想定のデータ（is_active はデフォルトの True）
+        created_data = {**payload, "id": 100, "is_active": True}
 
         mock_repo.create.return_value = created_data
 
@@ -110,6 +110,30 @@ class TestProductRouter:
         called_id, called_data = mock_repo.update.call_args[0]
         assert called_id == product_id
         assert called_data == payload
+
+    def test_toggle_product_is_active(self, mock_repo):
+        """PATCH /{id}: is_active フラグの有効/無効切り替えテスト"""
+        product_id = 1
+        # 無効化するケース
+        payload = {"is_active": False}
+        updated_data = {
+            "id": product_id,
+            "name": "Product A",
+            "code": "P001",
+            "is_active": False,
+        }
+
+        mock_repo.update.return_value = updated_data
+
+        response = client.patch(f"/products/{product_id}", json=payload)
+
+        assert response.status_code == 200
+        assert response.json()["is_active"] is False
+
+        # is_active だけが渡されているか確認（exclude_unset=True が効いているか）
+        called_id, called_data = mock_repo.update.call_args[0]
+        assert called_id == product_id
+        assert called_data == {"is_active": False}
 
     def test_delete_product_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

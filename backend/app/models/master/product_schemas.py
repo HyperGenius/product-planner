@@ -12,6 +12,7 @@ class ProductBase(BaseSchema):
     name: str = Field(default=..., description="製品名")
     code: str = Field(default=..., description="製品コード")
     type: str = Field(default=..., description="製品種別")
+    is_active: bool = Field(default=True, description="有効/無効フラグ")
 
 
 class ProductCreateSchema(ProductBase):
@@ -32,3 +33,4 @@ class ProductUpdateSchema(BaseSchema):
     name: str | None = Field(default=None, description="製品名")
     code: str | None = Field(default=None, description="製品コード")
     type: str | None = Field(default=None, description="製品種別")
+    is_active: bool | None = Field(default=None, description="有効/無効フラグ")

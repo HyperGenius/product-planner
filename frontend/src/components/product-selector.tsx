@@ -38,6 +38,9 @@ export function ProductSelector({
   const { data: products, isLoading } = useProducts()
   const [open, setOpen] = React.useState(false)
 
+  // is_active === true の製品のみを選択肢として使用する
+  const activeProducts = products?.filter((p) => p.is_active)
+
   const selectedProduct = products?.find((p) => p.id.toString() === value)
 
   const handleSelect = (productId: string) => {
@@ -71,7 +74,7 @@ export function ProductSelector({
         <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
           <Command
             filter={(itemValue, search) => {
-              const product = products?.find((p) => p.id.toString() === itemValue)
+              const product = activeProducts?.find((p) => p.id.toString() === itemValue)
               if (!product) return 0
               const searchLower = search.toLowerCase()
               const matchesName = product.name?.toLowerCase().includes(searchLower) ?? false
@@ -83,7 +86,7 @@ export function ProductSelector({
             <CommandList>
               <CommandEmpty>製品が見つかりません</CommandEmpty>
               <CommandGroup>
-                {products?.map((product) => (
+                {activeProducts?.map((product) => (
                   <CommandItem
                     key={product.id}
                     value={product.id.toString()}
