@@ -5,7 +5,7 @@ export interface Schedule {
   id: number
   order_id: number
   process_routing_id: number
-  equipment_id: number
+  equipment_id: number | null
   start_datetime: string // ISO 8601形式
   end_datetime: string // ISO 8601形式
   order_number?: string
