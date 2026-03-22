@@ -38,8 +38,20 @@ class TestProductRouter:
         """GET /: 全件取得のテスト（is_active=falseも含む全件を返すこと）"""
         # 1. モックの振る舞いを定義
         expected_data = [
-            {"id": 1, "name": "Product A", "code": "P001", "tenant_id": "uuid-1", "is_active": True},
-            {"id": 2, "name": "Product B", "code": "P002", "tenant_id": "uuid-1", "is_active": False},
+            {
+                "id": 1,
+                "name": "Product A",
+                "code": "P001",
+                "tenant_id": "uuid-1",
+                "is_active": True,
+            },
+            {
+                "id": 2,
+                "name": "Product B",
+                "code": "P002",
+                "tenant_id": "uuid-1",
+                "is_active": False,
+            },
         ]
         mock_repo.get_all.return_value = expected_data
 
