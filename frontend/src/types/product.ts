@@ -6,6 +6,7 @@ export interface Product {
   name: string
   code: string
   type: string
+  is_active: boolean
   tenant_id: string
   created_at: string
   updated_at: string
@@ -27,4 +28,5 @@ export interface ProductUpdate {
   name?: string
   code?: string
   type?: string
+  is_active?: boolean
 }

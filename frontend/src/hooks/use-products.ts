@@ -72,3 +72,22 @@ export function useDeleteProduct() {
     },
   })
 }
+
+/**
+ * 製品の有効/無効（is_active）を切り替えるフック
+ */
+export function useToggleProductActive() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, is_active }: { id: number; is_active: boolean }) =>
+      apiClient<Product>(`/products/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active }),
+      }),
+    onSuccess: () => {
+      // 製品一覧を再取得
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
+    },
+  })
+}
