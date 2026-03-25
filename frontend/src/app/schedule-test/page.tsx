@@ -133,6 +133,7 @@ export default function ScheduleTestPage() {
           tasks={dummySchedules}
           viewMode={viewMode}
           colorMode={colorMode}
+          currentDate={new Date(2024, 0, 11)}
         />
       </div>
 
