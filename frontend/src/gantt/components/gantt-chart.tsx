@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { GanttTask, GanttViewMode } from '../types'
 import {
   buildTimelineConfig,
@@ -21,6 +21,11 @@ export interface GanttChartProps {
   rangeEnd: Date
   /** 行の高さ（px） */
   rowHeight?: number
+  /**
+   * タスクバーをラップするレンダー関数（外部からTooltip等を注入する際に使用）。
+   * 未指定の場合はバーをそのまま表示する。
+   */
+  wrapTaskBar?: (task: GanttTask, children: ReactNode) => ReactNode
 }
 
 /**
@@ -35,6 +40,7 @@ export function GanttChart({
   rangeStart,
   rangeEnd,
   rowHeight = 40,
+  wrapTaskBar,
 }: GanttChartProps) {
   const config = useMemo(
     () => buildTimelineConfig(rangeStart, rangeEnd, viewMode),
@@ -85,6 +91,7 @@ export function GanttChart({
           {/* タスク行 */}
           {tasks.map((task, index) => {
             const { colStart, colEnd } = getTaskGridColumns(task.start, task.end, config)
+            const bar = <TaskBar task={task} colStart={colStart} colEnd={colEnd} />
             return (
               <div
                 key={task.id}
@@ -98,7 +105,7 @@ export function GanttChart({
                     index % 2 === 1 ? 'rgba(0,0,0,0.03)' : 'transparent',
                 }}
               >
-                <TaskBar task={task} colStart={colStart} colEnd={colEnd} />
+                {wrapTaskBar ? wrapTaskBar(task, bar) : bar}
               </div>
             )
           })}

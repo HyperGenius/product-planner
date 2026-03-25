@@ -31,10 +31,11 @@ export function TaskBar({ task, colStart, colEnd }: TaskBarProps) {
         gridColumn: `${colStart} / ${colEnd}`,
         backgroundColor: task.color || '#3b82f6',
       }}
-      className="flex items-center px-2 h-7 rounded text-white text-xs overflow-hidden mx-0.5 my-0.5 cursor-default"
-      title={task.name}
+      className="relative flex items-center px-2 h-7 rounded text-white text-xs overflow-visible mx-0.5 my-0.5 cursor-default z-[1] hover:z-[2]"
     >
-      <span className="truncate">{task.name}</span>
+      <span className="whitespace-nowrap [text-shadow:_0_1px_2px_rgba(0,0,0,0.8)]">
+        {task.name}
+      </span>
     </div>
   )
 }

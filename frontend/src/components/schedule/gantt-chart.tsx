@@ -8,11 +8,17 @@ import {
   endOfDay,
   startOfWeek,
   endOfWeek,
+  format,
 } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { GanttChart as GanttChartLib } from '@/gantt'
 import type { GanttTask } from '@/gantt'
 import type { Schedule, GanttViewMode, GroupByMode } from '@/types/schedule'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 /**
  * ガントチャートコンポーネントのProps
@@ -224,6 +230,15 @@ export function GanttChart({
       viewMode={viewMode}
       rangeStart={rangeStart}
       rangeEnd={rangeEnd}
+      wrapTaskBar={(task: GanttTask, children) => (
+        <Tooltip>
+          <TooltipTrigger asChild>{children}</TooltipTrigger>
+          <TooltipContent>
+            <p className="font-semibold">{task.name}</p>
+            <p>{format(task.start, 'HH:mm', { locale: ja })} - {format(task.end, 'HH:mm', { locale: ja })}</p>
+          </TooltipContent>
+        </Tooltip>
+      )}
     />
   )
 }
