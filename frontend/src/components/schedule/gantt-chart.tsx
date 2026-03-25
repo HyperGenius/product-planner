@@ -195,10 +195,10 @@ export function GanttChart({
           rangeEnd: endOfWeek(refDate, { locale: ja }),
         }
       case 'Month':
-        // 当日を軸として前後30日（計61日）を表示
+        // 当日を軸として前3日、後31日（計35日）を表示
         return {
-          rangeStart: startOfDay(addDays(refDate, -30)),
-          rangeEnd: endOfDay(addDays(refDate, 30)),
+          rangeStart: startOfDay(addDays(refDate, -3)),
+          rangeEnd: endOfDay(addDays(refDate, 31)),
         }
     }
   }, [currentDate, viewMode])

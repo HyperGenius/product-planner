@@ -54,9 +54,9 @@ export function TimelineHeader({ config, viewMode }: TimelineHeaderProps) {
       return { dayLabels, hourLabels, showHours: true }
     }
 
-    // Month モード: 日付ラベルのみ（7日ごとにMM/dd、それ以外はd）
+    // Month モード: 日付ラベルのみ（1日もしくは最終日のみMM/dd、それ以外はd）
     const dayLabels = Array.from({ length: totalUnits }, (_, i) => ({
-      label: i % 7 === 0
+      label: i === 0 || i === totalUnits - 1
         ? format(addDays(rangeStart, i), 'MM/dd')
         : format(addDays(rangeStart, i), 'd'),
       colStart: i + 1,

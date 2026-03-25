@@ -46,9 +46,9 @@ export default function SchedulePage() {
         end = endOfWeek(currentDate, { locale: ja })
         break
       case "Month":
-        // 当日を軸として前後30日（計61日）分のデータをフェッチ
-        start = startOfDay(addDays(currentDate, -30))
-        end = endOfDay(addDays(currentDate, 30))
+        // 当日を軸として前後15日（計31日）分のデータをフェッチ
+        start = startOfDay(addDays(currentDate, -3))
+        end = endOfDay(addDays(currentDate, 31))
         break
     }
 
