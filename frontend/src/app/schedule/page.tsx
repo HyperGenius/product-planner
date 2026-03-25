@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
-import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns"
+import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -37,16 +37,18 @@ export default function SchedulePage() {
 
     switch (viewMode) {
       case "Day":
-        start = startOfDay(currentDate)
-        end = endOfDay(currentDate)
+        // 前後1日を含む72時間分のデータをフェッチ
+        start = startOfDay(addDays(currentDate, -1))
+        end = endOfDay(addDays(currentDate, 1))
         break
       case "Week":
         start = startOfWeek(currentDate, { locale: ja })
         end = endOfWeek(currentDate, { locale: ja })
         break
       case "Month":
-        start = startOfMonth(currentDate)
-        end = endOfMonth(currentDate)
+        // 当日を軸として前後15日（計31日）分のデータをフェッチ
+        start = startOfDay(addDays(currentDate, -3))
+        end = endOfDay(addDays(currentDate, 31))
         break
     }
 
@@ -231,7 +233,7 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : schedules && schedules.length > 0 ? (
-          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} groupBy={groupBy} />
+          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} groupBy={groupBy} currentDate={currentDate} />
         ) : (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-muted-foreground">
