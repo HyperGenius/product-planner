@@ -23,7 +23,7 @@ export function TimelineHeader({ config, viewMode }: TimelineHeaderProps) {
     if (viewMode === 'Day') {
       // 3日分の日付ラベル（各24列スパン）
       const dayLabels = [0, 1, 2].map((i) => ({
-        label: format(addDays(rangeStart, i), 'M/d (EEE)'),
+        label: format(addDays(rangeStart, i), 'MM/dd (EEE)'),
         colStart: i * 24 + 1,
         colEnd: (i + 1) * 24 + 1,
       }))
@@ -54,9 +54,11 @@ export function TimelineHeader({ config, viewMode }: TimelineHeaderProps) {
       return { dayLabels, hourLabels, showHours: true }
     }
 
-    // Month モード: 日付ラベルのみ
+    // Month モード: 日付ラベルのみ（7日ごとにMM/dd、それ以外はd）
     const dayLabels = Array.from({ length: totalUnits }, (_, i) => ({
-      label: format(addDays(rangeStart, i), 'd'),
+      label: i % 7 === 0
+        ? format(addDays(rangeStart, i), 'MM/dd')
+        : format(addDays(rangeStart, i), 'd'),
       colStart: i + 1,
       colEnd: i + 2,
     }))

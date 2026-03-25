@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
-import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns"
+import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -46,8 +46,9 @@ export default function SchedulePage() {
         end = endOfWeek(currentDate, { locale: ja })
         break
       case "Month":
-        start = startOfMonth(currentDate)
-        end = endOfMonth(currentDate)
+        // 当日を軸として前後30日（計61日）分のデータをフェッチ
+        start = startOfDay(addDays(currentDate, -30))
+        end = endOfDay(addDays(currentDate, 30))
         break
     }
 

@@ -8,8 +8,6 @@ import {
   endOfDay,
   startOfWeek,
   endOfWeek,
-  startOfMonth,
-  endOfMonth,
 } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { GanttChart as GanttChartLib } from '@/gantt'
@@ -197,9 +195,10 @@ export function GanttChart({
           rangeEnd: endOfWeek(refDate, { locale: ja }),
         }
       case 'Month':
+        // 当日を軸として前後30日（計61日）を表示
         return {
-          rangeStart: startOfMonth(refDate),
-          rangeEnd: endOfMonth(refDate),
+          rangeStart: startOfDay(addDays(refDate, -30)),
+          rangeEnd: endOfDay(addDays(refDate, 30)),
         }
     }
   }, [currentDate, viewMode])
