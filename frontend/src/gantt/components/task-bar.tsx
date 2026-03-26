@@ -1,24 +1,33 @@
+import { forwardRef } from 'react'
 import type { GanttTask } from '../types'
 
-interface TaskBarProps {
+type TaskBarProps = {
   task: GanttTask
   colStart: number
   colEnd: number
-}
+} & React.HTMLAttributes<HTMLDivElement>
 
 /**
  * ガントチャートの1タスク分のバーコンポーネント
+ * forwardRef で ref と HTML イベントハンドラーを DOM に転送することで
+ * Radix UI の Tooltip（asChild）などが正常に動作する
  */
-export function TaskBar({ task, colStart, colEnd }: TaskBarProps) {
+export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar(
+  { task, colStart, colEnd, className, style, ...props },
+  ref,
+) {
   if (task.isGroupHeader) {
     return (
       <div
+        ref={ref}
         style={{
           gridColumn: `${colStart} / ${colEnd}`,
           backgroundColor: task.color ? `${task.color}22` : '#e5e7eb',
           borderLeft: `3px solid ${task.color || '#9ca3af'}`,
+          ...style,
         }}
-        className="flex items-center px-2 h-8 rounded text-xs font-semibold text-gray-700 dark:text-gray-300 overflow-hidden mx-0.5"
+        className={`flex items-center px-2 h-8 rounded text-xs font-semibold text-gray-700 dark:text-gray-300 overflow-hidden mx-0.5${className ? ` ${className}` : ''}`}
+        {...props}
       >
         <span className="truncate">{task.name}</span>
       </div>
@@ -27,14 +36,18 @@ export function TaskBar({ task, colStart, colEnd }: TaskBarProps) {
 
   return (
     <div
+      ref={ref}
       style={{
         gridColumn: `${colStart} / ${colEnd}`,
         backgroundColor: task.color || '#3b82f6',
+        ...style,
       }}
-      className="flex items-center px-2 h-7 rounded text-white text-xs overflow-hidden mx-0.5 my-0.5 cursor-default"
-      title={task.name}
+      className={`relative flex items-center h-7 rounded text-xs overflow-visible mx-0.5 my-0.5 cursor-default z-[1] hover:z-[2]${className ? ` ${className}` : ''}`}
+      {...props}
     >
-      <span className="truncate">{task.name}</span>
+      <span className="absolute left-full ml-1 whitespace-nowrap text-gray-700 dark:text-gray-300 pointer-events-none">
+        {task.name}
+      </span>
     </div>
   )
-}
+})
