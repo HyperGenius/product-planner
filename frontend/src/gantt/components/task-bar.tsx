@@ -42,10 +42,10 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
         backgroundColor: task.color || '#3b82f6',
         ...style,
       }}
-      className={`relative flex items-center px-2 h-7 rounded text-white text-xs overflow-visible mx-0.5 my-0.5 cursor-default z-[1] hover:z-[2]${className ? ` ${className}` : ''}`}
+      className={`relative flex items-center h-7 rounded text-xs overflow-visible mx-0.5 my-0.5 cursor-default z-[1] hover:z-[2]${className ? ` ${className}` : ''}`}
       {...props}
     >
-      <span className="whitespace-nowrap [text-shadow:_0_1px_2px_rgba(0,0,0,0.8)]">
+      <span className="absolute left-full ml-1 whitespace-nowrap text-gray-700 dark:text-gray-300 pointer-events-none">
         {task.name}
       </span>
     </div>
