@@ -22,6 +22,10 @@ export interface GanttChartProps {
   /** 行の高さ（px） */
   rowHeight?: number
   /**
+   * タスクバーがクリックされた際に発火するコールバック
+   */
+  onTaskClick?: (task: GanttTask) => void
+  /**
    * タスクバーをラップするレンダー関数（外部からTooltip等を注入する際に使用）。
    * 未指定の場合はバーをそのまま表示する。
    */
@@ -40,6 +44,7 @@ export function GanttChart({
   rangeStart,
   rangeEnd,
   rowHeight = 40,
+  onTaskClick,
   wrapTaskBar,
 }: GanttChartProps) {
   const config = useMemo(
@@ -91,7 +96,14 @@ export function GanttChart({
           {/* タスク行 */}
           {tasks.map((task, index) => {
             const { colStart, colEnd } = getTaskGridColumns(task.start, task.end, config)
-            const bar = <TaskBar task={task} colStart={colStart} colEnd={colEnd} />
+            const bar = (
+              <TaskBar
+                task={task}
+                colStart={colStart}
+                colEnd={colEnd}
+                onClick={onTaskClick && !task.isGroupHeader ? () => onTaskClick(task) : undefined}
+              />
+            )
             return (
               <div
                 key={task.id}
