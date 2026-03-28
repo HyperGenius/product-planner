@@ -48,6 +48,10 @@ export interface GanttChartProps {
    * 表示の基準日（タイムライン範囲の計算に使用）
    */
   currentDate?: Date
+  /**
+   * タスクバーがクリックされた際に発火するコールバック
+   */
+  onTaskClick?: (schedule: Schedule) => void
 }
 
 /**
@@ -184,6 +188,7 @@ export function GanttChart({
   colorMode = 'product',
   groupBy = 'none',
   currentDate,
+  onTaskClick,
 }: GanttChartProps) {
   // タイムライン表示範囲の計算（表示モードに応じた前後を含む期間）
   const { rangeStart, rangeEnd } = useMemo(() => {
@@ -214,6 +219,20 @@ export function GanttChart({
     [tasks, groupBy, colorMode],
   )
 
+  // GanttTask.id → Schedule の逆引きマップ
+  const scheduleMap = useMemo(() => {
+    const map = new Map<string, Schedule>()
+    tasks.forEach((s) => map.set(`schedule-${s.id}`, s))
+    return map
+  }, [tasks])
+
+  const handleTaskClick = onTaskClick
+    ? (task: GanttTask) => {
+        const schedule = scheduleMap.get(task.id)
+        if (schedule) onTaskClick(schedule)
+      }
+    : undefined
+
   if (ganttTasks.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -230,6 +249,7 @@ export function GanttChart({
       viewMode={viewMode}
       rangeStart={rangeStart}
       rangeEnd={rangeEnd}
+      onTaskClick={handleTaskClick}
       wrapTaskBar={(task: GanttTask, children) => (
         <Tooltip>
           <TooltipTrigger asChild>{children}</TooltipTrigger>

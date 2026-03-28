@@ -7,9 +7,10 @@ import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { GanttChart } from "@/components/schedule/gantt-chart"
-import { useSchedules } from "@/hooks/use-schedules"
+import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
+import { useSchedules, useUpdateSchedule } from "@/hooks/use-schedules"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
-import type { GanttViewMode, GroupByMode } from "@/types/schedule"
+import type { GanttViewMode, GroupByMode, Schedule } from "@/types/schedule"
 import { useSidebar } from "@/components/ui/sidebar"
 
 /**
@@ -23,6 +24,12 @@ export default function SchedulePage() {
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
   const [isEditMode, setIsEditMode] = useState<boolean>(false)
   const [groupBy, setGroupBy] = useState<GroupByMode>("none")
+
+  // 編集モーダル用の状態
+  const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
+
+  const updateSchedule = useUpdateSchedule()
 
   // state は "expanded" | "collapsed" | "mobile" などを返す
   const { state, open } = useSidebar()
@@ -100,6 +107,23 @@ export default function SchedulePage() {
   const handleToday = useCallback(() => {
     setCurrentDate(new Date())
   }, [])
+
+  // タスクバークリック時のハンドラ
+  const handleTaskClick = useCallback((schedule: Schedule) => {
+    setSelectedSchedule(schedule)
+    setIsModalOpen(true)
+  }, [])
+
+  // 編集モーダルの保存ハンドラ
+  const handleSave = useCallback(
+    (scheduleId: number, startDatetime: string, endDatetime: string) => {
+      updateSchedule.mutate(
+        { scheduleId, data: { start_datetime: startDatetime, end_datetime: endDatetime } },
+        { onSuccess: () => setIsModalOpen(false) },
+      )
+    },
+    [updateSchedule],
+  )
 
   // 表示期間のフォーマット
   const displayPeriod = useMemo(() => {
@@ -233,7 +257,7 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : schedules && schedules.length > 0 ? (
-          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} groupBy={groupBy} currentDate={currentDate} />
+          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} groupBy={groupBy} currentDate={currentDate} onTaskClick={handleTaskClick} />
         ) : (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-muted-foreground">
@@ -242,6 +266,15 @@ export default function SchedulePage() {
           </div>
         )}
       </div>
+
+      {/* スケジュール編集モーダル */}
+      <ScheduleEditDialog
+        schedule={selectedSchedule}
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        onSave={handleSave}
+        isSaving={updateSchedule.isPending}
+      />
     </div>
   )
 }
