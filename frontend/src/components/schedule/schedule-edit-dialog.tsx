@@ -82,14 +82,35 @@ export function ScheduleEditDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>スケジュール編集</DialogTitle>
-          <DialogDescription>
-            {schedule
-              ? `${schedule.process_name || '工程'} - ${schedule.order_number || ''}`
-              : ''}
-          </DialogDescription>
+          <DialogDescription>対象スケジュールの日時を変更できます。</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
+          {/* 参照情報（読み取り専用） */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+            <div>
+              <span className="font-medium text-muted-foreground">製品名</span>
+              <p className="mt-0.5 truncate">{schedule?.product_name || '—'}</p>
+            </div>
+            <div>
+              <span className="font-medium text-muted-foreground">顧客名</span>
+              <p className="mt-0.5 truncate">{schedule?.customer_name || '—'}</p>
+            </div>
+            <div>
+              <span className="font-medium text-muted-foreground">注文番号</span>
+              <p className="mt-0.5 truncate">{schedule?.order_number || '—'}</p>
+            </div>
+            <div>
+              <span className="font-medium text-muted-foreground">工程名</span>
+              <p className="mt-0.5 truncate">{schedule?.process_name || '—'}</p>
+            </div>
+            <div className="col-span-2">
+              <span className="font-medium text-muted-foreground">設備グループ名</span>
+              <p className="mt-0.5 truncate">{schedule?.equipment_group_name || '—'}</p>
+            </div>
+          </div>
+
+          {/* 編集フィールド */}
           <div className="grid gap-2">
             <Label htmlFor="start-datetime">開始日時</Label>
             <Input
