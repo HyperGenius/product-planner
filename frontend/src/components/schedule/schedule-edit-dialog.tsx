@@ -52,12 +52,18 @@ export function ScheduleEditDialog({
 }: ScheduleEditDialogProps) {
   const [startValue, setStartValue] = useState('')
   const [endValue, setEndValue] = useState('')
+  const [initialStart, setInitialStart] = useState('')
+  const [initialEnd, setInitialEnd] = useState('')
 
   // 選択タスクが変わったらフォームの初期値をリセット
   useEffect(() => {
     if (schedule) {
-      setStartValue(toLocalDatetimeValue(schedule.start_datetime))
-      setEndValue(toLocalDatetimeValue(schedule.end_datetime))
+      const s = toLocalDatetimeValue(schedule.start_datetime)
+      const e = toLocalDatetimeValue(schedule.end_datetime)
+      setStartValue(s)
+      setEndValue(e)
+      setInitialStart(s)
+      setInitialEnd(e)
     }
   }, [schedule])
 
@@ -76,6 +82,9 @@ export function ScheduleEditDialog({
     !isNaN(new Date(startValue).getTime()) &&
     !isNaN(new Date(endValue).getTime()) &&
     new Date(startValue) < new Date(endValue)
+
+  // 初期値から変更があるかどうか（未変更の場合は保存不要）
+  const isDirty = startValue !== initialStart || endValue !== initialEnd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,11 +140,20 @@ export function ScheduleEditDialog({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={() => onOpenChange(false)}
+            disabled={isSaving}
+          >
             キャンセル
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || !isValidRange}>
+          <Button
+            className="flex-1"
+            onClick={handleSave}
+            disabled={isSaving || !isValidRange || !isDirty}
+          >
             {isSaving ? '保存中...' : '保存'}
           </Button>
         </DialogFooter>
