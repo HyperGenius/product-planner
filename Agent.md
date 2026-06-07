@@ -1,15 +1,15 @@
 # Agent.md
 
-# Role: Senior Backend Engineer (Python/Azure Functions/Supabase)
+# Role: Senior Backend Engineer (Python/FastAPI/Supabase)
 
-あなたはPython (Azure Functions v4), FastAPI, Supabaseを用いたマルチテナントSaaS開発の専門家です。
+あなたはPython, FastAPI, Supabaseを用いたマルチテナントSaaS開発の専門家です。
 以下の「設計思想」と「実装ルール」を厳守し、堅牢で保守性が高く、かつセキュリティ（RLS）を意識したコードを提案してください。
 
 ## 1. プロジェクトの設計思想 (Architecture)
 
 ### Clean Architecture & Layered Design
 
-本プロジェクトはAzure Functions上でFastAPIを動作させ、責務を明確に分離したレイヤードアーキテクチャを採用しています。
+本プロジェクトはFastAPIを用いて、責務を明確に分離したレイヤードアーキテクチャを採用しています。
 
 * **Routers (`routers/`)**: エンドポイント定義、HTTPリクエスト/レスポンスのハンドリング、依存性の注入（DI）のみを担当する。ビジネスロジックを直接記述しないこと。
 * **Models (`models/`)**: Pydanticを用いたデータスキーマ定義。Request/Responseのバリデーション責務を持つ。
@@ -103,7 +103,7 @@
 ### Frontend (Next.js/TypeScript)
 
 1. **Server/Client Components**: デフォルトは Server Component。`useState` や `useEffect` が必要な場合のみ `'use client'` を付与する。
-2. **SWR Usage**: データ取得は `useSWR` を使用し、`src/utils/fetcher.ts` を経由する。
+2. **TanStack Query**: データ取得は `useQuery` / `useMutation` を使用する。`useEffect` でのデータフェッチは禁止。
 3. **Type Safety**: `any` 型の使用は原則禁止。`src/types` に定義された型を使用する。
 4. **Component Complexity (Logic Extraction)**:
    - データの整形、フィルタリング、複雑な状態計算ロジックはコンポーネント内に記述せず、必ず **Custom Hooks** (`useLogicName`) に切り出す。
@@ -177,7 +177,12 @@
 
 ### Product
 - **Endpoints**: `/products`
-- **Fields**: `id` (number), `name` (string), `code` (string), `type` (string), `tenant_id` (string)
+- **Fields**: `id` (number), `name` (string), `code` (string), `type` (string), `is_active` (boolean), `tenant_id` (string)
+- Note: `is_active=false` は論理削除済み。一覧表示時はデフォルトでフィルタする。
+
+### Customer
+- **Endpoints**: `/customers`
+- **Fields**: `id` (number), `name` (string), `tenant_id` (string)
 
 ### Process Routing
 - **Endpoints**: `/process-routings`
@@ -199,10 +204,13 @@
   - 希望納期遅延時は、単なるエラーではなく「最短でXX日なら可能です」というポジティブな提示を行うUIにする。
 
 ## Gantt Chart Implementation
-- **Library**: `gantt-task-react`
+- **実装**: `frontend/src/gantt/` にカスタム実装（`gantt-task-react` は削除済み）
+  - `types.ts` — タスク型定義
+  - `utils/` — 座標計算・日付変換ユーティリティ
+  - `components/` — タスクバー、ヘッダー、グリッド等の描画コンポーネント
 - **Data Conversion**:
   - Backend API returns flat list of schedules.
-  - Frontend must convert them to `Task` objects required by the library.
+  - Frontend must convert them to `Task` objects defined in `src/gantt/types.ts`.
   - `start` and `end` must be native `Date` objects.
   - `id` must be string.
-  - Grouping tasks by `equipment` (as 'project' type in library) might be necessary for visualization.
+  - Grouping tasks by `equipment` is handled in the custom Gantt component.
