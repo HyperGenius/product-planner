@@ -1,6 +1,6 @@
 # 🚀 Product Roadmap
 
-> **Last Updated**: 2026年1月31日
+> **Last Updated**: 2026年6月7日
 
 ## 📍 現在地 (Current Status)
 
@@ -22,6 +22,11 @@
   * 注文管理画面（一覧、新規作成、シミュレーション、確定）
   * ガントチャート画面（日次/週次/月次切替、ドラッグ&ドロップ編集、カラーモード切替）
   * 稼働カレンダー管理画面（月別表示、休日設定、一括設定）
+  * カスタムガントチャート実装（`gantt-task-react` を削除し `src/gantt/` に自前実装へ移行）
+  * ガントチャートのタスク編集機能（バークリックで編集モーダル表示）
+  * 製品の論理削除対応（`is_active` フラグ）
+  * 設備なし工程のサポート（手作業・自然乾燥など）
+  * 製品選択UIの改善（インクリメンタルサーチ付き Combobox）
 
 * **Database**:
   * `work_calendars` テーブル作成済み
@@ -126,6 +131,7 @@
 
 * ✅ ガントチャート上でバーをドラッグして開始時間をずらす機能
 * ✅ 変更に伴う更新API（`PATCH /schedules/{id}`）
+* ✅ タスクバーのクリックによる編集モーダル（製品名・顧客名・注文番号・工程名・設備グループ名を表示）
 * ⬜ **追加改善**:
   * ⬜ 設備間のドラッグ&ドロップ移動
   * ⬜ 変更時の再計算（バリデーション）API
@@ -185,7 +191,7 @@
 * **Framework**: Next.js (App Router)
 * **UI**: shadcn/ui (Radix UI + Tailwind CSS)
 * **状態管理**: TanStack Query (React Query)
-* **ガントチャート**: gantt-task-react
+* **ガントチャート**: カスタム実装 (`frontend/src/gantt/`)
 * **カレンダー**: react-day-picker
 * **日付処理**: date-fns
 * **通知**: Sonner (Toast)
