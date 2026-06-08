@@ -17,6 +17,7 @@ import {
   Calendar,
   Users,
   Settings,
+  BarChart2,
 } from "lucide-react"
 
 import {
@@ -99,6 +100,11 @@ const menuItems = [
         icon: Users,
       },
     ],
+  },
+  {
+    title: "利用状況",
+    url: "/admin",
+    icon: BarChart2,
   },
 ]
 
