@@ -302,7 +302,8 @@ export default function CalendarPage() {
               modifiers={dayPickerModifiers}
               modifiersClassNames={dayPickerModifiersClassNames}
               locale={ja}
-              className="px-8"
+              hideNavigation
+              classNames={{ month_caption: "hidden" }}
             />
           ) : (
             <DayPicker
@@ -313,7 +314,8 @@ export default function CalendarPage() {
               modifiers={dayPickerModifiers}
               modifiersClassNames={dayPickerModifiersClassNames}
               locale={ja}
-              className="px-8"
+              hideNavigation
+              classNames={{ month_caption: "hidden" }}
             />
           )}
         </div>
