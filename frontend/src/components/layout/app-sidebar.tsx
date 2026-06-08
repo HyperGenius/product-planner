@@ -44,57 +44,57 @@ import { logout } from "@/lib/auth-server-actions"
 
 const menuItems = [
   {
-    title: "Dashboard",
+    title: "ダッシュボード",
     url: "/",
     icon: LayoutDashboard,
   },
   {
-    title: "Orders",
+    title: "受注管理",
     url: "/orders",
     icon: ShoppingCart,
   },
   {
-    title: "Schedule",
+    title: "生産スケジュール",
     url: "/schedule",
     icon: Calendar,
   },
   {
-    title: "Master Data",
+    title: "マスタデータ",
     icon: Database,
     items: [
       {
-        title: "Products",
+        title: "製品マスタ",
         url: "/master/products",
         icon: Package,
       },
       {
-        title: "Customers",
+        title: "顧客マスタ",
         url: "/master/customers",
         icon: Users,
       },
       {
-        title: "Equipments",
+        title: "設備マスタ",
         url: "/master/equipments",
         icon: Cpu,
       },
       {
-        title: "Equipment Groups",
+        title: "設備グループ",
         url: "/master/equipment-groups",
         icon: Layers,
       },
       {
-        title: "Work Calendar",
+        title: "稼働カレンダー",
         url: "/master/calendar",
         icon: Calendar,
       },
     ],
   },
   {
-    title: "Settings",
+    title: "設定",
     icon: Settings,
     items: [
       {
-        title: "Members",
+        title: "メンバー管理",
         url: "/settings/members",
         icon: Users,
       },
@@ -130,7 +130,7 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>メニュー</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) =>
@@ -138,8 +138,8 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                   <Collapsible
                     key={item.title}
                     defaultOpen={
-                      (item.title === "Master Data" && pathname.startsWith("/master")) ||
-                      (item.title === "Settings" && pathname.startsWith("/settings"))
+                      (item.title === "マスタデータ" && pathname.startsWith("/master")) ||
+                      (item.title === "設定" && pathname.startsWith("/settings"))
                     }
                   >
                     <SidebarMenuItem>
