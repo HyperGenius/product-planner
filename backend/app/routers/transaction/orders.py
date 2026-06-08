@@ -1,4 +1,6 @@
 # routers/transaction/orders.py
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import (
@@ -195,7 +197,14 @@ def confirm_order(
         )
 
         # 2. ステータス更新 & is_scheduled フラグ更新
-        order_repo.update(order_id, {"status": "confirmed", "is_scheduled": True})
+        order_repo.update(
+            order_id,
+            {
+                "status": "confirmed",
+                "is_scheduled": True,
+                "confirmed_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
         return {"status": "confirmed", "schedules": result}
     except ValueError as e:
