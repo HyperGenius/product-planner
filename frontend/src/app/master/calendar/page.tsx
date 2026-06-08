@@ -1,15 +1,16 @@
 "use client"
 
-import { useState } from "react"
-import { format, getDaysInMonth } from "date-fns"
+import { useMemo, useState } from "react"
+import { format, getDaysInMonth, isBefore, startOfDay } from "date-fns"
 import { ja } from "date-fns/locale"
 import { DayPicker } from "react-day-picker"
 import { toast } from "sonner"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { CalendarPlus, ChevronLeft, ChevronRight, Download } from "lucide-react"
 import {
   useCalendars,
   useUpsertCalendar,
   useBatchUpdateCalendars,
+  useImportNationalHolidays,
 } from "@/hooks/use-calendars"
 import { Button } from "@/components/ui/button"
 import {
@@ -31,187 +32,215 @@ import {
 } from "@/components/ui/select"
 import "react-day-picker/style.css"
 
+const today = startOfDay(new Date())
+const currentYear = new Date().getFullYear()
+
 /**
  * 稼働カレンダー編集画面
  * URL: /master/calendar
  */
 export default function CalendarPage() {
-  const [currentYear, setCurrentYear] = useState(new Date().getFullYear())
-  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1) // 1-12
+  const [viewYear, setViewYear] = useState(new Date().getFullYear())
+  const [viewMonth, setViewMonth] = useState(new Date().getMonth() + 1) // 1-12
+
+  // 通常編集ダイアログ
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [note, setNote] = useState("")
   const [isHoliday, setIsHoliday] = useState(false)
 
-  // データ取得・操作のフック
-  const { data: calendars = [], isLoading } = useCalendars(currentYear, currentMonth)
+  // 臨時休日マルチ選択モード
+  const [isAdHocMode, setIsAdHocMode] = useState(false)
+  const [adHocDates, setAdHocDates] = useState<Date[]>([])
+  const [adHocNote, setAdHocNote] = useState("")
+
+  // 祝日インポート
+  const [importYear, setImportYear] = useState(currentYear)
+
+  // データ取得・操作
+  const { data: calendars = [], isLoading } = useCalendars(viewYear, viewMonth)
   const upsertMutation = useUpsertCalendar()
   const batchMutation = useBatchUpdateCalendars()
+  const importMutation = useImportNationalHolidays()
 
   // カレンダーデータをマップに変換
-  const calendarMap = new Map(
-    calendars.map((cal) => [cal.date, cal])
+  const calendarMap = useMemo(
+    () => new Map(calendars.map((cal) => [cal.date, cal])),
+    [calendars]
   )
 
-  // 休日の日付セット
-  const holidayDates = calendars
-    .filter((cal) => cal.is_holiday)
-    .map((cal) => new Date(cal.date))
+  // DBで明示的に稼働日設定された日付セット
+  const dbWorkdaySet = useMemo(
+    () => new Set(calendars.filter((c) => !c.is_holiday).map((c) => c.date)),
+    [calendars]
+  )
 
-  // 稼働日（明示的に設定されたもの）の日付セット
-  const workdayDates = calendars
-    .filter((cal) => !cal.is_holiday && cal.note)
-    .map((cal) => new Date(cal.date))
+  // 当月の全土日（DBに稼働日上書きがないもの）→ デフォルト休日として表示
+  const effectiveWeekendDates = useMemo(() => {
+    const dates: Date[] = []
+    const daysInMonth = getDaysInMonth(new Date(viewYear, viewMonth - 1))
+    for (let day = 1; day <= daysInMonth; day++) {
+      const d = new Date(viewYear, viewMonth - 1, day)
+      if (d.getDay() === 0 || d.getDay() === 6) {
+        if (!dbWorkdaySet.has(format(d, "yyyy-MM-dd"))) {
+          dates.push(d)
+        }
+      }
+    }
+    return dates
+  }, [viewYear, viewMonth, dbWorkdaySet])
 
-  // 前月へ移動
+  // DBで明示設定された休日（祝日・臨時休日など）
+  const dbHolidayDates = useMemo(
+    () => calendars.filter((c) => c.is_holiday).map((c) => new Date(c.date)),
+    [calendars]
+  )
+
+  // DBで明示設定された稼働日（土日の出勤日など）
+  const workdayDates = useMemo(
+    () => calendars.filter((c) => !c.is_holiday).map((c) => new Date(c.date)),
+    [calendars]
+  )
+
   const handlePrevMonth = () => {
-    if (currentMonth === 1) {
-      setCurrentMonth(12)
-      setCurrentYear(currentYear - 1)
+    if (viewMonth === 1) {
+      setViewMonth(12)
+      setViewYear(viewYear - 1)
     } else {
-      setCurrentMonth(currentMonth - 1)
+      setViewMonth(viewMonth - 1)
     }
   }
 
-  // 翌月へ移動
   const handleNextMonth = () => {
-    if (currentMonth === 12) {
-      setCurrentMonth(1)
-      setCurrentYear(currentYear + 1)
+    if (viewMonth === 12) {
+      setViewMonth(1)
+      setViewYear(viewYear + 1)
     } else {
-      setCurrentMonth(currentMonth + 1)
+      setViewMonth(viewMonth + 1)
     }
   }
 
-  // 日付をクリック
+  // 通常モード: 日付クリック → ダイアログ（過去日付は無効）
   const handleDayClick = (day: Date) => {
+    if (isBefore(day, today)) return
     const dateStr = format(day, "yyyy-MM-dd")
     const existing = calendarMap.get(dateStr)
-
     setSelectedDate(day)
     setIsHoliday(existing?.is_holiday ?? false)
     setNote(existing?.note ?? "")
     setIsEditDialogOpen(true)
   }
 
-  // 日付を更新
   const handleSaveDate = async () => {
     if (!selectedDate) return
-
-    const dateStr = format(selectedDate, "yyyy-MM-dd")
-
     try {
       await upsertMutation.mutateAsync({
-        date: dateStr,
+        date: format(selectedDate, "yyyy-MM-dd"),
         is_holiday: isHoliday,
         note: note.trim() || null,
       })
       toast.success("カレンダーを更新しました")
       setIsEditDialogOpen(false)
-    } catch (error) {
+    } catch {
       toast.error("カレンダーの更新に失敗しました")
-      console.error(error)
     }
   }
 
-  // 一括設定: 土日を休日に設定
-  const handleSetWeekendsAsHolidays = async () => {
-    const year = currentYear
-    const month = currentMonth
-    const daysInMonth = getDaysInMonth(new Date(year, month - 1))
-    const dates: string[] = []
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day)
-      const dayOfWeek = date.getDay()
-      if (dayOfWeek === 0 || dayOfWeek === 6) {
-        // 日曜日または土曜日
-        dates.push(format(date, "yyyy-MM-dd"))
-      }
-    }
-
-    if (dates.length === 0) {
-      toast.error("該当する日付がありません")
-      return
-    }
-
+  // 臨時休日モードの保存
+  const handleSaveAdHoc = async () => {
+    if (adHocDates.length === 0) return
+    const dates = adHocDates.map((d) => format(d, "yyyy-MM-dd"))
     try {
       const result = await batchMutation.mutateAsync({
         dates,
         is_holiday: true,
-        note: "休日",
+        note: adHocNote.trim() || "臨時休日",
       })
-      toast.success(`${result.updated_count}件の日付を休日に設定しました`)
-    } catch (error) {
-      toast.error("一括設定に失敗しました")
-      console.error(error)
+      toast.success(`${result.updated_count}件の臨時休日を設定しました`)
+      setAdHocDates([])
+      setAdHocNote("")
+      setIsAdHocMode(false)
+    } catch {
+      toast.error("臨時休日の設定に失敗しました")
     }
   }
 
-  // 一括設定: 土曜日を稼働日に設定
-  const handleSetSaturdaysAsWorkdays = async () => {
-    const year = currentYear
-    const month = currentMonth
-    const daysInMonth = getDaysInMonth(new Date(year, month - 1))
-    const dates: string[] = []
+  const handleCancelAdHoc = () => {
+    setAdHocDates([])
+    setAdHocNote("")
+    setIsAdHocMode(false)
+  }
 
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month - 1, day)
-      const dayOfWeek = date.getDay()
-      if (dayOfWeek === 6) {
-        // 土曜日
-        dates.push(format(date, "yyyy-MM-dd"))
-      }
-    }
-
-    if (dates.length === 0) {
-      toast.error("該当する日付がありません")
-      return
-    }
-
+  // 祝日インポート
+  const handleImportHolidays = async () => {
     try {
-      const result = await batchMutation.mutateAsync({
-        dates,
-        is_holiday: false,
-        note: "稼働日",
-      })
-      toast.success(`${result.updated_count}件の日付を稼働日に設定しました`)
-    } catch (error) {
-      toast.error("一括設定に失敗しました")
-      console.error(error)
+      const result = await importMutation.mutateAsync(importYear)
+      toast.success(`${importYear}年の国民の祝日を${result.imported_count}件インポートしました`)
+    } catch {
+      toast.error("祝日のインポートに失敗しました")
     }
   }
 
-  const monthDate = new Date(currentYear, currentMonth - 1, 1)
+  const monthDate = new Date(viewYear, viewMonth - 1, 1)
 
   return (
-    <div className="container mx-auto py-8">
-      <div className="mb-6">
+    <div className="container mx-auto py-8 space-y-8">
+      <div>
         <h1 className="text-2xl font-bold">稼働カレンダー</h1>
         <p className="text-sm text-muted-foreground">
-          会社の休日や臨時稼働日を設定できます
+          会社の休日や臨時稼働日を設定できます。土曜・日曜はデフォルトで休日として扱われます。
         </p>
       </div>
 
-      {/* 一括設定ボタン */}
-      <div className="mb-6 flex gap-2">
+      {/* ── 国民の祝日インポート ── */}
+      <div className="rounded-lg border p-4 space-y-3">
+        <h2 className="font-semibold flex items-center gap-2">
+          <Download className="h-4 w-4" />
+          国民の祝日インポート
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          総務省（内閣府）が公開する祝日データを取り込みます。
+        </p>
+        <div className="flex items-center gap-2">
+          <Select
+            value={String(importYear)}
+            onValueChange={(v) => setImportYear(Number(v))}
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[currentYear, currentYear + 1, currentYear + 2].map((y) => (
+                <SelectItem key={y} value={String(y)}>
+                  {y}年
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            onClick={handleImportHolidays}
+            disabled={importMutation.isPending}
+          >
+            {importMutation.isPending ? "インポート中..." : "インポート"}
+          </Button>
+        </div>
+      </div>
+
+      {/* ── 臨時休日設定ボタン群 ── */}
+      <div className="flex flex-wrap gap-2">
         <Button
-          variant="outline"
-          onClick={handleSetWeekendsAsHolidays}
-          disabled={batchMutation.isPending}
+          variant={isAdHocMode ? "default" : "outline"}
+          onClick={() => {
+            setIsAdHocMode(!isAdHocMode)
+            setAdHocDates([])
+          }}
         >
-          土日を休日に設定
-        </Button>
-        <Button
-          variant="outline"
-          onClick={handleSetSaturdaysAsWorkdays}
-          disabled={batchMutation.isPending}
-        >
-          土曜日を稼働日に設定
+          <CalendarPlus className="h-4 w-4 mr-2" />
+          臨時休日設定
         </Button>
       </div>
 
-      {/* カレンダー表示 */}
+      {/* ── カレンダー表示 ── */}
       <div className="rounded-lg border p-6 max-w-md">
         {/* 月移動ヘッダー */}
         <div className="mb-4 flex items-center justify-between">
@@ -219,7 +248,7 @@ export default function CalendarPage() {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <h2 className="text-lg font-semibold">
-            {currentYear}年 {currentMonth}月
+            {viewYear}年 {viewMonth}月
           </h2>
           <Button variant="outline" size="sm" onClick={handleNextMonth}>
             <ChevronRight className="h-4 w-4" />
@@ -227,32 +256,90 @@ export default function CalendarPage() {
         </div>
 
         {/* 凡例 */}
-        <div className="mb-4 flex gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded bg-red-200"></div>
-            <span>休日</span>
+        <div className="mb-4 flex flex-wrap gap-3 text-sm">
+          <div className="flex items-center gap-1.5">
+            <div className="h-4 w-4 rounded bg-red-100 border border-red-200"></div>
+            <span>土日（デフォルト休日）</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <div className="h-4 w-4 rounded bg-red-300"></div>
+            <span>祝日・臨時休日</span>
+          </div>
+          <div className="flex items-center gap-1.5">
             <div className="h-4 w-4 rounded bg-blue-200"></div>
             <span>臨時稼働日</span>
           </div>
         </div>
 
         {isLoading ? (
-          <div className="py-8 text-center text-muted-foreground">
-            読み込み中...
-          </div>
+          <div className="py-8 text-center text-muted-foreground">読み込み中...</div>
+        ) : isAdHocMode ? (
+          /* 臨時休日マルチ選択モード */
+          <>
+            <p className="text-sm text-muted-foreground mb-2">
+              休日にしたい日付を複数選択してください（過去日付は選択不可）
+            </p>
+            <DayPicker
+              mode="multiple"
+              month={monthDate}
+              selected={adHocDates}
+              onSelect={(dates) => setAdHocDates(dates ?? [])}
+              disabled={{ before: today }}
+              modifiers={{
+                defaultWeekend: effectiveWeekendDates,
+                holiday: dbHolidayDates,
+                workday: workdayDates,
+              }}
+              modifiersClassNames={{
+                defaultWeekend: "bg-red-100 text-red-800",
+                holiday: "bg-red-300 text-red-900 font-bold",
+                workday: "bg-blue-200 text-blue-900 font-bold",
+              }}
+              locale={ja}
+              className="px-8"
+            />
+            {/* 臨時休日設定パネル */}
+            <div className="mt-4 space-y-3 border-t pt-4">
+              <p className="text-sm font-medium">
+                選択中: {adHocDates.length}件
+              </p>
+              <div className="space-y-1">
+                <Label htmlFor="adHocNote">備考</Label>
+                <Input
+                  id="adHocNote"
+                  value={adHocNote}
+                  onChange={(e) => setAdHocNote(e.target.value)}
+                  placeholder="例: 創立記念日、工場メンテナンス"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleSaveAdHoc}
+                  disabled={adHocDates.length === 0 || batchMutation.isPending}
+                >
+                  休日に設定
+                </Button>
+                <Button variant="outline" onClick={handleCancelAdHoc}>
+                  キャンセル
+                </Button>
+              </div>
+            </div>
+          </>
         ) : (
+          /* 通常モード */
           <DayPicker
             mode="single"
             month={monthDate}
             onDayClick={handleDayClick}
+            disabled={{ before: today }}
             modifiers={{
-              holiday: holidayDates,
+              defaultWeekend: effectiveWeekendDates,
+              holiday: dbHolidayDates,
               workday: workdayDates,
             }}
             modifiersClassNames={{
-              holiday: "bg-red-200 text-red-900 font-bold",
+              defaultWeekend: "bg-red-100 text-red-800",
+              holiday: "bg-red-300 text-red-900 font-bold",
               workday: "bg-blue-200 text-blue-900 font-bold",
             }}
             locale={ja}
@@ -261,7 +348,7 @@ export default function CalendarPage() {
         )}
       </div>
 
-      {/* 編集ダイアログ */}
+      {/* 通常編集ダイアログ */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
@@ -297,10 +384,7 @@ export default function CalendarPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsEditDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               キャンセル
             </Button>
             <Button onClick={handleSaveDate} disabled={upsertMutation.isPending}>

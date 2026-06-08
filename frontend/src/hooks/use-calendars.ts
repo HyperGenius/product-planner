@@ -46,6 +46,24 @@ export function useUpsertCalendar() {
 }
 
 /**
+ * 総務省祝日 CSV から指定年の国民の祝日を一括インポートするフック
+ */
+export function useImportNationalHolidays() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (year: number) =>
+      apiClient<{ imported_count: number; year: number }>(
+        `/calendars/import-national-holidays?year=${year}`,
+        { method: "POST" }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["calendars"] })
+    },
+  })
+}
+
+/**
  * カレンダー情報を一括更新するフック
  */
 export function useBatchUpdateCalendars() {
