@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, Pencil, Trash2, Settings } from "lucide-react"
+import { useMemo, useState } from "react"
+import { Circle, MoreHorizontal, Plus, Search } from "lucide-react"
 import { toast } from "sonner"
 import {
   useProducts,
@@ -20,9 +20,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -33,10 +46,8 @@ import {
 } from "@/components/ui/table"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 
-/**
- * 製品マスタ画面
- * URL: /master/products
- */
+type StatusFilter = "all" | "active" | "inactive"
+
 export default function ProductsPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -46,15 +57,33 @@ export default function ProductsPage() {
   const [productName, setProductName] = useState("")
   const [productCode, setProductCode] = useState("")
   const [productType, setProductType] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
-  // データ取得・操作のフック
   const { data: products, isLoading, error } = useProducts()
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
   const toggleActiveMutation = useToggleProductActive()
 
-  // 作成ダイアログを開く
+  const filteredProducts = useMemo(() => {
+    if (!products) return []
+    return products.filter((p) => {
+      const displayCode = p.code || p.name
+      const displayName = p.code ? p.name : null
+      const q = searchQuery.toLowerCase()
+      const matchesSearch =
+        !q ||
+        displayCode.toLowerCase().includes(q) ||
+        (displayName?.toLowerCase().includes(q) ?? false)
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && p.is_active) ||
+        (statusFilter === "inactive" && !p.is_active)
+      return matchesSearch && matchesStatus
+    })
+  }, [products, searchQuery, statusFilter])
+
   const handleOpenCreateDialog = () => {
     setProductName("")
     setProductCode("")
@@ -62,7 +91,6 @@ export default function ProductsPage() {
     setIsCreateDialogOpen(true)
   }
 
-  // 編集ダイアログを開く
   const handleOpenEditDialog = (product: Product) => {
     setSelectedProduct(product)
     setProductName(product.name)
@@ -71,19 +99,16 @@ export default function ProductsPage() {
     setIsEditDialogOpen(true)
   }
 
-  // 削除ダイアログを開く
   const handleOpenDeleteDialog = (product: Product) => {
     setSelectedProduct(product)
     setIsDeleteDialogOpen(true)
   }
 
-  // 工程管理ダイアログを開く
   const handleOpenRoutingsDialog = (product: Product) => {
     setSelectedProduct(product)
     setIsRoutingsDialogOpen(true)
   }
 
-  // 製品の有効/無効を切り替える
   const handleToggleActive = async (product: Product) => {
     try {
       await toggleActiveMutation.mutateAsync({
@@ -98,18 +123,9 @@ export default function ProductsPage() {
     }
   }
 
-  // 製品を作成
   const handleCreate = async () => {
     if (!productName.trim()) {
-      toast.error("製品名を入力してください")
-      return
-    }
-    if (!productCode.trim()) {
-      toast.error("製品コードを入力してください")
-      return
-    }
-    if (!productType.trim()) {
-      toast.error("種別を入力してください")
+      toast.error("品番を入力してください")
       return
     }
 
@@ -121,29 +137,16 @@ export default function ProductsPage() {
       })
       toast.success("製品を作成しました")
       setIsCreateDialogOpen(false)
-      setProductName("")
-      setProductCode("")
-      setProductType("")
     } catch (error) {
       toast.error("製品の作成に失敗しました")
       console.error(error)
     }
   }
 
-  // 製品を更新
   const handleUpdate = async () => {
     if (!selectedProduct) return
-
     if (!productName.trim()) {
-      toast.error("製品名を入力してください")
-      return
-    }
-    if (!productCode.trim()) {
-      toast.error("製品コードを入力してください")
-      return
-    }
-    if (!productType.trim()) {
-      toast.error("種別を入力してください")
+      toast.error("品番を入力してください")
       return
     }
 
@@ -158,9 +161,6 @@ export default function ProductsPage() {
       })
       toast.success("製品を更新しました")
       setIsEditDialogOpen(false)
-      setProductName("")
-      setProductCode("")
-      setProductType("")
       setSelectedProduct(null)
     } catch (error) {
       toast.error("製品の更新に失敗しました")
@@ -168,7 +168,6 @@ export default function ProductsPage() {
     }
   }
 
-  // 製品を削除
   const handleDelete = async () => {
     if (!selectedProduct) return
 
@@ -208,6 +207,28 @@ export default function ProductsPage() {
         </Button>
       </div>
 
+      <div className="flex gap-3 mb-4">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="品番・製品名で検索..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+          <SelectTrigger className="w-[120px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">すべて</SelectItem>
+            <SelectItem value="active">有効</SelectItem>
+            <SelectItem value="inactive">無効</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       {isLoading ? (
         <div className="text-center py-10">読み込み中...</div>
       ) : (
@@ -215,65 +236,78 @@ export default function ProductsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[100px]">ID</TableHead>
-                <TableHead>製品コード</TableHead>
-                <TableHead>製品名</TableHead>
-                <TableHead>種別</TableHead>
+                <TableHead>品番 / 製品名</TableHead>
                 <TableHead className="w-[100px]">状態</TableHead>
-                <TableHead className="w-[180px] text-right">操作</TableHead>
+                <TableHead className="w-[50px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products && products.length > 0 ? (
-                products.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-medium">{product.id}</TableCell>
-                    <TableCell>{product.code}</TableCell>
-                    <TableCell>{product.name}</TableCell>
-                    <TableCell>{product.type}</TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={product.is_active}
-                        onCheckedChange={() => handleToggleActive(product)}
-                        disabled={toggleActiveMutation.isPending}
-                        aria-label={`${product.name}の有効/無効を切り替え`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleOpenRoutingsDialog(product)}
-                          aria-label={`${product.name}の工程管理`}
-                          title="工程管理"
-                        >
-                          <Settings className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleOpenEditDialog(product)}
-                          aria-label={`${product.name}を編集`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleOpenDeleteDialog(product)}
-                          aria-label={`${product.name}を削除`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+              {filteredProducts.length > 0 ? (
+                filteredProducts.map((product) => {
+                  const displayCode = product.code || product.name
+                  const displayName = product.code ? product.name : null
+                  return (
+                    <TableRow key={product.id}>
+                      <TableCell>
+                        <div className="font-mono text-sm">{displayCode}</div>
+                        {displayName ? (
+                          <div className="text-xs text-muted-foreground">{displayName}</div>
+                        ) : (
+                          <div className="text-xs text-muted-foreground italic">製品名未設定</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Circle
+                            className={`h-2 w-2 fill-current ${
+                              product.is_active ? "text-green-500" : "text-gray-400"
+                            }`}
+                          />
+                          <span className="text-sm">
+                            {product.is_active ? "有効" : "無効"}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon-sm">
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">操作メニュー</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleOpenEditDialog(product)}>
+                              編集
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleOpenRoutingsDialog(product)}>
+                              工程管理
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleToggleActive(product)}
+                              disabled={toggleActiveMutation.isPending}
+                            >
+                              {product.is_active ? "無効化" : "有効化"}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleOpenDeleteDialog(product)}
+                            >
+                              削除
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-10">
-                    製品がありません
+                  <TableCell colSpan={3} className="text-center py-10">
+                    {searchQuery || statusFilter !== "all"
+                      ? "条件に一致する製品がありません"
+                      : "製品がありません"}
                   </TableCell>
                 </TableRow>
               )}
@@ -293,44 +327,29 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="create-name">製品名 *</Label>
+              <Label htmlFor="create-name">品番 *</Label>
               <Input
                 id="create-name"
                 value={productName}
                 onChange={(e) => setProductName(e.target.value)}
-                placeholder="例: 製品A"
+                placeholder="例: A-001"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="create-code">製品コード *</Label>
+              <Label htmlFor="create-code">製品名（任意）</Label>
               <Input
                 id="create-code"
                 value={productCode}
                 onChange={(e) => setProductCode(e.target.value)}
-                placeholder="例: PROD-001"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="create-type">種別 *</Label>
-              <Input
-                id="create-type"
-                value={productType}
-                onChange={(e) => setProductType(e.target.value)}
-                placeholder="例: standard, custom, repair"
+                placeholder="例: 製品A"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsCreateDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
               キャンセル
             </Button>
-            <Button
-              onClick={handleCreate}
-              disabled={createMutation.isPending}
-            >
+            <Button onClick={handleCreate} disabled={createMutation.isPending}>
               {createMutation.isPending ? "作成中..." : "作成"}
             </Button>
           </DialogFooter>
@@ -348,44 +367,29 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-name">製品名 *</Label>
+              <Label htmlFor="edit-name">品番 *</Label>
               <Input
                 id="edit-name"
                 value={productName}
                 onChange={(e) => setProductName(e.target.value)}
-                placeholder="例: 製品A"
+                placeholder="例: A-001"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-code">製品コード *</Label>
+              <Label htmlFor="edit-code">製品名（任意）</Label>
               <Input
                 id="edit-code"
                 value={productCode}
                 onChange={(e) => setProductCode(e.target.value)}
-                placeholder="例: PROD-001"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-type">種別 *</Label>
-              <Input
-                id="edit-type"
-                value={productType}
-                onChange={(e) => setProductType(e.target.value)}
-                placeholder="例: standard, custom, repair"
+                placeholder="例: 製品A"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsEditDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               キャンセル
             </Button>
-            <Button
-              onClick={handleUpdate}
-              disabled={updateMutation.isPending}
-            >
+            <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
               {updateMutation.isPending ? "更新中..." : "更新"}
             </Button>
           </DialogFooter>
@@ -398,15 +402,12 @@ export default function ProductsPage() {
           <DialogHeader>
             <DialogTitle>製品の削除</DialogTitle>
             <DialogDescription>
-              本当に「{selectedProduct?.name}」を削除しますか？
+              本当に「{selectedProduct?.code || selectedProduct?.name}」を削除しますか？
               この操作は取り消せません。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
               キャンセル
             </Button>
             <Button
