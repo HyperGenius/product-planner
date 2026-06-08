@@ -5,7 +5,7 @@ import { format, getDaysInMonth, isBefore, startOfDay } from "date-fns"
 import { ja } from "date-fns/locale"
 import { DayPicker } from "react-day-picker"
 import { toast } from "sonner"
-import { CalendarPlus, ChevronLeft, ChevronRight, Download } from "lucide-react"
+import { CalendarPlus, ChevronLeft, ChevronRight, Download, X } from "lucide-react"
 import {
   useCalendars,
   useUpsertCalendar,
@@ -171,6 +171,12 @@ export default function CalendarPage() {
     setIsAdHocMode(false)
   }
 
+  const handleRemoveAdHocDate = (dateToRemove: Date) => {
+    setAdHocDates((prev) =>
+      prev.filter((d) => d.toISOString() !== dateToRemove.toISOString())
+    )
+  }
+
   // 祝日インポート
   const handleImportHolidays = async () => {
     try {
@@ -183,6 +189,18 @@ export default function CalendarPage() {
 
   const monthDate = new Date(viewYear, viewMonth - 1, 1)
 
+  const dayPickerModifiers = {
+    defaultWeekend: effectiveWeekendDates,
+    holiday: dbHolidayDates,
+    workday: workdayDates,
+  }
+
+  const dayPickerModifiersClassNames = {
+    defaultWeekend: "bg-red-100 text-red-800",
+    holiday: "bg-red-300 text-red-900 font-bold",
+    workday: "bg-blue-200 text-blue-900 font-bold",
+  }
+
   return (
     <div className="container mx-auto py-8 space-y-8">
       <div>
@@ -193,7 +211,7 @@ export default function CalendarPage() {
       </div>
 
       {/* ── 国民の祝日インポート ── */}
-      <div className="rounded-lg border p-4 space-y-3">
+      <div className="rounded-lg border p-4 space-y-3 max-w-md">
         <h2 className="font-semibold flex items-center gap-2">
           <Download className="h-4 w-4" />
           国民の祝日インポート
@@ -226,125 +244,146 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* ── 臨時休日設定ボタン群 ── */}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={isAdHocMode ? "default" : "outline"}
-          onClick={() => {
-            setIsAdHocMode(!isAdHocMode)
-            setAdHocDates([])
-          }}
-        >
-          <CalendarPlus className="h-4 w-4 mr-2" />
-          臨時休日設定
-        </Button>
-      </div>
-
-      {/* ── カレンダー表示 ── */}
-      <div className="rounded-lg border p-6 max-w-md">
-        {/* 月移動ヘッダー */}
-        <div className="mb-4 flex items-center justify-between">
-          <Button variant="outline" size="sm" onClick={handlePrevMonth}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <h2 className="text-lg font-semibold">
-            {viewYear}年 {viewMonth}月
-          </h2>
-          <Button variant="outline" size="sm" onClick={handleNextMonth}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* 凡例 */}
-        <div className="mb-4 flex flex-wrap gap-3 text-sm">
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded bg-red-100 border border-red-200"></div>
-            <span>土日（デフォルト休日）</span>
+      {/* ── カレンダー + アクションパネル（横並び） ── */}
+      <div className="flex flex-col sm:flex-row gap-4 items-start">
+        {/* カレンダーカード */}
+        <div className="rounded-lg border p-6 w-fit">
+          {/* 月移動ヘッダー + 臨時休日設定ボタン */}
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" onClick={handlePrevMonth}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <h2 className="text-base font-semibold px-2 min-w-[7rem] text-center">
+                {viewYear}年 {viewMonth}月
+              </h2>
+              <Button variant="outline" size="sm" onClick={handleNextMonth}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            <Button
+              variant={isAdHocMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setIsAdHocMode(!isAdHocMode)
+                setAdHocDates([])
+              }}
+            >
+              <CalendarPlus className="h-4 w-4 mr-1.5" />
+              臨時休日設定
+            </Button>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded bg-red-300"></div>
-            <span>祝日・臨時休日</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-4 w-4 rounded bg-blue-200"></div>
-            <span>臨時稼働日</span>
-          </div>
-        </div>
 
-        {isLoading ? (
-          <div className="py-8 text-center text-muted-foreground">読み込み中...</div>
-        ) : isAdHocMode ? (
-          /* 臨時休日マルチ選択モード */
-          <>
-            <p className="text-sm text-muted-foreground mb-2">
-              休日にしたい日付を複数選択してください（過去日付は選択不可）
-            </p>
+          {/* 凡例 */}
+          <div className="mb-4 flex flex-wrap gap-3 text-sm">
+            <div className="flex items-center gap-1.5">
+              <div className="h-4 w-4 rounded bg-red-100 border border-red-200"></div>
+              <span>土日（デフォルト休日）</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-4 w-4 rounded bg-red-300"></div>
+              <span>祝日・臨時休日</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-4 w-4 rounded bg-blue-200"></div>
+              <span>臨時稼働日</span>
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div className="py-8 text-center text-muted-foreground">読み込み中...</div>
+          ) : isAdHocMode ? (
             <DayPicker
               mode="multiple"
               month={monthDate}
               selected={adHocDates}
               onSelect={(dates) => setAdHocDates(dates ?? [])}
               disabled={{ before: today }}
-              modifiers={{
-                defaultWeekend: effectiveWeekendDates,
-                holiday: dbHolidayDates,
-                workday: workdayDates,
-              }}
-              modifiersClassNames={{
-                defaultWeekend: "bg-red-100 text-red-800",
-                holiday: "bg-red-300 text-red-900 font-bold",
-                workday: "bg-blue-200 text-blue-900 font-bold",
-              }}
+              modifiers={dayPickerModifiers}
+              modifiersClassNames={dayPickerModifiersClassNames}
               locale={ja}
               className="px-8"
             />
-            {/* 臨時休日設定パネル */}
-            <div className="mt-4 space-y-3 border-t pt-4">
-              <p className="text-sm font-medium">
-                選択中: {adHocDates.length}件
+          ) : (
+            <DayPicker
+              mode="single"
+              month={monthDate}
+              onDayClick={handleDayClick}
+              disabled={{ before: today }}
+              modifiers={dayPickerModifiers}
+              modifiersClassNames={dayPickerModifiersClassNames}
+              locale={ja}
+              className="px-8"
+            />
+          )}
+        </div>
+
+        {/* アクションパネル（臨時休日設定モード時のみ表示） */}
+        {isAdHocMode && (
+          <div className="rounded-lg border p-4 w-full sm:w-64 space-y-4 sticky top-4">
+            <div>
+              <h3 className="font-semibold flex items-center gap-2">
+                <CalendarPlus className="h-4 w-4" />
+                臨時休日設定
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                カレンダーから日付を複数選択してください（過去日付は選択不可）
               </p>
-              <div className="space-y-1">
-                <Label htmlFor="adHocNote">備考</Label>
-                <Input
-                  id="adHocNote"
-                  value={adHocNote}
-                  onChange={(e) => setAdHocNote(e.target.value)}
-                  placeholder="例: 創立記念日、工場メンテナンス"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleSaveAdHoc}
-                  disabled={adHocDates.length === 0 || batchMutation.isPending}
-                >
-                  休日に設定
-                </Button>
-                <Button variant="outline" onClick={handleCancelAdHoc}>
-                  キャンセル
-                </Button>
-              </div>
             </div>
-          </>
-        ) : (
-          /* 通常モード */
-          <DayPicker
-            mode="single"
-            month={monthDate}
-            onDayClick={handleDayClick}
-            disabled={{ before: today }}
-            modifiers={{
-              defaultWeekend: effectiveWeekendDates,
-              holiday: dbHolidayDates,
-              workday: workdayDates,
-            }}
-            modifiersClassNames={{
-              defaultWeekend: "bg-red-100 text-red-800",
-              holiday: "bg-red-300 text-red-900 font-bold",
-              workday: "bg-blue-200 text-blue-900 font-bold",
-            }}
-            locale={ja}
-            className="px-8"
-          />
+
+            {/* 選択済み日付リスト */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">選択中: {adHocDates.length}件</p>
+              {adHocDates.length === 0 ? (
+                <p className="text-sm text-muted-foreground">日付が選択されていません</p>
+              ) : (
+                <ul className="space-y-1 max-h-48 overflow-y-auto">
+                  {adHocDates
+                    .slice()
+                    .sort((a, b) => a.getTime() - b.getTime())
+                    .map((d) => (
+                      <li
+                        key={d.toISOString()}
+                        className="flex items-center justify-between text-sm py-0.5"
+                      >
+                        <span>{format(d, "M月d日 (E)", { locale: ja })}</span>
+                        <button
+                          onClick={() => handleRemoveAdHocDate(d)}
+                          className="text-muted-foreground hover:text-foreground transition-colors ml-2 flex-shrink-0"
+                          aria-label={`${format(d, "M月d日")}を解除`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+
+            {/* 備考 */}
+            <div className="space-y-1">
+              <Label htmlFor="adHocNote">備考</Label>
+              <Input
+                id="adHocNote"
+                value={adHocNote}
+                onChange={(e) => setAdHocNote(e.target.value)}
+                placeholder="例: 創立記念日、工場メンテナンス"
+              />
+            </div>
+
+            {/* アクションボタン */}
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={handleSaveAdHoc}
+                disabled={adHocDates.length === 0 || batchMutation.isPending}
+              >
+                {batchMutation.isPending ? "保存中..." : "休日に設定"}
+              </Button>
+              <Button variant="outline" onClick={handleCancelAdHoc}>
+                キャンセル
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 
