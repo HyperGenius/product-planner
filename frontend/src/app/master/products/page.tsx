@@ -244,16 +244,16 @@ export default function ProductsPage() {
             <TableBody>
               {filteredProducts.length > 0 ? (
                 filteredProducts.map((product) => {
-                  const displayCode = product.code || product.name
-                  const displayName = product.code ? product.name : null
+                  const displayCode = product.code || "品番なし"
+                  const displayName = product.name || null
                   return (
                     <TableRow key={product.id}>
                       <TableCell>
-                        <div className="font-mono text-sm">{displayCode}</div>
+                        <div className="text-xs text-muted-foreground">{displayCode}</div>
                         {displayName ? (
-                          <div className="text-xs text-muted-foreground">{displayName}</div>
+                          <div className="text-sm">{displayName}</div>
                         ) : (
-                          <div className="text-xs text-muted-foreground italic">製品名未設定</div>
+                          <div className="text-sm text-muted-foreground">製品名未設定</div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -367,20 +367,20 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-name">品番 *</Label>
-              <Input
-                id="edit-name"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                placeholder="例: A-001"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-code">製品名（任意）</Label>
+              <Label htmlFor="edit-code">品番（任意）</Label>
               <Input
                 id="edit-code"
                 value={productCode}
                 onChange={(e) => setProductCode(e.target.value)}
+                placeholder="例: A-001"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">製品名</Label>
+              <Input
+                id="edit-name"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
                 placeholder="例: 製品A"
               />
             </div>
