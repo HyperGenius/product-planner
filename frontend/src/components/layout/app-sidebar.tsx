@@ -61,6 +61,7 @@ const menuItems = [
   },
   {
     title: "マスタデータ",
+    url: "/master",
     icon: Database,
     items: [
       {
@@ -150,10 +151,23 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                   >
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
-                        <SidebarMenuButton>
-                          <item.icon className="h-4 w-4" />
-                          <span>{item.title}</span>
-                          <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                        <SidebarMenuButton
+                          asChild={!!item.url}
+                          isActive={!!item.url && pathname === item.url}
+                        >
+                          {item.url ? (
+                            <Link href={item.url}>
+                              <item.icon className="h-4 w-4" />
+                              <span>{item.title}</span>
+                              <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                            </Link>
+                          ) : (
+                            <>
+                              <item.icon className="h-4 w-4" />
+                              <span>{item.title}</span>
+                              <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                            </>
+                          )}
                         </SidebarMenuButton>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
