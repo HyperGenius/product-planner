@@ -95,7 +95,7 @@ export default function OrdersPage() {
                   </TableCell>
                   <TableCell>
                     {order.confirmed_deadline
-                      ? format(new Date(order.confirmed_deadline), "yyyy/MM/dd HH:mm", {
+                      ? format(new Date(order.confirmed_deadline), "yyyy/MM/dd", {
                           locale: ja,
                         })
                       : "-"}

@@ -197,12 +197,15 @@ def confirm_order(
         )
 
         # 2. ステータス更新 & is_scheduled フラグ更新
+        last_end = max(s["end_datetime"] for s in result)
+        confirmed_deadline = datetime.fromisoformat(last_end).date().isoformat()
         order_repo.update(
             order_id,
             {
                 "status": "confirmed",
                 "is_scheduled": True,
                 "confirmed_at": datetime.now(UTC).isoformat(),
+                "confirmed_deadline": confirmed_deadline,
             },
         )
 
