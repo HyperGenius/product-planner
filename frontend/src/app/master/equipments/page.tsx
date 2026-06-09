@@ -127,7 +127,7 @@ export default function EquipmentsPage() {
 
   if (error) {
     return (
-      <div className="container mx-auto py-10">
+      <div className="py-10">
         <div className="text-red-500">
           エラーが発生しました: {error?.message || "不明なエラー"}
         </div>
@@ -136,7 +136,7 @@ export default function EquipmentsPage() {
   }
 
   return (
-    <div className="container mx-auto py-10">
+    <div className="py-10">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">設備マスタ</h1>

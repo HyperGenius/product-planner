@@ -202,7 +202,7 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="container mx-auto py-8 space-y-8">
+    <div className="py-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold">稼働カレンダー</h1>
         <p className="text-sm text-muted-foreground">

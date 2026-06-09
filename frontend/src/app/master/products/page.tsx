@@ -102,7 +102,7 @@ export default function ProductsPage() {
         return matchesSearch && matchesStatus
       })
       .sort((a, b) => {
-        if (sortKey === "created_at") return a.created_at.localeCompare(b.created_at)
+        if (sortKey === "created_at") return (a.created_at || "").localeCompare(b.created_at || "")
         if (sortKey === "product_code") return (a.code || "").localeCompare(b.code || "")
         return (a.name || "").localeCompare(b.name || "")
       })
@@ -218,7 +218,7 @@ export default function ProductsPage() {
 
   if (error) {
     return (
-      <div className="container mx-auto py-10">
+      <div className="py-10">
         <div className="text-red-500">
           エラーが発生しました: {error?.message || "不明なエラー"}
         </div>
@@ -227,7 +227,7 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="container mx-auto py-10">
+    <div className="py-10">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">製品マスタ</h1>
