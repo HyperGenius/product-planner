@@ -129,7 +129,7 @@ export default function EquipmentGroupsPage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto py-10">
+      <div className="py-10">
         <div className="flex items-center justify-center">
           <p className="text-muted-foreground">読み込み中...</p>
         </div>
@@ -139,7 +139,7 @@ export default function EquipmentGroupsPage() {
 
   if (error) {
     return (
-      <div className="container mx-auto py-10">
+      <div className="py-10">
         <div className="flex items-center justify-center">
           <p className="text-destructive">エラーが発生しました: {error?.message || "不明なエラー"}</p>
         </div>
@@ -148,7 +148,7 @@ export default function EquipmentGroupsPage() {
   }
 
   return (
-    <div className="container mx-auto py-10">
+    <div className="py-10">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold">設備グループマスタ</h1>
         <Button onClick={handleOpenCreateDialog}>
