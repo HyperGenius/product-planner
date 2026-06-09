@@ -1,16 +1,27 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, Pencil, Trash2 } from "lucide-react"
+import { useMemo, useState } from "react"
+import { Pencil, Plus, Trash2, Users, Layers } from "lucide-react"
 import { toast } from "sonner"
+
 import {
   useEquipments,
   useCreateEquipment,
   useUpdateEquipment,
   useDeleteEquipment,
 } from "@/hooks/use-equipments"
+import {
+  useEquipmentGroups,
+  useCreateEquipmentGroup,
+  useUpdateEquipmentGroup,
+  useDeleteEquipmentGroup,
+  type EquipmentGroup,
+} from "@/lib/hooks/use-equipment-groups"
+import { useAllEquipmentGroupMembers } from "@/hooks/use-equipment-group-members"
 import type { Equipment } from "@/types/equipment"
+
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
@@ -19,6 +30,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -29,54 +50,86 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { EquipmentGroupMembersDialog } from "@/components/equipment-group-members-dialog"
+import { EquipmentGroupAssignmentDialog } from "@/components/equipment-group-assignment-dialog"
 
-/**
- * 設備マスタ画面
- * URL: /master/equipments
- */
+type GroupDialogMode = "create" | "edit" | null
+
 export default function EquipmentsPage() {
+  // ── 設備一覧タブの状態 ──────────────────────────────────────────
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(
-    null
-  )
+  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null)
   const [equipmentName, setEquipmentName] = useState("")
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
+  const [equipmentForAssignment, setEquipmentForAssignment] = useState<Equipment | null>(null)
 
-  // データ取得・操作のフック
-  const { data: equipments, isLoading, error } = useEquipments()
-  const createMutation = useCreateEquipment()
-  const updateMutation = useUpdateEquipment()
-  const deleteMutation = useDeleteEquipment()
+  // ── グループ管理タブの状態 ──────────────────────────────────────
+  const [groupDialogMode, setGroupDialogMode] = useState<GroupDialogMode>(null)
+  const [selectedGroup, setSelectedGroup] = useState<EquipmentGroup | null>(null)
+  const [groupName, setGroupName] = useState("")
+  const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false)
+  const [groupToDelete, setGroupToDelete] = useState<EquipmentGroup | null>(null)
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false)
+  const [groupForMembers, setGroupForMembers] = useState<EquipmentGroup | null>(null)
 
-  // 作成ダイアログを開く
+  // ── データフェッチ ───────────────────────────────────────────────
+  const { data: equipments, isLoading: isLoadingEquipments, error: equipmentError } = useEquipments()
+  const { data: groups, isLoading: isLoadingGroups, error: groupError } = useEquipmentGroups()
+  const { data: allMembers = [] } = useAllEquipmentGroupMembers()
+
+  const createEquipmentMutation = useCreateEquipment()
+  const updateEquipmentMutation = useUpdateEquipment()
+  const deleteEquipmentMutation = useDeleteEquipment()
+
+  const createGroupMutation = useCreateEquipmentGroup()
+  const updateGroupMutation = useUpdateEquipmentGroup()
+  const deleteGroupMutation = useDeleteEquipmentGroup()
+
+  // 設備ID → 所属グループ名リスト のマップ
+  const equipmentGroupMap = useMemo(() => {
+    const map = new Map<number, string[]>()
+    for (const member of allMembers) {
+      const group = groups?.find((g) => g.id === member.equipment_group_id)
+      if (!group) continue
+      const names = map.get(member.equipment_id) ?? []
+      names.push(group.name)
+      map.set(member.equipment_id, names)
+    }
+    return map
+  }, [allMembers, groups])
+
+  // ── 設備タブのハンドラ ────────────────────────────────────────
   const handleOpenCreateDialog = () => {
     setEquipmentName("")
     setIsCreateDialogOpen(true)
   }
 
-  // 編集ダイアログを開く
   const handleOpenEditDialog = (equipment: Equipment) => {
     setSelectedEquipment(equipment)
     setEquipmentName(equipment.name)
     setIsEditDialogOpen(true)
   }
 
-  // 削除ダイアログを開く
   const handleOpenDeleteDialog = (equipment: Equipment) => {
     setSelectedEquipment(equipment)
     setIsDeleteDialogOpen(true)
   }
 
-  // 設備を作成
+  const handleOpenAssignmentDialog = (equipment: Equipment) => {
+    setEquipmentForAssignment(equipment)
+    setAssignmentDialogOpen(true)
+  }
+
   const handleCreate = async () => {
     if (!equipmentName.trim()) {
       toast.error("設備名を入力してください")
       return
     }
-
     try {
-      await createMutation.mutateAsync({ name: equipmentName })
+      await createEquipmentMutation.mutateAsync({ name: equipmentName })
       toast.success("設備を作成しました")
       setIsCreateDialogOpen(false)
       setEquipmentName("")
@@ -86,17 +139,14 @@ export default function EquipmentsPage() {
     }
   }
 
-  // 設備を更新
   const handleUpdate = async () => {
     if (!selectedEquipment) return
-
     if (!equipmentName.trim()) {
       toast.error("設備名を入力してください")
       return
     }
-
     try {
-      await updateMutation.mutateAsync({
+      await updateEquipmentMutation.mutateAsync({
         id: selectedEquipment.id,
         data: { name: equipmentName },
       })
@@ -110,12 +160,10 @@ export default function EquipmentsPage() {
     }
   }
 
-  // 設備を削除
   const handleDelete = async () => {
     if (!selectedEquipment) return
-
     try {
-      await deleteMutation.mutateAsync(selectedEquipment.id)
+      await deleteEquipmentMutation.mutateAsync(selectedEquipment.id)
       toast.success("設備を削除しました")
       setIsDeleteDialogOpen(false)
       setSelectedEquipment(null)
@@ -125,11 +173,78 @@ export default function EquipmentsPage() {
     }
   }
 
-  if (error) {
+  // ── グループタブのハンドラ ────────────────────────────────────
+  const handleOpenGroupCreateDialog = () => {
+    setGroupName("")
+    setSelectedGroup(null)
+    setGroupDialogMode("create")
+  }
+
+  const handleOpenGroupEditDialog = (group: EquipmentGroup) => {
+    setGroupName(group.name)
+    setSelectedGroup(group)
+    setGroupDialogMode("edit")
+  }
+
+  const handleCloseGroupDialog = () => {
+    setGroupDialogMode(null)
+    setSelectedGroup(null)
+    setGroupName("")
+  }
+
+  const handleGroupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!groupName.trim()) {
+      toast.error("グループ名を入力してください")
+      return
+    }
+    try {
+      if (groupDialogMode === "create") {
+        await createGroupMutation.mutateAsync({ name: groupName })
+        toast.success("設備グループを作成しました")
+      } else if (groupDialogMode === "edit" && selectedGroup) {
+        await updateGroupMutation.mutateAsync({
+          id: selectedGroup.id,
+          data: { name: groupName },
+        })
+        toast.success("設備グループを更新しました")
+      }
+      handleCloseGroupDialog()
+    } catch (error) {
+      toast.error("操作に失敗しました")
+      console.error(error)
+    }
+  }
+
+  const handleOpenGroupDeleteDialog = (group: EquipmentGroup) => {
+    setGroupToDelete(group)
+    setDeleteGroupDialogOpen(true)
+  }
+
+  const handleGroupDelete = async () => {
+    if (!groupToDelete) return
+    try {
+      await deleteGroupMutation.mutateAsync(groupToDelete.id)
+      toast.success("設備グループを削除しました")
+      setDeleteGroupDialogOpen(false)
+      setGroupToDelete(null)
+    } catch (error) {
+      toast.error("削除に失敗しました")
+      console.error(error)
+    }
+  }
+
+  const handleOpenMembersDialog = (group: EquipmentGroup) => {
+    setGroupForMembers(group)
+    setMembersDialogOpen(true)
+  }
+
+  // ── エラー表示 ───────────────────────────────────────────────
+  if (equipmentError || groupError) {
     return (
       <div className="py-10">
         <div className="text-red-500">
-          エラーが発生しました: {error?.message || "不明なエラー"}
+          エラーが発生しました: {(equipmentError ?? groupError)?.message || "不明なエラー"}
         </div>
       </div>
     )
@@ -137,79 +252,180 @@ export default function EquipmentsPage() {
 
   return (
     <div className="py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">設備マスタ</h1>
-          <p className="text-muted-foreground">
-            設備の一覧表示、作成、編集、削除を行います
-          </p>
-        </div>
-        <Button onClick={handleOpenCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          新規作成
-        </Button>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">設備マスタ</h1>
+        <p className="text-muted-foreground">設備の登録・管理、グループ設定を行います</p>
       </div>
 
-      {isLoading ? (
-        <div className="text-center py-10">読み込み中...</div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[100px]">ID</TableHead>
-                <TableHead>設備名</TableHead>
-                <TableHead className="w-[150px] text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {equipments && equipments.length > 0 ? (
-                equipments.map((equipment) => (
-                  <TableRow key={equipment.id}>
-                    <TableCell className="font-medium">{equipment.id}</TableCell>
-                    <TableCell>{equipment.name}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleOpenEditDialog(equipment)}
-                          aria-label={`${equipment.name}を編集`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => handleOpenDeleteDialog(equipment)}
-                          aria-label={`${equipment.name}を削除`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={3} className="text-center py-10">
-                    設備がありません
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <Tabs defaultValue="equipments">
+        <TabsList className="mb-6">
+          <TabsTrigger value="equipments">設備一覧</TabsTrigger>
+          <TabsTrigger value="groups">グループ管理</TabsTrigger>
+        </TabsList>
 
-      {/* 作成ダイアログ */}
+        {/* ── タブ1: 設備一覧 ─────────────────────────────────── */}
+        <TabsContent value="equipments">
+          <div className="mb-4 flex justify-end">
+            <Button onClick={handleOpenCreateDialog}>
+              <Plus className="mr-2 h-4 w-4" />
+              新規作成
+            </Button>
+          </div>
+
+          {isLoadingEquipments ? (
+            <div className="text-center py-10 text-muted-foreground">読み込み中...</div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[100px]">ID</TableHead>
+                    <TableHead>設備名</TableHead>
+                    <TableHead>所属グループ</TableHead>
+                    <TableHead className="w-[150px] text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {equipments && equipments.length > 0 ? (
+                    equipments.map((equipment) => {
+                      const groupNames = equipmentGroupMap.get(equipment.id) ?? []
+                      return (
+                        <TableRow key={equipment.id}>
+                          <TableCell className="font-medium">{equipment.id}</TableCell>
+                          <TableCell>{equipment.name}</TableCell>
+                          <TableCell>
+                            {groupNames.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {groupNames.map((name) => (
+                                  <Badge key={name} variant="secondary">
+                                    {name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => handleOpenAssignmentDialog(equipment)}
+                                title="グループ管理"
+                                aria-label={`${equipment.name}のグループ管理`}
+                              >
+                                <Layers className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => handleOpenEditDialog(equipment)}
+                                aria-label={`${equipment.name}を編集`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => handleOpenDeleteDialog(equipment)}
+                                aria-label={`${equipment.name}を削除`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-10">
+                        設備がありません
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── タブ2: グループ管理 ──────────────────────────────── */}
+        <TabsContent value="groups">
+          <div className="mb-4 flex justify-end">
+            <Button onClick={handleOpenGroupCreateDialog}>
+              <Plus className="mr-2 h-4 w-4" />
+              新規作成
+            </Button>
+          </div>
+
+          {isLoadingGroups ? (
+            <div className="text-center py-10 text-muted-foreground">読み込み中...</div>
+          ) : (
+            <div className="rounded-lg border bg-card">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[100px]">ID</TableHead>
+                    <TableHead>グループ名</TableHead>
+                    <TableHead className="w-[200px] text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {groups && groups.length > 0 ? (
+                    groups.map((group) => (
+                      <TableRow key={group.id}>
+                        <TableCell className="font-medium">{group.id}</TableCell>
+                        <TableCell>{group.name}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleOpenMembersDialog(group)}
+                              title="メンバー管理"
+                            >
+                              <Users className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleOpenGroupEditDialog(group)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleOpenGroupDeleteDialog(group)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center text-muted-foreground py-10">
+                        データがありません
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* ── 設備: 作成ダイアログ ─────────────────────────────────── */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>設備の新規作成</DialogTitle>
-            <DialogDescription>
-              新しい設備を作成します。設備名を入力してください。
-            </DialogDescription>
+            <DialogDescription>新しい設備を作成します。設備名を入力してください。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -223,30 +439,22 @@ export default function EquipmentsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsCreateDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
               キャンセル
             </Button>
-            <Button
-              onClick={handleCreate}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending ? "作成中..." : "作成"}
+            <Button onClick={handleCreate} disabled={createEquipmentMutation.isPending}>
+              {createEquipmentMutation.isPending ? "作成中..." : "作成"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* 編集ダイアログ */}
+      {/* ── 設備: 編集ダイアログ ─────────────────────────────────── */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>設備の編集</DialogTitle>
-            <DialogDescription>
-              設備情報を編集します。設備名を変更してください。
-            </DialogDescription>
+            <DialogDescription>設備名を変更してください。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -260,49 +468,116 @@ export default function EquipmentsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsEditDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               キャンセル
             </Button>
-            <Button
-              onClick={handleUpdate}
-              disabled={updateMutation.isPending}
-            >
-              {updateMutation.isPending ? "更新中..." : "更新"}
+            <Button onClick={handleUpdate} disabled={updateEquipmentMutation.isPending}>
+              {updateEquipmentMutation.isPending ? "更新中..." : "更新"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* 削除確認ダイアログ */}
+      {/* ── 設備: 削除確認ダイアログ ─────────────────────────────── */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>設備の削除</DialogTitle>
             <DialogDescription>
-              本当に「{selectedEquipment?.name}」を削除しますか？
-              この操作は取り消せません。
+              本当に「{selectedEquipment?.name}」を削除しますか？この操作は取り消せません。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
               キャンセル
             </Button>
             <Button
               variant="destructive"
               onClick={handleDelete}
-              disabled={deleteMutation.isPending}
+              disabled={deleteEquipmentMutation.isPending}
             >
-              {deleteMutation.isPending ? "削除中..." : "削除"}
+              {deleteEquipmentMutation.isPending ? "削除中..." : "削除"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── 設備: グループ管理ダイアログ（設備視点） ─────────────── */}
+      <EquipmentGroupAssignmentDialog
+        equipment={equipmentForAssignment}
+        open={assignmentDialogOpen}
+        onOpenChange={setAssignmentDialogOpen}
+      />
+
+      {/* ── グループ: 作成/編集ダイアログ ────────────────────────── */}
+      <Dialog open={groupDialogMode !== null} onOpenChange={handleCloseGroupDialog}>
+        <DialogContent>
+          <form onSubmit={handleGroupSubmit}>
+            <DialogHeader>
+              <DialogTitle>{groupDialogMode === "create" ? "新規作成" : "編集"}</DialogTitle>
+              <DialogDescription>設備グループの情報を入力してください</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="group-name">グループ名</Label>
+                <Input
+                  id="group-name"
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  placeholder="例: 切断グループ"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseGroupDialog}>
+                キャンセル
+              </Button>
+              <Button
+                type="submit"
+                disabled={createGroupMutation.isPending || updateGroupMutation.isPending}
+              >
+                {createGroupMutation.isPending || updateGroupMutation.isPending
+                  ? "保存中..."
+                  : "保存"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── グループ: 削除確認ダイアログ ─────────────────────────── */}
+      <AlertDialog open={deleteGroupDialogOpen} onOpenChange={setDeleteGroupDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>削除の確認</AlertDialogTitle>
+            <AlertDialogDescription>
+              {groupToDelete?.name} を削除してもよろしいですか？
+              <br />
+              この操作は取り消せません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setGroupToDelete(null)}>
+              キャンセル
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleGroupDelete}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleteGroupMutation.isPending}
+            >
+              {deleteGroupMutation.isPending ? "削除中..." : "削除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── グループ: メンバー管理ダイアログ（グループ視点） ─────── */}
+      <EquipmentGroupMembersDialog
+        group={groupForMembers}
+        open={membersDialogOpen}
+        onOpenChange={setMembersDialogOpen}
+      />
     </div>
   )
 }

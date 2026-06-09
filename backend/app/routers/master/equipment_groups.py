@@ -17,6 +17,15 @@ equipment_group_router = APIRouter(
 logger = get_logger(__name__)
 
 
+@equipment_group_router.get("/members")
+def get_all_equipment_group_members(
+    repo: EquipmentRepository = Depends(get_equipment_repo),
+):
+    """全equipment_group_membersを一括取得"""
+    logger.info("Fetching all equipment group members")
+    return repo.get_all_members()
+
+
 @equipment_group_router.post("/")
 def create_equipment_group(
     group_data: EquipmentGroupCreate,
