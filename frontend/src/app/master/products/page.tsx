@@ -47,6 +47,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
+import { MasterPagination } from "@/components/master-pagination"
+
+const PAGE_SIZE = 20
 
 type StatusFilter = "all" | "active" | "inactive"
 type SortKey = "created_at" | "product_code" | "name"
@@ -61,6 +64,7 @@ export default function ProductsPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const sortKey = (searchParams.get("sort") as SortKey) ?? "created_at"
+  const page = Number(searchParams.get("page") ?? "1")
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -107,6 +111,11 @@ export default function ProductsPage() {
         return (a.name || "").localeCompare(b.name || "")
       })
   }, [products, searchQuery, statusFilter, sortKey])
+
+  const pagedProducts = useMemo(() => {
+    const offset = (page - 1) * PAGE_SIZE
+    return filteredProducts.slice(offset, offset + PAGE_SIZE)
+  }, [filteredProducts, page])
 
   const handleOpenCreateDialog = () => {
     setProductName("")
@@ -293,8 +302,8 @@ export default function ProductsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProducts.length > 0 ? (
-                filteredProducts.map((product) => {
+              {pagedProducts.length > 0 ? (
+                pagedProducts.map((product) => {
                   const displayCode = product.code || "品番なし"
                   const displayName = product.name || null
                   return (
@@ -365,6 +374,7 @@ export default function ProductsPage() {
           </Table>
         </div>
       )}
+      <MasterPagination totalCount={filteredProducts.length} pageSize={PAGE_SIZE} />
 
       {/* 作成ダイアログ */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
