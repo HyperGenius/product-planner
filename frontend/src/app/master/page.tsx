@@ -6,21 +6,23 @@ export default function MasterPage() {
     <div className="py-10">
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight">マスタデータ</h1>
-        <p className="text-muted-foreground">
-          各種マスタデータの登録・管理を行います
-        </p>
+        <p className="text-muted-foreground mt-1">各種マスタデータの登録・管理を行います</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {masterItems.map((item) => (
-          <Link key={item.href} href={item.href}>
-            <div className="flex items-start gap-4 rounded-lg border p-6 transition-colors hover:bg-accent hover:text-accent-foreground">
-              <div className="rounded-md bg-muted p-2">
-                <item.icon className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="font-semibold">{item.title}</h2>
-                <p className="text-sm text-muted-foreground">{item.description}</p>
+          <Link key={item.href} href={item.href} className="group">
+            <div
+              className={`rounded-lg border-t-4 ${item.accent} border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent/40`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-muted-foreground mb-1">{item.title}</p>
+                  <p className="text-xs text-muted-foreground/70 leading-relaxed">{item.description}</p>
+                </div>
+                <div className={`rounded-lg ${item.iconBg} p-2.5 ml-4 shrink-0`}>
+                  <item.icon className={`h-5 w-5 ${item.iconColor}`} />
+                </div>
               </div>
             </div>
           </Link>
