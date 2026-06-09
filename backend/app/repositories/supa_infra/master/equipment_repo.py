@@ -117,6 +117,15 @@ class EquipmentRepository(BaseRepository[T]):
         equipments = [item["equipments"] for item in data if item.get("equipments")]
         return cast(list[T], equipments)
 
+    def get_all_members(self) -> list[T]:
+        """全equipment_group_membersを一括取得"""
+        res = (
+            self.client.table(SupabaseTableName.EQUIPMENT_GROUP_MEMBERS.value)
+            .select("*")
+            .execute()
+        )
+        return cast(list[T], res.data)
+
     def get_equipment_name(self, equipment_id: int) -> str | None:
         """設備IDから設備名を取得"""
         try:

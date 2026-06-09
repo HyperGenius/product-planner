@@ -1,4 +1,4 @@
-import { Calendar, Cpu, Layers, Package, Users } from "lucide-react"
+import { Calendar, Cpu, Package, Users } from "lucide-react"
 
 export const masterItems = [
   {
@@ -23,19 +23,10 @@ export const masterItems = [
     title: "設備マスタ",
     href: "/master/equipments",
     icon: Cpu,
-    description: "設備・機械登録",
+    description: "設備・機械登録 / グループ管理",
     accent: "border-t-orange-400",
     iconBg: "bg-orange-50",
     iconColor: "text-orange-500",
-  },
-  {
-    title: "設備グループ",
-    href: "/master/equipment-groups",
-    icon: Layers,
-    description: "設備グループ設定",
-    accent: "border-t-purple-500",
-    iconBg: "bg-purple-50",
-    iconColor: "text-purple-600",
   },
   {
     title: "稼働カレンダー",
