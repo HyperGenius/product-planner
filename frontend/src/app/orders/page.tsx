@@ -1,10 +1,25 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { CheckCircle, Plus } from "lucide-react"
+import { AlertTriangle, CheckCircle, MoreHorizontal, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -22,7 +37,9 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MasterPagination } from "@/components/master-pagination"
-import { useConfirmOrder, useOrders } from "@/hooks/use-orders"
+import { ProductSelector } from "@/components/product-selector"
+import { CustomerSelector } from "@/components/customer-selector"
+import { useConfirmOrder, useOrders, useUpdateOrder } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { format } from "date-fns"
@@ -66,6 +83,131 @@ function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
   return a.desired_deadline.localeCompare(b.desired_deadline)
 }
 
+interface EditOrderDialogProps {
+  order: Order
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogProps) {
+  const updateOrder = useUpdateOrder()
+
+  const [orderNo, setOrderNo] = useState(order.order_no)
+  const [productId, setProductId] = useState(order.product_id.toString())
+  const [customerId, setCustomerId] = useState(order.customer_id?.toString() ?? "")
+  const [quantity, setQuantity] = useState(order.quantity.toString())
+  const [desiredDeadline, setDesiredDeadline] = useState(
+    order.desired_deadline ? order.desired_deadline.slice(0, 16) : ""
+  )
+  const [duplicateError, setDuplicateError] = useState("")
+
+  const productChanged = productId !== order.product_id.toString()
+  const quantityChanged = quantity !== order.quantity.toString()
+  const showScheduleWarning = order.is_scheduled && (productChanged || quantityChanged)
+
+  const handleSubmit = () => {
+    setDuplicateError("")
+    const parsedQuantity = parseInt(quantity, 10)
+    if (!orderNo.trim() || !productId || isNaN(parsedQuantity) || parsedQuantity <= 0) return
+
+    updateOrder.mutate(
+      {
+        id: order.id,
+        data: {
+          order_no: orderNo.trim(),
+          product_id: parseInt(productId, 10),
+          customer_id: customerId ? parseInt(customerId, 10) : undefined,
+          quantity: parsedQuantity,
+          desired_deadline: desiredDeadline || undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success("注文情報を更新しました")
+          onOpenChange(false)
+        },
+        onError: (error: Error) => {
+          if (error.message.includes("400") || error.message.toLowerCase().includes("duplicate") || error.message.includes("already")) {
+            setDuplicateError("この注文番号はすでに使用されています")
+          } else {
+            toast.error(`更新に失敗しました: ${error.message}`)
+          }
+        },
+      }
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle>注文の編集</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {showScheduleWarning && (
+            <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                スケジュールが無効になります。保存後に再シミュレーションが必要です。
+              </span>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="order-no">注文番号 *</Label>
+            <Input
+              id="order-no"
+              value={orderNo}
+              onChange={(e) => {
+                setOrderNo(e.target.value)
+                setDuplicateError("")
+              }}
+            />
+            {duplicateError && (
+              <p className="text-sm text-destructive">{duplicateError}</p>
+            )}
+          </div>
+
+          <ProductSelector value={productId} onValueChange={setProductId} />
+
+          <CustomerSelector value={customerId} onValueChange={setCustomerId} />
+
+          <div className="space-y-2">
+            <Label htmlFor="quantity">数量 *</Label>
+            <Input
+              id="quantity"
+              type="number"
+              min={1}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="desired-deadline">希望納期</Label>
+            <Input
+              id="desired-deadline"
+              type="datetime-local"
+              value={desiredDeadline}
+              onChange={(e) => setDesiredDeadline(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            キャンセル
+          </Button>
+          <Button onClick={handleSubmit} disabled={updateOrder.isPending}>
+            {updateOrder.isPending ? "保存中..." : "保存"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /**
  * 注文一覧画面
  * URL: /orders
@@ -77,6 +219,9 @@ export default function OrdersPage() {
   const statusFilter = (searchParams.get("status") ?? "") as StatusFilter
   const sortKey = (searchParams.get("sort") ?? "created_at_desc") as SortKey
   const page = Number(searchParams.get("page") ?? "1")
+
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
@@ -120,6 +265,11 @@ export default function OrdersPage() {
         toast.error(`確定に失敗しました: ${error.message}`)
       },
     })
+  }
+
+  const handleOpenEditDialog = (order: Order) => {
+    setSelectedOrder(order)
+    setIsEditDialogOpen(true)
   }
 
   const isLoading = ordersLoading || productsLoading || customersLoading
@@ -212,17 +362,32 @@ export default function OrdersPage() {
                   </TableCell>
                   <TableCell>{getStatusLabel(order.status)}</TableCell>
                   <TableCell className="text-right">
-                    {order.status === "draft" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleConfirmOrder(order.id, order.order_no)}
-                        disabled={confirmOrder.isPending}
-                      >
-                        <CheckCircle className="mr-1 h-3 w-3" />
-                        確定
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      {order.status === "draft" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleConfirmOrder(order.id, order.order_no)}
+                          disabled={confirmOrder.isPending}
+                        >
+                          <CheckCircle className="mr-1 h-3 w-3" />
+                          確定
+                        </Button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">メニューを開く</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleOpenEditDialog(order)}>
+                            編集
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -250,6 +415,14 @@ export default function OrdersPage() {
       </div>
 
       <MasterPagination totalCount={filteredOrders.length} pageSize={PAGE_SIZE} />
+
+      {selectedOrder && (
+        <EditOrderDialog
+          order={selectedOrder}
+          open={isEditDialogOpen}
+          onOpenChange={setIsEditDialogOpen}
+        />
+      )}
     </div>
   )
 }
