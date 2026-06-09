@@ -13,12 +13,12 @@ export default function MasterPage() {
         {masterItems.map((item) => (
           <Link key={item.href} href={item.href} className="group">
             <div
-              className={`rounded-lg border-t-4 ${item.accent} border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent/40`}
+              className={`rounded-lg border-t-4 ${item.accent} border border-border bg-card p-5 shadow-sm transition-colors hover:bg-accent/40 min-h-[120px]`}
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-muted-foreground mb-1">{item.title}</p>
-                  <p className="text-xs text-muted-foreground/70 leading-relaxed">{item.description}</p>
+                  <p className="text-md font-medium mb-1">{item.title}</p>
+                  <p className="text-sm text-muted-foreground/70 leading-relaxed">{item.description}</p>
                 </div>
                 <div className={`rounded-lg ${item.iconBg} p-2.5 ml-4 shrink-0`}>
                   <item.icon className={`h-5 w-5 ${item.iconColor}`} />
