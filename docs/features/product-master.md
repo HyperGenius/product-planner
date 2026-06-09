@@ -3,7 +3,8 @@
 ## 概要
 
 製品・品番の登録・管理を行うマスタデータ画面。
-`/master/products` からアクセスし、製品の CRUD 操作と工程管理を提供する。
+`/master/products` からアクセスし、製品の CRUD 操作・工程管理・有効/無効切り替えを提供する。
+マスタ画面の**基準実装**として設計されており、他マスタ画面のリファクタリング時の参照元となる（→ [マスタ管理画面 設計ガイド](./master-screen-design.md)）。
 
 ## URL
 
@@ -11,6 +12,7 @@
 |---|---|
 | `/master` | マスタデータカード一覧（各マスタへのナビゲーション） |
 | `/master/products` | 製品マスタ一覧 |
+| `/master/products?sort=product_code&page=2` | ソート・ページ状態付き URL の例 |
 
 ## データモデル
 
@@ -22,6 +24,7 @@ interface Product {
   type: string       // 種別（旧フィールド。新規データでは空）
   is_active: boolean
   tenant_id: string
+  created_at: string
 }
 ```
 
@@ -40,28 +43,44 @@ const displayName = product.code ? product.name : null  // 製品名として表
 ## 機能一覧
 
 ### 一覧表示
-- 3列構成：品番/製品名 / 状態 / 操作メニュー
-- 品番はモノスペースフォントで表示
-- 状態はドット（緑/グレー）＋テキスト（有効/無効）で表示
 
-### 検索・フィルター
+- 3列構成：品番/製品名 / 状態 / 操作メニュー
+- 1ページ `PAGE_SIZE = 20` 件。件数が超えた場合のみページネーション表示
+- コンテンツ幅上限 `max-w-[860px]`（`master/layout.tsx` で全マスタ共通適用）
+
+### 検索・フィルター・ソート
+
 - テキスト検索：品番・製品名を横断検索
-- 状態フィルター：すべて / 有効 / 無効
+- ステータスフィルター：すべて / 有効 / 無効
+- 並べ替えセレクト：登録順 / 品番順 / 製品名順
+- ソート・ページ状態は URL クエリパラメータ（`?sort=`, `?page=`）に保持
 
 ### ケバブメニュー（⋮）
-- **編集**: 品番・製品名を変更するダイアログ
-- **工程管理**: 製造工程ルーティングを管理（`ProductRoutingsDialog`）
-- **有効化 / 無効化**: 状態をトグル
-- **削除**: 確認ダイアログ付き（取り消し不可）
+
+| 項目 | 権限 | 動作 |
+|---|---|---|
+| 編集 | 全員 | 品番・製品名を変更するダイアログ |
+| 工程管理 | 全員 | 製造工程ルーティングを管理（`ProductRoutingsDialog`） |
+| 有効化 / 無効化 | admin のみ | 確認モーダル経由で状態変更 |
+| 削除 | admin のみ | 確認ダイアログ付き（取り消し不可） |
+
+### 有効/無効切り替え
+
+- 確認モーダルで製品名・影響範囲（新規受注の選択候補から除外）を表示してから実行
+- 無効化した製品は `product-selector.tsx` のコンボボックスから自動的に除外される
 
 ## 関連ファイル
 
 | ファイル | 役割 |
 |---|---|
+| `frontend/src/app/master/layout.tsx` | 全マスタ共通幅制限 |
 | `frontend/src/app/master/page.tsx` | マスタデータトップ（カード一覧） |
-| `frontend/src/app/master/products/page.tsx` | 製品マスタ一覧ページ |
+| `frontend/src/app/master/products/page.tsx` | 製品マスタ一覧ページ（基準実装） |
 | `frontend/src/hooks/use-products.ts` | TanStack Query フック群 |
+| `frontend/src/hooks/use-tenant-members.ts` | `useCurrentMember()` フック（権限制御） |
+| `frontend/src/components/master-pagination.tsx` | 共通ページネーション |
 | `frontend/src/components/product-routings-dialog.tsx` | 工程管理ダイアログ |
+| `frontend/src/components/product-selector.tsx` | 受注入力の製品選択（有効製品のみ表示） |
 | `backend/app/routers/master/products.py` | REST API エンドポイント |
 
 ## 変更履歴
@@ -69,3 +88,4 @@ const displayName = product.code ? product.name : null  // 製品名として表
 | PR | 内容 |
 |---|---|
 | #105 | 製品マスタ画面の再設計（Issue #104）。テーブル列統合・ケバブメニュー・検索フィルター追加 |
+| #106 | 並べ替え機能・状態変更モーダル化・ページネーション・幅制限追加（Issue #106） |
