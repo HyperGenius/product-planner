@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { Circle, MoreHorizontal, Plus, Search } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -10,6 +11,7 @@ import {
   useDeleteProduct,
   useToggleProductActive,
 } from "@/hooks/use-products"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import type { Product } from "@/types/product"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,13 +49,26 @@ import {
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 
 type StatusFilter = "all" | "active" | "inactive"
+type SortKey = "created_at" | "product_code" | "name"
+
+const SORT_OPTIONS: { label: string; value: SortKey }[] = [
+  { label: "並び順: 登録順", value: "created_at" },
+  { label: "並び順: 品番順", value: "product_code" },
+  { label: "並び順: 製品名順", value: "name" },
+]
 
 export default function ProductsPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const sortKey = (searchParams.get("sort") as SortKey) ?? "created_at"
+
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isRoutingsDialogOpen, setIsRoutingsDialogOpen] = useState(false)
+  const [isToggleActiveDialogOpen, setIsToggleActiveDialogOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [toggleActiveTarget, setToggleActiveTarget] = useState<Product | null>(null)
   const [productName, setProductName] = useState("")
   const [productCode, setProductCode] = useState("")
   const [productType, setProductType] = useState("")
@@ -61,6 +76,9 @@ export default function ProductsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
   const { data: products, isLoading, error } = useProducts()
+  const { data: currentMember } = useCurrentMember()
+  const isAdmin = currentMember?.role === "admin"
+
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
@@ -68,21 +86,27 @@ export default function ProductsPage() {
 
   const filteredProducts = useMemo(() => {
     if (!products) return []
-    return products.filter((p) => {
-      const displayCode = p.code || p.name
-      const displayName = p.code ? p.name : null
-      const q = searchQuery.toLowerCase()
-      const matchesSearch =
-        !q ||
-        displayCode.toLowerCase().includes(q) ||
-        (displayName?.toLowerCase().includes(q) ?? false)
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "active" && p.is_active) ||
-        (statusFilter === "inactive" && !p.is_active)
-      return matchesSearch && matchesStatus
-    })
-  }, [products, searchQuery, statusFilter])
+    return products
+      .filter((p) => {
+        const displayCode = p.code || p.name
+        const displayName = p.code ? p.name : null
+        const q = searchQuery.toLowerCase()
+        const matchesSearch =
+          !q ||
+          displayCode.toLowerCase().includes(q) ||
+          (displayName?.toLowerCase().includes(q) ?? false)
+        const matchesStatus =
+          statusFilter === "all" ||
+          (statusFilter === "active" && p.is_active) ||
+          (statusFilter === "inactive" && !p.is_active)
+        return matchesSearch && matchesStatus
+      })
+      .sort((a, b) => {
+        if (sortKey === "created_at") return a.created_at.localeCompare(b.created_at)
+        if (sortKey === "product_code") return (a.code || "").localeCompare(b.code || "")
+        return (a.name || "").localeCompare(b.name || "")
+      })
+  }, [products, searchQuery, statusFilter, sortKey])
 
   const handleOpenCreateDialog = () => {
     setProductName("")
@@ -109,15 +133,25 @@ export default function ProductsPage() {
     setIsRoutingsDialogOpen(true)
   }
 
-  const handleToggleActive = async (product: Product) => {
+  const handleOpenToggleActiveDialog = (product: Product) => {
+    setToggleActiveTarget(product)
+    setIsToggleActiveDialogOpen(true)
+  }
+
+  const handleConfirmToggleActive = async () => {
+    if (!toggleActiveTarget) return
     try {
       await toggleActiveMutation.mutateAsync({
-        id: product.id,
-        is_active: !product.is_active,
+        id: toggleActiveTarget.id,
+        is_active: !toggleActiveTarget.is_active,
       })
       toast.success(
-        product.is_active ? `「${product.name}」を無効にしました` : `「${product.name}」を有効にしました`
+        toggleActiveTarget.is_active
+          ? `「${toggleActiveTarget.name}」を無効にしました`
+          : `「${toggleActiveTarget.name}」を有効にしました`
       )
+      setIsToggleActiveDialogOpen(false)
+      setToggleActiveTarget(null)
     } catch {
       toast.error("状態の更新に失敗しました")
     }
@@ -227,6 +261,23 @@ export default function ProductsPage() {
             <SelectItem value="inactive">無効</SelectItem>
           </SelectContent>
         </Select>
+        <Select
+          value={sortKey}
+          onValueChange={(v) => {
+            const params = new URLSearchParams(searchParams.toString())
+            params.set("sort", v)
+            router.push(`?${params.toString()}`)
+          }}
+        >
+          <SelectTrigger className="w-[160px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -283,12 +334,11 @@ export default function ProductsPage() {
                             <DropdownMenuItem onClick={() => handleOpenRoutingsDialog(product)}>
                               工程管理
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => handleToggleActive(product)}
-                              disabled={toggleActiveMutation.isPending}
-                            >
-                              {product.is_active ? "無効化" : "有効化"}
-                            </DropdownMenuItem>
+                            {isAdmin && (
+                              <DropdownMenuItem onClick={() => handleOpenToggleActiveDialog(product)}>
+                                {product.is_active ? "無効化" : "有効化"}
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive"
@@ -416,6 +466,51 @@ export default function ProductsPage() {
               disabled={deleteMutation.isPending}
             >
               {deleteMutation.isPending ? "削除中..." : "削除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 有効/無効切り替え確認ダイアログ */}
+      <Dialog open={isToggleActiveDialogOpen} onOpenChange={setIsToggleActiveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {toggleActiveTarget?.is_active ? "無効化の確認" : "有効化の確認"}
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div>
+                <p>
+                  「{[toggleActiveTarget?.code, toggleActiveTarget?.name].filter(Boolean).join("（") + (toggleActiveTarget?.name ? "）" : "")}」を
+                  {toggleActiveTarget?.is_active ? "無効化" : "有効化"}しますか？
+                </p>
+                {toggleActiveTarget?.is_active && (
+                  <>
+                    <p className="mt-2">無効化すると新規受注時の製品選択に表示されなくなります。</p>
+                    <p>既存の受注・生産計画には影響しません。</p>
+                  </>
+                )}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsToggleActiveDialogOpen(false)
+                setToggleActiveTarget(null)
+              }}
+            >
+              キャンセル
+            </Button>
+            <Button
+              variant={toggleActiveTarget?.is_active ? "destructive" : "default"}
+              onClick={handleConfirmToggleActive}
+              disabled={toggleActiveMutation.isPending}
+            >
+              {toggleActiveMutation.isPending
+                ? "処理中..."
+                : toggleActiveTarget?.is_active ? "無効化する" : "有効化する"}
             </Button>
           </DialogFooter>
         </DialogContent>
