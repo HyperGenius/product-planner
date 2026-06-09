@@ -8,9 +8,6 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Database,
-  Package,
-  Cpu,
-  Layers,
   LogOut,
   User,
   ChevronDown,
@@ -43,7 +40,16 @@ import {
 } from "@/components/ui/collapsible"
 import { logout } from "@/lib/auth-server-actions"
 
-const menuItems = [
+type SubMenuItem = { title: string; url: string; icon: React.ElementType }
+type MenuItem = {
+  title: string
+  icon: React.ElementType
+  url?: string
+  activePrefix?: string
+  items?: SubMenuItem[]
+}
+
+const menuItems: MenuItem[] = [
   {
     title: "ダッシュボード",
     url: "/",
@@ -63,33 +69,7 @@ const menuItems = [
     title: "マスタデータ",
     url: "/master",
     icon: Database,
-    items: [
-      {
-        title: "製品マスタ",
-        url: "/master/products",
-        icon: Package,
-      },
-      {
-        title: "顧客マスタ",
-        url: "/master/customers",
-        icon: Users,
-      },
-      {
-        title: "設備マスタ",
-        url: "/master/equipments",
-        icon: Cpu,
-      },
-      {
-        title: "設備グループ",
-        url: "/master/equipment-groups",
-        icon: Layers,
-      },
-      {
-        title: "稼働カレンダー",
-        url: "/master/calendar",
-        icon: Calendar,
-      },
-    ],
+    activePrefix: "/master",
   },
   {
     title: "設定",
@@ -144,10 +124,7 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                 item.items ? (
                   <Collapsible
                     key={item.title}
-                    defaultOpen={
-                      (item.title === "マスタデータ" && pathname.startsWith("/master")) ||
-                      (item.title === "設定" && pathname.startsWith("/settings"))
-                    }
+                    defaultOpen={item.title === "設定" && pathname.startsWith("/settings")}
                   >
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
@@ -191,8 +168,15 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                   </Collapsible>
                 ) : (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={pathname === item.url}>
-                      <Link href={item.url}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={
+                        item.activePrefix
+                          ? pathname.startsWith(item.activePrefix)
+                          : pathname === item.url
+                      }
+                    >
+                      <Link href={item.url!}>
                         <item.icon className="h-4 w-4" />
                         <span>{item.title}</span>
                       </Link>
