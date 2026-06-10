@@ -6,7 +6,7 @@
 
 ## プロジェクト概要
 
-中小製造業向けの生産計画 SaaS。受注入力 → シミュレーション → 確定 のワークフローで、設備ごとのガントチャート表示・手動調整まで対応するマルチテナントシステム。
+中小製造業向けの生産計画 SaaS。受注入力 → シミュレーション → 確定 のワークフローで、設備ごとのガントチャート表示・手動調整まで対応するマルチテナントシステム。(詳細は[product_planner_knowledge.md](docs/product_planner_knowledge.md) 参照)
 
 - **Backend**: FastAPI (Python) + Supabase (PostgreSQL) + Azure Functions
 - **Frontend**: Next.js 14+ (App Router) + TanStack Query + shadcn/ui
