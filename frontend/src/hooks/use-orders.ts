@@ -91,3 +91,31 @@ export function useConfirmOrder() {
     },
   })
 }
+
+/**
+ * 注文を削除するフック
+ */
+export function useDeleteOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient(`/orders/${orderId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      queryClient.invalidateQueries({ queryKey: ["schedules"] })
+    },
+  })
+}
+
+/**
+ * 既存の注文IDでシミュレーションを実行するフック
+ */
+export function useSimulateOrderById() {
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient<OrderSimulateResponse>(`/orders/${orderId}/simulate`, {
+        method: "POST",
+      }),
+  })
+}
