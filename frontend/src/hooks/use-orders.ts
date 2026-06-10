@@ -55,6 +55,24 @@ export function useCreateOrder() {
 }
 
 /**
+ * 注文を更新するフック
+ */
+export function useUpdateOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Partial<OrderCreate> }) =>
+      apiClient<Order>(`/orders/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
  * 注文を確定するフック
  * スケジュールを作成し、注文ステータスをconfirmedにする
  */

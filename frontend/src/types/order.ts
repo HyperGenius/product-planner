@@ -10,6 +10,7 @@ export interface Order {
   desired_deadline?: string // ISO 8601形式
   confirmed_deadline?: string // ISO 8601形式
   status: 'draft' | 'confirmed' | 'completed' | 'canceled'
+  is_scheduled: boolean
   tenant_id: string
   created_at: string
   updated_at: string
