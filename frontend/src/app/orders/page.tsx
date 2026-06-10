@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle, MoreHorizontal, Plus } from "lucide-react"
 import { toast } from "sonner"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -240,6 +241,15 @@ export default function OrdersPage() {
     router.push(`?${params.toString()}`)
   }
 
+  const draftCount = useMemo(
+    () => orders?.filter((o) => o.status === "draft").length ?? 0,
+    [orders]
+  )
+  const incompleteCount = useMemo(
+    () => orders?.filter((o) => !o.customer_id || !o.desired_deadline).length ?? 0,
+    [orders]
+  )
+
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
@@ -288,6 +298,33 @@ export default function OrdersPage() {
           新規注文
         </Button>
       </div>
+
+      {!isLoading && (draftCount > 0 || incompleteCount > 0) && (
+        <div className="mb-4 grid grid-cols-2 gap-4">
+          {draftCount > 0 && (
+            <Card
+              className="cursor-pointer border-yellow-300 bg-yellow-50 hover:bg-yellow-100 transition-colors"
+              onClick={() => setParam("status", "draft")}
+            >
+              <CardContent className="pt-6">
+                <p className="text-2xl font-bold text-yellow-800">{draftCount}件 未確定</p>
+                <p className="text-sm text-yellow-700 mt-1">下書きを見る →</p>
+              </CardContent>
+            </Card>
+          )}
+          {incompleteCount > 0 && (
+            <Card
+              className="cursor-pointer border-orange-300 bg-orange-50 hover:bg-orange-100 transition-colors"
+              onClick={() => setParam("status", "incomplete")}
+            >
+              <CardContent className="pt-6">
+                <p className="text-2xl font-bold text-orange-800">{incompleteCount}件 情報不足</p>
+                <p className="text-sm text-orange-700 mt-1">確認する →</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
 
       <div className="mb-4 flex items-center justify-between gap-4 flex-wrap">
         <Tabs
