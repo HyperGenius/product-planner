@@ -61,29 +61,45 @@ PATCH /production-schedules/{id}  ← ガントチャート上でドラッグ手
    a. 所要時間の計算
       duration_sec = setup_time_seconds + (unit_time_seconds × quantity)
 
-   b. 設備の選択
-      equipment_group_id が NULL → 設備不要（カレンダー制約のみ）
-      equipment_group_id が存在 →
-        equipment_group_members から設備 ID 一覧を取得
-        各設備の production_schedules.end_datetime（最新）を照会
-        最も早く空く設備を選択（min(last_end_time)）
+   b. 設備の選択（equipment_group_id が NULL の場合は設備不要）
+      equipment_group_members から設備 ID 一覧を取得
+      各設備について以下の順で候補時刻を計算:
 
-   c. 開始時刻の決定
-      start = max(選択設備の最終終了時刻, 前工程の終了時刻)
-      get_next_available_start_time() で稼働時間内に丸め込み
+      [ギャップ詰め込みフロー]
+      1. スケジューリングパラメータを解決（設備 > グループ > グローバルの優先度）
+         - guard_time_minutes: スケジュール間のバッファ時間
+         - min_slot_minutes:   利用可能と見なすギャップの最低時間
+         - max_fragments:      1 工程の最大分割数
+      2. 既存スケジュールのギャップリストを構築（guard_time を考慮）
+      3. greedy にギャップへ詰め込み（split_work_in_window）
+      4. 断片数 > max_fragments または全量未収容 → フォールバックへ
+      5. [フォールバック] 末尾追加: max(last_end_time, 前工程終了) から開始
 
-   d. 複数日への分割
-      split_work_across_days() で 1 日の稼働上限を超える場合に分割
-      → list[(start_datetime, end_datetime)] のセグメント列を生成
+      最も早く完了できる設備を選定
 
-   e. スケジュールレコードの生成（dry_run=False 時は DB INSERT）
-      各セグメントを production_schedules に追加
+   c. 複数日への分割
+      ギャップ詰め込み成功時 → 算出済みセグメントをそのまま使用
+      フォールバック時 → split_work_across_days() で分割
 
-   f. current_process_start を今工程の最終セグメント end_datetime に更新
-      → 次工程はここから続けて計算
+   d. スケジュールレコードの生成（dry_run=False 時は DB INSERT）
+
+   e. current_process_start を今工程の最終セグメント end_datetime に更新
 
 3. 全工程分のスケジュールセグメントを返す
 ```
+
+### スケジューリングパラメータ設定
+
+| パラメータ | デフォルト | 説明 |
+|---|---|---|
+| `guard_time_minutes` | 0 | スケジュール間の最小バッファ（段取り替え時間） |
+| `min_slot_minutes` | 0 | ギャップを利用可能と見なす最低時間 |
+| `max_fragments` | 10 | 1 工程あたりの最大セグメント分割数 |
+
+設定の優先度: **設備 > 設備グループ > グローバル（テナント全体）**
+
+- グローバル設定: `GET/PUT /scheduling-settings` または `/settings/scheduling` ページ
+- 設備グループ・設備: 各マスタ管理画面の「スケジューリング設定」欄
 
 ### dry_run フラグの動作
 
