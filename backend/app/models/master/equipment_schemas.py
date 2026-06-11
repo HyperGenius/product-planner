@@ -10,6 +10,15 @@ class EquipmentGroupBase(BaseSchema):
     """設備グループのベーススキーマ"""
 
     name: str = Field(default=..., description="設備グループ名")
+    guard_time_minutes: int | None = Field(
+        None, ge=0, description="ガードタイム（分）。NULL=グローバル設定を継承"
+    )
+    min_slot_minutes: int | None = Field(
+        None, ge=0, description="最低時間スロット（分）。NULL=グローバル設定を継承"
+    )
+    max_fragments: int | None = Field(
+        None, ge=1, description="最大断片数。NULL=グローバル設定を継承"
+    )
 
 
 class EquipmentGroupCreate(EquipmentGroupBase):
@@ -29,6 +38,17 @@ class EquipmentBase(BaseSchema):
     """設備のベーススキーマ"""
 
     name: str = Field(default=..., description="設備名")
+    guard_time_minutes: int | None = Field(
+        None, ge=0, description="ガードタイム（分）。NULL=グループ/グローバル設定を継承"
+    )
+    min_slot_minutes: int | None = Field(
+        None,
+        ge=0,
+        description="最低時間スロット（分）。NULL=グループ/グローバル設定を継承",
+    )
+    max_fragments: int | None = Field(
+        None, ge=1, description="最大断片数。NULL=グループ/グローバル設定を継承"
+    )
 
 
 class EquipmentCreate(EquipmentBase):

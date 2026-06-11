@@ -56,6 +56,63 @@ import { EquipmentGroupAssignmentDialog } from "@/components/equipment-group-ass
 
 type GroupDialogMode = "create" | "edit" | null
 
+interface SchedulingParamFieldsProps {
+  guardTime: string
+  minSlot: string
+  maxFragments: string
+  onGuardTimeChange: (v: string) => void
+  onMinSlotChange: (v: string) => void
+  onMaxFragmentsChange: (v: string) => void
+  idPrefix: string
+}
+
+function SchedulingParamFields({
+  guardTime, minSlot, maxFragments,
+  onGuardTimeChange, onMinSlotChange, onMaxFragmentsChange,
+  idPrefix,
+}: SchedulingParamFieldsProps) {
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        スケジューリング設定（空欄 = グローバル設定を使用）
+      </p>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-guard`}>ガードタイム（分）</Label>
+        <Input
+          id={`${idPrefix}-guard`}
+          type="number"
+          min={0}
+          value={guardTime}
+          onChange={(e) => onGuardTimeChange(e.target.value)}
+          placeholder="デフォルト使用中"
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-min-slot`}>最低時間スロット（分）</Label>
+        <Input
+          id={`${idPrefix}-min-slot`}
+          type="number"
+          min={0}
+          value={minSlot}
+          onChange={(e) => onMinSlotChange(e.target.value)}
+          placeholder="デフォルト使用中"
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-max-frag`}>最大断片数</Label>
+        <Input
+          id={`${idPrefix}-max-frag`}
+          type="number"
+          min={1}
+          value={maxFragments}
+          onChange={(e) => onMaxFragmentsChange(e.target.value)}
+          placeholder="デフォルト使用中"
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function EquipmentsPage() {
   // ── 設備一覧タブの状態 ──────────────────────────────────────────
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
@@ -63,6 +120,9 @@ export default function EquipmentsPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null)
   const [equipmentName, setEquipmentName] = useState("")
+  const [equipGuardTime, setEquipGuardTime] = useState("")
+  const [equipMinSlot, setEquipMinSlot] = useState("")
+  const [equipMaxFragments, setEquipMaxFragments] = useState("")
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
   const [equipmentForAssignment, setEquipmentForAssignment] = useState<Equipment | null>(null)
 
@@ -70,6 +130,9 @@ export default function EquipmentsPage() {
   const [groupDialogMode, setGroupDialogMode] = useState<GroupDialogMode>(null)
   const [selectedGroup, setSelectedGroup] = useState<EquipmentGroup | null>(null)
   const [groupName, setGroupName] = useState("")
+  const [groupGuardTime, setGroupGuardTime] = useState("")
+  const [groupMinSlot, setGroupMinSlot] = useState("")
+  const [groupMaxFragments, setGroupMaxFragments] = useState("")
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false)
   const [groupToDelete, setGroupToDelete] = useState<EquipmentGroup | null>(null)
   const [membersDialogOpen, setMembersDialogOpen] = useState(false)
@@ -104,12 +167,18 @@ export default function EquipmentsPage() {
   // ── 設備タブのハンドラ ────────────────────────────────────────
   const handleOpenCreateDialog = () => {
     setEquipmentName("")
+    setEquipGuardTime("")
+    setEquipMinSlot("")
+    setEquipMaxFragments("")
     setIsCreateDialogOpen(true)
   }
 
   const handleOpenEditDialog = (equipment: Equipment) => {
     setSelectedEquipment(equipment)
     setEquipmentName(equipment.name)
+    setEquipGuardTime(equipment.guard_time_minutes != null ? String(equipment.guard_time_minutes) : "")
+    setEquipMinSlot(equipment.min_slot_minutes != null ? String(equipment.min_slot_minutes) : "")
+    setEquipMaxFragments(equipment.max_fragments != null ? String(equipment.max_fragments) : "")
     setIsEditDialogOpen(true)
   }
 
@@ -123,13 +192,20 @@ export default function EquipmentsPage() {
     setAssignmentDialogOpen(true)
   }
 
+  const parseOptionalInt = (val: string) => (val.trim() === "" ? null : parseInt(val, 10))
+
   const handleCreate = async () => {
     if (!equipmentName.trim()) {
       toast.error("設備名を入力してください")
       return
     }
     try {
-      await createEquipmentMutation.mutateAsync({ name: equipmentName })
+      await createEquipmentMutation.mutateAsync({
+        name: equipmentName,
+        guard_time_minutes: parseOptionalInt(equipGuardTime),
+        min_slot_minutes: parseOptionalInt(equipMinSlot),
+        max_fragments: parseOptionalInt(equipMaxFragments),
+      })
       toast.success("設備を作成しました")
       setIsCreateDialogOpen(false)
       setEquipmentName("")
@@ -148,7 +224,12 @@ export default function EquipmentsPage() {
     try {
       await updateEquipmentMutation.mutateAsync({
         id: selectedEquipment.id,
-        data: { name: equipmentName },
+        data: {
+          name: equipmentName,
+          guard_time_minutes: parseOptionalInt(equipGuardTime),
+          min_slot_minutes: parseOptionalInt(equipMinSlot),
+          max_fragments: parseOptionalInt(equipMaxFragments),
+        },
       })
       toast.success("設備を更新しました")
       setIsEditDialogOpen(false)
@@ -176,12 +257,18 @@ export default function EquipmentsPage() {
   // ── グループタブのハンドラ ────────────────────────────────────
   const handleOpenGroupCreateDialog = () => {
     setGroupName("")
+    setGroupGuardTime("")
+    setGroupMinSlot("")
+    setGroupMaxFragments("")
     setSelectedGroup(null)
     setGroupDialogMode("create")
   }
 
   const handleOpenGroupEditDialog = (group: EquipmentGroup) => {
     setGroupName(group.name)
+    setGroupGuardTime(group.guard_time_minutes != null ? String(group.guard_time_minutes) : "")
+    setGroupMinSlot(group.min_slot_minutes != null ? String(group.min_slot_minutes) : "")
+    setGroupMaxFragments(group.max_fragments != null ? String(group.max_fragments) : "")
     setSelectedGroup(group)
     setGroupDialogMode("edit")
   }
@@ -190,6 +277,9 @@ export default function EquipmentsPage() {
     setGroupDialogMode(null)
     setSelectedGroup(null)
     setGroupName("")
+    setGroupGuardTime("")
+    setGroupMinSlot("")
+    setGroupMaxFragments("")
   }
 
   const handleGroupSubmit = async (e: React.FormEvent) => {
@@ -198,15 +288,18 @@ export default function EquipmentsPage() {
       toast.error("グループ名を入力してください")
       return
     }
+    const groupData = {
+      name: groupName,
+      guard_time_minutes: parseOptionalInt(groupGuardTime),
+      min_slot_minutes: parseOptionalInt(groupMinSlot),
+      max_fragments: parseOptionalInt(groupMaxFragments),
+    }
     try {
       if (groupDialogMode === "create") {
-        await createGroupMutation.mutateAsync({ name: groupName })
+        await createGroupMutation.mutateAsync(groupData)
         toast.success("設備グループを作成しました")
       } else if (groupDialogMode === "edit" && selectedGroup) {
-        await updateGroupMutation.mutateAsync({
-          id: selectedGroup.id,
-          data: { name: groupName },
-        })
+        await updateGroupMutation.mutateAsync({ id: selectedGroup.id, data: groupData })
         toast.success("設備グループを更新しました")
       }
       handleCloseGroupDialog()
@@ -437,6 +530,15 @@ export default function EquipmentsPage() {
                 placeholder="例: 切断機A"
               />
             </div>
+            <SchedulingParamFields
+              guardTime={equipGuardTime}
+              minSlot={equipMinSlot}
+              maxFragments={equipMaxFragments}
+              onGuardTimeChange={setEquipGuardTime}
+              onMinSlotChange={setEquipMinSlot}
+              onMaxFragmentsChange={setEquipMaxFragments}
+              idPrefix="create-equip"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -466,6 +568,15 @@ export default function EquipmentsPage() {
                 placeholder="例: 切断機A"
               />
             </div>
+            <SchedulingParamFields
+              guardTime={equipGuardTime}
+              minSlot={equipMinSlot}
+              maxFragments={equipMaxFragments}
+              onGuardTimeChange={setEquipGuardTime}
+              onMinSlotChange={setEquipMinSlot}
+              onMaxFragmentsChange={setEquipMaxFragments}
+              idPrefix="edit-equip"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
@@ -528,6 +639,15 @@ export default function EquipmentsPage() {
                   autoComplete="off"
                 />
               </div>
+              <SchedulingParamFields
+                guardTime={groupGuardTime}
+                minSlot={groupMinSlot}
+                maxFragments={groupMaxFragments}
+                onGuardTimeChange={setGroupGuardTime}
+                onMinSlotChange={setGroupMinSlot}
+                onMaxFragmentsChange={setGroupMaxFragments}
+                idPrefix="group"
+              />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleCloseGroupDialog}>

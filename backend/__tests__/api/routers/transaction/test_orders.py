@@ -11,6 +11,7 @@ from app.dependencies import (
 
 # テスト対象のAPIインスタンス
 from app.main import app
+from app.routers.transaction.orders import get_settings_repo
 from fastapi.testclient import TestClient
 
 # テストクライアントの作成
@@ -45,9 +46,20 @@ class TestOrderRouter:
         mock = MagicMock()
         return mock
 
+    @pytest.fixture
+    def mock_settings_repo(self):
+        mock = MagicMock()
+        mock.get.return_value = None
+        return mock
+
     @pytest.fixture(autouse=True)
     def override_dependency(
-        self, mock_repo, mock_product_repo, mock_equipment_repo, mock_schedule_repo
+        self,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_settings_repo,
     ):
         """
         テスト実行中だけ依存関係を mock に差し替える。
@@ -56,6 +68,7 @@ class TestOrderRouter:
         app.dependency_overrides[get_product_repo] = lambda: mock_product_repo
         app.dependency_overrides[get_equipment_repo] = lambda: mock_equipment_repo
         app.dependency_overrides[get_schedule_repo] = lambda: mock_schedule_repo
+        app.dependency_overrides[get_settings_repo] = lambda: mock_settings_repo
         yield
         app.dependency_overrides = {}
 
@@ -182,6 +195,7 @@ class TestOrderRouter:
 
         # 設備の最終終了時刻
         mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # 新しいRepositoryメソッドのモック
         mock_product_repo.get_process_name.return_value = "テスト工程"
@@ -247,6 +261,7 @@ class TestOrderRouter:
 
         # 設備の最終終了時刻
         mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
         mock_schedule_repo.create.return_value = None
 
         # 更新のMock
@@ -260,8 +275,8 @@ class TestOrderRouter:
         assert result["status"] == "confirmed"
         assert "schedules" in result
         assert isinstance(result["schedules"], list)
-        # dry_run=False のため、schedule_repo.create が呼ばれる
-        mock_schedule_repo.create.assert_called_once()
+        # dry_run=False のため、schedule_repo.create が1回以上呼ばれる（日またぎで複数回の場合あり）
+        assert mock_schedule_repo.create.call_count >= 1
         # ステータスが更新される
         mock_repo.update.assert_called_once_with(
             order_id, {"status": "confirmed", "is_scheduled": True}

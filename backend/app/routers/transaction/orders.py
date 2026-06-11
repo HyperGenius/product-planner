@@ -9,11 +9,15 @@ from app.dependencies import (
     get_order_repo,
     get_product_repo,
     get_schedule_repo,
+    get_supabase_client,
 )
 from app.models.transaction.order_schema import (
     OrderCreate,
     OrderSimulateRequest,
     OrderUpdate,
+)
+from app.repositories.supa_infra.common.scheduling_settings_repo import (
+    SchedulingSettingsRepository,
 )
 from app.repositories.supa_infra.master.equipment_repo import EquipmentRepository
 from app.repositories.supa_infra.master.product_repo import ProductRepository
@@ -22,6 +26,7 @@ from app.repositories.supa_infra.transaction.schedule_repo import ScheduleReposi
 from app.scheduler_logic import schedule_order
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
+from supabase import Client
 
 orders_router = APIRouter(prefix="/orders", tags=["Transaction (Orders)"])
 
@@ -98,6 +103,12 @@ def delete_order(order_id: int, repo: OrderRepository = Depends(get_order_repo))
     return {"status": "deleted"}
 
 
+def get_settings_repo(
+    client: Client = Depends(get_supabase_client),
+) -> SchedulingSettingsRepository:
+    return SchedulingSettingsRepository(client)
+
+
 @orders_router.post("/simulate")
 def simulate_schedule_without_id(
     order_data: OrderSimulateRequest,
@@ -105,6 +116,7 @@ def simulate_schedule_without_id(
     product_repo: ProductRepository = Depends(get_product_repo),
     equipment_repo: EquipmentRepository = Depends(get_equipment_repo),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
 ):
     """
     スケジュールのシミュレーションを行う（DB保存なし）。
@@ -115,7 +127,6 @@ def simulate_schedule_without_id(
     )
 
     try:
-        # dry_run=True で実行（order_id は None）
         result = schedule_order(
             order_id=None,
             product_id=order_data.product_id,
@@ -124,6 +135,7 @@ def simulate_schedule_without_id(
             schedule_repo=schedule_repo,
             tenant_id=tenant_id,
             dry_run=True,
+            settings_repo=settings_repo,
         )
         return build_simulate_response(
             result, order_data.deadline_date, product_repo, equipment_repo
@@ -140,6 +152,7 @@ def simulate_schedule(
     product_repo: ProductRepository = Depends(get_product_repo),
     equipment_repo: EquipmentRepository = Depends(get_equipment_repo),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
 ):
     """
     スケジュールのシミュレーションを行う（DB保存なし）。
@@ -151,7 +164,6 @@ def simulate_schedule(
         raise HTTPException(status_code=404, detail="Order not found")
 
     try:
-        # dry_run=True で実行
         result = schedule_order(
             order_id=order["id"],
             product_id=order["product_id"],
@@ -160,6 +172,7 @@ def simulate_schedule(
             schedule_repo=schedule_repo,
             tenant_id=tenant_id,
             dry_run=True,
+            settings_repo=settings_repo,
         )
         return build_simulate_response(
             result, order.get("desired_deadline"), product_repo, equipment_repo
@@ -175,6 +188,7 @@ def confirm_order(
     order_repo: OrderRepository = Depends(get_order_repo),
     product_repo: ProductRepository = Depends(get_product_repo),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
 ):
     """
     スケジュールを確定・保存し、注文ステータスをconfirmedにする。
@@ -194,6 +208,7 @@ def confirm_order(
             schedule_repo=schedule_repo,
             tenant_id=tenant_id,
             dry_run=False,
+            settings_repo=settings_repo,
         )
 
         # 2. ステータス更新 & is_scheduled フラグ更新

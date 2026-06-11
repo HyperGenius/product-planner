@@ -15,4 +15,4 @@ class SupabaseTableName(Enum):
     EQUIPMENT_GROUP_MEMBERS = "equipment_group_members"
     PRODUCTION_SCHEDULES = "production_schedules"
     WORK_CALENDARS = "work_calendars"
-    # Add more table names as needed
+    SCHEDULING_SETTINGS = "scheduling_settings"

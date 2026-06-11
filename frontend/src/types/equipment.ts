@@ -1,24 +1,24 @@
-/**
- * 設備のデータ型
- */
 export interface Equipment {
   id: number
   name: string
   tenant_id: string
   created_at: string
   updated_at: string
+  guard_time_minutes?: number | null
+  min_slot_minutes?: number | null
+  max_fragments?: number | null
 }
 
-/**
- * 設備作成時のデータ型
- */
 export interface EquipmentCreate {
   name: string
+  guard_time_minutes?: number | null
+  min_slot_minutes?: number | null
+  max_fragments?: number | null
 }
 
-/**
- * 設備更新時のデータ型
- */
 export interface EquipmentUpdate {
   name: string
+  guard_time_minutes?: number | null
+  min_slot_minutes?: number | null
+  max_fragments?: number | null
 }

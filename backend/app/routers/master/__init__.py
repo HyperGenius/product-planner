@@ -5,6 +5,7 @@ from .equipment_groups import equipment_group_router
 from .equipments import equipment_router
 from .process_routings import process_routing_router
 from .products import product_router
+from .scheduling_settings import scheduling_settings_router
 
 __all__ = [
     "product_router",
@@ -13,4 +14,5 @@ __all__ = [
     "process_routing_router",
     "calendar_router",
     "customer_router",
+    "scheduling_settings_router",
 ]

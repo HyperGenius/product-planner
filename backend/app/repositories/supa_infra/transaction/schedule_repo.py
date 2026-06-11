@@ -13,6 +13,32 @@ class ScheduleRepository(BaseRepository):
         super().__init__(client, SupabaseTableName.PRODUCTION_SCHEDULES.value)
         self.client = client
 
+    def get_schedules_by_equipment(
+        self, equipment_id: int, start: datetime, end: datetime
+    ) -> list[dict[str, Any]]:
+        """ギャップ計算用: 指定期間の設備スケジュールを start_datetime 昇順で取得する。
+
+        Args:
+            equipment_id: 設備ID
+            start: 取得範囲の開始日時
+            end: 取得範囲の終了日時
+
+        Returns:
+            {"id", "start_datetime", "end_datetime"} のリスト（昇順ソート済み）
+        """
+        res = (
+            self.client.table(self.table_name)
+            .select("id, start_datetime, end_datetime")
+            .eq("equipment_id", equipment_id)
+            .gte("start_datetime", start.isoformat())
+            .lte("start_datetime", end.isoformat())
+            .order("start_datetime", desc=False)
+            .execute()
+        )
+        if not res.data:
+            return []
+        return cast(list[dict[str, Any]], res.data)
+
     def get_last_end_time(self, equipment_id: int) -> datetime | None:
         """指定された設備IDに関連する最後のスケジュールの終了日時を取得する。
 

@@ -378,3 +378,101 @@ def split_work_across_days(
             current_start = get_next_work_start(end_of_day, calendar_config)
 
     return schedules
+
+
+def _break_adjusted_slot_minutes(
+    current_start: datetime,
+    effective_window_end: datetime,
+) -> float:
+    """current_start から effective_window_end までの実稼働分数（昼休憩を除く）を返す。"""
+    slot_minutes = (effective_window_end - current_start).total_seconds() / 60
+    break_start = current_start.replace(
+        hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
+    )
+    break_end_dt = current_start.replace(
+        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
+    )
+    if current_start < break_end_dt and effective_window_end > break_start:
+        overlap_start = max(current_start, break_start)
+        overlap_end = min(effective_window_end, break_end_dt)
+        if overlap_end > overlap_start:
+            slot_minutes -= (overlap_end - overlap_start).total_seconds() / 60
+    return slot_minutes
+
+
+def _is_outside_work_hours(dt: datetime) -> bool:
+    return dt.time() < time(WORK_START_HOUR, 0) or dt.time() >= time(WORK_END_HOUR, 0)
+
+
+def split_work_in_window(
+    start_dt: datetime,
+    window_end: datetime,
+    duration_minutes: float,
+    calendar_config: CalendarConfig | None = None,
+) -> tuple[list[tuple[datetime, datetime]], float]:
+    """ウィンドウ内の稼働時間に duration_minutes を greedy に詰め込む。
+
+    split_work_across_days と同じロジックだが window_end で打ち切る。
+
+    Returns:
+        (segments, remaining_minutes):
+            segments — 実際に詰め込まれた (開始, 終了) のリスト
+            remaining_minutes — ウィンドウに収まらなかった残り時間（分）
+    """
+    if duration_minutes <= 0:
+        return [], 0.0
+
+    segments: list[tuple[datetime, datetime]] = []
+    remaining_duration = duration_minutes
+    current_start = start_dt
+    epsilon = 0.01
+
+    while remaining_duration > epsilon:
+        if current_start >= window_end:
+            break
+
+        if not is_workday(current_start, calendar_config) or _is_outside_work_hours(
+            current_start
+        ):
+            current_start = get_next_work_start(current_start, calendar_config)
+            continue
+
+        end_of_day = current_start.replace(
+            hour=WORK_END_HOUR, minute=0, second=0, microsecond=0
+        )
+        effective_window_end = min(window_end, end_of_day)
+        slot_minutes = _break_adjusted_slot_minutes(current_start, effective_window_end)
+
+        if slot_minutes < epsilon:
+            if effective_window_end >= end_of_day:
+                current_start = get_next_work_start(end_of_day, calendar_config)
+                continue
+            break
+
+        break_start = current_start.replace(
+            hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
+        )
+        if remaining_duration <= slot_minutes + epsilon:
+            end_dt = min(
+                current_start
+                + timedelta(minutes=remaining_duration)
+                + (
+                    timedelta(minutes=BREAK_DURATION_MINUTES)
+                    if current_start < break_start
+                    and current_start + timedelta(minutes=remaining_duration)
+                    > break_start
+                    else timedelta(0)
+                ),
+                effective_window_end,
+            )
+            segments.append((current_start, end_dt))
+            remaining_duration = 0
+        else:
+            segments.append((current_start, effective_window_end))
+            remaining_duration -= slot_minutes
+            if effective_window_end >= end_of_day:
+                current_start = get_next_work_start(end_of_day, calendar_config)
+            else:
+                break
+
+    return segments, remaining_duration
