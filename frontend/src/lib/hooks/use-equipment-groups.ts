@@ -7,14 +7,23 @@ export interface EquipmentGroup {
   organization_id: string
   created_at: string
   updated_at: string
+  guard_time_minutes?: number | null
+  min_slot_minutes?: number | null
+  max_fragments?: number | null
 }
 
 export interface EquipmentGroupCreate {
   name: string
+  guard_time_minutes?: number | null
+  min_slot_minutes?: number | null
+  max_fragments?: number | null
 }
 
 export interface EquipmentGroupUpdate {
   name: string
+  guard_time_minutes?: number | null
+  min_slot_minutes?: number | null
+  max_fragments?: number | null
 }
 
 const EQUIPMENT_GROUPS_KEY = ['equipment-groups']

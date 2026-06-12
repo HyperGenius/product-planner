@@ -46,8 +46,10 @@ class TestScheduleOrder:
 
         mock_schedule_repo.get_last_end_time.side_effect = get_last_end_time_side_effect
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
-        # テスト実行
+        # テスト実行（開始時刻を固定して時刻依存を排除）
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
         result = schedule_order(
             order_id=1,
             product_id=1,
@@ -55,6 +57,7 @@ class TestScheduleOrder:
             product_repo=mock_product_repo,
             schedule_repo=mock_schedule_repo,
             tenant_id="test-tenant-id",
+            start_time=start_time,
         )
 
         # 検証
@@ -108,6 +111,7 @@ class TestScheduleOrder:
         # すべての設備が空き
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（開始時刻を9:00に固定して、日またぎが発生しないようにする）
         start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
@@ -177,6 +181,7 @@ class TestScheduleOrder:
 
         mock_schedule_repo.get_last_end_time.side_effect = get_last_end_time_side_effect
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（数量1個 = 60分）
         result = schedule_order(
@@ -267,6 +272,7 @@ class TestScheduleOrder:
             hour=16, minute=0, second=0, microsecond=0
         )
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         result = schedule_order(
             order_id=6,
@@ -316,8 +322,10 @@ class TestScheduleOrder:
         # 設備の最終終了時刻
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
-        # テスト実行（dry_run=True）
+        # テスト実行（dry_run=True、開始時刻を固定）
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
         result = schedule_order(
             order_id=1,
             product_id=1,
@@ -326,6 +334,7 @@ class TestScheduleOrder:
             schedule_repo=mock_schedule_repo,
             tenant_id="test-tenant-id",
             dry_run=True,
+            start_time=start_time,
         )
 
         # 検証：結果は返されるが、DBには保存されない
@@ -361,8 +370,10 @@ class TestScheduleOrder:
         # 設備の最終終了時刻
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
-        # テスト実行（dry_run=False）
+        # テスト実行（dry_run=False、開始時刻を固定）
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
         result = schedule_order(
             order_id=1,
             product_id=1,
@@ -371,6 +382,7 @@ class TestScheduleOrder:
             schedule_repo=mock_schedule_repo,
             tenant_id="test-tenant-id",
             dry_run=False,
+            start_time=start_time,
         )
 
         # 検証：結果は返され、DBにも保存される
@@ -406,6 +418,7 @@ class TestScheduleOrder:
         # 設備は空き
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（月曜日9:00から開始）
         from datetime import UTC
@@ -436,7 +449,8 @@ class TestScheduleOrder:
         assert end_dt_1.minute == 0
         assert start_dt_1.day == 6  # 月曜日
 
-        # 2日目: 9:00 - 11:00 (2時間)
+        # 2日目: 9:00 - 12:00 (3時間: 10時間 - 7稼働時間(1日目))
+        # 1日目は9:00-17:00で昼休憩1時間を除いた7時間分=420分、残り600-420=180分=3時間
         assert result[1]["order_id"] == 7
         assert result[1]["process_routing_id"] == 1
         assert result[1]["equipment_id"] == 1
@@ -444,7 +458,7 @@ class TestScheduleOrder:
         end_dt_2 = datetime.fromisoformat(result[1]["end_datetime"])
         assert start_dt_2.hour == 9
         assert start_dt_2.minute == 0
-        assert end_dt_2.hour == 11
+        assert end_dt_2.hour == 12
         assert end_dt_2.minute == 0
         assert start_dt_2.day == 7  # 火曜日
 
@@ -477,6 +491,7 @@ class TestScheduleOrder:
         # 設備は空き
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（金曜日14:00から開始）
         from datetime import UTC
@@ -526,6 +541,7 @@ class TestScheduleOrder:
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行
         start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
@@ -578,6 +594,7 @@ class TestScheduleOrder:
         ]
         mock_schedule_repo.get_last_end_time.return_value = None
         mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
         result = schedule_order(
@@ -600,3 +617,135 @@ class TestScheduleOrder:
         end_1 = datetime.fromisoformat(result[0]["end_datetime"])
         start_2 = datetime.fromisoformat(result[1]["start_datetime"])
         assert start_2 >= end_1
+
+
+@pytest.mark.unit
+class TestGapFillScheduling:
+    """ギャップ詰め込みスケジューリングのテスト"""
+
+    def _make_repos(self, routings, machine_ids, existing_schedules=None):
+        """テスト用のモックリポジトリを生成するヘルパー"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        mock_product_repo.get_routings_by_product.return_value = routings
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": mid} for mid in machine_ids
+        ]
+        mock_schedule_repo.create.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = (
+            existing_schedules or []
+        )
+        mock_schedule_repo.get_last_end_time.return_value = None
+        return mock_product_repo, mock_schedule_repo
+
+    def test_gap_fill_fits_in_gap(self) -> None:
+        """既存スケジュールのギャップに収まる場合、ギャップに詰め込まれる"""
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 1800,  # 30分/個
+                "sequence_order": 1,
+            }
+        ]
+        # 月曜 9:00 開始、30分の作業 → 9:30 終了
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        # 既存スケジュール: 10:00-17:00 (gap = 9:00-10:00 = 60分)
+        existing = [
+            {
+                "id": 99,
+                "start_datetime": "2025-01-06T10:00:00+00:00",
+                "end_datetime": "2025-01-06T17:00:00+00:00",
+            }
+        ]
+        mock_product_repo, mock_schedule_repo = self._make_repos(
+            routings, [1], existing
+        )
+
+        result = schedule_order(
+            order_id=100,
+            product_id=1,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=start_time,
+            dry_run=True,
+        )
+
+        assert len(result) == 1
+        start_dt = datetime.fromisoformat(result[0]["start_datetime"])
+        end_dt = datetime.fromisoformat(result[0]["end_datetime"])
+        # ギャップ内 (9:00-10:00) に収まっていること
+        assert start_dt.hour == 9
+        assert start_dt.minute == 0
+        assert end_dt <= datetime(2025, 1, 6, 10, 0, tzinfo=UTC)
+
+    def test_gap_fill_falls_back_on_max_fragments_exceeded(self) -> None:
+        """断片数が最大断片数(1)を超えたとき _try_gap_fill が None を返すこと"""
+        from app.models.common.scheduling_settings import SchedulingParams
+        from app.scheduler_logic import _try_gap_fill
+
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        # 30分ギャップが2つ → 20分ずつ2セグメント必要 → max_fragments=1 で超過
+        existing = [
+            {
+                "id": 1,
+                "start_datetime": "2025-01-06T09:30:00+00:00",
+                "end_datetime": "2025-01-06T10:00:00+00:00",
+            },
+            {
+                "id": 2,
+                "start_datetime": "2025-01-06T10:30:00+00:00",
+                "end_datetime": "2025-01-06T17:00:00+00:00",
+            },
+        ]
+        _, mock_schedule_repo = self._make_repos([], [1], existing)
+        params = SchedulingParams(
+            guard_time_minutes=0, min_slot_minutes=0, max_fragments=1
+        )
+
+        result = _try_gap_fill(
+            machine_id=1,
+            current_process_start=start_time,
+            total_duration_min=50.0,  # 50分: 最初のギャップ30分 + 2つ目から20分必要
+            params=params,
+            schedule_repo=mock_schedule_repo,
+            calendar_config=None,
+        )
+
+        # max_fragments=1 なので2セグメントになった時点で None を返す
+        assert result is None
+
+    def test_gap_fill_respects_guard_time(self) -> None:
+        """ガードタイムが大きい場合、ギャップに入れず None を返すこと"""
+        from app.models.common.scheduling_settings import SchedulingParams
+        from app.scheduler_logic import _try_gap_fill
+
+        # 9:00-9:30 のギャップ (30分) だが guard_time=25分なので有効スロット=5分 → 20分入らない
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        existing = [
+            {
+                "id": 99,
+                "start_datetime": "2025-01-06T09:30:00+00:00",
+                "end_datetime": "2025-01-06T17:00:00+00:00",
+            }
+        ]
+        _, mock_schedule_repo = self._make_repos([], [1], existing)
+        params = SchedulingParams(
+            guard_time_minutes=25, min_slot_minutes=0, max_fragments=10
+        )
+
+        result = _try_gap_fill(
+            machine_id=1,
+            current_process_start=start_time,
+            total_duration_min=20.0,
+            params=params,
+            schedule_repo=mock_schedule_repo,
+            calendar_config=None,
+        )
+
+        # ガードタイムにより有効ギャップが5分しかなく、20分を収められないので None
+        assert result is None
