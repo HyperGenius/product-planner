@@ -5,9 +5,6 @@ from app.repositories.supa_infra.common.scheduling_settings_repo import (
     SchedulingSettingsRepository,
 )
 from app.repositories.supa_infra.master.equipment_repo import EquipmentRepository
-from app.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 _DEFAULT_PARAMS = SchedulingParams(
     guard_time_minutes=0,

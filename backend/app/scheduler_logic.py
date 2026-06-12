@@ -188,13 +188,16 @@ def _select_best_machine(
             actual_start = get_next_available_start_time(
                 base_start, total_duration_min, calendar_config
             )
+            fb_segments = split_work_across_days(
+                actual_start, total_duration_min, calendar_config
+            )
             candidates.append(
                 {
                     "machine_id": machine_id,
                     "start": actual_start,
                     "duration_sec": total_duration_sec,
                     "segments": None,
-                    "completion": actual_start,
+                    "completion": fb_segments[-1][1],
                 }
             )
 
