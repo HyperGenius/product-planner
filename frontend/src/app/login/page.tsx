@@ -53,7 +53,7 @@ export default function LoginPage() {
 
             // 4. リダイレクト (ルーターキャッシュをクリアして遷移)
             router.refresh()
-            router.push('/master/equipment-groups') // 最初の画面へ
+            router.push('/')
 
         } catch (error: any) {
             console.error(error)
