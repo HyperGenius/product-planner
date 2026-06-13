@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { AlertCircle, AlertTriangle, MoreHorizontal, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -450,8 +450,8 @@ export default function OrdersPage() {
               </TableHeader>
               <TableBody>
                 {pagedOrders.map((order) => (
-                  <>
-                    <TableRow key={order.id}>
+                  <Fragment key={order.id}>
+                    <TableRow>
                       <TableCell className="font-medium">{order.order_no}</TableCell>
                       <TableCell>{getProductName(order.product_id, products)}</TableCell>
                       <TableCell>
@@ -581,7 +581,7 @@ export default function OrdersPage() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
