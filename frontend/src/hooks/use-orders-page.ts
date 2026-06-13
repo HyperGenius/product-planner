@@ -65,6 +65,14 @@ export function useOrdersPage() {
     () => orders?.filter((o) => !o.customer_id || !o.desired_deadline).length ?? 0,
     [orders]
   )
+  const noCustomerCount = useMemo(
+    () => orders?.filter((o) => !o.customer_id).length ?? 0,
+    [orders]
+  )
+  const noDeadlineCount = useMemo(
+    () => orders?.filter((o) => !o.desired_deadline).length ?? 0,
+    [orders]
+  )
 
   const filteredOrders = useMemo(() => {
     if (!orders) return []
@@ -152,6 +160,8 @@ export function useOrdersPage() {
     // Derived
     draftCount,
     incompleteCount,
+    noCustomerCount,
+    noDeadlineCount,
     filteredOrders,
     pagedOrders,
     // Dialog state

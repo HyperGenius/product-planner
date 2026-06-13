@@ -30,6 +30,8 @@ export default function OrdersPage() {
     customers,
     draftCount,
     incompleteCount,
+    noCustomerCount,
+    noDeadlineCount,
     filteredOrders,
     pagedOrders,
     isEditDialogOpen,
@@ -71,6 +73,8 @@ export default function OrdersPage() {
           <OrderNotificationCards
             draftCount={draftCount}
             incompleteCount={incompleteCount}
+            noCustomerCount={noCustomerCount}
+            noDeadlineCount={noDeadlineCount}
             onDraftClick={() => setParam("status", "draft")}
             onIncompleteClick={() => setParam("status", "incomplete")}
           />
