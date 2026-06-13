@@ -41,7 +41,8 @@ export default function OrdersPage() {
     expandedSimResult,
     confirmOrder,
     deleteOrder,
-    simulateOrderById,
+    simulatingOrderId,
+    simulationErrorOrderId,
     setParam,
     handleConfirmFromRow,
     handleSimulate,
@@ -106,7 +107,8 @@ export default function OrdersPage() {
                     order={order}
                     products={products}
                     customers={customers}
-                    simulateIsPending={simulateOrderById.isPending}
+                    isSimulating={simulatingOrderId === order.id}
+                    hasSimulationError={simulationErrorOrderId === order.id}
                     confirmIsPending={confirmOrder.isPending}
                     onSimulate={handleSimulate}
                     onConfirm={handleConfirmFromRow}

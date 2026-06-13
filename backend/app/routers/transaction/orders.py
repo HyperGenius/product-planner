@@ -175,7 +175,7 @@ def simulate_schedule(
             settings_repo=settings_repo,
         )
         return build_simulate_response(
-            result, order.get("desired_deadline"), product_repo, equipment_repo
+            result, order.get("deadline_date"), product_repo, equipment_repo
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None

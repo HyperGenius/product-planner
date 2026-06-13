@@ -36,6 +36,8 @@ export function useOrdersPage() {
   const [deleteTargetOrder, setDeleteTargetOrder] = useState<Order | null>(null)
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
   const [expandedSimResult, setExpandedSimResult] = useState<OrderSimulateResponse | null>(null)
+  const [simulatingOrderId, setSimulatingOrderId] = useState<number | null>(null)
+  const [simulationErrorOrderId, setSimulationErrorOrderId] = useState<number | null>(null)
 
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
@@ -90,14 +92,18 @@ export function useOrdersPage() {
   }
 
   const handleSimulate = async (order: Order) => {
+    setSimulatingOrderId(order.id)
+    setSimulationErrorOrderId(null)
     try {
       const result = await simulateOrderById.mutateAsync(order.id)
       setExpandedOrderId(order.id)
       setExpandedSimResult(result)
-      toast.success("シミュレーションが完了しました")
     } catch (error) {
       console.error("Simulation error:", error)
+      setSimulationErrorOrderId(order.id)
       toast.error("シミュレーションに失敗しました")
+    } finally {
+      setSimulatingOrderId(null)
     }
   }
 
@@ -160,6 +166,8 @@ export function useOrdersPage() {
     confirmOrder,
     deleteOrder,
     simulateOrderById,
+    simulatingOrderId,
+    simulationErrorOrderId,
     // Handlers
     handleConfirmFromRow,
     handleSimulate,
