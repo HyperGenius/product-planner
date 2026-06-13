@@ -315,6 +315,40 @@ export function useUpdateOrder() {
 
 ---
 
+## フロントエンド コード構成
+
+### orders/page.tsx リファクタリング後の構成 (#130)
+
+`page.tsx` の肥大化（645行）を解消するため、責務ごとにファイルを分割。
+
+```
+frontend/src/
+  app/orders/
+    page.tsx                              # エントリーポイント（~160行）
+  components/orders/
+    edit-order-dialog.tsx                 # 注文編集ダイアログ
+    delete-order-dialog.tsx               # 削除確認 AlertDialog
+    order-notification-cards.tsx          # 下書き/情報不足サマリーカード
+    orders-filter-bar.tsx                 # ステータスタブ + ソートセレクト
+    order-table-row.tsx                   # テーブル行 + Sim展開行
+  hooks/
+    use-orders-page.ts                    # URL state・データ取得・ハンドラー一式
+  lib/
+    order-utils.ts                        # filterOrder / compareOrders / 定数・型
+```
+
+**`use-orders-page.ts` が提供する値**
+
+| カテゴリ | 主な内容 |
+|---|---|
+| URL state | `statusFilter`, `sortKey`, `page`, `setParam()` |
+| データ | `orders`, `products`, `customers`, `isLoading` |
+| 派生値 | `draftCount`, `incompleteCount`, `filteredOrders`, `pagedOrders` |
+| ダイアログ state | `selectedOrder`, `deleteTargetOrder`, `expandedOrderId`, `expandedSimResult` |
+| ハンドラー | `handleSimulate`, `handleConfirmFromRow`, `handleOpenEditDialog`, `handleConfirmDelete`, `closeSimResult` |
+
+---
+
 ## 実装状況
 
 | 機能 | 優先度 | 状況 |
@@ -334,4 +368,5 @@ export function useUpdateOrder() {
 | 新規注文: 3ステップインジケーター | 中 | ✅ 実装済 (#117) |
 | 新規注文: 入力促進ヒント | 中 | ✅ 実装済 (#117) |
 | 新規注文: 確定前サマリー表示 | 中 | ✅ 実装済 (#117) |
+| 一覧ページ: コード分割リファクタリング | - | ✅ 実装済 (#130) |
 | キャンセル専用エンドポイント | 低 | ❌ 未実装 |
