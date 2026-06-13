@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertCircle, MoreHorizontal } from "lucide-react"
+import { AlertCircle, Loader2, MoreHorizontal } from "lucide-react"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
@@ -31,7 +31,8 @@ interface OrderTableRowProps {
   order: Order
   products?: Product[]
   customers?: Customer[]
-  simulateIsPending: boolean
+  isSimulating: boolean
+  hasSimulationError: boolean
   confirmIsPending: boolean
   onSimulate: (order: Order) => void
   onConfirm: (orderId: number, orderNo: string) => void
@@ -43,7 +44,8 @@ export function OrderTableRow({
   order,
   products,
   customers,
-  simulateIsPending,
+  isSimulating,
+  hasSimulationError,
   confirmIsPending,
   onSimulate,
   onConfirm,
@@ -97,14 +99,29 @@ export function OrderTableRow({
         </TableCell>
         <TableCell className="text-right">
           <div className="flex items-center justify-end gap-2">
+            {hasSimulationError && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                </TooltipTrigger>
+                <TooltipContent>シミュレーションに失敗しました</TooltipContent>
+              </Tooltip>
+            )}
             {order.status === "draft" && !order.is_scheduled && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => onSimulate(order)}
-                disabled={simulateIsPending}
+                disabled={isSimulating}
               >
-                シミュレーション実行
+                {isSimulating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    実行中...
+                  </>
+                ) : (
+                  "シミュレーション実行"
+                )}
               </Button>
             )}
             {order.status === "draft" && order.is_scheduled && (
