@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { cn } from "@/lib/utils"
 import {
   Table,
   TableBody,
@@ -54,6 +55,7 @@ export default function OrdersPage() {
     handleConfirmDelete,
     closeSimResult,
     selectedOrderIds,
+    selectedScheduledCount,
     draftPageOrders,
     allDraftOnPageSelected,
     someDraftOnPageSelected,
@@ -70,7 +72,7 @@ export default function OrdersPage() {
 
   return (
     <TooltipProvider>
-      <div className="container mx-auto py-6 px-4">
+      <div className={cn("container mx-auto py-6 px-4", selectedOrderIds.size > 0 && "pb-24")}>
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">注文一覧</h1>
@@ -108,18 +110,20 @@ export default function OrdersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">
-                    <Checkbox
-                      checked={
-                        allDraftOnPageSelected
-                          ? true
-                          : someDraftOnPageSelected
-                          ? "indeterminate"
-                          : false
-                      }
-                      onCheckedChange={handleToggleSelectAll}
-                      disabled={draftPageOrders.length === 0 || isBulkSimulating || isBulkConfirming}
-                      aria-label="全選択"
-                    />
+                    <div className="flex items-center justify-center">
+                      <Checkbox
+                        checked={
+                          allDraftOnPageSelected
+                            ? true
+                            : someDraftOnPageSelected
+                            ? "indeterminate"
+                            : false
+                        }
+                        onCheckedChange={handleToggleSelectAll}
+                        disabled={draftPageOrders.length === 0 || isBulkSimulating || isBulkConfirming}
+                        aria-label="全選択"
+                      />
+                    </div>
                   </TableHead>
                   <TableHead>注文番号</TableHead>
                   <TableHead>製品</TableHead>
@@ -201,6 +205,7 @@ export default function OrdersPage() {
 
         <BulkActionBar
           selectedCount={selectedOrderIds.size}
+          selectedScheduledCount={selectedScheduledCount}
           isBulkSimulating={isBulkSimulating}
           isBulkConfirming={isBulkConfirming}
           onBulkSimulate={handleBulkSimulate}

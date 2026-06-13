@@ -2,9 +2,15 @@
 
 import { Loader2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 interface BulkActionBarProps {
   selectedCount: number
+  selectedScheduledCount: number
   isBulkSimulating: boolean
   isBulkConfirming: boolean
   onBulkSimulate: () => void
@@ -14,6 +20,7 @@ interface BulkActionBarProps {
 
 export function BulkActionBar({
   selectedCount,
+  selectedScheduledCount,
   isBulkSimulating,
   isBulkConfirming,
   onBulkSimulate,
@@ -23,6 +30,7 @@ export function BulkActionBar({
   if (selectedCount === 0) return null
 
   const isBusy = isBulkSimulating || isBulkConfirming
+  const canConfirm = selectedScheduledCount > 0
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-lg">
@@ -40,26 +48,47 @@ export function BulkActionBar({
           `一括シミュレーション（${selectedCount}件）`
         )}
       </Button>
-      <Button size="sm" onClick={onBulkConfirm} disabled={isBusy}>
-        {isBulkConfirming ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            確定中...
-          </>
-        ) : (
-          `一括確定（${selectedCount}件）`
+      {/* disabled な Button は pointer-events: none のため Tooltip が発火しない。span でラップする */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={!canConfirm ? "cursor-not-allowed" : undefined}>
+            <Button
+              size="sm"
+              onClick={onBulkConfirm}
+              disabled={isBusy || !canConfirm}
+            >
+              {isBulkConfirming ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  確定中...
+                </>
+              ) : (
+                `一括確定（${selectedScheduledCount}件）`
+              )}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        {!canConfirm && (
+          <TooltipContent>
+            シミュレーション済みの注文がありません
+          </TooltipContent>
         )}
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onClearSelection}
-        disabled={isBusy}
-        className="h-8 w-8 p-0"
-        aria-label="選択を解除"
-      >
-        <X className="h-4 w-4" />
-      </Button>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onClearSelection}
+            disabled={isBusy}
+            className="h-8 w-8 p-0"
+            aria-label="選択を解除"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>選択を解除してバーを閉じる</TooltipContent>
+      </Tooltip>
     </div>
   )
 }

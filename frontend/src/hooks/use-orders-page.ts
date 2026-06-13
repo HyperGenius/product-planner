@@ -96,6 +96,12 @@ export function useOrdersPage() {
     () => pagedOrders.filter((o) => o.status === "draft"),
     [pagedOrders]
   )
+  const selectedScheduledCount = useMemo(
+    () => Array.from(selectedOrderIds).filter(
+      (id) => orders?.find((o) => o.id === id)?.is_scheduled
+    ).length,
+    [selectedOrderIds, orders]
+  )
   const allDraftOnPageSelected =
     draftPageOrders.length > 0 && draftPageOrders.every((o) => selectedOrderIds.has(o.id))
   const someDraftOnPageSelected =
@@ -283,6 +289,7 @@ export function useOrdersPage() {
     closeSimResult,
     // Bulk selection
     selectedOrderIds,
+    selectedScheduledCount,
     draftPageOrders,
     allDraftOnPageSelected,
     someDraftOnPageSelected,
