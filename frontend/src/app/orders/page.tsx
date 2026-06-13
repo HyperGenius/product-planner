@@ -14,6 +14,7 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { MasterPagination } from "@/components/master-pagination"
 import { BulkActionBar } from "@/components/orders/bulk-action-bar"
+import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
@@ -66,6 +67,9 @@ export default function OrdersPage() {
     handleClearSelection,
     handleBulkSimulate,
     handleBulkConfirm,
+    bulkSimSummary,
+    bulkSimFailedIds,
+    handleCloseBulkSimSummary,
   } = useOrdersPage()
 
   const expandedOrder = orders?.find((o) => o.id === expandedOrderId) ?? null
@@ -147,6 +151,7 @@ export default function OrdersPage() {
                     confirmIsPending={confirmOrder.isPending}
                     isSelected={selectedOrderIds.has(order.id)}
                     isBulkOperationInProgress={isBulkSimulating || isBulkConfirming}
+                    hasBulkSimFailed={bulkSimFailedIds.has(order.id)}
                     onSimulate={handleSimulate}
                     onConfirm={handleConfirmFromRow}
                     onEdit={handleOpenEditDialog}
@@ -211,6 +216,11 @@ export default function OrdersPage() {
           onBulkSimulate={handleBulkSimulate}
           onBulkConfirm={handleBulkConfirm}
           onClearSelection={handleClearSelection}
+        />
+
+        <BulkSimulateSummaryDialog
+          results={bulkSimSummary}
+          onClose={handleCloseBulkSimSummary}
         />
       </div>
     </TooltipProvider>

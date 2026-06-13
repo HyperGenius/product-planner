@@ -18,7 +18,7 @@ import {
   type StatusFilter,
   type SortKey,
 } from "@/lib/order-utils"
-import type { Order, OrderSimulateResponse } from "@/types/order"
+import type { Order, OrderSimulateResponse, BulkSimulateResult } from "@/types/order"
 
 const PAGE_SIZE = 20
 
@@ -42,6 +42,8 @@ export function useOrdersPage() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set())
   const [isBulkSimulating, setIsBulkSimulating] = useState(false)
   const [isBulkConfirming, setIsBulkConfirming] = useState(false)
+  const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
+  const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
 
   const queryClient = useQueryClient()
 
@@ -109,6 +111,7 @@ export function useOrdersPage() {
 
   useEffect(() => {
     setSelectedOrderIds(new Set())
+    setBulkSimFailedIds(new Set())
   }, [page, statusFilter])
 
   const handleConfirmFromRow = (orderId: number, orderNo: string) => {
@@ -195,26 +198,29 @@ export function useOrdersPage() {
   const handleBulkSimulate = async () => {
     const ids = Array.from(selectedOrderIds)
     setIsBulkSimulating(true)
-    let successCount = 0, failCount = 0
+    setBulkSimFailedIds(new Set())
+    const results: BulkSimulateResult[] = []
     for (const id of ids) {
+      const order = orders?.find((o) => o.id === id)
+      const orderNo = order?.order_no ?? String(id)
       try {
-        await simulateOrderById.mutateAsync(id)
-        successCount++
+        const result = await simulateOrderById.mutateAsync(id)
+        results.push({ orderId: id, orderNo, desiredDeadline: order?.desired_deadline, result })
       } catch {
-        failCount++
+        results.push({ orderId: id, orderNo, desiredDeadline: order?.desired_deadline, result: null })
       }
     }
     await queryClient.invalidateQueries({ queryKey: ["orders"] })
-    setIsBulkSimulating(false)
+    const failedIds = new Set(
+      results.filter((r) => r.result === null || !r.result.is_feasible).map((r) => r.orderId)
+    )
+    setBulkSimFailedIds(failedIds)
     setSelectedOrderIds(new Set())
-    if (failCount === 0) {
-      toast.success(`一括シミュレーション完了: 成功 ${successCount}件`)
-    } else if (successCount === 0) {
-      toast.error(`一括シミュレーション失敗: 失敗 ${failCount}件`)
-    } else {
-      toast.warning(`一括シミュレーション完了: 成功 ${successCount}件 / 失敗 ${failCount}件`)
-    }
+    setIsBulkSimulating(false)
+    setBulkSimSummary(results)
   }
+
+  const handleCloseBulkSimSummary = () => setBulkSimSummary(null)
 
   const handleBulkConfirm = async () => {
     const ids = Array.from(selectedOrderIds)
@@ -300,5 +306,8 @@ export function useOrdersPage() {
     handleClearSelection,
     handleBulkSimulate,
     handleBulkConfirm,
+    bulkSimSummary,
+    bulkSimFailedIds,
+    handleCloseBulkSimSummary,
   }
 }

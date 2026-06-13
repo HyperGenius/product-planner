@@ -37,6 +37,7 @@ interface OrderTableRowProps {
   confirmIsPending: boolean
   isSelected: boolean
   isBulkOperationInProgress: boolean
+  hasBulkSimFailed?: boolean
   onSimulate: (order: Order) => void
   onConfirm: (orderId: number, orderNo: string) => void
   onEdit: (order: Order) => void
@@ -53,6 +54,7 @@ export function OrderTableRow({
   confirmIsPending,
   isSelected,
   isBulkOperationInProgress,
+  hasBulkSimFailed,
   onSimulate,
   onConfirm,
   onEdit,
@@ -60,7 +62,7 @@ export function OrderTableRow({
   onToggleSelect,
 }: OrderTableRowProps) {
   return (
-      <TableRow>
+      <TableRow className={hasBulkSimFailed ? "border-l-[3px] border-l-destructive bg-destructive/5" : undefined}>
         <TableCell className="w-10">
           {order.status === "draft" ? (
             <Checkbox

@@ -54,3 +54,13 @@ export interface OrderSimulateResponse {
   is_feasible: boolean // 希望納期に間に合うか
   process_schedules: ProcessSchedule[]
 }
+
+/**
+ * 一括シミュレーション結果の1件分
+ */
+export interface BulkSimulateResult {
+  orderId: number
+  orderNo: string
+  desiredDeadline?: string // ユーザー希望納期 (ISO 8601形式)
+  result: OrderSimulateResponse | null // null = シミュレーション失敗
+}
