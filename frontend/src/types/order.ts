@@ -12,8 +12,8 @@ export interface Order {
   status: 'draft' | 'confirmed' | 'completed' | 'canceled'
   is_scheduled: boolean
   tenant_id: string
-  created_at: string
-  updated_at: string
+  created_at: string | null
+  updated_at: string | null
 }
 
 /**

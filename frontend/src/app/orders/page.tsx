@@ -104,8 +104,15 @@ function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
 }
 
 function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
-  if (sortKey === "created_at_desc") return b.created_at.localeCompare(a.created_at)
-  if (sortKey === "created_at_asc") return a.created_at.localeCompare(b.created_at)
+  if (sortKey === "created_at_desc" || sortKey === "created_at_asc") {
+    // created_at が null の場合は末尾に
+    if (!a.created_at && !b.created_at) return 0
+    if (!a.created_at) return 1
+    if (!b.created_at) return -1
+    return sortKey === "created_at_desc"
+      ? b.created_at.localeCompare(a.created_at)
+      : a.created_at.localeCompare(b.created_at)
+  }
   // desired_deadline_asc: null を末尾に
   if (!a.desired_deadline && !b.desired_deadline) return 0
   if (!a.desired_deadline) return 1

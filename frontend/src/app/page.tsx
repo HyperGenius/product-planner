@@ -53,13 +53,13 @@ export default function Home() {
   }, [orders])
 
   const weeklyOrdersCount = useMemo(() => {
-    return orders?.filter((order) => new Date(order.created_at) >= weekStart).length ?? 0
+    return orders?.filter((order) => order.created_at && new Date(order.created_at) >= weekStart).length ?? 0
   }, [orders, weekStart])
 
   const recentOrders = useMemo(() => {
     if (!orders) return []
     return [...orders]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
       .slice(0, 5)
   }, [orders])
 
