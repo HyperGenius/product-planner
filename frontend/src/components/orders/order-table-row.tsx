@@ -1,6 +1,5 @@
 "use client"
 
-import { Fragment } from "react"
 import { AlertCircle, MoreHorizontal } from "lucide-react"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
@@ -18,14 +17,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { SimulationResult } from "@/components/simulation-result"
 import {
   getProductName,
   getCustomerName,
   getStatusLabel,
   getStatusBadgeClass,
 } from "@/lib/order-utils"
-import type { Order, OrderSimulateResponse } from "@/types/order"
+import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
@@ -33,35 +31,26 @@ interface OrderTableRowProps {
   order: Order
   products?: Product[]
   customers?: Customer[]
-  expandedOrderId: number | null
-  expandedSimResult: OrderSimulateResponse | null
   simulateIsPending: boolean
   confirmIsPending: boolean
   onSimulate: (order: Order) => void
   onConfirm: (orderId: number, orderNo: string) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
-  onCloseSimResult: () => void
 }
 
 export function OrderTableRow({
   order,
   products,
   customers,
-  expandedOrderId,
-  expandedSimResult,
   simulateIsPending,
   confirmIsPending,
   onSimulate,
   onConfirm,
   onEdit,
   onDelete,
-  onCloseSimResult,
 }: OrderTableRowProps) {
-  const isExpanded = expandedOrderId === order.id
-
   return (
-    <Fragment key={order.id}>
       <TableRow>
         <TableCell className="font-medium">{order.order_no}</TableCell>
         <TableCell>{getProductName(order.product_id, products)}</TableCell>
@@ -159,28 +148,5 @@ export function OrderTableRow({
           </div>
         </TableCell>
       </TableRow>
-      {isExpanded && expandedSimResult && (
-        <TableRow key={`${order.id}-sim`}>
-          <TableCell colSpan={8} className="bg-muted/30 p-4">
-            <SimulationResult
-              result={expandedSimResult}
-              desiredDeadline={order.desired_deadline}
-            />
-            <div className="flex justify-end gap-2 mt-4">
-              <Button variant="outline" size="sm" onClick={onCloseSimResult}>
-                閉じる
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => onConfirm(order.id, order.order_no)}
-                disabled={confirmIsPending}
-              >
-                この内容で確定
-              </Button>
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </Fragment>
   )
 }

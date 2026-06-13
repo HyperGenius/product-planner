@@ -111,7 +111,7 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 | `completed` | (なし) | 詳細確認 |
 | `canceled` | (なし) | 削除 |
 
-**シミュレーション実行**（`POST /orders/{order_id}/simulate`）の結果は、行展開またはサイドシート（右側パネル）で表示する。シミュレーション結果を確認後、「この内容で確定」ボタンで confirm へ移行する。
+**シミュレーション実行**（`POST /orders/{order_id}/simulate`）の結果は、画面右からスライドインするサイドシート（shadcn/ui `Sheet`）で表示する。Sheet フッターに「閉じる」「この内容で確定」ボタンを固定表示し、シミュレーション結果を確認後に confirm へ移行する。同時に開けるシートは 1 件のみで、別の注文のシミュレーション実行で自動的に切り替わる。
 
 ### 入力不足の警告表示
 
@@ -330,7 +330,8 @@ frontend/src/
     delete-order-dialog.tsx               # 削除確認 AlertDialog
     order-notification-cards.tsx          # 下書き/情報不足サマリーカード
     orders-filter-bar.tsx                 # ステータスタブ + ソートセレクト
-    order-table-row.tsx                   # テーブル行 + Sim展開行
+    order-table-row.tsx                   # テーブル行
+    simulation-side-sheet.tsx             # シミュレーション結果サイドシート
   hooks/
     use-orders-page.ts                    # URL state・データ取得・ハンドラー一式
   lib/
@@ -363,6 +364,7 @@ frontend/src/
 | 一覧ページ: ステータスバッジのカラーコード化 | 高 | ✅ 実装済 (#115) |
 | 一覧ページ: アクション体系の整備（is_scheduled連動） | 高 | ✅ 実装済 (#115) |
 | 一覧ページ: シミュレーション結果の行内展開 | 高 | ✅ 実装済 (#115) |
+| 一覧ページ: シミュレーション結果をサイドシート方式に変更 | 高 | ✅ 実装済 (#132) |
 | 一覧ページ: AlertDialogによる削除確認 | 高 | ✅ 実装済 (#115) |
 | 注文編集ダイアログ | 中 | ✅ 実装済 (#116) |
 | 新規注文: 3ステップインジケーター | 中 | ✅ 実装済 (#117) |

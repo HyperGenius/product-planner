@@ -16,6 +16,7 @@ import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
 import { OrderTableRow } from "@/components/orders/order-table-row"
+import { SimulationSideSheet } from "@/components/orders/simulation-side-sheet"
 import { useOrdersPage, PAGE_SIZE } from "@/hooks/use-orders-page"
 
 export default function OrdersPage() {
@@ -24,6 +25,7 @@ export default function OrdersPage() {
     sortKey,
     router,
     isLoading,
+    orders,
     products,
     customers,
     draftCount,
@@ -47,6 +49,8 @@ export default function OrdersPage() {
     handleConfirmDelete,
     closeSimResult,
   } = useOrdersPage()
+
+  const expandedOrder = orders?.find((o) => o.id === expandedOrderId) ?? null
 
   return (
     <TooltipProvider>
@@ -102,15 +106,12 @@ export default function OrdersPage() {
                     order={order}
                     products={products}
                     customers={customers}
-                    expandedOrderId={expandedOrderId}
-                    expandedSimResult={expandedSimResult}
                     simulateIsPending={simulateOrderById.isPending}
                     confirmIsPending={confirmOrder.isPending}
                     onSimulate={handleSimulate}
                     onConfirm={handleConfirmFromRow}
                     onEdit={handleOpenEditDialog}
                     onDelete={setDeleteTargetOrder}
-                    onCloseSimResult={closeSimResult}
                   />
                 ))}
               </TableBody>
@@ -151,6 +152,15 @@ export default function OrdersPage() {
           isPending={deleteOrder.isPending}
           onConfirm={handleConfirmDelete}
           onOpenChange={(open) => { if (!open) setDeleteTargetOrder(null) }}
+        />
+
+        <SimulationSideSheet
+          open={expandedSimResult !== null}
+          order={expandedOrder}
+          result={expandedSimResult}
+          confirmIsPending={confirmOrder.isPending}
+          onClose={closeSimResult}
+          onConfirm={handleConfirmFromRow}
         />
       </div>
     </TooltipProvider>
