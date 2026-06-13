@@ -98,7 +98,6 @@ export function useOrdersPage() {
       const result = await simulateOrderById.mutateAsync(order.id)
       setExpandedOrderId(order.id)
       setExpandedSimResult(result)
-      toast.success("シミュレーションが完了しました")
     } catch (error) {
       console.error("Simulation error:", error)
       setSimulationErrorOrderId(order.id)
