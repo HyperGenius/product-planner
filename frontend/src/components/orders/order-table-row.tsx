@@ -5,6 +5,7 @@ import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,10 +35,13 @@ interface OrderTableRowProps {
   isSimulating: boolean
   hasSimulationError: boolean
   confirmIsPending: boolean
+  isSelected: boolean
+  isBulkOperationInProgress: boolean
   onSimulate: (order: Order) => void
   onConfirm: (orderId: number, orderNo: string) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
+  onToggleSelect: (orderId: number) => void
 }
 
 export function OrderTableRow({
@@ -47,13 +51,26 @@ export function OrderTableRow({
   isSimulating,
   hasSimulationError,
   confirmIsPending,
+  isSelected,
+  isBulkOperationInProgress,
   onSimulate,
   onConfirm,
   onEdit,
   onDelete,
+  onToggleSelect,
 }: OrderTableRowProps) {
   return (
       <TableRow>
+        <TableCell className="w-10">
+          {order.status === "draft" ? (
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={() => onToggleSelect(order.id)}
+              disabled={isBulkOperationInProgress}
+              aria-label={`注文 ${order.order_no} を選択`}
+            />
+          ) : null}
+        </TableCell>
         <TableCell className="font-medium">{order.order_no}</TableCell>
         <TableCell>{getProductName(order.product_id, products)}</TableCell>
         <TableCell>
@@ -112,7 +129,7 @@ export function OrderTableRow({
                 size="sm"
                 variant="outline"
                 onClick={() => onSimulate(order)}
-                disabled={isSimulating}
+                disabled={isSimulating || isBulkOperationInProgress}
               >
                 {isSimulating ? (
                   <>
@@ -129,7 +146,7 @@ export function OrderTableRow({
                 size="sm"
                 variant="outline"
                 onClick={() => onConfirm(order.id, order.order_no)}
-                disabled={confirmIsPending}
+                disabled={confirmIsPending || isBulkOperationInProgress}
               >
                 確定
               </Button>

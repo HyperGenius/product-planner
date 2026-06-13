@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   useConfirmOrder,
@@ -38,6 +39,11 @@ export function useOrdersPage() {
   const [expandedSimResult, setExpandedSimResult] = useState<OrderSimulateResponse | null>(null)
   const [simulatingOrderId, setSimulatingOrderId] = useState<number | null>(null)
   const [simulationErrorOrderId, setSimulationErrorOrderId] = useState<number | null>(null)
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set())
+  const [isBulkSimulating, setIsBulkSimulating] = useState(false)
+  const [isBulkConfirming, setIsBulkConfirming] = useState(false)
+
+  const queryClient = useQueryClient()
 
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
@@ -85,6 +91,25 @@ export function useOrdersPage() {
     const offset = (page - 1) * PAGE_SIZE
     return filteredOrders.slice(offset, offset + PAGE_SIZE)
   }, [filteredOrders, page])
+
+  const draftPageOrders = useMemo(
+    () => pagedOrders.filter((o) => o.status === "draft"),
+    [pagedOrders]
+  )
+  const selectedScheduledCount = useMemo(
+    () => Array.from(selectedOrderIds).filter(
+      (id) => orders?.find((o) => o.id === id)?.is_scheduled
+    ).length,
+    [selectedOrderIds, orders]
+  )
+  const allDraftOnPageSelected =
+    draftPageOrders.length > 0 && draftPageOrders.every((o) => selectedOrderIds.has(o.id))
+  const someDraftOnPageSelected =
+    draftPageOrders.some((o) => selectedOrderIds.has(o.id)) && !allDraftOnPageSelected
+
+  useEffect(() => {
+    setSelectedOrderIds(new Set())
+  }, [page, statusFilter])
 
   const handleConfirmFromRow = (orderId: number, orderNo: string) => {
     confirmOrder.mutate(orderId, {
@@ -145,6 +170,84 @@ export function useOrdersPage() {
     setExpandedSimResult(null)
   }
 
+  const handleToggleSelect = (orderId: number) => {
+    setSelectedOrderIds((prev) => {
+      const next = new Set(prev)
+      next.has(orderId) ? next.delete(orderId) : next.add(orderId)
+      return next
+    })
+  }
+
+  const handleToggleSelectAll = () => {
+    setSelectedOrderIds((prev) => {
+      const next = new Set(prev)
+      if (allDraftOnPageSelected) {
+        draftPageOrders.forEach((o) => next.delete(o.id))
+      } else {
+        draftPageOrders.forEach((o) => next.add(o.id))
+      }
+      return next
+    })
+  }
+
+  const handleClearSelection = () => setSelectedOrderIds(new Set())
+
+  const handleBulkSimulate = async () => {
+    const ids = Array.from(selectedOrderIds)
+    setIsBulkSimulating(true)
+    let successCount = 0, failCount = 0
+    for (const id of ids) {
+      try {
+        await simulateOrderById.mutateAsync(id)
+        successCount++
+      } catch {
+        failCount++
+      }
+    }
+    await queryClient.invalidateQueries({ queryKey: ["orders"] })
+    setIsBulkSimulating(false)
+    setSelectedOrderIds(new Set())
+    if (failCount === 0) {
+      toast.success(`一括シミュレーション完了: 成功 ${successCount}件`)
+    } else if (successCount === 0) {
+      toast.error(`一括シミュレーション失敗: 失敗 ${failCount}件`)
+    } else {
+      toast.warning(`一括シミュレーション完了: 成功 ${successCount}件 / 失敗 ${failCount}件`)
+    }
+  }
+
+  const handleBulkConfirm = async () => {
+    const ids = Array.from(selectedOrderIds)
+    const scheduledIds = ids.filter((id) => orders?.find((o) => o.id === id)?.is_scheduled)
+    const skippedCount = ids.length - scheduledIds.length
+    setIsBulkConfirming(true)
+    let successCount = 0, failCount = 0
+    for (const id of scheduledIds) {
+      try {
+        await confirmOrder.mutateAsync(id)
+        successCount++
+      } catch {
+        failCount++
+      }
+    }
+    setIsBulkConfirming(false)
+    setSelectedOrderIds(new Set())
+    const parts = (
+      [
+        successCount > 0 ? `成功 ${successCount}件` : null,
+        failCount > 0 ? `失敗 ${failCount}件` : null,
+        skippedCount > 0 ? `スキップ ${skippedCount}件（未スケジュール）` : null,
+      ] as (string | null)[]
+    ).filter((p): p is string => p !== null).join(" / ")
+    if (failCount === 0 && skippedCount === 0) {
+      toast.success(`一括確定完了: ${parts}`)
+    } else if (successCount === 0 && failCount > 0) {
+      toast.error(`一括確定失敗: ${parts}`)
+    } else {
+      toast.warning(`一括確定完了: ${parts}`)
+    }
+  }
+
   return {
     // URL state
     statusFilter,
@@ -184,5 +287,18 @@ export function useOrdersPage() {
     handleOpenEditDialog,
     handleConfirmDelete,
     closeSimResult,
+    // Bulk selection
+    selectedOrderIds,
+    selectedScheduledCount,
+    draftPageOrders,
+    allDraftOnPageSelected,
+    someDraftOnPageSelected,
+    isBulkSimulating,
+    isBulkConfirming,
+    handleToggleSelect,
+    handleToggleSelectAll,
+    handleClearSelection,
+    handleBulkSimulate,
+    handleBulkConfirm,
   }
 }
