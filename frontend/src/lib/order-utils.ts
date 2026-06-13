@@ -2,6 +2,45 @@ import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
+export type StatusFilter = "" | "draft" | "confirmed" | "incomplete" | "completed" | "canceled"
+export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
+
+export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
+  { label: "すべて", value: "" },
+  { label: "下書き", value: "draft" },
+  { label: "確定済", value: "confirmed" },
+  { label: "情報不足", value: "incomplete" },
+  { label: "完了", value: "completed" },
+  { label: "キャンセル", value: "canceled" },
+]
+
+export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
+  { label: "登録日（新しい順）", value: "created_at_desc" },
+  { label: "登録日（古い順）", value: "created_at_asc" },
+  { label: "希望納期（近い順）", value: "desired_deadline_asc" },
+]
+
+export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
+  if (statusFilter === "incomplete") return !order.customer_id || !order.desired_deadline
+  if (statusFilter) return order.status === statusFilter
+  return true
+}
+
+export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
+  if (sortKey === "created_at_desc" || sortKey === "created_at_asc") {
+    if (!a.created_at && !b.created_at) return 0
+    if (!a.created_at) return 1
+    if (!b.created_at) return -1
+    return sortKey === "created_at_desc"
+      ? b.created_at.localeCompare(a.created_at)
+      : a.created_at.localeCompare(b.created_at)
+  }
+  if (!a.desired_deadline && !b.desired_deadline) return 0
+  if (!a.desired_deadline) return 1
+  if (!b.desired_deadline) return -1
+  return a.desired_deadline.localeCompare(b.desired_deadline)
+}
+
 /**
  * 製品IDから製品名を取得
  */
