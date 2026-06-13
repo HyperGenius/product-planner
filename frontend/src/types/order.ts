@@ -61,5 +61,6 @@ export interface OrderSimulateResponse {
 export interface BulkSimulateResult {
   orderId: number
   orderNo: string
+  desiredDeadline?: string // ユーザー希望納期 (ISO 8601形式)
   result: OrderSimulateResponse | null // null = シミュレーション失敗
 }

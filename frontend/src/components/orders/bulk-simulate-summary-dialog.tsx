@@ -18,6 +18,10 @@ interface BulkSimulateSummaryDialogProps {
   onClose: () => void
 }
 
+function formatDate(iso: string) {
+  return format(new Date(iso), "yyyy/MM/dd HH:mm", { locale: ja })
+}
+
 export function BulkSimulateSummaryDialog({ results, onClose }: BulkSimulateSummaryDialogProps) {
   if (!results) return null
 
@@ -30,8 +34,21 @@ export function BulkSimulateSummaryDialog({ results, onClose }: BulkSimulateSumm
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>一括シミュレーション結果</DialogTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            納期OK {okCount}件 / 納期不可 {infeasibleCount}件 / 失敗 {failedCount}件
+          <p className="flex items-center gap-2 text-sm text-muted-foreground mt-1 flex-wrap">
+            <span className="flex items-center gap-1">
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              納期OK {okCount}件
+            </span>
+            <span className="text-muted-foreground/50">/</span>
+            <span className="flex items-center gap-1">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              納期不可 {infeasibleCount}件
+            </span>
+            <span className="text-muted-foreground/50">/</span>
+            <span className="flex items-center gap-1">
+              <XCircle className="h-4 w-4 text-destructive" />
+              失敗 {failedCount}件
+            </span>
           </p>
         </DialogHeader>
 
@@ -48,21 +65,37 @@ export function BulkSimulateSummaryDialog({ results, onClose }: BulkSimulateSumm
             return (
               <div
                 key={r.orderId}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 ${rowClass}`}
+                className={`flex items-start gap-3 rounded-md px-3 py-2 ${rowClass}`}
               >
                 {isFailed ? (
-                  <XCircle className="h-4 w-4 shrink-0 text-destructive" />
+                  <XCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
                 ) : isInfeasible ? (
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-500" />
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />
                 ) : (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />
                 )}
-                <span className="text-sm font-medium">{r.orderNo}</span>
-                <span className="ml-auto text-sm text-muted-foreground">
-                  {isFailed
-                    ? "シミュレーション失敗"
-                    : format(new Date(r.result!.calculated_deadline), "yyyy/MM/dd HH:mm", { locale: ja })}
-                </span>
+                <span className="text-sm font-medium shrink-0">{r.orderNo}</span>
+                <div className="ml-auto text-right text-sm text-muted-foreground space-y-0.5">
+                  {isFailed ? (
+                    <p>シミュレーション失敗</p>
+                  ) : isInfeasible ? (
+                    <>
+                      <p>
+                        <span className="text-xs text-muted-foreground/70">希望　</span>
+                        {r.desiredDeadline ? formatDate(r.desiredDeadline) : "未設定"}
+                      </p>
+                      <p>
+                        <span className="text-xs text-muted-foreground/70">回答　</span>
+                        {formatDate(r.result!.calculated_deadline)}
+                      </p>
+                    </>
+                  ) : (
+                    <p>
+                      <span className="text-xs text-muted-foreground/70">回答　</span>
+                      {formatDate(r.result!.calculated_deadline)}
+                    </p>
+                  )}
+                </div>
               </div>
             )
           })}

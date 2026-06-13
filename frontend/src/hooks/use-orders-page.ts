@@ -205,9 +205,9 @@ export function useOrdersPage() {
       const orderNo = order?.order_no ?? String(id)
       try {
         const result = await simulateOrderById.mutateAsync(id)
-        results.push({ orderId: id, orderNo, result })
+        results.push({ orderId: id, orderNo, desiredDeadline: order?.desired_deadline, result })
       } catch {
-        results.push({ orderId: id, orderNo, result: null })
+        results.push({ orderId: id, orderNo, desiredDeadline: order?.desired_deadline, result: null })
       }
     }
     await queryClient.invalidateQueries({ queryKey: ["orders"] })
