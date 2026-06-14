@@ -36,6 +36,7 @@ interface OrderTableRowProps {
   hasSimulationError: boolean
   confirmIsPending: boolean
   isSelected: boolean
+  selectionIndex?: number
   isBulkOperationInProgress: boolean
   hasBulkSimFailed?: boolean
   onSimulate: (order: Order) => void
@@ -53,6 +54,7 @@ export function OrderTableRow({
   hasSimulationError,
   confirmIsPending,
   isSelected,
+  selectionIndex,
   isBulkOperationInProgress,
   hasBulkSimFailed,
   onSimulate,
@@ -65,12 +67,19 @@ export function OrderTableRow({
       <TableRow className={hasBulkSimFailed ? "border-l-[3px] border-l-destructive bg-destructive/5" : undefined}>
         <TableCell className="w-10">
           {order.status === "draft" ? (
-            <Checkbox
-              checked={isSelected}
-              onCheckedChange={() => onToggleSelect(order.id)}
-              disabled={isBulkOperationInProgress}
-              aria-label={`注文 ${order.order_no} を選択`}
-            />
+            <div className="relative flex items-center justify-center">
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={() => onToggleSelect(order.id)}
+                disabled={isBulkOperationInProgress}
+                aria-label={`注文 ${order.order_no} を選択`}
+              />
+              {selectionIndex != null && (
+                <Badge className="absolute -top-2 -right-2 h-4 w-4 p-0 text-[10px] flex items-center justify-center rounded-full">
+                  {selectionIndex}
+                </Badge>
+              )}
+            </div>
           ) : null}
         </TableCell>
         <TableCell className="font-medium">{order.order_no}</TableCell>
