@@ -42,6 +42,7 @@ export function useOrdersPage() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([])
   const [isBulkSimulating, setIsBulkSimulating] = useState(false)
   const [isBulkConfirming, setIsBulkConfirming] = useState(false)
+  const [isBulkSimulateConfirmOpen, setIsBulkSimulateConfirmOpen] = useState(false)
   const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
   const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
 
@@ -192,7 +193,12 @@ export function useOrdersPage() {
 
   const handleClearSelection = () => setSelectedOrderIds([])
 
-  const handleBulkSimulate = async () => {
+  const handleBulkSimulateRequest = () => setIsBulkSimulateConfirmOpen(true)
+
+  const handleBulkSimulateCancel = () => setIsBulkSimulateConfirmOpen(false)
+
+  const handleBulkSimulateConfirm = async () => {
+    setIsBulkSimulateConfirmOpen(false)
     const ids = selectedOrderIds
     setIsBulkSimulating(true)
     setBulkSimFailedIds(new Set())
@@ -298,10 +304,13 @@ export function useOrdersPage() {
     someDraftOnPageSelected,
     isBulkSimulating,
     isBulkConfirming,
+    isBulkSimulateConfirmOpen,
     handleToggleSelect,
     handleToggleSelectAll,
     handleClearSelection,
-    handleBulkSimulate,
+    handleBulkSimulateRequest,
+    handleBulkSimulateConfirm,
+    handleBulkSimulateCancel,
     handleBulkConfirm,
     bulkSimSummary,
     bulkSimFailedIds,
