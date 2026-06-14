@@ -14,6 +14,8 @@ export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "キャンセル", value: "canceled" },
 ]
 
+export const DEFAULT_SORT: SortKey = "desired_deadline_asc"
+
 export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "登録日（新しい順）", value: "created_at_desc" },
   { label: "登録日（古い順）", value: "created_at_asc" },
