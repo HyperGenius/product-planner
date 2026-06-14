@@ -14,6 +14,7 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { MasterPagination } from "@/components/master-pagination"
 import { BulkActionBar } from "@/components/orders/bulk-action-bar"
+import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-confirm-dialog"
 import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
@@ -62,10 +63,13 @@ export default function OrdersPage() {
     someDraftOnPageSelected,
     isBulkSimulating,
     isBulkConfirming,
+    isBulkSimulateConfirmOpen,
     handleToggleSelect,
     handleToggleSelectAll,
     handleClearSelection,
-    handleBulkSimulate,
+    handleBulkSimulateRequest,
+    handleBulkSimulateConfirm,
+    handleBulkSimulateCancel,
     handleBulkConfirm,
     bulkSimSummary,
     bulkSimFailedIds,
@@ -214,9 +218,17 @@ export default function OrdersPage() {
           selectedScheduledCount={selectedScheduledCount}
           isBulkSimulating={isBulkSimulating}
           isBulkConfirming={isBulkConfirming}
-          onBulkSimulate={handleBulkSimulate}
+          onBulkSimulate={handleBulkSimulateRequest}
           onBulkConfirm={handleBulkConfirm}
           onClearSelection={handleClearSelection}
+        />
+
+        <BulkSimulateConfirmDialog
+          open={isBulkSimulateConfirmOpen}
+          orders={selectedOrderIds.map((id) => orders?.find((o) => o.id === id)!).filter(Boolean)}
+          products={products}
+          onConfirm={handleBulkSimulateConfirm}
+          onCancel={handleBulkSimulateCancel}
         />
 
         <BulkSimulateSummaryDialog
