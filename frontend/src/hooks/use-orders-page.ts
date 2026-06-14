@@ -40,7 +40,7 @@ export function useOrdersPage() {
   const [expandedSimResult, setExpandedSimResult] = useState<OrderSimulateResponse | null>(null)
   const [simulatingOrderId, setSimulatingOrderId] = useState<number | null>(null)
   const [simulationErrorOrderId, setSimulationErrorOrderId] = useState<number | null>(null)
-  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set())
+  const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([])
   const [isBulkSimulating, setIsBulkSimulating] = useState(false)
   const [isBulkConfirming, setIsBulkConfirming] = useState(false)
   const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
@@ -100,18 +100,18 @@ export function useOrdersPage() {
     [pagedOrders]
   )
   const selectedScheduledCount = useMemo(
-    () => Array.from(selectedOrderIds).filter(
+    () => selectedOrderIds.filter(
       (id) => orders?.find((o) => o.id === id)?.is_scheduled
     ).length,
     [selectedOrderIds, orders]
   )
   const allDraftOnPageSelected =
-    draftPageOrders.length > 0 && draftPageOrders.every((o) => selectedOrderIds.has(o.id))
+    draftPageOrders.length > 0 && draftPageOrders.every((o) => selectedOrderIds.includes(o.id))
   const someDraftOnPageSelected =
-    draftPageOrders.some((o) => selectedOrderIds.has(o.id)) && !allDraftOnPageSelected
+    draftPageOrders.some((o) => selectedOrderIds.includes(o.id)) && !allDraftOnPageSelected
 
   useEffect(() => {
-    setSelectedOrderIds(new Set())
+    setSelectedOrderIds([])
     setBulkSimFailedIds(new Set())
   }, [page, statusFilter])
 
@@ -175,29 +175,26 @@ export function useOrdersPage() {
   }
 
   const handleToggleSelect = (orderId: number) => {
-    setSelectedOrderIds((prev) => {
-      const next = new Set(prev)
-      next.has(orderId) ? next.delete(orderId) : next.add(orderId)
-      return next
-    })
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    )
   }
 
   const handleToggleSelectAll = () => {
     setSelectedOrderIds((prev) => {
-      const next = new Set(prev)
       if (allDraftOnPageSelected) {
-        draftPageOrders.forEach((o) => next.delete(o.id))
+        return prev.filter((id) => !draftPageOrders.some((o) => o.id === id))
       } else {
-        draftPageOrders.forEach((o) => next.add(o.id))
+        const newIds = draftPageOrders.map((o) => o.id).filter((id) => !prev.includes(id))
+        return [...prev, ...newIds]
       }
-      return next
     })
   }
 
-  const handleClearSelection = () => setSelectedOrderIds(new Set())
+  const handleClearSelection = () => setSelectedOrderIds([])
 
   const handleBulkSimulate = async () => {
-    const ids = Array.from(selectedOrderIds)
+    const ids = selectedOrderIds
     setIsBulkSimulating(true)
     setBulkSimFailedIds(new Set())
     const results: BulkSimulateResult[] = []
@@ -216,7 +213,7 @@ export function useOrdersPage() {
       results.filter((r) => r.result === null || !r.result.is_feasible).map((r) => r.orderId)
     )
     setBulkSimFailedIds(failedIds)
-    setSelectedOrderIds(new Set())
+    setSelectedOrderIds([])
     setIsBulkSimulating(false)
     setBulkSimSummary(results)
   }
@@ -224,7 +221,7 @@ export function useOrdersPage() {
   const handleCloseBulkSimSummary = () => setBulkSimSummary(null)
 
   const handleBulkConfirm = async () => {
-    const ids = Array.from(selectedOrderIds)
+    const ids = selectedOrderIds
     const scheduledIds = ids.filter((id) => orders?.find((o) => o.id === id)?.is_scheduled)
     const skippedCount = ids.length - scheduledIds.length
     setIsBulkConfirming(true)
@@ -238,7 +235,7 @@ export function useOrdersPage() {
       }
     }
     setIsBulkConfirming(false)
-    setSelectedOrderIds(new Set())
+    setSelectedOrderIds([])
     const parts = (
       [
         successCount > 0 ? `成功 ${successCount}件` : null,

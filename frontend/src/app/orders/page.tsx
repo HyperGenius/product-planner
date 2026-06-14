@@ -76,7 +76,7 @@ export default function OrdersPage() {
 
   return (
     <TooltipProvider>
-      <div className={cn("container mx-auto py-6 px-4", selectedOrderIds.size > 0 && "pb-24")}>
+      <div className={cn("container mx-auto py-6 px-4", selectedOrderIds.length > 0 && "pb-24")}>
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">注文一覧</h1>
@@ -149,7 +149,8 @@ export default function OrdersPage() {
                     isSimulating={simulatingOrderId === order.id}
                     hasSimulationError={simulationErrorOrderId === order.id}
                     confirmIsPending={confirmOrder.isPending}
-                    isSelected={selectedOrderIds.has(order.id)}
+                    isSelected={selectedOrderIds.includes(order.id)}
+                    selectionIndex={selectedOrderIds.includes(order.id) ? selectedOrderIds.indexOf(order.id) + 1 : undefined}
                     isBulkOperationInProgress={isBulkSimulating || isBulkConfirming}
                     hasBulkSimFailed={bulkSimFailedIds.has(order.id)}
                     onSimulate={handleSimulate}
@@ -209,7 +210,7 @@ export default function OrdersPage() {
         />
 
         <BulkActionBar
-          selectedCount={selectedOrderIds.size}
+          selectedCount={selectedOrderIds.length}
           selectedScheduledCount={selectedScheduledCount}
           isBulkSimulating={isBulkSimulating}
           isBulkConfirming={isBulkConfirming}
