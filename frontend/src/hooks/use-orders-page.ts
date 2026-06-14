@@ -15,6 +15,7 @@ import { useCustomers } from "@/hooks/use-customers"
 import {
   filterOrder,
   compareOrders,
+  DEFAULT_SORT,
   type StatusFilter,
   type SortKey,
 } from "@/lib/order-utils"
@@ -29,7 +30,7 @@ export function useOrdersPage() {
   const searchParams = useSearchParams()
 
   const statusFilter = (searchParams.get("status") ?? "") as StatusFilter
-  const sortKey = (searchParams.get("sort") ?? "created_at_desc") as SortKey
+  const sortKey = (searchParams.get("sort") ?? DEFAULT_SORT) as SortKey
   const page = Number(searchParams.get("page") ?? "1")
 
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
