@@ -109,6 +109,17 @@ export function useDeleteOrder() {
 }
 
 /**
+ * 注文を1件取得するフック
+ */
+export function useOrder(orderId: number) {
+  return useQuery<Order>({
+    queryKey: ["orders", orderId],
+    queryFn: () => apiClient<Order>(`/orders/${orderId}`),
+    enabled: !!orderId,
+  })
+}
+
+/**
  * 既存の注文IDでシミュレーションを実行するフック
  */
 export function useSimulateOrderById() {
