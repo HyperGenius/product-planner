@@ -76,11 +76,6 @@ export default function NewOrderPage() {
   }
 
   const handleConfirm = async () => {
-    if (!orderNo) {
-      toast.error("注文番号を入力してください")
-      return
-    }
-
     if (!simulationResult) {
       toast.error("先にシミュレーションを実行してください")
       return
@@ -96,7 +91,7 @@ export default function NewOrderPage() {
 
     try {
       const createdOrder = await createMutation.mutateAsync({
-        order_no: orderNo,
+        order_no: orderNo || undefined,
         product_id: productIdNum,
         customer_id: customerId ? parseInt(customerId) : undefined,
         quantity: quantityNum,
@@ -187,11 +182,11 @@ export default function NewOrderPage() {
             <div className="space-y-4">
               {/* 注文番号 */}
               <div className="space-y-2">
-                <Label htmlFor="order-no">注文番号 *</Label>
+                <Label htmlFor="order-no">注文番号（任意）</Label>
                 <Input
                   id="order-no"
                   type="text"
-                  placeholder="ORD-20260125-001"
+                  placeholder="例: ORD-20260125-001（空白可）"
                   value={orderNo}
                   onChange={(e) => setOrderNo(e.target.value)}
                 />
@@ -282,6 +277,10 @@ export default function NewOrderPage() {
             <div className="mt-4 rounded-lg border p-4 space-y-3 text-sm">
               <p className="font-semibold">注文内容の確認</p>
               <dl className="space-y-1.5">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">注文番号</dt>
+                  <dd>{orderNo || <span className="text-muted-foreground">未設定</span>}</dd>
+                </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">製品</dt>
                   <dd>{productId ? getProductName(parseInt(productId), products) : "-"}</dd>

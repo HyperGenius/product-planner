@@ -114,7 +114,7 @@ export default function OrderDetailPage() {
           戻る
         </Button>
         <div>
-          <h1 className="text-3xl font-bold">{order.order_no}</h1>
+          <h1 className="text-3xl font-bold">{order.order_no ?? `注文 #${order.id}`}</h1>
           <p className="text-muted-foreground mt-1">注文詳細</p>
         </div>
       </div>
@@ -127,7 +127,7 @@ export default function OrderDetailPage() {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">注文番号</dt>
-                <dd className="font-medium">{order.order_no}</dd>
+                <dd className="font-medium">{order.order_no ?? <span className="text-muted-foreground">未設定</span>}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">製品</dt>
@@ -159,6 +159,18 @@ export default function OrderDetailPage() {
               </div>
             </dl>
           </div>
+
+          {/* メール本文パネル (メール起票時のみ) */}
+          {order.source_type === 'email' && order.source_raw && (
+            <details className="rounded-lg border bg-muted/50 p-4">
+              <summary className="cursor-pointer text-sm font-medium">
+                メール本文を表示
+              </summary>
+              <pre className="mt-2 text-xs whitespace-pre-wrap break-words text-muted-foreground">
+                {order.source_raw}
+              </pre>
+            </details>
+          )}
 
           {/* アクションボタン */}
           <div className="flex flex-wrap gap-3">

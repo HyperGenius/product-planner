@@ -74,46 +74,57 @@ class TestOrderRouter:
 
     def test_get_orders(self, mock_repo):
         """GET /: 全件取得のテスト"""
-        expected_data = [
+        db_data = [
             {"id": 1, "order_number": "ORD-001", "product_id": 1, "quantity": 100},
             {"id": 2, "order_number": "ORD-002", "product_id": 2, "quantity": 200},
         ]
-        mock_repo.get_all.return_value = expected_data
+        mock_repo.get_all.return_value = db_data
 
         response = client.get("/orders/")
 
         assert response.status_code == 200
-        assert response.json() == expected_data
+        result = response.json()
+        assert result[0]["order_no"] == "ORD-001"
+        assert result[1]["order_no"] == "ORD-002"
         mock_repo.get_all.assert_called_once()
 
     def test_get_order_by_id(self, mock_repo):
         """GET /{id}: 1件取得のテスト"""
         order_id = 1
-        expected_data = {"id": order_id, "order_number": "ORD-001"}
-        mock_repo.get_by_id.return_value = expected_data
+        db_data = {"id": order_id, "order_number": "ORD-001"}
+        mock_repo.get_by_id.return_value = db_data
 
         response = client.get(f"/orders/{order_id}")
 
         assert response.status_code == 200
-        assert response.json() == expected_data
+        result = response.json()
+        assert result["order_no"] == "ORD-001"
         mock_repo.get_by_id.assert_called_with(order_id)
 
     def test_create_order(self, headers, mock_repo):
         """POST /: 新規作成のテスト"""
         payload = {
+            "order_no": "NEW-ORD",
+            "product_id": 1,
+            "quantity": 50,
+            "desired_deadline": "2024-12-31T00:00:00",
+        }
+        created_data = {
+            "id": 100,
             "order_number": "NEW-ORD",
             "product_id": 1,
             "quantity": 50,
-            "deadline_date": "2024-12-31",
+            "deadline_date": "2024-12-31T00:00:00",
         }
-        created_data = {**payload, "id": 100}
 
         mock_repo.create.return_value = created_data
 
         response = client.post("/orders/", json=payload, headers=headers)
 
         assert response.status_code == 200
-        assert response.json() == created_data
+        result = response.json()
+        assert result["order_no"] == "NEW-ORD"
+        assert result["id"] == 100
 
         mock_repo.create.assert_called_once()
 
@@ -128,7 +139,9 @@ class TestOrderRouter:
         response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
 
         assert response.status_code == 200
-        assert response.json() == updated_data
+        result = response.json()
+        assert result["order_no"] == "ORD-001"
+        assert result["quantity"] == 60
 
         mock_repo.update.assert_called_once()
         called_id, called_data = mock_repo.update.call_args[0]
@@ -277,10 +290,13 @@ class TestOrderRouter:
         assert isinstance(result["schedules"], list)
         # dry_run=False のため、schedule_repo.create が1回以上呼ばれる（日またぎで複数回の場合あり）
         assert mock_schedule_repo.create.call_count >= 1
-        # ステータスが更新される
-        mock_repo.update.assert_called_once_with(
-            order_id, {"status": "confirmed", "is_scheduled": True}
-        )
+        # ステータスが更新される (confirmed_at, confirmed_deadline も含む)
+        called_id, called_data = mock_repo.update.call_args[0]
+        assert called_id == order_id
+        assert called_data["status"] == "confirmed"
+        assert called_data["is_scheduled"] is True
+        assert "confirmed_at" in called_data
+        assert "confirmed_deadline" in called_data
 
     def test_confirm_order_not_found(self, headers, mock_repo):
         """POST /{order_id}/confirm: 注文が存在しない場合の404エラーテスト"""
