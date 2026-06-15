@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useMemo, useCallback } from "react"
-import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek } from "date-fns"
+import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, parseISO } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -10,6 +10,7 @@ import { GanttChart } from "@/components/schedule/gantt-chart"
 import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
 import { useSchedules, useUpdateSchedule } from "@/hooks/use-schedules"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
+import { useCalendars } from "@/hooks/use-calendars"
 import type { GanttViewMode, GroupByMode, Schedule } from "@/types/schedule"
 import { useSidebar } from "@/components/ui/sidebar"
 
@@ -71,6 +72,40 @@ export default function SchedulePage() {
     equipment_group_id: equipmentGroupId,
   })
 
+  // 週次表示用カレンダーデータ（月跨ぎ対応のため2ヶ月分を取得）
+  const weekStart = useMemo(() => startOfWeek(currentDate, { locale: ja }), [currentDate])
+  const weekEnd = useMemo(() => endOfWeek(currentDate, { locale: ja }), [currentDate])
+
+  const { data: calMonth1 } = useCalendars(weekStart.getFullYear(), weekStart.getMonth() + 1)
+  const { data: calMonth2 } = useCalendars(weekEnd.getFullYear(), weekEnd.getMonth() + 1)
+
+  // 非稼働日（祝日＋土日）を計算（週次モードのみ利用）
+  const nonWorkingDays = useMemo<Date[]>(() => {
+    const result: Date[] = []
+
+    // カレンダーデータから祝日を抽出（重複排除のため Set を使用）
+    const holidayKeys = new Set<string>()
+    const allCalDays = [...(calMonth1 ?? []), ...(calMonth2 ?? [])]
+    allCalDays.forEach((entry) => {
+      if (entry.is_holiday && !holidayKeys.has(entry.date)) {
+        holidayKeys.add(entry.date)
+        result.push(parseISO(entry.date))
+      }
+    })
+
+    // 当週の土日を追加
+    const cur = new Date(weekStart)
+    while (cur.getTime() <= weekEnd.getTime()) {
+      const day = cur.getDay()
+      if (day === 0 || day === 6) {
+        result.push(new Date(cur))
+      }
+      cur.setDate(cur.getDate() + 1)
+    }
+
+    return result
+  }, [calMonth1, calMonth2, weekStart, weekEnd])
+
   // 前の期間に移動
   const handlePrevious = useCallback(() => {
     setCurrentDate((prev) => {
@@ -131,13 +166,11 @@ export default function SchedulePage() {
       case "Day":
         return format(currentDate, "yyyy年M月d日 (E)", { locale: ja })
       case "Week":
-        const weekStart = startOfWeek(currentDate, { locale: ja })
-        const weekEnd = endOfWeek(currentDate, { locale: ja })
         return `${format(weekStart, "yyyy年M月d", { locale: ja })} - ${format(weekEnd, "M月d日", { locale: ja })}`
       case "Month":
         return format(currentDate, "yyyy年M月", { locale: ja })
     }
-  }, [currentDate, viewMode])
+  }, [currentDate, viewMode, weekStart, weekEnd])
 
   const viewWidth = open ? '78vw' : '96vw'
 
@@ -257,7 +290,16 @@ export default function SchedulePage() {
             </div>
           </div>
         ) : schedules && schedules.length > 0 ? (
-          <GanttChart tasks={schedules} viewMode={viewMode} colorMode="product" isEditable={isEditMode} groupBy={groupBy} currentDate={currentDate} onTaskClick={handleTaskClick} />
+          <GanttChart
+            tasks={schedules}
+            viewMode={viewMode}
+            colorMode="product"
+            isEditable={isEditMode}
+            groupBy={groupBy}
+            currentDate={currentDate}
+            nonWorkingDays={nonWorkingDays}
+            onTaskClick={handleTaskClick}
+          />
         ) : (
           <div className="flex h-96 items-center justify-center">
             <div className="text-center text-muted-foreground">
