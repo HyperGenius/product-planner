@@ -79,15 +79,34 @@ function getBarColor(schedule: Schedule, colorMode: 'product' | 'process'): stri
 }
 
 /**
+ * 注文の表示キーを返す（ユーザー定義注文番号 or 内部ID）
+ */
+function orderKey(schedule: Schedule): string {
+  return schedule.order_number || `#${schedule.order_id}`
+}
+
+/**
  * Schedule型からGanttTask型に変換するユーティリティ関数
  */
 export function convertScheduleToTask(
   schedule: Schedule,
   colorMode: 'product' | 'process' = 'product',
+  groupBy: GroupByMode = 'none',
 ): GanttTask {
+  const processName = schedule.process_name || '工程'
+
+  let suffix: string
+  if (groupBy === 'equipment_group') {
+    suffix = orderKey(schedule)
+  } else {
+    suffix = schedule.equipment_group_name ?? ''
+  }
+
+  const name = suffix ? `${processName} - ${suffix}` : processName
+
   return {
     id: `schedule-${schedule.id}`,
-    name: `${schedule.process_name || '工程'} - ${schedule.order_number || ''}`,
+    name,
     start: new Date(schedule.start_datetime),
     end: new Date(schedule.end_datetime),
     color: getBarColor(schedule, colorMode),
@@ -108,7 +127,7 @@ function transformSchedulesToGroupedTasks(
     )
 
   if (groupBy === 'none') {
-    return sortByStartDate(schedules).map((s) => convertScheduleToTask(s, colorMode))
+    return sortByStartDate(schedules).map((s) => convertScheduleToTask(s, colorMode, 'none'))
   }
 
   const tasks: GanttTask[] = []
@@ -116,7 +135,7 @@ function transformSchedulesToGroupedTasks(
   if (groupBy === 'order') {
     const groups = new Map<string, Schedule[]>()
     schedules.forEach((s) => {
-      const key = s.order_number || 'Unknown'
+      const key = s.order_number || String(s.order_id)
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(s)
     })
@@ -133,15 +152,17 @@ function transformSchedulesToGroupedTasks(
       .forEach(({ key, items }) => {
         const starts = items.map((s) => new Date(s.start_datetime).getTime())
         const ends = items.map((s) => new Date(s.end_datetime).getTime())
+        const displayKey = items[0]?.order_number || `#${items[0]?.order_id}`
         const productName = items[0]?.product_name || ''
+        const headerName = productName ? `注文: ${displayKey} - ${productName}` : `注文: ${displayKey}`
         tasks.push({
           id: `group-order-${key}`,
-          name: `注文: ${key} - ${productName}`,
+          name: headerName,
           start: new Date(Math.min(...starts)),
           end: new Date(Math.max(...ends)),
           isGroupHeader: true,
         })
-        items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode)))
+        items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode, 'order')))
       })
   } else if (groupBy === 'equipment_group') {
     const groups = new Map<string, Schedule[]>()
@@ -170,7 +191,7 @@ function transformSchedulesToGroupedTasks(
           end: new Date(Math.max(...ends)),
           isGroupHeader: true,
         })
-        items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode)))
+        items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode, 'equipment_group')))
       })
   }
 
