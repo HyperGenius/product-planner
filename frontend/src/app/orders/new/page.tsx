@@ -270,55 +270,53 @@ export default function NewOrderPage() {
           <SimulationResult
             result={simulationResult}
             desiredDeadline={desiredDeadline}
-          />
-
-          {/* 確定前サマリー */}
-          {simulationResult && (
-            <div className="mt-4 rounded-lg border p-4 space-y-3 text-sm">
-              <p className="font-semibold">注文内容の確認</p>
-              <dl className="space-y-1.5">
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">注文番号</dt>
-                  <dd>{orderNo || <span className="text-muted-foreground">未設定</span>}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">製品</dt>
-                  <dd>{productId ? getProductName(parseInt(productId), products) : "-"}</dd>
-                </div>
-                {customerId && (
+            summaryContent={simulationResult && (
+              <div className="rounded-lg border p-4 space-y-3 text-sm">
+                <p className="font-semibold">注文内容の確認</p>
+                <dl className="space-y-1.5">
                   <div className="flex justify-between">
-                    <dt className="text-muted-foreground">顧客</dt>
-                    <dd>{getCustomerName(parseInt(customerId), customers)}</dd>
+                    <dt className="text-muted-foreground">注文番号</dt>
+                    <dd>{orderNo || <span className="text-muted-foreground">未設定</span>}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">製品</dt>
+                    <dd>{productId ? getProductName(parseInt(productId), products) : "-"}</dd>
+                  </div>
+                  {customerId && (
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">顧客</dt>
+                      <dd>{getCustomerName(parseInt(customerId), customers)}</dd>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">数量</dt>
+                    <dd>{quantity || "-"}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">希望納期</dt>
+                    <dd>
+                      {desiredDeadline
+                        ? format(new Date(desiredDeadline), "yyyy/MM/dd HH:mm", { locale: ja })
+                        : <span className="text-muted-foreground">未設定</span>}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">確定納期</dt>
+                    <dd className={!simulationResult.is_feasible ? "text-red-600 font-medium" : ""}>
+                      {format(new Date(simulationResult.calculated_deadline), "yyyy/MM/dd HH:mm", { locale: ja })}
+                    </dd>
+                  </div>
+                </dl>
+
+                {(!desiredDeadline || !customerId) && (
+                  <div className="flex items-start gap-1.5 text-yellow-700 pt-1 border-t">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <p>このまま確定してよいですか？</p>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">数量</dt>
-                  <dd>{quantity || "-"}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">希望納期</dt>
-                  <dd>
-                    {desiredDeadline
-                      ? format(new Date(desiredDeadline), "yyyy/MM/dd HH:mm", { locale: ja })
-                      : <span className="text-muted-foreground">未設定</span>}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">確定納期</dt>
-                  <dd className={!simulationResult.is_feasible ? "text-red-600 font-medium" : ""}>
-                    {format(new Date(simulationResult.calculated_deadline), "yyyy/MM/dd HH:mm", { locale: ja })}
-                  </dd>
-                </div>
-              </dl>
-
-              {(!desiredDeadline || !customerId) && (
-                <div className="flex items-start gap-1.5 text-yellow-700 pt-1 border-t">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <p>このまま確定してよいですか？</p>
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          />
         </div>
       </div>
     </div>

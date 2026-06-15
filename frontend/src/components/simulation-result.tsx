@@ -9,6 +9,7 @@ import type { OrderSimulateResponse } from "@/types/order"
 interface SimulationResultProps {
   result: OrderSimulateResponse | null
   desiredDeadline?: string
+  summaryContent?: React.ReactNode
 }
 
 /**
@@ -17,6 +18,7 @@ interface SimulationResultProps {
 export function SimulationResult({
   result,
   desiredDeadline,
+  summaryContent,
 }: SimulationResultProps) {
   if (!result) {
     return (
@@ -70,6 +72,8 @@ export function SimulationResult({
           </p>
         )}
       </div>
+
+      {summaryContent}
 
       {/* 工程プレビュー */}
       <div className="rounded-lg border bg-card p-6 shadow-sm">
