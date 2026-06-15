@@ -92,31 +92,38 @@ def build_process_schedules(
     """
     スケジュール情報からプロセススケジュールを構築する。
 
+    同一 process_routing_id の連続セグメントを1エントリに集約する。
+    （スケジューラが日跨ぎで分割したセグメントを工程単位に統合）
+
     Args:
         schedules: スケジュール情報のリスト
         product_repo: 製品リポジトリ
         equipment_repo: 設備リポジトリ
 
     Returns:
-        プロセススケジュールのリスト
+        工程単位に集約されたプロセススケジュールのリスト
     """
-    process_schedules = []
+    merged: list[dict] = []
     for schedule in schedules:
         routing_id = schedule.get("process_routing_id")
+
+        # 直前と同じ工程なら終了時刻だけ更新（日跨ぎセグメントのマージ）
+        if merged and merged[-1]["_routing_id"] == routing_id:
+            merged[-1]["end_time"] = schedule["end_datetime"]
+            continue
+
+        # 新しい工程グループの開始
+        process_name = (
+            product_repo.get_process_name(routing_id) if routing_id else "不明"
+        )
         equipment_id = schedule.get("equipment_id")
+        equipment_name = (
+            equipment_repo.get_equipment_name(equipment_id) if equipment_id else None
+        )
 
-        # 工程名を取得
-        process_name = "不明"
-        if routing_id:
-            process_name = product_repo.get_process_name(routing_id)
-
-        # 設備名を取得
-        equipment_name = None
-        if equipment_id:
-            equipment_name = equipment_repo.get_equipment_name(equipment_id)
-
-        process_schedules.append(
+        merged.append(
             {
+                "_routing_id": routing_id,
                 "process_name": process_name,
                 "start_time": schedule["start_datetime"],
                 "end_time": schedule["end_datetime"],
@@ -124,4 +131,7 @@ def build_process_schedules(
             }
         )
 
-    return process_schedules
+    for entry in merged:
+        entry.pop("_routing_id", None)
+
+    return merged

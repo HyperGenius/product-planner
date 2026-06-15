@@ -137,6 +137,119 @@ class TestSimulationService:
                 [], "2024-12-31T17:00:00", mock_product_repo, mock_equipment_repo
             )
 
+    def test_build_process_schedules_merges_consecutive_same_routing(self):
+        """同一 process_routing_id の連続セグメントが1エントリに集約される"""
+        mock_product_repo = MagicMock()
+        mock_equipment_repo = MagicMock()
+        mock_product_repo.get_process_name.return_value = "内職"
+        mock_equipment_repo.get_equipment_name.return_value = "Machine A"
+
+        schedules = [
+            {
+                "process_routing_id": 5,
+                "equipment_id": 10,
+                "start_datetime": "2024-06-17T13:05:00",
+                "end_datetime": "2024-06-17T17:00:00",
+            },
+            {
+                "process_routing_id": 5,
+                "equipment_id": 10,
+                "start_datetime": "2024-06-18T09:00:00",
+                "end_datetime": "2024-06-18T17:00:00",
+            },
+            {
+                "process_routing_id": 5,
+                "equipment_id": 10,
+                "start_datetime": "2024-07-09T09:00:00",
+                "end_datetime": "2024-07-09T11:12:00",
+            },
+        ]
+
+        result = build_process_schedules(
+            schedules, mock_product_repo, mock_equipment_repo
+        )
+
+        assert len(result) == 1
+        assert result[0]["process_name"] == "内職"
+        assert result[0]["start_time"] == "2024-06-17T13:05:00"
+        assert result[0]["end_time"] == "2024-07-09T11:12:00"
+
+    def test_build_process_schedules_separate_different_routing(self):
+        """異なる process_routing_id のセグメントは別エントリになる"""
+        mock_product_repo = MagicMock()
+        mock_equipment_repo = MagicMock()
+        mock_product_repo.get_process_name.side_effect = lambda rid: {
+            1: "組立",
+            2: "検査",
+        }[rid]
+        mock_equipment_repo.get_equipment_name.return_value = None
+
+        schedules = [
+            {
+                "process_routing_id": 1,
+                "equipment_id": None,
+                "start_datetime": "2024-12-01T09:00:00",
+                "end_datetime": "2024-12-01T12:00:00",
+            },
+            {
+                "process_routing_id": 2,
+                "equipment_id": None,
+                "start_datetime": "2024-12-01T12:00:00",
+                "end_datetime": "2024-12-01T15:00:00",
+            },
+        ]
+
+        result = build_process_schedules(
+            schedules, mock_product_repo, mock_equipment_repo
+        )
+
+        assert len(result) == 2
+        assert result[0]["process_name"] == "組立"
+        assert result[1]["process_name"] == "検査"
+
+    def test_build_process_schedules_lookup_called_once_per_group(self):
+        """get_process_name はグループ数（工程数）だけ呼ばれる（セグメント数ではない）"""
+        mock_product_repo = MagicMock()
+        mock_equipment_repo = MagicMock()
+        mock_product_repo.get_process_name.return_value = "内職"
+        mock_equipment_repo.get_equipment_name.return_value = None
+
+        schedules = [
+            {
+                "process_routing_id": 5,
+                "equipment_id": None,
+                "start_datetime": f"2024-06-{17 + i:02d}T09:00:00",
+                "end_datetime": f"2024-06-{17 + i:02d}T17:00:00",
+            }
+            for i in range(5)  # 5セグメント、全て同じ routing_id
+        ]
+
+        build_process_schedules(schedules, mock_product_repo, mock_equipment_repo)
+
+        # lookup は1回のみ
+        mock_product_repo.get_process_name.assert_called_once_with(5)
+
+    def test_build_process_schedules_no_routing_id_in_merged_output(self):
+        """出力に内部キー _routing_id が含まれないこと"""
+        mock_product_repo = MagicMock()
+        mock_equipment_repo = MagicMock()
+        mock_product_repo.get_process_name.return_value = "組立"
+
+        schedules = [
+            {
+                "process_routing_id": 1,
+                "equipment_id": None,
+                "start_datetime": "2024-12-01T09:00:00",
+                "end_datetime": "2024-12-01T12:00:00",
+            }
+        ]
+
+        result = build_process_schedules(
+            schedules, mock_product_repo, mock_equipment_repo
+        )
+
+        assert "_routing_id" not in result[0]
+
     def test_build_simulate_response_exceeds_deadline(self):
         """計算納期が希望納期を超える場合"""
         mock_product_repo = MagicMock()
