@@ -134,7 +134,7 @@ export function getTaskGridColumns(
   const { rangeStart, unitDurationMs, totalUnits } = config
   const rangeStartMs = rangeStart.getTime()
 
-  const rawColStart = Math.floor((taskStart.getTime() - rangeStartMs) / unitDurationMs) + 1
+  const rawColStart = Math.ceil((taskStart.getTime() - rangeStartMs) / unitDurationMs) + 1
   const rawColEnd = Math.ceil((taskEnd.getTime() - rangeStartMs) / unitDurationMs) + 1
 
   const colStart = Math.max(1, Math.min(rawColStart, totalUnits))
