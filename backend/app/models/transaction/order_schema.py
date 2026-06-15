@@ -10,11 +10,13 @@ class OrderCreate(BaseSchema):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    order_number: str = Field(..., alias="order_no")
+    order_number: str | None = Field(None, alias="order_no")
     product_id: int
     quantity: int
     deadline_date: str | None = Field(None, alias="desired_deadline")
     customer_id: int | None = None
+    source_type: str = Field("manual")
+    source_raw: str | None = None
 
 
 class OrderSimulateRequest(BaseSchema):

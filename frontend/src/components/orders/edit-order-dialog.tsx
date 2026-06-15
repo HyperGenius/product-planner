@@ -27,7 +27,7 @@ interface EditOrderDialogProps {
 export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogProps) {
   const updateOrder = useUpdateOrder()
 
-  const [orderNo, setOrderNo] = useState(order.order_no)
+  const [orderNo, setOrderNo] = useState(order.order_no ?? "")
   const [productId, setProductId] = useState(order.product_id.toString())
   const [customerId, setCustomerId] = useState(order.customer_id?.toString() ?? "")
   const [quantity, setQuantity] = useState(order.quantity.toString())
@@ -43,13 +43,13 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   const handleSubmit = () => {
     setDuplicateError("")
     const parsedQuantity = parseInt(quantity, 10)
-    if (!orderNo.trim() || !productId || isNaN(parsedQuantity) || parsedQuantity <= 0) return
+    if (!productId || isNaN(parsedQuantity) || parsedQuantity <= 0) return
 
     updateOrder.mutate(
       {
         id: order.id,
         data: {
-          order_no: orderNo.trim(),
+          order_no: orderNo.trim() || undefined,
           product_id: parseInt(productId, 10),
           customer_id: customerId ? parseInt(customerId, 10) : undefined,
           quantity: parsedQuantity,
@@ -94,7 +94,7 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="order-no">注文番号 *</Label>
+            <Label htmlFor="order-no">注文番号（任意）</Label>
             <Input
               id="order-no"
               value={orderNo}

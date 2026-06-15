@@ -3,7 +3,7 @@
  */
 export interface Order {
   id: number
-  order_no: string
+  order_no: string | null
   product_id: number
   customer_id?: number
   quantity: number
@@ -11,6 +11,8 @@ export interface Order {
   confirmed_deadline?: string // ISO 8601形式
   status: 'draft' | 'confirmed' | 'completed' | 'canceled'
   is_scheduled: boolean
+  source_type: 'manual' | 'email'
+  source_raw?: string
   tenant_id: string
   created_at: string | null
   updated_at: string | null
@@ -20,7 +22,7 @@ export interface Order {
  * 注文作成時のデータ型
  */
 export interface OrderCreate {
-  order_no: string
+  order_no?: string
   product_id: number
   customer_id?: number
   quantity: number
