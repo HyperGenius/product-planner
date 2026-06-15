@@ -7,6 +7,7 @@ import {
   getTaskGridColumns,
   getNowFractionalColumn,
 } from '../utils/date-math'
+import type { WorkHoursConfig } from '../utils/date-math'
 import { TimelineHeader } from './timeline-header'
 import { TaskBar } from './task-bar'
 
@@ -21,6 +22,16 @@ export interface GanttChartProps {
   rangeEnd: Date
   /** 行の高さ（px） */
   rowHeight?: number
+  /**
+   * 稼働時間設定。週次モード時に指定すると非稼働時間帯のグリッドを生成しない。
+   * 未指定の場合は 24 時間均一グリッドにフォールバック。
+   */
+  workHours?: WorkHoursConfig
+  /**
+   * 非稼働日の Date 配列（祝日・土日等）。週次モード時に指定すると非稼働日の列を生成しない。
+   * 未指定の場合は 24 時間均一グリッドにフォールバック。
+   */
+  nonWorkingDays?: Date[]
   /**
    * タスクバーがクリックされた際に発火するコールバック
    */
@@ -44,12 +55,14 @@ export function GanttChart({
   rangeStart,
   rangeEnd,
   rowHeight = 40,
+  workHours,
+  nonWorkingDays,
   onTaskClick,
   wrapTaskBar,
 }: GanttChartProps) {
   const config = useMemo(
-    () => buildTimelineConfig(rangeStart, rangeEnd, viewMode),
-    [rangeStart, rangeEnd, viewMode],
+    () => buildTimelineConfig(rangeStart, rangeEnd, viewMode, workHours, nonWorkingDays),
+    [rangeStart, rangeEnd, viewMode, workHours, nonWorkingDays],
   )
 
   const nowFrac = useMemo(() => getNowFractionalColumn(config), [config])
