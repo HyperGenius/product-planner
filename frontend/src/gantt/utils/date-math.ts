@@ -134,7 +134,7 @@ export function getTaskGridColumns(
   const { rangeStart, unitDurationMs, totalUnits } = config
   const rangeStartMs = rangeStart.getTime()
 
-  const rawColStart = Math.floor((taskStart.getTime() - rangeStartMs) / unitDurationMs) + 1
+  const rawColStart = Math.ceil((taskStart.getTime() - rangeStartMs) / unitDurationMs) + 1
   const rawColEnd = Math.ceil((taskEnd.getTime() - rangeStartMs) / unitDurationMs) + 1
 
   const colStart = Math.max(1, Math.min(rawColStart, totalUnits))
@@ -159,9 +159,9 @@ function getTaskGridColumnsFromSlots(
   if (colStartIdx >= total) colStartIdx = total - 1
   if (colStartIdx < 0) colStartIdx = 0
 
-  let colEndIdx = binarySearchFirstGe(slots, taskEndMs)
-  if (colEndIdx <= colStartIdx) colEndIdx = colStartIdx + 1
+  let colEndIdx = binarySearchFirstGt(slots, taskEndMs)
   if (colEndIdx > total) colEndIdx = total
+  if (colEndIdx <= colStartIdx) colEndIdx = colStartIdx + 1
 
   return {
     colStart: colStartIdx + 1,
@@ -178,6 +178,23 @@ function binarySearchFirstGe(slots: Date[], targetMs: number): number {
   while (lo < hi) {
     const mid = (lo + hi) >> 1
     if (slots[mid].getTime() < targetMs) {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  return lo
+}
+
+/**
+ * slots[i].getTime() > targetMs を満たす最初のインデックスを返す（二分探索）
+ */
+function binarySearchFirstGt(slots: Date[], targetMs: number): number {
+  let lo = 0
+  let hi = slots.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (slots[mid].getTime() <= targetMs) {
       lo = mid + 1
     } else {
       hi = mid
