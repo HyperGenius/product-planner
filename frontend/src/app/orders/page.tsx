@@ -74,6 +74,7 @@ export default function OrdersPage() {
     bulkSimSummary,
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
+    handleBulkConfirmFromSummary,
   } = useOrdersPage()
 
   const expandedOrder = orders?.find((o) => o.id === expandedOrderId) ?? null
@@ -234,6 +235,7 @@ export default function OrdersPage() {
         <BulkSimulateSummaryDialog
           results={bulkSimSummary}
           onClose={handleCloseBulkSimSummary}
+          onBulkConfirm={handleBulkConfirmFromSummary}
         />
       </div>
     </TooltipProvider>

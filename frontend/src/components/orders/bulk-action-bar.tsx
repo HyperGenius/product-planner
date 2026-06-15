@@ -1,6 +1,6 @@
 "use client"
 
-import { Loader2, X } from "lucide-react"
+import { AlertTriangle, Loader2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -31,12 +31,19 @@ export function BulkActionBar({
 
   const isBusy = isBulkSimulating || isBulkConfirming
   const canConfirm = selectedScheduledCount > 0
+  const BULK_SIMULATE_WARN_THRESHOLD = 20
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-lg">
       <span className="text-sm font-medium text-muted-foreground">
         {selectedCount}件選択中
       </span>
+      {selectedCount > BULK_SIMULATE_WARN_THRESHOLD && (
+        <span className="flex items-center gap-1 text-xs text-yellow-600">
+          <AlertTriangle className="h-3 w-3" />
+          結果確認に時間がかかる場合があります
+        </span>
+      )}
       <div className="h-4 w-px bg-border" />
       <Button size="sm" variant="outline" onClick={onBulkSimulate} disabled={isBusy}>
         {isBulkSimulating ? (
