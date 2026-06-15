@@ -1,9 +1,11 @@
 "use client"
 
+import { useState } from "react"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -13,27 +15,50 @@ import {
 } from "@/components/ui/dialog"
 import type { BulkSimulateResult } from "@/types/order"
 
+const PAGE_SIZE = 5
+
 interface BulkSimulateSummaryDialogProps {
   results: BulkSimulateResult[] | null
   onClose: () => void
+  onBulkConfirm?: (orderIds: number[]) => void
 }
 
 function formatDate(iso: string) {
   return format(new Date(iso), "yyyy/MM/dd HH:mm", { locale: ja })
 }
 
-export function BulkSimulateSummaryDialog({ results, onClose }: BulkSimulateSummaryDialogProps) {
+export function BulkSimulateSummaryDialog({ results, onClose, onBulkConfirm }: BulkSimulateSummaryDialogProps) {
+  const [currentPage, setCurrentPage] = useState(1)
+  const [showNgOnly, setShowNgOnly] = useState(false)
+
   if (!results) return null
 
   const okCount = results.filter((r) => r.result !== null && r.result.is_feasible).length
   const infeasibleCount = results.filter((r) => r.result !== null && !r.result.is_feasible).length
   const failedCount = results.filter((r) => r.result === null).length
 
+  const filteredResults = showNgOnly
+    ? results.filter((r) => !r.result?.is_feasible)
+    : results
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / PAGE_SIZE))
+  const pagedResults = filteredResults.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+
+  const currentPageOkIds = pagedResults
+    .filter((r) => r.result !== null && r.result.is_feasible)
+    .map((r) => r.orderId)
+
+  const handleNgOnlyChange = (checked: boolean) => {
+    setShowNgOnly(checked)
+    setCurrentPage(1)
+  }
+
   return (
     <Dialog open={results !== null} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>一括シミュレーション結果</DialogTitle>
+          <DialogTitle>
+            一括シミュレーション結果（{results.length}件）　{currentPage}/{totalPages}ページ
+          </DialogTitle>
           <p className="flex items-center gap-2 text-sm text-muted-foreground mt-1 flex-wrap">
             <span className="flex items-center gap-1">
               <CheckCircle2 className="h-4 w-4 text-green-500" />
@@ -52,8 +77,8 @@ export function BulkSimulateSummaryDialog({ results, onClose }: BulkSimulateSumm
           </p>
         </DialogHeader>
 
-        <div className="max-h-80 overflow-y-auto space-y-1 py-2">
-          {results.map((r) => {
+        <div className="space-y-1 py-2">
+          {pagedResults.map((r) => {
             const isFailed = r.result === null
             const isInfeasible = r.result !== null && !r.result.is_feasible
             const rowClass = isFailed
@@ -101,8 +126,43 @@ export function BulkSimulateSummaryDialog({ results, onClose }: BulkSimulateSumm
           })}
         </div>
 
-        <DialogFooter>
-          <Button onClick={onClose}>閉じる</Button>
+        <DialogFooter className="flex-col gap-2 sm:flex-col">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="ng-only"
+              checked={showNgOnly}
+              onCheckedChange={(v) => handleNgOnlyChange(!!v)}
+            />
+            <label htmlFor="ng-only" className="text-sm cursor-pointer">NGのみ表示</label>
+          </div>
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((p) => p - 1)}
+              disabled={currentPage <= 1}
+            >
+              ← 前へ
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((p) => p + 1)}
+              disabled={currentPage >= totalPages}
+            >
+              次へ →
+            </Button>
+            {onBulkConfirm && (
+              <Button
+                size="sm"
+                onClick={() => onBulkConfirm(currentPageOkIds)}
+                disabled={currentPageOkIds.length === 0}
+              >
+                OK分だけ一括確定
+              </Button>
+            )}
+            <Button onClick={onClose}>閉じる</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

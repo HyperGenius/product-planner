@@ -226,6 +226,34 @@ export function useOrdersPage() {
 
   const handleCloseBulkSimSummary = () => setBulkSimSummary(null)
 
+  const handleBulkConfirmFromSummary = async (orderIds: number[]) => {
+    setIsBulkConfirming(true)
+    let successCount = 0, failCount = 0
+    for (const id of orderIds) {
+      try {
+        await confirmOrder.mutateAsync(id)
+        successCount++
+      } catch {
+        failCount++
+      }
+    }
+    await queryClient.invalidateQueries({ queryKey: ["orders"] })
+    setIsBulkConfirming(false)
+    const parts = (
+      [
+        successCount > 0 ? `成功 ${successCount}件` : null,
+        failCount > 0 ? `失敗 ${failCount}件` : null,
+      ] as (string | null)[]
+    ).filter((p): p is string => p !== null).join(" / ")
+    if (failCount === 0) {
+      toast.success(`一括確定完了: ${parts}`)
+    } else if (successCount === 0) {
+      toast.error(`一括確定失敗: ${parts}`)
+    } else {
+      toast.warning(`一括確定完了: ${parts}`)
+    }
+  }
+
   const handleBulkConfirm = async () => {
     const ids = selectedOrderIds
     const scheduledIds = ids.filter((id) => orders?.find((o) => o.id === id)?.is_scheduled)
@@ -316,5 +344,6 @@ export function useOrdersPage() {
     bulkSimSummary,
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
+    handleBulkConfirmFromSummary,
   }
 }
