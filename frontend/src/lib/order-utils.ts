@@ -48,7 +48,8 @@ export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
  */
 export function getProductName(productId: number, products?: Product[]): string {
   const product = products?.find((p) => p.id === productId)
-  return product ? `${product.code} - ${product.name}` : "不明"
+  if (!product) return "不明"
+  return product.code ? `${product.code} - ${product.name}` : product.name
 }
 
 /**
