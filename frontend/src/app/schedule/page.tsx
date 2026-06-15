@@ -21,10 +21,10 @@ import { useSidebar } from "@/components/ui/sidebar"
 export default function SchedulePage() {
   // 状態管理
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
-  const [viewMode, setViewMode] = useState<GanttViewMode>("Day")
+  const [viewMode, setViewMode] = useState<GanttViewMode>("Week")
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
   const [isEditMode, setIsEditMode] = useState<boolean>(false)
-  const [groupBy, setGroupBy] = useState<GroupByMode>("none")
+  const [groupBy, setGroupBy] = useState<GroupByMode>("order")
 
   // 編集モーダル用の状態
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null)
