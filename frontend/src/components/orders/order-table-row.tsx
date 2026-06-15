@@ -156,7 +156,7 @@ export function OrderTableRow({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onConfirm(order.id, order.order_no)}
+                onClick={() => onConfirm(order.id, order.order_no ?? "")}
                 disabled={confirmIsPending || isBulkOperationInProgress}
               >
                 確定
