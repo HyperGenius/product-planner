@@ -74,7 +74,7 @@ export default function OrderDetailPage() {
     try {
       await deleteMutation.mutateAsync(orderId)
       toast.success("注文を削除しました")
-      router.push("/orders")
+      router.back()
     } catch {
       toast.error("注文の削除に失敗しました")
     }
@@ -109,9 +109,9 @@ export default function OrderDetailPage() {
   return (
     <div className="container mx-auto py-6 px-4">
       <div className="mb-6 flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => router.push("/orders")}>
+        <Button variant="ghost" size="sm" onClick={() => router.back()}>
           <ArrowLeft className="mr-2 h-4 w-4" />
-          注文一覧へ
+          戻る
         </Button>
         <div>
           <h1 className="text-3xl font-bold">{order.order_no}</h1>
