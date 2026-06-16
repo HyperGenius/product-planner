@@ -86,5 +86,6 @@ terraform apply -var-file=environments/prod/terraform.tfvars
 
 ## 関連
 
-- Issue #165: Gmail タイマートリガー Azure Function
-- 後続: Secret Manager Terraform リソース管理
+- #170: Secret Manager リソース管理（[secret-manager-terraform.md](secret-manager-terraform.md)）
+- #171: Gmail OAuth2 認証情報セットアップ（[gmail-oauth-setup.md](gmail-oauth-setup.md)）
+- #165: Gmail タイマートリガー Azure Function（後続）

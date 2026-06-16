@@ -139,3 +139,6 @@ infra/terraform/.terraform/
 infra/terraform/*.tfstate
 infra/terraform/*.tfstate.backup
 infra/terraform/environments/**/*.tfvars
+
+# OAuth2 認証情報（絶対にコミットしない）
+scripts/credentials.json
