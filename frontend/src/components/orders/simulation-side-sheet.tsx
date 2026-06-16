@@ -50,7 +50,7 @@ export function SimulationSideSheet({
           <Button
             disabled={confirmIsPending || !order}
             onClick={() => {
-              if (order) onConfirm(order.id, order.order_no)
+              if (order) onConfirm(order.id, order.order_no ?? '')
             }}
           >
             この内容で確定
