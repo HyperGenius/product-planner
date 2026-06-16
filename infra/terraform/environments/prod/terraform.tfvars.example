@@ -1,0 +1,33 @@
+project = {
+  id     = "your-gcp-project-id"
+  region = "asia-northeast1"
+  number = "your-project-number"
+}
+
+apis = {
+  gmail = {
+    service = "gmail.googleapis.com"
+  }
+  secretmanager = {
+    service = "secretmanager.googleapis.com"
+  }
+}
+
+# IAM member to grant secretAccessor role
+# e.g. "user:you@example.com" or "serviceAccount:sa@project.iam.gserviceaccount.com"
+secret_accessor_member = "user:you@example.com"
+
+secrets = {
+  client_id = {
+    secret_id   = "gmail-oauth-client-id"
+    description = "Gmail OAuth2 client ID"
+  }
+  client_secret = {
+    secret_id   = "gmail-oauth-client-secret"
+    description = "Gmail OAuth2 client secret"
+  }
+  refresh_token = {
+    secret_id   = "gmail-oauth-refresh-token"
+    description = "Gmail OAuth2 refresh token"
+  }
+}
