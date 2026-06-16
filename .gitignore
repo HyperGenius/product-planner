@@ -133,3 +133,9 @@ __queuestorage__
 __azurite_db*__.json
 .python_packages
 AzuriteConfig
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/environments/**/*.tfvars
