@@ -1,3 +1,6 @@
 productplanner
 SUPABASE
+supa
 delenv
+creds
+googleapiclient
