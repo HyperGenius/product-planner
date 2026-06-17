@@ -62,5 +62,5 @@ gcloud secrets versions access latest --secret="gmail-oauth-refresh-token"
 
 - #169: GCP プロジェクト基盤
 - #170: Secret Manager Terraform リソース管理
-- #165: Gmail タイマートリガー Azure Function（本セットアップ完了後に実装）
+- #165: Gmail ポーリング Vercel Cron ジョブ（本セットアップ完了後に実装）
 - `scripts/get_gmail_refresh_token.py`

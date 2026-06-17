@@ -20,5 +20,19 @@
         "**/.mypy_cache": true,
         "**/.venv": true,
         "**/.ruff_cache": true
-    }
+    },
+    "cSpell.customDictionaries": {
+        "pp-words": {
+            "name": "pp-words",
+            "path": "${workspaceRoot}/.vscode/pp-words.txt",
+            "description": "ProductPlannerプロジェクトでよく使われる単語を含むカスタム辞書",
+            "addWords": true
+        }
+    },
+    "cSpell.dictionaries": [
+        "python",
+        "typescript",
+        "terraform",
+        "softwareTerms"
+    ],
 }
