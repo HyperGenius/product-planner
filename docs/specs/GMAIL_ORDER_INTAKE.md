@@ -89,7 +89,7 @@ sequenceDiagram
 
 ### 1. Vercel Cron トリガー
 
-- スケジュール: `*/15 * * * *`（15 分間隔）
+- スケジュール: `0 8,17 * * *`（8 時・17 時の 1 日 2 回、Vercel 無料プランの上限に合わせた設定）
 - 設定ファイル: [frontend/vercel.json](../../frontend/vercel.json)
 - Vercel が自動で `Authorization: Bearer <CRON_SECRET>` を付与する
 

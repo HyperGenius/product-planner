@@ -229,7 +229,7 @@ curl -s http://localhost:8000/api/cron/gmail-poll \
 - `CRON_SECRET` は Render と Vercel で**必ず同じ値**を設定すること
 - `ANTHROPIC_API_KEY` と `SUPABASE_SERVICE_ROLE_KEY` は Secret Manager 管理必須。`.env` ファイルをリポジトリにコミットしないこと
 - `GMAIL_REFRESH_TOKEN` が無効化された場合は `scripts/get_gmail_refresh_token.py` を再実行して Secret Manager を更新し、Render の環境変数も差し替える（[gmail-oauth-setup.md](gmail-oauth-setup.md) 参照）
-- Vercel Cron の 15 分間隔実行は **Pro プラン以上**が必要。無料プランでは 1 日 2 回まで
+- Vercel Cron は無料プランで 1 日 2 回まで。現在は `0 8,17 * * *`（8 時・17 時）に設定
 
 ## 関連
 
