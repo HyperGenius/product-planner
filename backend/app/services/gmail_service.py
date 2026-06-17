@@ -21,10 +21,10 @@ logger = get_logger(__name__)
 _GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 # Label name prefixes — full label names are "{prefix}/{tenant_name}"
-_PREFIX_PENDING = os.environ.get("GMAIL_LABEL_PREFIX_PENDING", "処理待ち")
-_PREFIX_PROCESSING = os.environ.get("GMAIL_LABEL_PREFIX_PROCESSING", "処理中")
-_PREFIX_DONE = os.environ.get("GMAIL_LABEL_PREFIX_DONE", "処理済み")
-_PREFIX_ERROR = os.environ.get("GMAIL_LABEL_PREFIX_ERROR", "エラー")
+_PREFIX_PENDING = os.environ.get("GMAIL_LABEL_PREFIX_PENDING", "pp-pending")
+_PREFIX_PROCESSING = os.environ.get("GMAIL_LABEL_PREFIX_PROCESSING", "pp-processing")
+_PREFIX_DONE = os.environ.get("GMAIL_LABEL_PREFIX_DONE", "pp-done")
+_PREFIX_ERROR = os.environ.get("GMAIL_LABEL_PREFIX_ERROR", "pp-error")
 
 
 def _build_gmail_client():

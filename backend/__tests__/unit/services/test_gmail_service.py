@@ -10,37 +10,46 @@ class TestPollUnreadEmails:
         monkeypatch.setenv("GMAIL_CLIENT_ID", "client-id")
         monkeypatch.setenv("GMAIL_CLIENT_SECRET", "client-secret")
         monkeypatch.setenv("GMAIL_REFRESH_TOKEN", "refresh-token")
-        monkeypatch.setenv("GMAIL_QUERY_FILTER", "is:unread")
-        monkeypatch.setenv("GMAIL_LABEL_PROCESSED", "Label_123")
 
-    def test_no_unread_emails_returns_zero(self, monkeypatch):
+    def test_no_pending_labels_returns_zero(self, monkeypatch):
         self._set_required_env(monkeypatch)
 
         mock_service = MagicMock()
-        mock_service.users().messages().list().execute.return_value = {"messages": []}
+        mock_service.users().labels().list().execute.return_value = {"labels": []}
 
         with patch(
             "app.services.gmail_service._build_gmail_client", return_value=mock_service
         ):
-            result = poll_unread_emails()
+            result = poll_unread_emails(MagicMock())
 
-        assert result == {"processed": 0}
+        assert result == {"processed": 0, "errors": 0}
 
-    def test_emails_are_labeled_and_count_returned(self, monkeypatch):
+    def test_messages_processed_and_count_returned(self, monkeypatch):
         self._set_required_env(monkeypatch)
 
         mock_service = MagicMock()
+        mock_service.users().labels().list().execute.return_value = {
+            "labels": [
+                {"name": "pp-pending/tenantA", "id": "label-1"},
+            ]
+        }
         mock_service.users().messages().list().execute.return_value = {
             "messages": [{"id": "aaa"}, {"id": "bbb"}]
         }
 
-        with patch(
-            "app.services.gmail_service._build_gmail_client", return_value=mock_service
+        mock_db = MagicMock()
+        with (
+            patch(
+                "app.services.gmail_service._build_gmail_client",
+                return_value=mock_service,
+            ),
+            patch("app.services.gmail_service._process_message") as mock_process,
         ):
-            result = poll_unread_emails()
+            result = poll_unread_emails(mock_db)
 
-        assert result == {"processed": 2}
-        mock_service.users().messages().batchModify.assert_called_once()
+        assert result["processed"] == 2
+        assert result["errors"] == 0
+        assert mock_process.call_count == 2
 
     def test_missing_env_vars_raise_value_error(self, monkeypatch):
         monkeypatch.delenv("GMAIL_CLIENT_ID", raising=False)
@@ -48,21 +57,33 @@ class TestPollUnreadEmails:
         monkeypatch.delenv("GMAIL_REFRESH_TOKEN", raising=False)
 
         with pytest.raises(ValueError, match="Missing Gmail OAuth env vars"):
-            poll_unread_emails()
+            poll_unread_emails(MagicMock())
 
-    def test_paginated_emails_are_all_processed(self, monkeypatch):
+    def test_processing_error_increments_error_count(self, monkeypatch):
         self._set_required_env(monkeypatch)
 
         mock_service = MagicMock()
-        # 1ページ目: nextPageToken あり、2ページ目: なし
-        mock_service.users().messages().list().execute.side_effect = [
-            {"messages": [{"id": "aaa"}, {"id": "bbb"}], "nextPageToken": "tok"},
-            {"messages": [{"id": "ccc"}]},
-        ]
+        mock_service.users().labels().list().execute.return_value = {
+            "labels": [
+                {"name": "pp-pending/tenantA", "id": "label-1"},
+            ]
+        }
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "aaa"}]
+        }
 
-        with patch(
-            "app.services.gmail_service._build_gmail_client", return_value=mock_service
+        mock_db = MagicMock()
+        with (
+            patch(
+                "app.services.gmail_service._build_gmail_client",
+                return_value=mock_service,
+            ),
+            patch(
+                "app.services.gmail_service._process_message",
+                side_effect=Exception("processing failed"),
+            ),
         ):
-            result = poll_unread_emails()
+            result = poll_unread_emails(mock_db)
 
-        assert result == {"processed": 3}
+        assert result["processed"] == 0
+        assert result["errors"] == 1

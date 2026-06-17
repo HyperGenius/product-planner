@@ -15,7 +15,7 @@ LLM 解析の誤りに備え、起票は必ず **下書き状態** とし、担�
 
 | コンポーネント | 役割 |
 |---|---|
-| Gmail フィルタ | 受信時に `処理待ち/{テナント名}` ラベルを自動付与 |
+| Gmail フィルタ | 受信時に `pp-pending/{テナント名}` ラベルを自動付与 |
 | Vercel Cron | 15 分ごとに Next.js API ルートを呼び出すスケジューラ |
 | Next.js API Route | Cron Secret を検証し、Render バックエンドへリクエストを転送 |
 | FastAPI (Render) | Gmail API 呼び出し・LLM 解析・注文下書き作成を実行 |
@@ -31,10 +31,10 @@ LLM 解析の誤りに備え、起票は必ず **下書き状態** とし、担�
 メールの処理状態を Gmail のネストラベルで管理する。
 
 ```
-処理待ち/テナントA    ← Gmail フィルタが受信時に自動付与
-処理中/テナントA      ← Cron 処理開始時に遷移（二重処理防止）
-処理済み/テナントA    ← 正常完了時に遷移
-エラー/テナントA      ← 例外発生時に遷移
+pp-pending/テナントA    ← Gmail フィルタが受信時に自動付与
+pp-processing/テナントA ← Cron 処理開始時に遷移（二重処理防止）
+pp-done/テナントA       ← 正常完了時に遷移
+pp-error/テナントA      ← 例外発生時に遷移
 ```
 
 プレフィックスは環境変数で変更可能（[環境変数一覧](#環境変数一覧) 参照）。  
@@ -55,18 +55,18 @@ sequenceDiagram
     participant PG as Supabase<br>pg_trgm
     participant DB as Supabase<br>orders
 
-    GF->>GM: 受信メールに 処理待ち/テナントA を付与
+    GF->>GM: 受信メールに pp-pending/テナントA を付与
 
     VC->>NR: GET /api/cron/gmail-poll (15分ごと)
     NR->>NR: CRON_SECRET 検証
     NR->>BE: GET /api/cron/gmail-poll
 
     BE->>GM: labels.list() → ラベル ID マップ取得
-    BE->>GM: messages.list(labelIds=[処理待ち/*])
+    BE->>GM: messages.list(labelIds=[pp-pending/*])
     GM-->>BE: メッセージ ID リスト
 
     loop 各メール
-        BE->>GM: modify(処理待ち→処理中)
+        BE->>GM: modify(pp-pending→pp-processing)
         BE->>GM: messages.get(id, format=full)
         GM-->>BE: 本文テキスト
         BE->>DB: gmail_label_tenants lookup → tenant_id
@@ -76,7 +76,7 @@ sequenceDiagram
         PG-->>BE: [{id, name, score}, ...]
         BE->>DB: customers lookup/auto-create
         BE->>DB: orders INSERT (status=draft)
-        BE->>GM: modify(処理中→処理済み)
+        BE->>GM: modify(pp-processing→pp-done)
     end
 
     BE-->>NR: {processed: N, errors: E}
@@ -109,17 +109,17 @@ sequenceDiagram
 
 | 項目 | 詳細 |
 |---|---|
-| 取得対象 | `処理待ち/*` ラベルを持つメール全件 |
-| 二重処理防止 | 取得直後に `処理待ち → 処理中` へ遷移 |
+| 取得対象 | `pp-pending/*` ラベルを持つメール全件 |
+| 二重処理防止 | 取得直後に `pp-pending → pp-processing` へ遷移 |
 | ページング | `nextPageToken` によるページ送り（最大 500 件/回） |
-| エラー時 | メール単位でキャッチし `処理中 → エラー` へ遷移。他メールの処理は継続 |
+| エラー時 | メール単位でキャッチし `pp-processing → pp-error` へ遷移。他メールの処理は継続 |
 
 実装: [backend/app/services/gmail_service.py](../../backend/app/services/gmail_service.py)
 
 ### 5. テナント解決
 
-`処理待ち/テナントA` ラベルのサフィックス（`テナントA`）を `gmail_label_tenants` テーブルに問い合わせ `tenant_id` (UUID) を取得する。  
-エントリが存在しない場合はエラーとして処理を中断し `エラー` ラベルへ遷移する。
+`pp-pending/テナントA` ラベルのサフィックス（`テナントA`）を `gmail_label_tenants` テーブルに問い合わせ `tenant_id` (UUID) を取得する。  
+エントリが存在しない場合はエラーとして処理を中断し `pp-error` ラベルへ遷移する。
 
 ### 6. Claude による注文フィールド抽出
 
@@ -260,10 +260,10 @@ ORDER BY score DESC;
 | `GMAIL_CLIENT_ID` | — | Gmail OAuth2 クライアント ID |
 | `GMAIL_CLIENT_SECRET` | — | Gmail OAuth2 クライアントシークレット |
 | `GMAIL_REFRESH_TOKEN` | — | Gmail OAuth2 リフレッシュトークン |
-| `GMAIL_LABEL_PREFIX_PENDING` | `処理待ち` | 処理待ちラベルプレフィックス |
-| `GMAIL_LABEL_PREFIX_PROCESSING` | `処理中` | 処理中ラベルプレフィックス |
-| `GMAIL_LABEL_PREFIX_DONE` | `処理済み` | 処理済みラベルプレフィックス |
-| `GMAIL_LABEL_PREFIX_ERROR` | `エラー` | エラーラベルプレフィックス |
+| `GMAIL_LABEL_PREFIX_PENDING` | `pp-pending` | 処理待ちラベルプレフィックス |
+| `GMAIL_LABEL_PREFIX_PROCESSING` | `pp-processing` | 処理中ラベルプレフィックス |
+| `GMAIL_LABEL_PREFIX_DONE` | `pp-done` | 処理済みラベルプレフィックス |
+| `GMAIL_LABEL_PREFIX_ERROR` | `pp-error` | エラーラベルプレフィックス |
 | `CRON_SECRET` | — | Vercel Cron 認証トークン |
 | `ANTHROPIC_API_KEY` | — | Claude API キー |
 | `EMAIL_EXTRACTION_MODEL` | `claude-haiku-4-5-20251001` | 使用する Claude モデル |
@@ -278,11 +278,11 @@ ORDER BY score DESC;
 ```
 [Gmail 受信]
     ↓ Gmail フィルタ
-[処理待ち/テナントA ラベル付与]
+[pp-pending/テナントA ラベル付与]
     ↓ Vercel Cron (15分ごと)
 [Claude 抽出 → pg_trgm マッチ → draft 注文作成]
     ↓
-[処理済み/テナントA ラベル付与]
+[pp-done/テナントA ラベル付与]
     ↓
 [担当者が ProductPlanner でレビュー]
     ↓

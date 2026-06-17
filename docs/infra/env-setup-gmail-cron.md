@@ -18,10 +18,10 @@ Gmail ポーリング Cron ジョブの動作に必要な環境変数を、GCP S
 | `GMAIL_CLIENT_ID` | GCP Secret Manager | — |
 | `GMAIL_CLIENT_SECRET` | GCP Secret Manager | — |
 | `GMAIL_REFRESH_TOKEN` | GCP Secret Manager | — |
-| `GMAIL_LABEL_PREFIX_PENDING` | 自前設定 | デフォルト: `処理待ち` |
-| `GMAIL_LABEL_PREFIX_PROCESSING` | 自前設定 | デフォルト: `処理中` |
-| `GMAIL_LABEL_PREFIX_DONE` | 自前設定 | デフォルト: `処理済み` |
-| `GMAIL_LABEL_PREFIX_ERROR` | 自前設定 | デフォルト: `エラー` |
+| `GMAIL_LABEL_PREFIX_PENDING` | 自前設定 | デフォルト: `pp-pending` |
+| `GMAIL_LABEL_PREFIX_PROCESSING` | 自前設定 | デフォルト: `pp-processing` |
+| `GMAIL_LABEL_PREFIX_DONE` | 自前設定 | デフォルト: `pp-done` |
+| `GMAIL_LABEL_PREFIX_ERROR` | 自前設定 | デフォルト: `pp-error` |
 | `ANTHROPIC_API_KEY` | GCP Secret Manager | Claude メール解析用 |
 | `EMAIL_EXTRACTION_MODEL` | 自前設定 | デフォルト: `claude-haiku-4-5-20251001` |
 | `PRODUCT_MATCH_THRESHOLD` | 自前設定 | デフォルト: `0.3` |
@@ -97,19 +97,19 @@ Gmail の設定画面（[mail.google.com → 設定 → ラベル → 新しい�
 
 | ラベル名（例） | 用途 |
 |---|---|
-| `処理待ち/テナントA` | Gmail フィルタが受信時に自動付与 |
-| `処理中/テナントA` | Cron 処理開始時に自動遷移（二重処理防止） |
-| `処理済み/テナントA` | 正常完了時に自動遷移 |
-| `エラー/テナントA` | 例外発生時に自動遷移 |
+| `pp-pending/テナントA` | Gmail フィルタが受信時に自動付与 |
+| `pp-processing/テナントA` | Cron 処理開始時に自動遷移（二重処理防止） |
+| `pp-done/テナントA` | 正常完了時に自動遷移 |
+| `pp-error/テナントA` | 例外発生時に自動遷移 |
 
-> テナント名部分（`テナントA`）はテナントごとに変える。プレフィックス（`処理待ち` 等）は環境変数で変更可能。
+> テナント名部分（`テナントA`）はテナントごとに変える。プレフィックス（`pp-pending` 等）は環境変数で変更可能。
 
 ### Gmail フィルタの設定
 
 Gmail の設定 → フィルタ → フィルタを作成 で以下を設定する。
 
 - **From:** （受注メールの送信元ドメイン、例: `@example-customer.co.jp`）
-- **ラベルを付ける:** `処理待ち/テナントA`
+- **ラベルを付ける:** `pp-pending/テナントA`
 
 ---
 
@@ -148,10 +148,10 @@ Render ダッシュボード → サービス選択 → **Environment** タブ �
 
 | Key | デフォルト | 説明 |
 |---|---|---|
-| `GMAIL_LABEL_PREFIX_PENDING` | `処理待ち` | — |
-| `GMAIL_LABEL_PREFIX_PROCESSING` | `処理中` | — |
-| `GMAIL_LABEL_PREFIX_DONE` | `処理済み` | — |
-| `GMAIL_LABEL_PREFIX_ERROR` | `エラー` | — |
+| `GMAIL_LABEL_PREFIX_PENDING` | `pp-pending` | — |
+| `GMAIL_LABEL_PREFIX_PROCESSING` | `pp-processing` | — |
+| `GMAIL_LABEL_PREFIX_DONE` | `pp-done` | — |
+| `GMAIL_LABEL_PREFIX_ERROR` | `pp-error` | — |
 | `EMAIL_EXTRACTION_MODEL` | `claude-haiku-4-5-20251001` | — |
 | `PRODUCT_MATCH_THRESHOLD` | `0.3` | 類似度閾値（0〜1） |
 | `PRODUCT_MATCH_TOP_N` | `5` | 候補表示件数上限 |
@@ -201,7 +201,7 @@ ANTHROPIC_API_KEY=<Step3の値>
 SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
 SUPABASE_URL=<Supabase URL>
 # 以下はデフォルト値から変更する場合のみ
-# GMAIL_LABEL_PREFIX_PENDING=処理待ち
+# GMAIL_LABEL_PREFIX_PENDING=pp-pending
 # EMAIL_EXTRACTION_MODEL=claude-haiku-4-5-20251001
 # PRODUCT_MATCH_THRESHOLD=0.3
 # PRODUCT_MATCH_TOP_N=5
