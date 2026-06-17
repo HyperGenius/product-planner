@@ -157,11 +157,22 @@ interface OrderCreate {
 
 ## 将来の拡張: メール解析パイプライン
 
-本機能はメール解析 Azure Function との接続を想定した土台。以下のフローで注文を自動起票する。
+本機能はメール解析パイプラインとの接続を想定した土台。以下のフローで注文を自動起票する。
 
+**現在のアーキテクチャ**
 ```
-[受信メール] → [Azure Function: メール解析]
+[Vercel Cron] → [バックエンド API（Render）: Gmail ポーリング]
+              → Gmail API で未読メール取得
               → LLM でフィールド抽出 (製品コード, 数量, 希望納期)
+              → POST /orders/ {source_type: "email", source_raw: "<メール本文>"}
+              → [人間によるレビュー・確定]
+```
+
+**将来のアーキテクチャ（スケールアップ時）**
+```
+[Cloud Scheduler] → [Cloud Run: Gmail ポーリング]
+              → Gmail API で未読メール取得
+              → LLM でフィールド抽出
               → POST /orders/ {source_type: "email", source_raw: "<メール本文>"}
               → [人間によるレビュー・確定]
 ```
@@ -187,5 +198,5 @@ interface OrderCreate {
 | Frontend: `Order` 型更新 | ✅ #155 |
 | Frontend: 注文番号フィールド任意化 | ✅ #155 |
 | Frontend: メール本文折りたたみUI | ✅ #155 |
-| Azure Function: メール受信トリガー | ❌ 未実装 |
+| Vercel Cron: Gmail ポーリングジョブ | ❌ 未実装 (#165) |
 | LLM によるメール本文解析 | ❌ 未実装 |
