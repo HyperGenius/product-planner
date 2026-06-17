@@ -10,15 +10,31 @@ Gmail ポーリング Cron ジョブの動作に必要な環境変数を、GCP S
 
 ## 必要な環境変数一覧
 
-| 変数名 | 設定先 | 取得元 |
+### Render（バックエンド）
+
+| 変数名 | 取得元 | 備考 |
 |---|---|---|
-| `CRON_SECRET` | Render・Vercel（共通） | 自前生成 |
-| `GMAIL_CLIENT_ID` | Render | GCP Secret Manager |
-| `GMAIL_CLIENT_SECRET` | Render | GCP Secret Manager |
-| `GMAIL_REFRESH_TOKEN` | Render | GCP Secret Manager |
-| `GMAIL_QUERY_FILTER` | Render | 自前設定 |
-| `GMAIL_LABEL_PROCESSED` | Render | Gmail API で確認 |
-| `BACKEND_URL` | Vercel | Render のサービス URL |
+| `CRON_SECRET` | 自前生成 | Vercel と同じ値 |
+| `GMAIL_CLIENT_ID` | GCP Secret Manager | — |
+| `GMAIL_CLIENT_SECRET` | GCP Secret Manager | — |
+| `GMAIL_REFRESH_TOKEN` | GCP Secret Manager | — |
+| `GMAIL_LABEL_PREFIX_PENDING` | 自前設定 | デフォルト: `処理待ち` |
+| `GMAIL_LABEL_PREFIX_PROCESSING` | 自前設定 | デフォルト: `処理中` |
+| `GMAIL_LABEL_PREFIX_DONE` | 自前設定 | デフォルト: `処理済み` |
+| `GMAIL_LABEL_PREFIX_ERROR` | 自前設定 | デフォルト: `エラー` |
+| `ANTHROPIC_API_KEY` | GCP Secret Manager | Claude メール解析用 |
+| `EMAIL_EXTRACTION_MODEL` | 自前設定 | デフォルト: `claude-haiku-4-5-20251001` |
+| `PRODUCT_MATCH_THRESHOLD` | 自前設定 | デフォルト: `0.3` |
+| `PRODUCT_MATCH_TOP_N` | 自前設定 | デフォルト: `5` |
+| `SUPABASE_SERVICE_ROLE_KEY` | GCP Secret Manager | Cron 専用。Secret Manager 管理必須 |
+| `SUPABASE_URL` | Supabase ダッシュボード | — |
+
+### Vercel（フロントエンド）
+
+| 変数名 | 取得元 | 備考 |
+|---|---|---|
+| `CRON_SECRET` | 自前生成 | Render と同じ値 |
+| `BACKEND_URL` | Render のサービス URL | 末尾スラッシュなし |
 
 ---
 
@@ -56,42 +72,65 @@ gcloud secrets versions access latest --secret="gmail-oauth-refresh-token"
 
 ---
 
-## Step 3: Gmail ラベル ID を確認する
-
-`GMAIL_LABEL_PROCESSED` には Gmail ラベルの**表示名ではなく ID**（`Label_XXXXXXXXX` 形式）を設定する必要がある。
-
-### ラベル一覧を取得
+## Step 3: Anthropic API キーを Secret Manager に登録する
 
 ```bash
-# access_token を取得（refresh_token から）
-ACCESS_TOKEN=$(curl -s -X POST https://oauth2.googleapis.com/token \
-  -d "client_id=$(gcloud secrets versions access latest --secret=gmail-oauth-client-id)" \
-  -d "client_secret=$(gcloud secrets versions access latest --secret=gmail-oauth-client-secret)" \
-  -d "refresh_token=$(gcloud secrets versions access latest --secret=gmail-oauth-refresh-token)" \
-  -d "grant_type=refresh_token" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+# APIキーを Secret Manager に保存
+echo -n "<ANTHROPIC_API_KEY>" | \
+  gcloud secrets create anthropic-api-key --data-file=- --project=productplanner-prod
 
-# ラベル一覧を取得
-curl -s "https://gmail.googleapis.com/gmail/v1/users/me/labels" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  | python3 -m json.tool | grep -A1 '"name"'
+# 既存シークレットを更新する場合
+echo -n "<ANTHROPIC_API_KEY>" | \
+  gcloud secrets versions add anthropic-api-key --data-file=- --project=productplanner-prod
+
+# 確認
+gcloud secrets versions access latest --secret="anthropic-api-key" --project=productplanner-prod
 ```
-
-出力例:
-```json
-"name": "受注",
-"id": "Label_1234567890123456789",
-```
-
-`"id"` の値（`Label_` から始まる文字列）が `GMAIL_LABEL_PROCESSED` に設定する値。
-
-### ラベルがまだない場合
-
-Gmail の設定画面（[mail.google.com → 設定 → ラベル](https://mail.google.com)）でラベルを作成してから上記コマンドを再実行する。
 
 ---
 
-## Step 4: Render に環境変数を設定する
+## Step 4: Gmail ネストラベルを作成する
+
+処理状態管理に使う 4 種のネストラベルを Gmail に作成する。
+
+Gmail の設定画面（[mail.google.com → 設定 → ラベル → 新しいラベルを作成](https://mail.google.com)）で以下を作成する。
+
+| ラベル名（例） | 用途 |
+|---|---|
+| `処理待ち/テナントA` | Gmail フィルタが受信時に自動付与 |
+| `処理中/テナントA` | Cron 処理開始時に自動遷移（二重処理防止） |
+| `処理済み/テナントA` | 正常完了時に自動遷移 |
+| `エラー/テナントA` | 例外発生時に自動遷移 |
+
+> テナント名部分（`テナントA`）はテナントごとに変える。プレフィックス（`処理待ち` 等）は環境変数で変更可能。
+
+### Gmail フィルタの設定
+
+Gmail の設定 → フィルタ → フィルタを作成 で以下を設定する。
+
+- **From:** （受注メールの送信元ドメイン、例: `@example-customer.co.jp`）
+- **ラベルを付ける:** `処理待ち/テナントA`
+
+---
+
+## Step 5: gmail_label_tenants テーブルにエントリを追加する
+
+Supabase ダッシュボード → SQL Editor で以下を実行する。
+
+```sql
+INSERT INTO gmail_label_tenants (label_name, tenant_id)
+VALUES ('テナントA', '<tenant_id_uuid>');
+```
+
+`tenant_id` は `tenants` テーブルから確認する。
+
+```sql
+SELECT id, name FROM tenants;
+```
+
+---
+
+## Step 6: Render に環境変数を設定する
 
 Render ダッシュボード → サービス選択 → **Environment** タブ で以下を設定する。
 
@@ -101,8 +140,21 @@ Render ダッシュボード → サービス選択 → **Environment** タブ �
 | `GMAIL_CLIENT_ID` | Step 2 で取得した値 |
 | `GMAIL_CLIENT_SECRET` | Step 2 で取得した値 |
 | `GMAIL_REFRESH_TOKEN` | Step 2 で取得した値 |
-| `GMAIL_QUERY_FILTER` | 例: `is:unread label:受注` |
-| `GMAIL_LABEL_PROCESSED` | Step 3 で確認した Label ID |
+| `ANTHROPIC_API_KEY` | Step 3 で登録した値 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase ダッシュボード → Settings → API |
+| `SUPABASE_URL` | Supabase ダッシュボード → Settings → API |
+
+以下はデフォルト値から変更する場合のみ設定する。
+
+| Key | デフォルト | 説明 |
+|---|---|---|
+| `GMAIL_LABEL_PREFIX_PENDING` | `処理待ち` | — |
+| `GMAIL_LABEL_PREFIX_PROCESSING` | `処理中` | — |
+| `GMAIL_LABEL_PREFIX_DONE` | `処理済み` | — |
+| `GMAIL_LABEL_PREFIX_ERROR` | `エラー` | — |
+| `EMAIL_EXTRACTION_MODEL` | `claude-haiku-4-5-20251001` | — |
+| `PRODUCT_MATCH_THRESHOLD` | `0.3` | 類似度閾値（0〜1） |
+| `PRODUCT_MATCH_TOP_N` | `5` | 候補表示件数上限 |
 
 設定後、**Manual Deploy** でサービスを再デプロイする。
 
@@ -111,12 +163,12 @@ Render ダッシュボード → サービス選択 → **Environment** タブ �
 ```bash
 curl -s -X GET https://<render-service>.onrender.com/api/cron/gmail-poll \
   -H "Authorization: Bearer <CRON_SECRET>"
-# → {"processed": 0} または {"processed": N}
+# → {"processed": N, "errors": 0}
 ```
 
 ---
 
-## Step 5: Vercel に環境変数を設定する
+## Step 7: Vercel に環境変数を設定する
 
 Vercel ダッシュボード → プロジェクト選択 → **Settings → Environment Variables** で以下を設定する。
 
@@ -145,8 +197,14 @@ CRON_SECRET=<Step1の値>
 GMAIL_CLIENT_ID=<Step2の値>
 GMAIL_CLIENT_SECRET=<Step2の値>
 GMAIL_REFRESH_TOKEN=<Step2の値>
-GMAIL_QUERY_FILTER=is:unread
-GMAIL_LABEL_PROCESSED=<Step3のLabel ID>
+ANTHROPIC_API_KEY=<Step3の値>
+SUPABASE_SERVICE_ROLE_KEY=<Supabase Service Role Key>
+SUPABASE_URL=<Supabase URL>
+# 以下はデフォルト値から変更する場合のみ
+# GMAIL_LABEL_PREFIX_PENDING=処理待ち
+# EMAIL_EXTRACTION_MODEL=claude-haiku-4-5-20251001
+# PRODUCT_MATCH_THRESHOLD=0.3
+# PRODUCT_MATCH_TOP_N=5
 ```
 
 ```bash
@@ -161,6 +219,7 @@ BACKEND_URL=http://localhost:8000
 # バックエンドを起動した状態で
 curl -s http://localhost:8000/api/cron/gmail-poll \
   -H "Authorization: Bearer <CRON_SECRET>"
+# → {"processed": N, "errors": 0}
 ```
 
 ---
@@ -168,12 +227,13 @@ curl -s http://localhost:8000/api/cron/gmail-poll \
 ## 注意事項
 
 - `CRON_SECRET` は Render と Vercel で**必ず同じ値**を設定すること
+- `ANTHROPIC_API_KEY` と `SUPABASE_SERVICE_ROLE_KEY` は Secret Manager 管理必須。`.env` ファイルをリポジトリにコミットしないこと
 - `GMAIL_REFRESH_TOKEN` が無効化された場合は `scripts/get_gmail_refresh_token.py` を再実行して Secret Manager を更新し、Render の環境変数も差し替える（[gmail-oauth-setup.md](gmail-oauth-setup.md) 参照）
-- Vercel Cron の 5 分間隔実行は **Pro プラン以上**が必要。無料プランでは 1 日 2 回まで
+- Vercel Cron の 15 分間隔実行は **Pro プラン以上**が必要。無料プランでは 1 日 2 回まで
 
 ## 関連
 
 - #169: GCP プロジェクト基盤（[gcp-terraform-foundation.md](gcp-terraform-foundation.md)）
 - #170: Secret Manager リソース管理（[secret-manager-terraform.md](secret-manager-terraform.md)）
 - #171: Gmail OAuth2 認証情報セットアップ（[gmail-oauth-setup.md](gmail-oauth-setup.md)）
-- #165: Gmail ポーリング Vercel Cron ジョブ実装
+- #165 / #166 / #167: Gmail メール → 注文下書き自動作成パイプライン実装

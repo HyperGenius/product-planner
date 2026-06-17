@@ -3,6 +3,7 @@ import secrets
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.dependencies import get_supabase_admin_client
 from app.services.gmail_service import poll_unread_emails
 from app.utils.logger import get_logger
 
@@ -35,7 +36,8 @@ def _validate_cron_secret(request: Request) -> None:
 def gmail_poll(request: Request):
     _validate_cron_secret(request)
     try:
-        return poll_unread_emails()
+        db_client = get_supabase_admin_client()
+        return poll_unread_emails(db_client)
     except ValueError as exc:
         logger.error(f"Gmail poll config error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

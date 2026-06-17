@@ -16,3 +16,4 @@ class SupabaseTableName(Enum):
     PRODUCTION_SCHEDULES = "production_schedules"
     WORK_CALENDARS = "work_calendars"
     SCHEDULING_SETTINGS = "scheduling_settings"
+    GMAIL_LABEL_TENANTS = "gmail_label_tenants"
