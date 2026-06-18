@@ -18,8 +18,6 @@ from dotenv import load_dotenv
 
 from supabase import create_client
 
-load_dotenv()
-
 PASSWORD_LENGTH = 16
 PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!#$%&*+-=?@^_"
 
@@ -163,7 +161,19 @@ def main() -> None:
     parser.add_argument("--company-name", required=True, help="会社名（テナント名）")
     parser.add_argument("--owner-email", required=True, help="オーナーのメールアドレス")
     parser.add_argument("--owner-name", required=True, help="オーナーの氏名")
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="読み込む .env ファイルのパス（省略時は scripts/.env）",
+    )
     args = parser.parse_args()
+
+    env_path = (
+        args.env_file
+        if args.env_file
+        else os.path.join(os.path.dirname(__file__), ".env")
+    )
+    load_dotenv(dotenv_path=env_path, override=True)
 
     create_tenant(
         company_name=args.company_name,
