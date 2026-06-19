@@ -91,13 +91,13 @@ export function EquipmentGroupAssignmentDialog({ equipment, open, onOpenChange }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="flex flex-col max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>{equipment?.name} のグループ設定</DialogTitle>
           <DialogDescription>この設備が属するグループを選択してください</DialogDescription>
         </DialogHeader>
 
-        <div className="py-4">
+        <div className="overflow-y-auto flex-1 min-h-0 py-4">
           {groups.length === 0 ? (
             <p className="text-sm text-muted-foreground">グループが登録されていません</p>
           ) : (

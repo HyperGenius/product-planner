@@ -31,7 +31,7 @@ export function EquipmentList({
     emptyMessage = "設備はありません",
 }: EquipmentListProps) {
     return (
-        <div className="border rounded-lg p-4 h-full flex flex-col">
+        <div className="border rounded-lg p-4 flex flex-col min-h-0">
             <h3 className="font-semibold mb-3 text-sm">{title}</h3>
             <div className="space-y-1 flex-1 overflow-y-auto min-h-0">
                 {isLoading ? (
