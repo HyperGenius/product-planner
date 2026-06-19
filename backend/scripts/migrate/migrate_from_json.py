@@ -12,7 +12,7 @@ backend/scripts/migrate/migrate_from_json.py
      (code が空文字の場合は NULL として扱う; 配列インデックス+1 = legacy_product_id)
   5. processes.json         → process_routings テーブル
      (product_id は products.json の1始まりインデックスで解決)
-     (machine_id はレガシーIDのためマッピング不可 → equipment_group_id は NULL で登録)
+     (machine_name が equipment_groups.name と一致しない場合は equipment_group_id = NULL)
 
 冪等性:
   - equipment_groups / equipments は (tenant_id, name) でupsert
@@ -21,16 +21,21 @@ backend/scripts/migrate/migrate_from_json.py
   - process_routings は (product_id, sequence_order) でupsert
 
 Usage:
-    python scripts/migrate/migrate_from_json.py
+    python scripts/migrate/migrate_from_json.py \\
+        [--env-file PATH] \\
+        [--tenant-id UUID] \\
+        [--dry-run] \\
+        [--skip-validation]
 
-環境変数 (backend/.env に設定):
+環境変数 (backend/scripts/.env または --env-file 指定ファイルに設定):
     SUPABASE_URL
     SUPABASE_PUBLISHABLE_KEY
     TEST_USER_EMAIL
     TEST_USER_PASS
-    TEST_TENANT_ID
+    TEST_TENANT_ID        # --tenant-id で上書き可
 """
 
+import argparse
 import json
 import os
 import sys
@@ -42,8 +47,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from dotenv import load_dotenv
 
 from supabase import Client, create_client  # type: ignore
-
-load_dotenv()
 
 # _data ディレクトリのパス
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
@@ -63,28 +66,132 @@ def load_json(filename: str) -> list[dict[str, Any]]:
         return json.load(f)
 
 
-def init_client() -> tuple[Client, str]:
+def load_all_data() -> dict[str, list[dict[str, Any]]]:
+    """全 JSON ファイルを読み込んで返す。"""
+    return {
+        "equipment_groups": load_json("equipment_groups.json"),
+        "equipments": load_json("equipments.json"),
+        "equipment_group_members": load_json("equipment_group_members.json"),
+        "products": load_json("products.json"),
+        "processes": load_json("processes.json"),
+    }
+
+
+def init_client(tenant_id_arg: str | None = None) -> tuple[Client, str]:
     """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す。"""
     url = os.environ.get("SUPABASE_URL", "")
     key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
     email = os.environ.get("TEST_USER_EMAIL", "")
     password = os.environ.get("TEST_USER_PASS", "")
-    tenant_id = os.environ.get("TEST_TENANT_ID", "")
+    tenant_id = tenant_id_arg or os.environ.get("TEST_TENANT_ID", "")
 
     if not all([url, key, email, password, tenant_id]):
-        raise ValueError(
-            "必須の環境変数が不足しています: "
-            "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, "
-            "TEST_USER_EMAIL, TEST_USER_PASS, TEST_TENANT_ID"
-        )
+        missing = [
+            name
+            for name, val in [
+                ("SUPABASE_URL", url),
+                ("SUPABASE_PUBLISHABLE_KEY", key),
+                ("TEST_USER_EMAIL", email),
+                ("TEST_USER_PASS", password),
+                ("TEST_TENANT_ID (or --tenant-id)", tenant_id),
+            ]
+            if not val
+        ]
+        raise ValueError(f"必須の環境変数が不足しています: {', '.join(missing)}")
 
     client = create_client(url, key)
     res = client.auth.sign_in_with_password({"email": email, "password": password})
     if not res.session:
         raise ValueError("認証に失敗しました")
 
-    print(f"✅ Authenticated as {email}")
+    print(f"✅ Authenticated as {email} (tenant: {tenant_id})")
     return client, tenant_id
+
+
+# ---------------------------------------------------------------------------
+# バリデーション
+# ---------------------------------------------------------------------------
+
+
+def _get_unresolved_machine_names(data: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """processes の machine_name のうち equipment_groups に存在しないものを返す。"""
+    group_names = {row["name"] for row in data["equipment_groups"]}
+    unresolved = sorted(
+        {
+            row["machine_name"]
+            for row in data["processes"]
+            if row.get("machine_name") and row["machine_name"] not in group_names
+        }
+    )
+    return unresolved
+
+
+def preflight_validation(
+    data: dict[str, list[dict[str, Any]]], skip: bool = False
+) -> bool:
+    """
+    processes.json の machine_name を equipment_groups.json と突き合わせ、
+    未解決のものを一覧表示して続行確認する。
+
+    Returns:
+        True: 続行、False: 中止
+    """
+    print("\n🔍 事前バリデーション: machine_name のチェック...")
+    unresolved = _get_unresolved_machine_names(data)
+
+    if not unresolved:
+        print("✅ 全 machine_name が equipment_groups に存在します")
+        return True
+
+    print(f"\n⚠️  未解決の machine_name が {len(unresolved)} 件あります:")
+    for name in unresolved:
+        count = sum(1 for row in data["processes"] if row.get("machine_name") == name)
+        print(f"    - '{name}' ({count} 件の工程で使用)")
+    print("→ 上記の process_routings は equipment_group_id = NULL で登録されます\n")
+
+    if skip:
+        print("--skip-validation が指定されたため確認をスキップして続行します")
+        return True
+
+    try:
+        answer = input("続行しますか? [y/N]: ").strip().lower()
+    except EOFError:
+        answer = ""
+
+    return answer == "y"
+
+
+# ---------------------------------------------------------------------------
+# ドライラン
+# ---------------------------------------------------------------------------
+
+
+def print_dry_run_summary(data: dict[str, list[dict[str, Any]]]) -> None:
+    """--dry-run 時の投入予定件数サマリーを表示する。"""
+    unresolved = _get_unresolved_machine_names(data)
+
+    print("\n📋 ドライラン: 投入予定件数（DB への書き込みは行いません）")
+    print(f"  equipment_groups        : {len(data['equipment_groups'])} 件 (UPSERT)")
+    print(f"  equipments              : {len(data['equipments'])} 件 (UPSERT)")
+    print(
+        f"  equipment_group_members : {len(data['equipment_group_members'])} 件 (UPSERT)"
+    )
+    print(f"  products                : {len(data['products'])} 件 (重複はスキップ)")
+    print(f"  process_routings        : {len(data['processes'])} 件 (UPSERT)")
+
+    if unresolved:
+        print(
+            f"\n⚠️  未解決 machine_name ({len(unresolved)} 件) → equipment_group_id = NULL で登録:"
+        )
+        for name in unresolved:
+            count = sum(
+                1 for row in data["processes"] if row.get("machine_name") == name
+            )
+            print(f"    - '{name}' ({count} 件)")
+
+    print(
+        "\n✅ ドライラン完了。実際に投入するには --dry-run を外して実行してください。"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -311,11 +418,54 @@ def import_process_routings(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="_data/*.json からデータを Supabase へ投入する"
+    )
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help="読み込む .env ファイルのパス（省略時は scripts/.env）",
+    )
+    parser.add_argument(
+        "--tenant-id",
+        default=None,
+        help="投入先テナント UUID（省略時は TEST_TENANT_ID 環境変数を使用）",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="DB への書き込みをスキップし、投入予定件数をプレビュー表示する",
+    )
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="machine_name の事前バリデーション確認をスキップして続行する",
+    )
+    args = parser.parse_args()
+
+    env_path = (
+        args.env_file
+        if args.env_file
+        else os.path.join(os.path.dirname(__file__), "..", ".env")
+    )
+    load_dotenv(dotenv_path=env_path, override=True)
+
     print("=" * 60)
     print("🚀 migrate_from_json: _data/*.json → Supabase")
     print("=" * 60)
 
-    client, tenant_id = init_client()
+    data = load_all_data()
+
+    # 事前バリデーション（--dry-run 時も実行）
+    if not preflight_validation(data, skip=args.skip_validation):
+        print("中止しました。")
+        sys.exit(0)
+
+    if args.dry_run:
+        print_dry_run_summary(data)
+        return
+
+    client, tenant_id = init_client(args.tenant_id)
 
     group_map = import_equipment_groups(client, tenant_id)
     equipment_map = import_equipments(client, tenant_id)
