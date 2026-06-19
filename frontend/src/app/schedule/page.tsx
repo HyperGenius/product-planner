@@ -250,7 +250,7 @@ export default function SchedulePage() {
                 <SelectTrigger className="w-[180px]" aria-label="設備グループ選択">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[300px] overflow-y-auto">
                   <SelectItem value="all">すべて</SelectItem>
                   {equipmentGroups?.map((group) => (
                     <SelectItem key={group.id} value={group.id.toString()}>
