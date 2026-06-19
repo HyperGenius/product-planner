@@ -67,7 +67,7 @@ export function EquipmentGroupMembersDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-4 py-4 flex-1 min-h-0">
+        <div className="grid grid-cols-[1fr_auto_1fr] grid-rows-[minmax(0,_1fr)] gap-4 py-4 flex-1 min-h-0">
           {/* 左側: 未所属設備リスト */}
           <EquipmentList
             title="未所属設備"
