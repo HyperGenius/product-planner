@@ -11,7 +11,7 @@ customer_router = APIRouter(prefix="/customers", tags=["Master (Customers)"])
 logger = get_logger(__name__)
 
 
-@customer_router.post("/")
+@customer_router.post("")
 def create_customer(
     customer_data: CustomerCreateSchema,
     tenant_id: str = Depends(get_current_tenant_id),
@@ -22,7 +22,7 @@ def create_customer(
     return repo.create(customer_data.with_tenant_id(tenant_id))
 
 
-@customer_router.get("/")
+@customer_router.get("")
 def get_customers(repo: CustomerRepository = Depends(get_customer_repo)):
     """顧客を全件取得"""
     logger.info("Fetching all customers")

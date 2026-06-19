@@ -56,7 +56,7 @@ class TestProductRouter:
         mock_repo.get_all.return_value = expected_data
 
         # 2. リクエスト実行
-        response = client.get("/products/")  # prefixの設定に合わせてパスを調整
+        response = client.get("/products")  # prefixの設定に合わせてパスを調整
 
         # 3. 検証
         assert response.status_code == 200
@@ -89,7 +89,7 @@ class TestProductRouter:
 
         mock_repo.create.return_value = created_data
 
-        response = client.post("/products/", json=payload, headers=headers)
+        response = client.post("/products", json=payload, headers=headers)
 
         assert response.status_code == 200
         assert response.json() == created_data

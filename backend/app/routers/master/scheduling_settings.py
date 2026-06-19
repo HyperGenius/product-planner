@@ -33,7 +33,7 @@ def get_settings_repo(
     return SchedulingSettingsRepository(client)
 
 
-@scheduling_settings_router.get("/")
+@scheduling_settings_router.get("")
 def get_scheduling_settings(
     tenant_id: str = Depends(get_current_tenant_id),
     repo: SchedulingSettingsRepository = Depends(get_settings_repo),
@@ -51,7 +51,7 @@ def get_scheduling_settings(
     }
 
 
-@scheduling_settings_router.put("/")
+@scheduling_settings_router.put("")
 def upsert_scheduling_settings(
     data: SchedulingSettingsUpdate,
     tenant_id: str = Depends(get_current_tenant_id),

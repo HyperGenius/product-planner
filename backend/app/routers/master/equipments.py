@@ -14,7 +14,7 @@ equipment_router = APIRouter(prefix="/equipments", tags=["Master (Equipments)"])
 logger = get_logger(__name__)
 
 
-@equipment_router.post("/")
+@equipment_router.post("")
 def create_equipment(
     equipment_data: EquipmentCreate,
     tenant_id: str = Depends(get_current_tenant_id),
@@ -25,7 +25,7 @@ def create_equipment(
     return repo.create(equipment_data.with_tenant_id(tenant_id))
 
 
-@equipment_router.get("/")
+@equipment_router.get("")
 def get_equipments(repo: EquipmentRepository = Depends(get_equipment_repo)):
     """設備を全件取得"""
     logger.info("Fetching all equipments")

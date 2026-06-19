@@ -37,7 +37,7 @@ class TestEquipmentGroupRouter:
         ]
         mock_repo.get_all_groups.return_value = expected_data
 
-        response = client.get("/equipment-groups/")
+        response = client.get("/equipment-groups")
 
         assert response.status_code == 200
         assert response.json() == expected_data
@@ -64,7 +64,7 @@ class TestEquipmentGroupRouter:
 
         mock_repo.create_group.return_value = created_data
 
-        response = client.post("/equipment-groups/", json=payload, headers=headers)
+        response = client.post("/equipment-groups", json=payload, headers=headers)
 
         assert response.status_code == 200
         assert response.json() == created_data

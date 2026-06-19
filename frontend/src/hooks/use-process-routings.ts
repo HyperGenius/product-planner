@@ -13,7 +13,7 @@ const getProcessRoutingsQueryKey = (productId: number) => ["process-routings", p
 export function useProcessRoutings(productId: number | null) {
   return useQuery<ProcessRouting[]>({
     queryKey: getProcessRoutingsQueryKey(productId ?? 0),
-    queryFn: () => apiClient<ProcessRouting[]>(`/process-routings/?product_id=${productId}`),
+    queryFn: () => apiClient<ProcessRouting[]>(`/process-routings?product_id=${productId}`),
     enabled: productId !== null,
   })
 }
@@ -26,7 +26,7 @@ export function useCreateProcessRouting() {
 
   return useMutation({
     mutationFn: (data: ProcessRoutingCreate) =>
-      apiClient<ProcessRouting>("/process-routings/", {
+      apiClient<ProcessRouting>("/process-routings", {
         method: "POST",
         body: JSON.stringify(data),
       }),

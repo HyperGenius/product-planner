@@ -51,7 +51,7 @@ class TestSchedulingSettingsRouter:
         """設定が存在しない場合にデフォルト値を返すこと"""
         _make_table_mock(mock_client, [])
 
-        response = client.get("/scheduling-settings/", headers=headers)
+        response = client.get("/scheduling-settings", headers=headers)
 
         assert response.status_code == 200
         body = response.json()
@@ -69,7 +69,7 @@ class TestSchedulingSettingsRouter:
         }
         _make_table_mock(mock_client, [existing])
 
-        response = client.get("/scheduling-settings/", headers=headers)
+        response = client.get("/scheduling-settings", headers=headers)
 
         assert response.status_code == 200
         body = response.json()
@@ -111,7 +111,7 @@ class TestSchedulingSettingsRouter:
         mock_client.table.side_effect = table_side_effect
 
         payload = {"guard_time_minutes": 10, "min_slot_minutes": 20, "max_fragments": 3}
-        response = client.put("/scheduling-settings/", json=payload, headers=headers)
+        response = client.put("/scheduling-settings", json=payload, headers=headers)
 
         assert response.status_code == 200
 
@@ -146,7 +146,7 @@ class TestSchedulingSettingsRouter:
 
         # guard_time_minutes だけ指定
         payload = {"guard_time_minutes": 5}
-        response = client.put("/scheduling-settings/", json=payload, headers=headers)
+        response = client.put("/scheduling-settings", json=payload, headers=headers)
 
         assert response.status_code == 200
 
@@ -154,12 +154,12 @@ class TestSchedulingSettingsRouter:
         """ガードタイムに負の値を渡した場合は 422 を返すこと"""
         _make_table_mock(mock_client, [])
         payload = {"guard_time_minutes": -1}
-        response = client.put("/scheduling-settings/", json=payload, headers=headers)
+        response = client.put("/scheduling-settings", json=payload, headers=headers)
         assert response.status_code == 422
 
     def test_put_rejects_zero_max_fragments(self, headers, mock_client):
         """最大断片数に 0 以下を渡した場合は 422 を返すこと"""
         _make_table_mock(mock_client, [])
         payload = {"max_fragments": 0}
-        response = client.put("/scheduling-settings/", json=payload, headers=headers)
+        response = client.put("/scheduling-settings", json=payload, headers=headers)
         assert response.status_code == 422

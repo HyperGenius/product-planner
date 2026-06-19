@@ -40,7 +40,7 @@ class TestProcessRoutingRouter:
         ]
         mock_repo.get_routings_by_product.return_value = expected_data
 
-        response = client.get(f"/process-routings/?product_id={product_id}")
+        response = client.get(f"/process-routings?product_id={product_id}")
 
         assert response.status_code == 200
         assert response.json() == expected_data
@@ -72,7 +72,7 @@ class TestProcessRoutingRouter:
 
         mock_repo.create_routing.return_value = created_data
 
-        response = client.post("/process-routings/", json=payload, headers=headers)
+        response = client.post("/process-routings", json=payload, headers=headers)
 
         assert response.status_code == 200
         assert response.json() == created_data
