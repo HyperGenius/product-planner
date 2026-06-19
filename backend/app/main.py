@@ -27,6 +27,7 @@ app = FastAPI(
     title="Product Planner API",
     description="API on Render",
     version="1.0.0",
+    redirect_slashes=False,
 )
 
 # CORS設定
