@@ -466,6 +466,7 @@ export default function EquipmentsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>グループ名</TableHead>
+                    <TableHead className="w-[80px] text-right">台数</TableHead>
                     <TableHead className="w-[200px] text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -473,12 +474,8 @@ export default function EquipmentsPage() {
                   {groups && groups.filter((g) => g.member_count >= 2).length > 0 ? (
                     groups.filter((g) => g.member_count >= 2).map((group) => (
                       <TableRow key={group.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span>{group.name}</span>
-                            <span className="text-sm text-muted-foreground">{group.member_count}台</span>
-                          </div>
-                        </TableCell>
+                        <TableCell>{group.name}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">{group.member_count}台</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button
@@ -509,7 +506,7 @@ export default function EquipmentsPage() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={2} className="text-center text-muted-foreground py-10">
+                      <TableCell colSpan={3} className="text-center text-muted-foreground py-10">
                         データがありません
                       </TableCell>
                     </TableRow>
