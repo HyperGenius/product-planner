@@ -4,8 +4,12 @@
 import { useState, useMemo, useCallback } from "react"
 import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, parseISO } from "date-fns"
 import { ja } from "date-fns/locale"
+import { Check, ChevronsUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 import { GanttChart } from "@/components/schedule/gantt-chart"
 import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
 import { useSchedules, useUpdateSchedule } from "@/hooks/use-schedules"
@@ -23,6 +27,7 @@ export default function SchedulePage() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date())
   const [viewMode, setViewMode] = useState<GanttViewMode>("Week")
   const [equipmentGroupId, setEquipmentGroupId] = useState<number | undefined>(undefined)
+  const [equipmentGroupOpen, setEquipmentGroupOpen] = useState(false)
   const [isEditMode, setIsEditMode] = useState<boolean>(false)
   const [groupBy, setGroupBy] = useState<GroupByMode>("order")
 
@@ -242,23 +247,58 @@ export default function SchedulePage() {
             {/* 設備グループフィルタ */}
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">設備グループ:</span>
-              <Select
-                value={equipmentGroupId?.toString() ?? "all"}
-                onValueChange={(value) => setEquipmentGroupId(value === "all" ? undefined : Number(value))}
-                disabled={equipmentGroupsLoading}
-              >
-                <SelectTrigger className="w-[180px]" aria-label="設備グループ選択">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">すべて</SelectItem>
-                  {equipmentGroups?.map((group) => (
-                    <SelectItem key={group.id} value={group.id.toString()}>
-                      {group.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={equipmentGroupOpen} onOpenChange={setEquipmentGroupOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={equipmentGroupOpen}
+                    aria-label="設備グループ選択"
+                    disabled={equipmentGroupsLoading}
+                    className="w-[180px] justify-between"
+                  >
+                    <span className="truncate">
+                      {equipmentGroupId !== undefined
+                        ? (equipmentGroups?.find((g) => g.id === equipmentGroupId)?.name ?? "すべて")
+                        : "すべて"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[220px] p-0">
+                  <Command>
+                    <CommandInput placeholder="設備グループを検索..." />
+                    <CommandList>
+                      <CommandEmpty>見つかりません</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="all"
+                          onSelect={() => {
+                            setEquipmentGroupId(undefined)
+                            setEquipmentGroupOpen(false)
+                          }}
+                        >
+                          <Check className={cn("mr-2 h-4 w-4", equipmentGroupId === undefined ? "opacity-100" : "opacity-0")} />
+                          すべて
+                        </CommandItem>
+                        {equipmentGroups?.map((group) => (
+                          <CommandItem
+                            key={group.id}
+                            value={group.name}
+                            onSelect={() => {
+                              setEquipmentGroupId(group.id)
+                              setEquipmentGroupOpen(false)
+                            }}
+                          >
+                            <Check className={cn("mr-2 h-4 w-4", equipmentGroupId === group.id ? "opacity-100" : "opacity-0")} />
+                            {group.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </div>
