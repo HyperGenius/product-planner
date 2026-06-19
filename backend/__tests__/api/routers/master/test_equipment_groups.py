@@ -30,12 +30,45 @@ class TestEquipmentGroupRouter:
         app.dependency_overrides = {}
 
     def test_get_equipment_groups(self, mock_repo):
-        """GET /: 全件取得のテスト"""
-        expected_data = [
-            {"id": 1, "name": "Group A", "tenant_id": "uuid-1"},
-            {"id": 2, "name": "Group B", "tenant_id": "uuid-1"},
+        """GET /: 全件取得のテスト。member_names / member_count が付与されて返ること。"""
+        mock_repo.get_all_groups.return_value = [
+            {
+                "id": 1,
+                "name": "Group A",
+                "tenant_id": "uuid-1",
+                "member_names": ["設備A", "設備B"],
+                "member_count": 2,
+            },
+            {
+                "id": 2,
+                "name": "Group B",
+                "tenant_id": "uuid-1",
+                "member_names": ["設備C"],
+                "member_count": 1,
+            },
         ]
-        mock_repo.get_all_groups.return_value = expected_data
+        expected_data = [
+            {
+                "id": 1,
+                "name": "Group A",
+                "tenant_id": "uuid-1",
+                "guard_time_minutes": None,
+                "min_slot_minutes": None,
+                "max_fragments": None,
+                "member_names": ["設備A", "設備B"],
+                "member_count": 2,
+            },
+            {
+                "id": 2,
+                "name": "Group B",
+                "tenant_id": "uuid-1",
+                "guard_time_minutes": None,
+                "min_slot_minutes": None,
+                "max_fragments": None,
+                "member_names": ["設備C"],
+                "member_count": 1,
+            },
+        ]
 
         response = client.get("/equipment-groups")
 

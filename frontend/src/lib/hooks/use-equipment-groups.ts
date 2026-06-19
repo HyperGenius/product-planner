@@ -10,6 +10,8 @@ export interface EquipmentGroup {
   guard_time_minutes?: number | null
   min_slot_minutes?: number | null
   max_fragments?: number | null
+  member_names: string[]
+  member_count: number
 }
 
 export interface EquipmentGroupCreate {
@@ -71,7 +73,7 @@ export function useUpdateEquipmentGroup() {
 // 削除
 export function useDeleteEquipmentGroup() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (id: number) =>
       apiClient<{ status: string }>(`/equipment-groups/${id}`, {
@@ -81,4 +83,14 @@ export function useDeleteEquipmentGroup() {
       queryClient.invalidateQueries({ queryKey: EQUIPMENT_GROUPS_KEY })
     },
   })
+}
+
+function formatMemberNames(names: string[], max = 3): string {
+  if (names.length <= max) return names.join(' / ')
+  return `${names.slice(0, max).join(' / ')} 他${names.length - max}台`
+}
+
+export function formatGroupLabel(group: Pick<EquipmentGroup, 'name' | 'member_names'>): string {
+  if (group.member_names.length <= 1) return group.name
+  return `${group.name} (${formatMemberNames(group.member_names)})`
 }

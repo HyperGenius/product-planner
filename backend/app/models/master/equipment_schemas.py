@@ -21,6 +21,15 @@ class EquipmentGroupBase(BaseSchema):
     )
 
 
+class EquipmentGroupResponse(EquipmentGroupBase):
+    """設備グループのレスポンススキーマ"""
+
+    id: int
+    tenant_id: str
+    member_names: list[str] = Field(default_factory=list)
+    member_count: int = Field(default=0)
+
+
 class EquipmentGroupCreate(EquipmentGroupBase):
     """設備グループを作成するためのスキーマ"""
 

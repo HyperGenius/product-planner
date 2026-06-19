@@ -37,7 +37,7 @@ import {
   useUpdateProcessRouting,
   useDeleteProcessRouting,
 } from "@/hooks/use-process-routings"
-import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
+import { useEquipmentGroups, formatGroupLabel } from "@/lib/hooks/use-equipment-groups"
 import type { Product } from "@/types/product"
 import type { ProcessRouting } from "@/types/process-routing"
 
@@ -333,7 +333,7 @@ export function ProductRoutingsDialog({
                     <option value="none">設備なし</option>
                     {equipmentGroups?.map((group) => (
                       <option key={group.id} value={group.id}>
-                        {group.name}
+                        {formatGroupLabel(group)}
                       </option>
                     ))}
                   </select>

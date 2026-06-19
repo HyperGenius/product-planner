@@ -15,13 +15,21 @@ class EquipmentRepository(BaseRepository[T]):
     # --- Equipment Groups (別テーブル操作) ---
 
     def get_all_groups(self) -> list[T]:
-        """設備グループのリストを取得する。"""
+        """設備グループのリストを取得する。member_names / member_count を付与して返す。"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
-            .select("*")
+            .select("*, equipment_group_members(equipments(id, name))")
             .execute()
         )
-        return cast(list[T], res.data)
+        groups = cast(list[dict[str, Any]], res.data)
+        for group in groups:
+            members = group.pop("equipment_group_members", [])
+            member_names = [
+                m["equipments"]["name"] for m in members if m.get("equipments")
+            ]
+            group["member_names"] = sorted(member_names)
+            group["member_count"] = len(member_names)
+        return cast(list[T], groups)
 
     def create_group(self, data: dict[str, Any]) -> T:
         """設備グループを新規作成"""

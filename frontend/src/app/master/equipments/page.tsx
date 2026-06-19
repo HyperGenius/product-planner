@@ -151,10 +151,17 @@ export default function EquipmentsPage() {
   const updateGroupMutation = useUpdateEquipmentGroup()
   const deleteGroupMutation = useDeleteEquipmentGroup()
 
-  // 設備ID → 所属グループ名リスト のマップ
+  // 共有グループ(2設備以上)のIDセット
+  const sharedGroupIds = useMemo(
+    () => new Set(groups?.filter((g) => g.member_count >= 2).map((g) => g.id) ?? []),
+    [groups]
+  )
+
+  // 設備ID → 所属共有グループ名リスト のマップ(システムグループは除外)
   const equipmentGroupMap = useMemo(() => {
     const map = new Map<number, string[]>()
     for (const member of allMembers) {
+      if (!sharedGroupIds.has(member.equipment_group_id)) continue
       const group = groups?.find((g) => g.id === member.equipment_group_id)
       if (!group) continue
       const names = map.get(member.equipment_id) ?? []
@@ -162,7 +169,7 @@ export default function EquipmentsPage() {
       map.set(member.equipment_id, names)
     }
     return map
-  }, [allMembers, groups])
+  }, [allMembers, groups, sharedGroupIds])
 
   // ── 設備タブのハンドラ ────────────────────────────────────────
   const handleOpenCreateDialog = () => {
@@ -372,7 +379,6 @@ export default function EquipmentsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[100px]">ID</TableHead>
                     <TableHead>設備名</TableHead>
                     <TableHead>所属グループ</TableHead>
                     <TableHead className="w-[150px] text-right">操作</TableHead>
@@ -384,7 +390,6 @@ export default function EquipmentsPage() {
                       const groupNames = equipmentGroupMap.get(equipment.id) ?? []
                       return (
                         <TableRow key={equipment.id}>
-                          <TableCell className="font-medium">{equipment.id}</TableCell>
                           <TableCell>{equipment.name}</TableCell>
                           <TableCell>
                             {groupNames.length > 0 ? (
@@ -433,7 +438,7 @@ export default function EquipmentsPage() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-10">
+                      <TableCell colSpan={3} className="text-center py-10">
                         設備がありません
                       </TableCell>
                     </TableRow>
@@ -460,17 +465,17 @@ export default function EquipmentsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[100px]">ID</TableHead>
                     <TableHead>グループ名</TableHead>
+                    <TableHead className="w-[80px] text-right">台数</TableHead>
                     <TableHead className="w-[200px] text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {groups && groups.length > 0 ? (
-                    groups.map((group) => (
+                  {groups && groups.filter((g) => g.member_count >= 2).length > 0 ? (
+                    groups.filter((g) => g.member_count >= 2).map((group) => (
                       <TableRow key={group.id}>
-                        <TableCell className="font-medium">{group.id}</TableCell>
                         <TableCell>{group.name}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">{group.member_count}台</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button
