@@ -26,7 +26,7 @@ def get_all_equipment_group_members(
     return repo.get_all_members()
 
 
-@equipment_group_router.post("/")
+@equipment_group_router.post("")
 def create_equipment_group(
     group_data: EquipmentGroupCreate,
     tenant_id: str = Depends(get_current_tenant_id),
@@ -37,7 +37,7 @@ def create_equipment_group(
     return repo.create_group(group_data.with_tenant_id(tenant_id))
 
 
-@equipment_group_router.get("/")
+@equipment_group_router.get("")
 def get_equipment_groups(repo: EquipmentRepository = Depends(get_equipment_repo)):
     """設備グループを全件取得"""
     logger.info("Fetching all equipment groups")

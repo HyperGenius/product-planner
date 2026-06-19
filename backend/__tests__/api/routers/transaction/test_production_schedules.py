@@ -63,7 +63,7 @@ class TestProductionSchedulesRouter:
         mock_repo.get_by_period.return_value = expected_data
 
         response = client.get(
-            "/production-schedules/",
+            "/production-schedules",
             params={"start_date": "2024-01-01", "end_date": "2024-01-31"},
             headers=headers,
         )
@@ -95,7 +95,7 @@ class TestProductionSchedulesRouter:
         mock_repo.get_by_period.return_value = expected_data
 
         response = client.get(
-            "/production-schedules/",
+            "/production-schedules",
             params={
                 "start_date": "2024-01-01",
                 "end_date": "2024-01-31",
@@ -113,7 +113,7 @@ class TestProductionSchedulesRouter:
         mock_repo.get_by_period.return_value = []
 
         response = client.get(
-            "/production-schedules/",
+            "/production-schedules",
             params={"start_date": "2024-12-01", "end_date": "2024-12-31"},
             headers=headers,
         )
@@ -129,7 +129,7 @@ class TestProductionSchedulesRouter:
         mock_repo.get_by_period.return_value = []
 
         response = client.get(
-            "/production-schedules/",
+            "/production-schedules",
             params={
                 "start_date": "2024-01-01",
                 "end_date": "2024-01-31",
@@ -146,7 +146,7 @@ class TestProductionSchedulesRouter:
         """GET /: 必須パラメータが不足している場合のテスト"""
         # start_date のみ指定
         response = client.get(
-            "/production-schedules/",
+            "/production-schedules",
             params={"start_date": "2024-01-01"},
             headers=headers,
         )
@@ -154,14 +154,14 @@ class TestProductionSchedulesRouter:
 
         # end_date のみ指定
         response = client.get(
-            "/production-schedules/",
+            "/production-schedules",
             params={"end_date": "2024-01-31"},
             headers=headers,
         )
         assert response.status_code == 422  # Unprocessable Entity
 
         # パラメータなし
-        response = client.get("/production-schedules/", headers=headers)
+        response = client.get("/production-schedules", headers=headers)
         assert response.status_code == 422  # Unprocessable Entity
 
     def test_update_production_schedule(self, headers, mock_repo):

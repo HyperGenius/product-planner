@@ -15,7 +15,7 @@ production_schedules_router = APIRouter(
 logger = get_logger(__name__)
 
 
-@production_schedules_router.get("/")
+@production_schedules_router.get("")
 def get_production_schedules(
     start_date: str = Query(..., description="取得開始日 (ISO8601 / YYYY-MM-DD)"),
     end_date: str = Query(..., description="取得終了日 (ISO8601 / YYYY-MM-DD)"),

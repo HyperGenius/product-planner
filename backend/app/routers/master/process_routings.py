@@ -13,7 +13,7 @@ process_routing_router = APIRouter(
 logger = get_logger(__name__)
 
 
-@process_routing_router.post("/")
+@process_routing_router.post("")
 def create_process_routing(
     routing_data: RoutingCreate,
     tenant_id: str = Depends(get_current_tenant_id),
@@ -24,7 +24,7 @@ def create_process_routing(
     return repo.create_routing(routing_data.with_tenant_id(tenant_id))
 
 
-@process_routing_router.get("/")
+@process_routing_router.get("")
 def get_process_routings(
     product_id: int = Query(..., description="製品ID"),
     repo: ProductRepository = Depends(get_product_repo),

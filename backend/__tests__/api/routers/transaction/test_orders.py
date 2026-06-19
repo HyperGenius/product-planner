@@ -80,7 +80,7 @@ class TestOrderRouter:
         ]
         mock_repo.get_all.return_value = db_data
 
-        response = client.get("/orders/")
+        response = client.get("/orders")
 
         assert response.status_code == 200
         result = response.json()
@@ -119,7 +119,7 @@ class TestOrderRouter:
 
         mock_repo.create.return_value = created_data
 
-        response = client.post("/orders/", json=payload, headers=headers)
+        response = client.post("/orders", json=payload, headers=headers)
 
         assert response.status_code == 200
         result = response.json()

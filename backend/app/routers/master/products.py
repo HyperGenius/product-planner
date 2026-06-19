@@ -11,7 +11,7 @@ product_router = APIRouter(prefix="/products", tags=["Master (Products)"])
 logger = get_logger(__name__)
 
 
-@product_router.post("/")
+@product_router.post("")
 def create_product(
     product_data: ProductCreateSchema,  # Pydanticモデル
     tenant_id: str = Depends(get_current_tenant_id),
@@ -22,7 +22,7 @@ def create_product(
     return repo.create(product_data.with_tenant_id(tenant_id))
 
 
-@product_router.get("/")
+@product_router.get("")
 def get_products(repo: ProductRepository = Depends(get_product_repo)):
     """製品を全件取得"""
     logger.info("Fetching all products")

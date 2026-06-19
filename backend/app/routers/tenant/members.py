@@ -38,7 +38,7 @@ def _require_admin(
         )
 
 
-@member_router.get("/", response_model=list[MemberResponse])
+@member_router.get("", response_model=list[MemberResponse])
 def list_members(
     tenant_id: str = Depends(get_current_tenant_id),
     current_user_id: str = Depends(get_current_user_id),
@@ -85,7 +85,7 @@ def list_members(
 
 
 @member_router.post(
-    "/", response_model=MemberResponse, status_code=status.HTTP_201_CREATED
+    "", response_model=MemberResponse, status_code=status.HTTP_201_CREATED
 )
 def create_member(
     data: MemberCreateSchema,

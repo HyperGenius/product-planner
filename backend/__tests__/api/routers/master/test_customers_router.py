@@ -54,7 +54,7 @@ class TestCustomerRouter:
         mock_repo.get_all.return_value = expected_data
 
         # 2. リクエスト実行
-        response = client.get("/customers/")
+        response = client.get("/customers")
 
         # 3. 検証
         assert response.status_code == 200
@@ -93,7 +93,7 @@ class TestCustomerRouter:
 
         mock_repo.create.return_value = created_data
 
-        response = client.post("/customers/", json=payload, headers=headers)
+        response = client.post("/customers", json=payload, headers=headers)
 
         assert response.status_code == 200
         assert response.json() == created_data

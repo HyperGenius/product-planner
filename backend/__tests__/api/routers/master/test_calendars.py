@@ -66,7 +66,7 @@ class TestCalendarRouter:
         mock_response.data = mock_calendar_data
         mock_client.table.return_value.select.return_value.gte.return_value.lte.return_value.execute.return_value = mock_response
 
-        response = client.get("/calendars/?year=2024&month=1", headers=headers)
+        response = client.get("/calendars?year=2024&month=1", headers=headers)
 
         assert response.status_code == 200
         assert response.json() == mock_calendar_data
@@ -94,7 +94,7 @@ class TestCalendarRouter:
             mock_response
         )
 
-        response = client.post("/calendars/", json=payload, headers=headers)
+        response = client.post("/calendars", json=payload, headers=headers)
 
         assert response.status_code == 200
         assert response.json()["is_holiday"] is True

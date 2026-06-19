@@ -46,7 +46,7 @@ def _map_order_response(order: dict) -> dict:
     return mapped
 
 
-@orders_router.post("/")
+@orders_router.post("")
 def create_order(
     order_data: OrderCreate,
     tenant_id: str = Depends(get_current_tenant_id),
@@ -61,7 +61,7 @@ def create_order(
         raise HTTPException(status_code=400, detail=str(e)) from None
 
 
-@orders_router.get("/")
+@orders_router.get("")
 def get_orders(repo: OrderRepository = Depends(get_order_repo)):
     """注文を全件取得"""
     logger.info("Fetching all orders")

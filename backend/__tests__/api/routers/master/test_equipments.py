@@ -39,7 +39,7 @@ class TestEquipmentRouter:
         ]
         mock_repo.get_all.return_value = expected_data
 
-        response = client.get("/equipments/")
+        response = client.get("/equipments")
 
         assert response.status_code == 200
         assert response.json() == expected_data
@@ -70,7 +70,7 @@ class TestEquipmentRouter:
 
         mock_repo.create.return_value = created_data
 
-        response = client.post("/equipments/", json=payload, headers=headers)
+        response = client.post("/equipments", json=payload, headers=headers)
 
         assert response.status_code == 200
         assert response.json() == created_data

@@ -43,7 +43,7 @@ def get_calendar_repo(
     return CalendarRepository(client)
 
 
-@calendar_router.get("/")
+@calendar_router.get("")
 def get_calendars(
     year: int,
     month: int,
@@ -71,7 +71,7 @@ def get_calendars(
     return repo.get_holidays_in_range(start_date, end_date)
 
 
-@calendar_router.post("/")
+@calendar_router.post("")
 def upsert_calendar(
     calendar_data: WorkCalendarCreate,
     tenant_id: str = Depends(get_current_tenant_id),
