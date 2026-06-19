@@ -78,28 +78,50 @@ def load_all_data() -> dict[str, list[dict[str, Any]]]:
 
 
 def init_client(tenant_id_arg: str | None = None) -> tuple[Client, str]:
-    """Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す。"""
+    """
+    Supabaseクライアントを初期化し、認証済みクライアントとテナントIDを返す。
+
+    接続方式:
+      - SUPABASE_SERVICE_ROLE_KEY が設定されている場合 → Service Role Key で直接接続（本番推奨）
+      - 未設定の場合 → TEST_USER_EMAIL / TEST_USER_PASS でサインインして JWT を取得（ローカル開発用）
+    """
     url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
-    email = os.environ.get("TEST_USER_EMAIL", "")
-    password = os.environ.get("TEST_USER_PASS", "")
+    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     tenant_id = tenant_id_arg or os.environ.get("TEST_TENANT_ID", "")
 
-    if not all([url, key, email, password, tenant_id]):
+    if not url:
+        raise ValueError("必須の環境変数が不足しています: SUPABASE_URL")
+    if not tenant_id:
+        raise ValueError(
+            "テナント ID が未指定です。--tenant-id 引数または TEST_TENANT_ID 環境変数を設定してください。"
+        )
+
+    if service_role_key:
+        client = create_client(url, service_role_key)
+        print(f"✅ Connected with Service Role Key (tenant: {tenant_id})")
+        return client, tenant_id
+
+    # ローカル開発用: ユーザー JWT で接続
+    anon_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
+    email = os.environ.get("TEST_USER_EMAIL", "")
+    password = os.environ.get("TEST_USER_PASS", "")
+
+    if not all([anon_key, email, password]):
         missing = [
             name
             for name, val in [
-                ("SUPABASE_URL", url),
-                ("SUPABASE_PUBLISHABLE_KEY", key),
+                ("SUPABASE_PUBLISHABLE_KEY", anon_key),
                 ("TEST_USER_EMAIL", email),
                 ("TEST_USER_PASS", password),
-                ("TEST_TENANT_ID (or --tenant-id)", tenant_id),
             ]
             if not val
         ]
-        raise ValueError(f"必須の環境変数が不足しています: {', '.join(missing)}")
+        raise ValueError(
+            f"SUPABASE_SERVICE_ROLE_KEY が未設定のため JWT 認証を試みましたが、"
+            f"必須の環境変数が不足しています: {', '.join(missing)}"
+        )
 
-    client = create_client(url, key)
+    client = create_client(url, anon_key)
     res = client.auth.sign_in_with_password({"email": email, "password": password})
     if not res.session:
         raise ValueError("認証に失敗しました")
