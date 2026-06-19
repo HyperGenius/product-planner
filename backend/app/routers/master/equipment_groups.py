@@ -5,6 +5,7 @@ from app.dependencies import get_current_tenant_id, get_equipment_repo
 from app.models.master.equipment_schemas import (
     EquipmentGroupCreate,
     EquipmentGroupMemberAdd,
+    EquipmentGroupResponse,
     EquipmentGroupUpdate,
 )
 from app.repositories.supa_infra.master.equipment_repo import EquipmentRepository
@@ -37,7 +38,7 @@ def create_equipment_group(
     return repo.create_group(group_data.with_tenant_id(tenant_id))
 
 
-@equipment_group_router.get("")
+@equipment_group_router.get("", response_model=list[EquipmentGroupResponse])
 def get_equipment_groups(repo: EquipmentRepository = Depends(get_equipment_repo)):
     """設備グループを全件取得"""
     logger.info("Fetching all equipment groups")

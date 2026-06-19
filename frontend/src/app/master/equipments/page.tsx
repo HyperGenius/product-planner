@@ -151,10 +151,17 @@ export default function EquipmentsPage() {
   const updateGroupMutation = useUpdateEquipmentGroup()
   const deleteGroupMutation = useDeleteEquipmentGroup()
 
-  // 設備ID → 所属グループ名リスト のマップ
+  // 共有グループ(2設備以上)のIDセット
+  const sharedGroupIds = useMemo(
+    () => new Set(groups?.filter((g) => g.member_count >= 2).map((g) => g.id) ?? []),
+    [groups]
+  )
+
+  // 設備ID → 所属共有グループ名リスト のマップ(システムグループは除外)
   const equipmentGroupMap = useMemo(() => {
     const map = new Map<number, string[]>()
     for (const member of allMembers) {
+      if (!sharedGroupIds.has(member.equipment_group_id)) continue
       const group = groups?.find((g) => g.id === member.equipment_group_id)
       if (!group) continue
       const names = map.get(member.equipment_id) ?? []
@@ -162,7 +169,7 @@ export default function EquipmentsPage() {
       map.set(member.equipment_id, names)
     }
     return map
-  }, [allMembers, groups])
+  }, [allMembers, groups, sharedGroupIds])
 
   // ── 設備タブのハンドラ ────────────────────────────────────────
   const handleOpenCreateDialog = () => {
@@ -466,8 +473,8 @@ export default function EquipmentsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {groups && groups.length > 0 ? (
-                    groups.map((group) => (
+                  {groups && groups.filter((g) => g.member_count >= 2).length > 0 ? (
+                    groups.filter((g) => g.member_count >= 2).map((group) => (
                       <TableRow key={group.id}>
                         <TableCell className="font-medium">{group.id}</TableCell>
                         <TableCell>{group.name}</TableCell>
