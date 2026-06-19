@@ -4,3 +4,5 @@ supa
 delenv
 creds
 googleapiclient
+gantt
+autouse
