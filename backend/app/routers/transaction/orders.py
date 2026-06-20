@@ -23,7 +23,7 @@ from app.repositories.supa_infra.master.equipment_repo import EquipmentRepositor
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
-from app.scheduler_logic import schedule_order
+from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
@@ -210,6 +210,7 @@ def confirm_order(
             tenant_id=tenant_id,
             dry_run=False,
             settings_repo=settings_repo,
+            desired_deadline=order.get("deadline_date"),
         )
 
         # 2. ステータス更新 & is_scheduled フラグ更新
@@ -226,5 +227,13 @@ def confirm_order(
         )
 
         return {"status": "confirmed", "schedules": result}
+    except RoutingUnconfirmedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "routing_unconfirmed",
+                "desired_deadline": e.desired_deadline,
+            },
+        ) from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None

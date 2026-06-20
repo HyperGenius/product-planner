@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
-from app.scheduler_logic import schedule_order
+from app.scheduler_logic import (
+    RoutingUnconfirmedError,
+    routings_are_confirmed,
+    schedule_order,
+)
 
 
 @pytest.mark.unit
@@ -27,6 +31,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 1800,  # 30分
                 "unit_time_seconds": 600,  # 10分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -80,6 +85,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 1800,  # 30分
                 "unit_time_seconds": 600,  # 10分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             },
             {
                 "id": 2,
@@ -87,6 +93,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 2400,  # 40分
                 "unit_time_seconds": 900,  # 15分/個
                 "sequence_order": 2,
+                "is_confirmed": True,
             },
             {
                 "id": 3,
@@ -94,6 +101,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 600,  # 10分
                 "unit_time_seconds": 300,  # 5分/個
                 "sequence_order": 3,
+                "is_confirmed": True,
             },
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -155,6 +163,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 3600,  # 60分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -228,6 +237,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 600,
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -257,6 +267,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 7200,  # 120分/個 = 2時間
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -310,6 +321,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 1800,  # 30分
                 "unit_time_seconds": 600,  # 10分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -358,6 +370,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 1800,  # 30分
                 "unit_time_seconds": 600,  # 10分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -406,6 +419,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 36000,  # 600分/個 = 10時間
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -479,6 +493,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 21600,  # 360分/個 = 6時間
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -537,6 +552,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 1800,  # 30分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -577,6 +593,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 3600,  # 60分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             },
             {
                 "id": 2,
@@ -584,6 +601,7 @@ class TestScheduleOrder:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 3600,  # 60分/個
                 "sequence_order": 2,
+                "is_confirmed": True,
             },
         ]
         mock_product_repo.get_routings_by_product.return_value = routings
@@ -648,6 +666,7 @@ class TestGapFillScheduling:
                 "setup_time_seconds": 0,
                 "unit_time_seconds": 1800,  # 30分/個
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         # 月曜 9:00 開始、30分の作業 → 9:30 終了
@@ -749,3 +768,156 @@ class TestGapFillScheduling:
 
         # ガードタイムにより有効ギャップが5分しかなく、20分を収められないので None
         assert result is None
+
+
+@pytest.mark.unit
+class TestRoutingsAreConfirmed:
+    """routings_are_confirmed ヘルパーのテスト"""
+
+    def test_empty_routings_returns_false(self) -> None:
+        assert routings_are_confirmed([]) is False
+
+    def test_all_confirmed_returns_true(self) -> None:
+        routings = [
+            {"id": 1, "is_confirmed": True},
+            {"id": 2, "is_confirmed": True},
+        ]
+        assert routings_are_confirmed(routings) is True
+
+    def test_any_unconfirmed_returns_false(self) -> None:
+        routings = [
+            {"id": 1, "is_confirmed": True},
+            {"id": 2, "is_confirmed": False},
+        ]
+        assert routings_are_confirmed(routings) is False
+
+    def test_missing_is_confirmed_field_returns_false(self) -> None:
+        """is_confirmed カラムが存在しない(マイグレーション前)レコードは未確定扱い"""
+        routings = [{"id": 1}]
+        assert routings_are_confirmed(routings) is False
+
+
+@pytest.mark.unit
+class TestScheduleOrderRoutingGuard:
+    """schedule_order の工程確定ガードのテスト"""
+
+    def _make_repos(self, routings: list) -> tuple:
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+        mock_product_repo.get_routings_by_product.return_value = routings
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
+        mock_schedule_repo.get_last_end_time.return_value = None
+        return mock_product_repo, mock_schedule_repo
+
+    def test_dry_run_allows_unconfirmed_routings(self) -> None:
+        """dry_run=True のシミュレーションは未確定工程でも実行できる"""
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 60,
+                "sequence_order": 1,
+                "is_confirmed": False,
+            }
+        ]
+        mock_product_repo, mock_schedule_repo = self._make_repos(routings)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+
+        # 例外なく実行できることを確認
+        result = schedule_order(
+            order_id=None,
+            product_id=1,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant",
+            start_time=start_time,
+            dry_run=True,
+        )
+        assert len(result) >= 1
+
+    def test_dry_run_false_raises_for_unconfirmed_routings(self) -> None:
+        """dry_run=False 時に未確定工程があれば RoutingUnconfirmedError を送出する"""
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 60,
+                "sequence_order": 1,
+                "is_confirmed": False,
+            }
+        ]
+        mock_product_repo, mock_schedule_repo = self._make_repos(routings)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+
+        with pytest.raises(RoutingUnconfirmedError):
+            schedule_order(
+                order_id=1,
+                product_id=1,
+                quantity=1,
+                product_repo=mock_product_repo,
+                schedule_repo=mock_schedule_repo,
+                tenant_id="test-tenant",
+                start_time=start_time,
+                dry_run=False,
+                desired_deadline="2025-02-01",
+            )
+
+    def test_dry_run_false_allows_all_confirmed_routings(self) -> None:
+        """全工程確定済みなら dry_run=False でも正常にスケジュールされる"""
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 60,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+        mock_product_repo, mock_schedule_repo = self._make_repos(routings)
+        mock_schedule_repo.create.return_value = None
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+
+        result = schedule_order(
+            order_id=1,
+            product_id=1,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant",
+            start_time=start_time,
+            dry_run=False,
+        )
+        assert len(result) >= 1
+
+    def test_routing_unconfirmed_error_carries_desired_deadline(self) -> None:
+        """RoutingUnconfirmedError に desired_deadline が設定される"""
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 60,
+                "sequence_order": 1,
+                "is_confirmed": False,
+            }
+        ]
+        mock_product_repo, mock_schedule_repo = self._make_repos(routings)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+
+        with pytest.raises(RoutingUnconfirmedError) as exc_info:
+            schedule_order(
+                order_id=1,
+                product_id=1,
+                quantity=1,
+                product_repo=mock_product_repo,
+                schedule_repo=mock_schedule_repo,
+                tenant_id="test-tenant",
+                start_time=start_time,
+                dry_run=False,
+                desired_deadline="2025-03-15",
+            )
+        assert exc_info.value.desired_deadline == "2025-03-15"

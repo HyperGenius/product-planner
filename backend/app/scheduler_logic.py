@@ -30,6 +30,21 @@ from app.utils.calendar import (
 _GAP_HORIZON_DAYS = 90
 
 
+class RoutingUnconfirmedError(ValueError):
+    """工程が未確定のためガント登録できない場合に送出する例外"""
+
+    def __init__(self, desired_deadline: str | None = None):
+        super().__init__("工程が未確定です。ガントチャートへの登録をスキップします")
+        self.desired_deadline = desired_deadline
+
+
+def routings_are_confirmed(routings: list[dict[str, Any]]) -> bool:
+    """全工程が確定済みかどうかを返す。工程が0件の場合は False。"""
+    if not routings:
+        return False
+    return all(r.get("is_confirmed", False) for r in routings)
+
+
 def schedule_order(
     order_id: int | None,
     product_id: int,
@@ -42,6 +57,7 @@ def schedule_order(
     calendar_config: CalendarConfig | None = None,
     settings_repo: SchedulingSettingsRepository | None = None,
     standalone: bool = False,
+    desired_deadline: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     注文に対してスケジュールを作成する。
@@ -58,17 +74,22 @@ def schedule_order(
         calendar_config: カレンダー設定（Noneの場合はデフォルト設定を使用）
         settings_repo: スケジューリング設定リポジトリ（Noneの場合はデフォルトパラメータ使用）
         standalone: Trueの場合、既存スケジュールを無視して純粋な工程所要時間のみで計算する
+        desired_deadline: 顧客希望納期（RoutingUnconfirmedError に付与して呼び出し側で利用）
 
     Returns:
         作成されたスケジュールのリスト
 
     Raises:
         ValueError: 工程が取得できない場合、または設備グループにメンバーが存在しない場合
+        RoutingUnconfirmedError: dry_run=False 時に未確定工程が含まれる場合
     """
     routings = product_repo.get_routings_by_product(product_id)
 
     if not routings:
         raise ValueError(f"製品ID {product_id} に対する工程が見つかりません")
+
+    if not dry_run and not routings_are_confirmed(routings):
+        raise RoutingUnconfirmedError(desired_deadline=desired_deadline)
 
     created_schedules = []
     current_process_start = start_time if start_time else datetime.now().astimezone()
