@@ -9,6 +9,9 @@ export interface ProcessRouting {
   sequence_order: number
   setup_time_seconds: number
   unit_time_seconds: number
+  is_confirmed: boolean
+  confirmed_by: string | null
+  confirmed_at: string | null
   tenant_id: string
   created_at: string
   updated_at: string
@@ -24,6 +27,7 @@ export interface ProcessRoutingCreate {
   sequence_order: number
   setup_time_seconds: number
   unit_time_seconds: number
+  is_confirmed?: boolean
 }
 
 /**
@@ -35,4 +39,5 @@ export interface ProcessRoutingUpdate {
   sequence_order?: number
   setup_time_seconds?: number
   unit_time_seconds?: number
+  is_confirmed?: boolean
 }
