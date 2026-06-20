@@ -1,6 +1,6 @@
 # backend/app/models/master/__init__.py
 from .customer_schemas import CustomerCreateSchema, CustomerUpdateSchema
-from .process_routings import RoutingCreate, RoutingUpdate
+from .process_routings import RoutingCreate, RoutingResponse, RoutingUpdate
 from .product_schemas import ProductCreateSchema, ProductUpdateSchema
 
 __all__ = [
@@ -8,6 +8,7 @@ __all__ = [
     "ProductUpdateSchema",
     "RoutingCreate",
     "RoutingUpdate",
+    "RoutingResponse",
     "CustomerCreateSchema",
     "CustomerUpdateSchema",
 ]

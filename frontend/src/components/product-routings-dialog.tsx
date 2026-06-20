@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Pencil, Trash2, Plus, Loader2 } from "lucide-react"
+import { Pencil, Trash2, Plus, Loader2, Lock, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import {
   Table,
   TableBody,
@@ -40,6 +41,7 @@ import {
 } from "@/hooks/use-process-routings"
 import { useEquipmentGroups, formatGroupLabel } from "@/lib/hooks/use-equipment-groups"
 import { useSimulateOrder } from "@/hooks/use-orders"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import type { Product } from "@/types/product"
 import type { ProcessRouting } from "@/types/process-routing"
 
@@ -64,10 +66,14 @@ export function ProductRoutingsDialog({
   const [sequenceOrder, setSequenceOrder] = useState<number | "">(1)
   const [setupTime, setSetupTime] = useState<number | "">(0)
   const [unitTime, setUnitTime] = useState<number | "">(0)
-  
+
   // 削除確認ダイアログの状態
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [routingToDelete, setRoutingToDelete] = useState<ProcessRouting | null>(null)
+
+  // 確定取消確認ダイアログの状態
+  const [unconfirmDialogOpen, setUnconfirmDialogOpen] = useState(false)
+  const [routingToUnconfirm, setRoutingToUnconfirm] = useState<ProcessRouting | null>(null)
 
   // 個数からの目安
   const [estimateQuantity, setEstimateQuantity] = useState<number | "">(1000)
@@ -75,6 +81,9 @@ export function ProductRoutingsDialog({
   // データ取得
   const { data: routings, isLoading: isLoadingRoutings } = useProcessRoutings(product?.id ?? null)
   const { data: equipmentGroups, isLoading: isLoadingGroups } = useEquipmentGroups()
+  const { data: currentMember } = useCurrentMember()
+
+  const isAdmin = currentMember?.role === "admin"
 
   // ミューテーション
   const createMutation = useCreateProcessRouting()
@@ -216,7 +225,7 @@ export function ProductRoutingsDialog({
         productId: product.id,
       })
       toast.success("工程を削除しました")
-      
+
       // 削除した工程を編集中だった場合はフォームをリセット
       if (editingRouting?.id === routingToDelete.id) {
         resetForm()
@@ -227,6 +236,45 @@ export function ProductRoutingsDialog({
     } finally {
       setDeleteConfirmOpen(false)
       setRoutingToDelete(null)
+    }
+  }
+
+  // 確定トグルのハンドラ
+  const handleConfirmToggle = async (routing: ProcessRouting) => {
+    if (routing.is_confirmed) {
+      // 確定取消 → 確認ダイアログを表示
+      setRoutingToUnconfirm(routing)
+      setUnconfirmDialogOpen(true)
+    } else {
+      // 確定ON → 即時実行
+      try {
+        await updateMutation.mutateAsync({
+          id: routing.id,
+          data: { is_confirmed: true },
+        })
+        toast.success(`工程「${routing.process_name}」を確定しました`)
+      } catch (error) {
+        toast.error("確定操作に失敗しました")
+        console.error(error)
+      }
+    }
+  }
+
+  // 確定取消の実行
+  const handleUnconfirmConfirm = async () => {
+    if (!routingToUnconfirm) return
+    try {
+      await updateMutation.mutateAsync({
+        id: routingToUnconfirm.id,
+        data: { is_confirmed: false },
+      })
+      toast.success(`工程「${routingToUnconfirm.process_name}」の確定を取り消しました`)
+    } catch (error) {
+      toast.error("確定取消に失敗しました")
+      console.error(error)
+    } finally {
+      setUnconfirmDialogOpen(false)
+      setRoutingToUnconfirm(null)
     }
   }
 
@@ -268,6 +316,7 @@ export function ProductRoutingsDialog({
                       <TableHead>設備グループ</TableHead>
                       <TableHead className="w-[120px]">段取り時間(秒)</TableHead>
                       <TableHead className="w-[120px]">単位時間(秒)</TableHead>
+                      <TableHead className="w-[80px] text-center">確定</TableHead>
                       <TableHead className="w-[100px] text-right">操作</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -275,15 +324,50 @@ export function ProductRoutingsDialog({
                     {routings
                       .sort((a, b) => a.sequence_order - b.sequence_order)
                       .map((routing) => (
-                        <TableRow 
+                        <TableRow
                           key={routing.id}
                           className={editingRouting?.id === routing.id ? "bg-muted/50" : ""}
                         >
                           <TableCell className="font-medium">{routing.sequence_order}</TableCell>
-                          <TableCell>{routing.process_name}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {routing.process_name}
+                              {routing.is_confirmed && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-500 text-green-600 bg-green-50">
+                                  <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+                                  確定済み
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>{getEquipmentGroupName(routing.equipment_group_id)}</TableCell>
                           <TableCell>{routing.setup_time_seconds}</TableCell>
                           <TableCell>{routing.unit_time_seconds}</TableCell>
+                          <TableCell className="text-center">
+                            {isAdmin ? (
+                              <button
+                                type="button"
+                                onClick={() => handleConfirmToggle(routing)}
+                                disabled={isPending}
+                                aria-label={routing.is_confirmed ? "確定を取り消す" : "確定する"}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-colors ${
+                                  routing.is_confirmed
+                                    ? "bg-green-500 border-green-500"
+                                    : "bg-background border-input hover:border-green-400"
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                              >
+                                {routing.is_confirmed && (
+                                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12">
+                                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                )}
+                              </button>
+                            ) : (
+                              <div className="flex items-center justify-center" aria-label="管理者のみ操作可能">
+                                <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
                               <Button
@@ -509,6 +593,23 @@ export function ProductRoutingsDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>キャンセル</AlertDialogCancel>
           <AlertDialogAction onClick={handleDeleteConfirm}>削除</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* 確定取消確認ダイアログ */}
+    <AlertDialog open={unconfirmDialogOpen} onOpenChange={setUnconfirmDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>確定を取り消しますか？</AlertDialogTitle>
+          <AlertDialogDescription>
+            工程「{routingToUnconfirm?.process_name}」の確定を取り消します。
+            再度確定するまで、この工程は未確定状態になります。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>キャンセル</AlertDialogCancel>
+          <AlertDialogAction onClick={handleUnconfirmConfirm}>確定を取り消す</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

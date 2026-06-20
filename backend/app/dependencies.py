@@ -119,6 +119,33 @@ def get_customer_repo(
     return CustomerRepository(client)
 
 
+def get_current_user_role(tenant_id: str, user_id: str, client: Client) -> str:
+    """organization_members から現在ユーザーのロールを取得する。
+
+    Returns:
+        "admin" または "member"
+
+    Raises:
+        HTTPException 403: テナントメンバーでない場合
+    """
+    res = (
+        client.table("organization_members")
+        .select("role")
+        .eq("tenant_id", tenant_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="テナントのメンバーではありません",
+        )
+    data = res.data
+    assert isinstance(data, dict)
+    return str(data["role"])
+
+
 def get_supabase_admin_client() -> Client:
     """
     Service Role Key を使ったSupabase管理者クライアントを返す。
