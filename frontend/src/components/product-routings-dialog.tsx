@@ -92,7 +92,7 @@ export function ProductRoutingsDialog({
     }, 500)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estimateQuantity, routings?.length, product?.id])
+  }, [estimateQuantity, routings, product?.id])
 
   // 工程 start〜end の経過日数を計算
   const estimateDays = (() => {
@@ -331,12 +331,22 @@ export function ProductRoutingsDialog({
                     type="number"
                     min="1"
                     value={estimateQuantity}
-                    onChange={(e) =>
-                      setEstimateQuantity(e.target.value === "" ? "" : Number(e.target.value))
-                    }
+                    onChange={(e) => {
+                      if (e.target.value === "") {
+                        setEstimateQuantity("")
+                      } else {
+                        const n = Number(e.target.value)
+                        if (Number.isFinite(n)) setEstimateQuantity(n)
+                      }
+                    }}
                     disabled={!routings || routings.length === 0}
                     className="h-8 text-sm"
                     placeholder="個数"
+                    onKeyDown={(e) => {
+                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                        e.preventDefault()
+                      }
+                    }}
                   />
                   <span className="text-sm text-muted-foreground whitespace-nowrap">個</span>
                 </div>
@@ -350,7 +360,7 @@ export function ProductRoutingsDialog({
                     </span>
                   ) : simulateMutation.isError ? (
                     <span className="text-destructive">計算に失敗しました</span>
-                  ) : estimateDays !== null ? (
+                  ) : estimateDays !== null && estimateQuantity !== "" && estimateQuantity >= 1 ? (
                     <span>
                       {estimateQuantity}個で <strong>{estimateDays}日</strong>（単体換算）
                     </span>
