@@ -50,12 +50,43 @@ PATCH /production-schedules/{id}  ← ガントチャート上でドラッグ手
 | `start_time` | `datetime \| None` | シミュレーション開始基準時刻。`None` の場合は現在時刻 |
 | `dry_run` | `bool` | `True` = 算出のみ / `False` = DB 保存 |
 | `calendar_config` | `CalendarConfig \| None` | 稼働カレンダー設定 |
+| `settings_repo` | `SchedulingSettingsRepository \| None` | スケジューリング設定リポジトリ |
 | `standalone` | `bool` | `True` = 既存スケジュールを無視した単体換算モード（後述） |
+| `desired_deadline` | `str \| None` | 顧客希望納期。`RoutingUnconfirmedError` に付与して呼び出し側で利用 |
+
+### 工程確定ガード（#197 / #198 追加）
+
+`dry_run=False`（確定モード）の場合、スケジューリング処理の冒頭で工程確定状態をチェックする。
+
+```
+routings = get_routings_by_product(product_id)
+
+if not routings:
+    raise ValueError("工程が見つかりません")          # HTTP 400
+
+if not dry_run and not routings_are_confirmed(routings):
+    raise RoutingUnconfirmedError(desired_deadline)  # HTTP 422
+```
+
+| 状態 | `dry_run=True` | `dry_run=False` |
+|---|---|---|
+| 工程なし | `ValueError` (400) | `ValueError` (400) |
+| 未確定工程あり | 通過（シミュレーション可） | `RoutingUnconfirmedError` (422) |
+| 全工程確定済み | 通過 | 通過 |
+
+**`RoutingUnconfirmedError`** は `ValueError` のサブクラスで `desired_deadline` 属性を持つ。  
+`confirm_order` エンドポイントはこれを HTTP 422 + `{"error": "routing_unconfirmed", "desired_deadline": "..."}` に変換する。
+
+**`routings_are_confirmed(routings) -> bool`** は `scheduler_logic.py` に定義されたヘルパー関数。  
+工程が 0 件、または任意の工程の `is_confirmed=False`（フィールド不在を含む）で `False` を返す。
+
+---
 
 ### アルゴリズムステップ
 
 ```
 1. products → process_routings を sequence_order 昇順で取得
+   ↓ 工程確定ガード（dry_run=False 時のみ）
 
 2. 工程ごとにループ:
 
@@ -237,6 +268,17 @@ class CalendarConfig:
 | `confirmed_deadline` | 算出された最終工程終了日（date 型） |
 | `confirmed_at` | 確定操作のタイムスタンプ |
 
+**エラーレスポンス**
+
+| HTTP | 条件 | レスポンスボディ |
+|---|---|---|
+| 404 | 受注が見つからない | `{"detail": "Order not found"}` |
+| 422 | 未確定工程あり | `{"detail": {"error": "routing_unconfirmed", "desired_deadline": "YYYY-MM-DD"}}` |
+| 400 | 工程なし・その他 ValueError | `{"detail": "<メッセージ>"}` |
+
+未確定工程エラー（422）はシミュレーション自体はできても「ガントへ登録できない」状態を示す。  
+フロントエンドはこの `error: "routing_unconfirmed"` を判定し、工程確定を促すメッセージを表示する（#199 以降で実装予定）。
+
 ---
 
 ### GET `/production-schedules` — スケジュール一覧取得
@@ -299,6 +341,9 @@ class CalendarConfig:
 | `equipment_group_id` | `bigint FK \| NULL` | NULL = 設備不要 |
 | `setup_time_seconds` | `int` | 段取り時間（秒） |
 | `unit_time_seconds` | `numeric(10,4)` | 1個あたり加工時間（秒） |
+| `is_confirmed` | `boolean DEFAULT false` | 工程確定フラグ。`false` の工程を含む受注はガント登録不可 |
+| `confirmed_by` | `uuid FK \| NULL` | 確定操作を行ったユーザーの ID（audit 用） |
+| `confirmed_at` | `timestamptz \| NULL` | 確定操作のタイムスタンプ（audit 用） |
 
 ### `orders` テーブルの確定フィールド
 
@@ -347,3 +392,5 @@ class CalendarConfig:
 - **start_time デフォルト**: `schedule_order()` の `start_time=None` の場合、現在時刻（`datetime.now()`）が基準になる。テストや過去日付での計算が必要な場合は明示的に渡す
 - **タイムゾーン**: 全 datetime は UTC（`timestamptz`）で保存。フロントエンドの表示は日本語ロケールに変換
 - **複数日分割**: 1 工程が 7 時間を超える場合、翌稼働日の 9:00 に続きが割り当てられる。分割された各セグメントが個別の `production_schedules` レコードとなる
+- **工程確定ガード**: `is_confirmed=false` の工程が 1 件でもある場合、`dry_run=False`（ガント登録）はブロックされる。`dry_run=True`（シミュレーション）はブロックされない。詳細は「工程確定ガード」セクション参照
+- **`is_confirmed` フィールド不在の扱い**: `routings_are_confirmed()` は `r.get("is_confirmed", False)` で評価するため、マイグレーション前のレコード（フィールドなし）も未確定として扱われる

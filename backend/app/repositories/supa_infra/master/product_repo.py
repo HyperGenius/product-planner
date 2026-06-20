@@ -68,6 +68,13 @@ class ProductRepository(BaseRepository[T]):
         )
         return res.count is not None and res.count > 0
 
+    def get_routings_confirmed_status(self, product_id: int) -> bool:
+        """製品の全工程が確定済みかどうかを返す。工程が0件の場合は False。"""
+        routings = self.get_routings_by_product(product_id)
+        if not routings:
+            return False
+        return all(r.get("is_confirmed", False) for r in routings)
+
     def get_process_name(self, routing_id: int) -> str:
         """Routing IDから工程名を取得"""
         try:

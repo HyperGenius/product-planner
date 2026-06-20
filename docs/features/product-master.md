@@ -83,9 +83,39 @@ const displayName = product.code ? product.name : null  // 製品名として表
 | `frontend/src/components/product-selector.tsx` | 受注入力の製品選択（有効製品のみ表示） |
 | `backend/app/routers/master/products.py` | REST API エンドポイント |
 
+## 工程ルーティング (process_routings)
+
+製品ごとの製造工程を管理する。工程管理ダイアログ（`ProductRoutingsDialog`）から CRUD 操作を行う。
+
+### データモデル
+
+| カラム | 型 | 説明 |
+|---|---|---|
+| `id` | `bigint PK` | |
+| `product_id` | `bigint FK` | |
+| `sequence_order` | `int` | 工程の実行順序（製品内でユニーク制約） |
+| `process_name` | `text` | 工程名 |
+| `equipment_group_id` | `bigint FK \| NULL` | NULL = 設備不要工程 |
+| `setup_time_seconds` | `int` | 段取り時間（秒） |
+| `unit_time_seconds` | `numeric(10,4)` | 1個あたり加工時間（秒） |
+| `is_confirmed` | `boolean DEFAULT false` | 工程確定フラグ（#197 追加） |
+| `confirmed_by` | `uuid FK \| NULL` | 確定したユーザーの ID（audit 用、#197 追加） |
+| `confirmed_at` | `timestamptz \| NULL` | 確定日時（audit 用、#197 追加） |
+
+### 工程確定フラグ (`is_confirmed`) について
+
+工程情報はベテラン社員の暗黙知であるため、初期登録時点で完全でなくてよい設計になっている（詳細: [`docs/specs/ROUTING_INPUT_FLOW_AND_CONFLICT.md`](../specs/ROUTING_INPUT_FLOW_AND_CONFLICT.md)）。
+
+- `is_confirmed=false` の工程を含む製品の受注は、シミュレーションは実行できるが**ガントチャートへの確定登録ができない**
+- 工程が 0 件の製品も同様にガント登録不可
+- 確定操作時は `confirmed_by`（ユーザー ID）と `confirmed_at`（タイムスタンプ）が自動記録される
+
+Phase 3（Issue #199）にて、admin ロール限定の確定 UI をダイアログに追加予定。
+
 ## 変更履歴
 
 | PR | 内容 |
 |---|---|
 | #105 | 製品マスタ画面の再設計（Issue #104）。テーブル列統合・ケバブメニュー・検索フィルター追加 |
 | #106 | 並べ替え機能・状態変更モーダル化・ページネーション・幅制限追加（Issue #106） |
+| #204 | 工程確定フラグ（`is_confirmed` / `confirmed_by` / `confirmed_at`）をDBに追加（Issue #197） |
