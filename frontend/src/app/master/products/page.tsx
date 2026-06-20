@@ -127,7 +127,7 @@ export default function ProductsPage() {
   const handleOpenEditDialog = (product: Product) => {
     setSelectedProduct(product)
     setProductName(product.name)
-    setProductCode(product.code)
+    setProductCode(product.code ?? "")
     setProductType(product.type)
     setIsEditDialogOpen(true)
   }
