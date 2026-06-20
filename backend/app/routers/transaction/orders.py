@@ -135,6 +135,7 @@ def simulate_schedule_without_id(
             schedule_repo=schedule_repo,
             tenant_id=tenant_id,
             dry_run=True,
+            standalone=order_data.standalone,
             settings_repo=settings_repo,
         )
         return build_simulate_response(

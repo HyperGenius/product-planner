@@ -88,7 +88,7 @@ export function ProductRoutingsDialog({
     if (estimateQuantity === "" || estimateQuantity <= 0) return
 
     const timer = setTimeout(() => {
-      simulateMutation.mutate({ product_id: product.id, quantity: estimateQuantity })
+      simulateMutation.mutate({ product_id: product.id, quantity: estimateQuantity, standalone: true })
     }, 500)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,7 +357,7 @@ export function ProductRoutingsDialog({
                   ) : null}
                 </div>
                 <p className="text-[10px] text-muted-foreground leading-snug">
-                  他の受注がない場合の単体シミュレーション値です。実際の納期は設備の競合により異なる場合があります。
+                  他の受注がない場合の単体換算値です。実際の納期は設備の混雑状況により長くなる場合があります。
                 </p>
               </CardContent>
             </Card>
