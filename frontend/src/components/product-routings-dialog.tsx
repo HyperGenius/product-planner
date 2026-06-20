@@ -242,8 +242,8 @@ export function ProductRoutingsDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[700px] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-6xl max-h-[85vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>工程管理 - {product?.name}</DialogTitle>
           <DialogDescription>
             製品の製造工程（ルーティング）を管理します
@@ -254,14 +254,14 @@ export function ProductRoutingsDialog({
           {/* 左側: 工程リスト */}
           <div className="flex flex-col min-h-0">
             <h3 className="text-sm font-semibold mb-3">登録済み工程</h3>
-            <div className="border rounded-md flex-1 overflow-auto">
+            <div className="border rounded-md flex-1 overflow-y-auto">
               {isLoadingRoutings ? (
                 <div className="flex items-center justify-center h-full">
                   <p className="text-sm text-muted-foreground">読み込み中...</p>
                 </div>
               ) : routings && routings.length > 0 ? (
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-10 bg-background">
                     <TableRow>
                       <TableHead className="w-[80px]">順序</TableHead>
                       <TableHead>工程名</TableHead>
@@ -319,7 +319,7 @@ export function ProductRoutingsDialog({
           </div>
 
           {/* 右側: 編集/追加フォーム */}
-          <div className="flex flex-col border rounded-md p-4 gap-4 overflow-y-auto">
+          <div className="flex flex-col border rounded-md p-4 gap-4 overflow-y-auto min-h-0">
             {/* 個数からの目安カード */}
             <Card className="shrink-0">
               <CardHeader className="pb-2 pt-3 px-3">
@@ -340,10 +340,15 @@ export function ProductRoutingsDialog({
                       }
                     }}
                     disabled={!routings || routings.length === 0}
-                    className="h-8 text-sm"
+                    className="h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     placeholder="個数"
+                    onWheel={(e) => e.currentTarget.blur()}
                     onKeyDown={(e) => {
-                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") {
+                      if (
+                        e.key === "e" || e.key === "E" ||
+                        e.key === "+" || e.key === "-" ||
+                        e.key === "ArrowUp" || e.key === "ArrowDown"
+                      ) {
                         e.preventDefault()
                       }
                     }}
@@ -419,28 +424,30 @@ export function ProductRoutingsDialog({
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="sequence-order">順序</Label>
-                <Input
-                  id="sequence-order"
-                  type="number"
-                  min="0"
-                  value={sequenceOrder}
-                  onChange={(e) => setSequenceOrder(e.target.value === "" ? "" : Number(e.target.value))}
-                  disabled={isPending}
-                />
-              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="sequence-order">順序</Label>
+                  <Input
+                    id="sequence-order"
+                    type="number"
+                    min="0"
+                    value={sequenceOrder}
+                    onChange={(e) => setSequenceOrder(e.target.value === "" ? "" : Number(e.target.value))}
+                    disabled={isPending}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="setup-time">段取り時間 (秒)</Label>
-                <Input
-                  id="setup-time"
-                  type="number"
-                  min="0"
-                  value={setupTime}
-                  onChange={(e) => setSetupTime(e.target.value === "" ? "" : Number(e.target.value))}
-                  disabled={isPending}
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="setup-time">段取り時間 (秒)</Label>
+                  <Input
+                    id="setup-time"
+                    type="number"
+                    min="0"
+                    value={setupTime}
+                    onChange={(e) => setSetupTime(e.target.value === "" ? "" : Number(e.target.value))}
+                    disabled={isPending}
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
