@@ -36,6 +36,7 @@ export interface OrderSimulateRequest {
   product_id: number
   quantity: number
   desired_deadline?: string
+  standalone?: boolean
 }
 
 /**

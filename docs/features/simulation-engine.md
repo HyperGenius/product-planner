@@ -50,6 +50,7 @@ PATCH /production-schedules/{id}  ← ガントチャート上でドラッグ手
 | `start_time` | `datetime \| None` | シミュレーション開始基準時刻。`None` の場合は現在時刻 |
 | `dry_run` | `bool` | `True` = 算出のみ / `False` = DB 保存 |
 | `calendar_config` | `CalendarConfig \| None` | 稼働カレンダー設定 |
+| `standalone` | `bool` | `True` = 既存スケジュールを無視した単体換算モード（後述） |
 
 ### アルゴリズムステップ
 
@@ -108,6 +109,21 @@ PATCH /production-schedules/{id}  ← ガントチャート上でドラッグ手
 | `True` | スケジュールを計算して返すのみ。DB への書き込みなし |
 | `False` | 計算後に `production_schedules` へ INSERT。受注ステータスも更新 |
 
+### standalone モード
+
+`standalone=True` を渡すと、設備の選択時に `production_schedules` の参照をスキップし、
+稼働カレンダーのみに基づいた純粋な工程所要時間を計算する。
+
+| `standalone` | 動作 |
+|---|---|
+| `False`（デフォルト） | 確定済みスケジュールのギャップ埋め・末尾追加を行う通常モード |
+| `True` | 既存スケジュールを無視。`current_process_start` から即時割り当て |
+
+**用途**: 工程管理モーダルの「個数からの目安」カード。  
+単位時間の入力ミス検出のため「他の受注がない場合に N 個でおよそ何日かかるか」を表示する際に使用する。  
+受注管理側の通常シミュレーション（`standalone=False`）とは計算ロジックを共有しており、  
+カレンダー・稼働時間・複数日分割のルールは同一のエンジンが適用される。
+
 ---
 
 ## カレンダーロジック
@@ -160,9 +176,17 @@ class CalendarConfig:
 {
   "product_id": 100,
   "quantity": 50,
-  "desired_deadline": "2024-12-31T17:00:00+00:00"
+  "desired_deadline": "2024-12-31T17:00:00+00:00",
+  "standalone": false
 }
 ```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `product_id` | `int` | 製品 ID |
+| `quantity` | `int` | 生産数量 |
+| `desired_deadline` | `string \| null` | 希望納期（ISO 8601）。未指定時は `is_feasible` が常に `true` |
+| `standalone` | `bool` | `true` = 単体換算モード（既存スケジュール無視）。デフォルト `false` |
 
 **レスポンス**
 ```json
@@ -309,7 +333,8 @@ class CalendarConfig:
 | `backend/app/repositories/supa_infra/transaction/schedule_repo.py` | `production_schedules` DB 操作 |
 | `backend/app/models/transaction/order_schema.py` | `OrderSimulateRequest`, `OrderSimulateResponse` Pydantic スキーマ |
 | `frontend/src/hooks/use-orders.ts` | `useSimulateOrder`, `useConfirmOrder` TanStack Query フック |
-| `frontend/src/types/order.ts` | `OrderSimulateResponse`, `ProcessSchedule` TypeScript 型 |
+| `frontend/src/types/order.ts` | `OrderSimulateRequest`, `OrderSimulateResponse`, `ProcessSchedule` TypeScript 型 |
+| `frontend/src/components/product-routings-dialog.tsx` | 工程管理モーダル（`standalone: true` でカードの単体換算表示） |
 | `frontend/src/types/schedule.ts` | `Schedule` TypeScript 型 |
 | `frontend/src/components/simulation-result.tsx` | シミュレーション結果表示コンポーネント |
 

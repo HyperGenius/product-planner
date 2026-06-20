@@ -29,6 +29,7 @@ class OrderSimulateRequest(BaseSchema):
     product_id: int
     quantity: int
     deadline_date: str | None = Field(None, alias="desired_deadline")
+    standalone: bool = False
 
 
 class OrderUpdate(BaseSchema):

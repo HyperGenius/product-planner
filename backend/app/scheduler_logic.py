@@ -41,6 +41,7 @@ def schedule_order(
     dry_run: bool = False,
     calendar_config: CalendarConfig | None = None,
     settings_repo: SchedulingSettingsRepository | None = None,
+    standalone: bool = False,
 ) -> list[dict[str, Any]]:
     """
     注文に対してスケジュールを作成する。
@@ -56,6 +57,7 @@ def schedule_order(
         dry_run: Trueの場合、DBに保存せずに計算結果のみを返す
         calendar_config: カレンダー設定（Noneの場合はデフォルト設定を使用）
         settings_repo: スケジューリング設定リポジトリ（Noneの場合はデフォルトパラメータ使用）
+        standalone: Trueの場合、既存スケジュールを無視して純粋な工程所要時間のみで計算する
 
     Returns:
         作成されたスケジュールのリスト
@@ -100,6 +102,7 @@ def schedule_order(
                 product_repo=product_repo,
                 schedule_repo=schedule_repo,
                 calendar_config=calendar_config,
+                standalone=standalone,
             )
 
         chosen_start = best["start"]
@@ -149,6 +152,7 @@ def _select_best_machine(
     product_repo: ProductRepository,
     schedule_repo: ScheduleRepository,
     calendar_config: CalendarConfig | None,
+    standalone: bool = False,
 ) -> dict:
     """設備グループから最も早く完了できる設備を選定してその候補情報を返す。"""
     machine_ids = _get_equipment_ids_by_group(product_repo, equipment_group_id)
@@ -157,36 +161,10 @@ def _select_best_machine(
 
     candidates = []
     for machine_id in machine_ids:
-        params = _resolve_params(
-            machine_id, equipment_group_id, tenant_id, settings_repo, product_repo
-        )
-        gap_result = _try_gap_fill(
-            machine_id=machine_id,
-            current_process_start=current_process_start,
-            total_duration_min=total_duration_min,
-            params=params,
-            schedule_repo=schedule_repo,
-            calendar_config=calendar_config,
-        )
-        if gap_result is not None:
-            candidates.append(
-                {
-                    "machine_id": machine_id,
-                    "start": gap_result[0][0],
-                    "duration_sec": total_duration_sec,
-                    "segments": gap_result,
-                    "completion": gap_result[-1][1],
-                }
-            )
-        else:
-            last_end = schedule_repo.get_last_end_time(machine_id)
-            base_start = (
-                max(last_end, current_process_start)
-                if last_end
-                else current_process_start
-            )
+        if standalone:
+            # 既存スケジュールを無視: current_process_start からそのまま計算
             actual_start = get_next_available_start_time(
-                base_start, total_duration_min, calendar_config
+                current_process_start, total_duration_min, calendar_config
             )
             fb_segments = split_work_across_days(
                 actual_start, total_duration_min, calendar_config
@@ -200,6 +178,50 @@ def _select_best_machine(
                     "completion": fb_segments[-1][1],
                 }
             )
+        else:
+            params = _resolve_params(
+                machine_id, equipment_group_id, tenant_id, settings_repo, product_repo
+            )
+            gap_result = _try_gap_fill(
+                machine_id=machine_id,
+                current_process_start=current_process_start,
+                total_duration_min=total_duration_min,
+                params=params,
+                schedule_repo=schedule_repo,
+                calendar_config=calendar_config,
+            )
+            if gap_result is not None:
+                candidates.append(
+                    {
+                        "machine_id": machine_id,
+                        "start": gap_result[0][0],
+                        "duration_sec": total_duration_sec,
+                        "segments": gap_result,
+                        "completion": gap_result[-1][1],
+                    }
+                )
+            else:
+                last_end = schedule_repo.get_last_end_time(machine_id)
+                base_start = (
+                    max(last_end, current_process_start)
+                    if last_end
+                    else current_process_start
+                )
+                actual_start = get_next_available_start_time(
+                    base_start, total_duration_min, calendar_config
+                )
+                fb_segments = split_work_across_days(
+                    actual_start, total_duration_min, calendar_config
+                )
+                candidates.append(
+                    {
+                        "machine_id": machine_id,
+                        "start": actual_start,
+                        "duration_sec": total_duration_sec,
+                        "segments": None,
+                        "completion": fb_segments[-1][1],
+                    }
+                )
 
     return min(candidates, key=lambda x: x["completion"])  # type: ignore
 
