@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Pencil, Trash2, Plus } from "lucide-react"
+import { Pencil, Trash2, Plus, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -38,6 +39,7 @@ import {
   useDeleteProcessRouting,
 } from "@/hooks/use-process-routings"
 import { useEquipmentGroups, formatGroupLabel } from "@/lib/hooks/use-equipment-groups"
+import { useSimulateOrder } from "@/hooks/use-orders"
 import type { Product } from "@/types/product"
 import type { ProcessRouting } from "@/types/process-routing"
 
@@ -67,14 +69,39 @@ export function ProductRoutingsDialog({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [routingToDelete, setRoutingToDelete] = useState<ProcessRouting | null>(null)
 
+  // 個数からの目安
+  const [estimateQuantity, setEstimateQuantity] = useState<number | "">(1000)
+
   // データ取得
   const { data: routings, isLoading: isLoadingRoutings } = useProcessRoutings(product?.id ?? null)
   const { data: equipmentGroups, isLoading: isLoadingGroups } = useEquipmentGroups()
-  
+
   // ミューテーション
   const createMutation = useCreateProcessRouting()
   const updateMutation = useUpdateProcessRouting()
   const deleteMutation = useDeleteProcessRouting()
+  const simulateMutation = useSimulateOrder()
+
+  // 個数・工程が変わったら500ms debounce でシミュレーション実行
+  useEffect(() => {
+    if (!product || !routings || routings.length === 0) return
+    if (estimateQuantity === "" || estimateQuantity <= 0) return
+
+    const timer = setTimeout(() => {
+      simulateMutation.mutate({ product_id: product.id, quantity: estimateQuantity })
+    }, 500)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estimateQuantity, routings?.length, product?.id])
+
+  // 工程 start〜end の経過日数を計算
+  const estimateDays = (() => {
+    const schedules = simulateMutation.data?.process_schedules
+    if (!schedules || schedules.length === 0) return null
+    const start = new Date(schedules[0].start_time)
+    const end = new Date(schedules[schedules.length - 1].end_time)
+    return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+  })()
 
   // フォームをリセット
   const resetForm = () => {
@@ -292,11 +319,53 @@ export function ProductRoutingsDialog({
           </div>
 
           {/* 右側: 編集/追加フォーム */}
-          <div className="flex flex-col border rounded-md p-4">
-            <h3 className="text-sm font-semibold mb-4">
+          <div className="flex flex-col border rounded-md p-4 gap-4 overflow-y-auto">
+            {/* 個数からの目安カード */}
+            <Card className="shrink-0">
+              <CardHeader className="pb-2 pt-3 px-3">
+                <CardTitle className="text-xs font-semibold">個数からの目安</CardTitle>
+              </CardHeader>
+              <CardContent className="px-3 pb-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="1"
+                    value={estimateQuantity}
+                    onChange={(e) =>
+                      setEstimateQuantity(e.target.value === "" ? "" : Number(e.target.value))
+                    }
+                    disabled={!routings || routings.length === 0}
+                    className="h-8 text-sm"
+                    placeholder="個数"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">個</span>
+                </div>
+                <div className="text-sm font-medium min-h-[1.25rem]">
+                  {!routings || routings.length === 0 ? (
+                    <span className="text-muted-foreground">工程を登録すると計算できます</span>
+                  ) : simulateMutation.isPending ? (
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      計算中...
+                    </span>
+                  ) : simulateMutation.isError ? (
+                    <span className="text-destructive">計算に失敗しました</span>
+                  ) : estimateDays !== null ? (
+                    <span>
+                      {estimateQuantity}個で <strong>{estimateDays}日</strong>（単体換算）
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-snug">
+                  他の受注がない場合の単体シミュレーション値です。実際の納期は設備の競合により異なる場合があります。
+                </p>
+              </CardContent>
+            </Card>
+
+            <h3 className="text-sm font-semibold">
               {editingRouting ? "工程編集" : "工程追加"}
             </h3>
-            
+
             <div className="space-y-4 flex-1">
               <div className="space-y-2">
                 <Label htmlFor="process-name">工程名</Label>
