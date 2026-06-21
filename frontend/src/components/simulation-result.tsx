@@ -33,8 +33,8 @@ export function SimulationResult({
   }
 
   // 日付の検証
-  const calculatedDate = new Date(result.calculated_deadline)
-  if (isNaN(calculatedDate.getTime())) {
+  const calculatedDate = result.calculated_deadline ? new Date(result.calculated_deadline) : null
+  if (!calculatedDate || isNaN(calculatedDate.getTime())) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <div className="text-center">

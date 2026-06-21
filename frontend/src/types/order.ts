@@ -52,10 +52,12 @@ export interface ProcessSchedule {
 
 /**
  * 注文シミュレーション結果のデータ型
+ * routing_status が "no_routing" の場合、calculated_deadline / is_feasible は null
  */
 export interface OrderSimulateResponse {
-  calculated_deadline: string // ISO 8601形式
-  is_feasible: boolean // 希望納期に間に合うか
+  routing_status?: "no_routing" | "unconfirmed"
+  calculated_deadline: string | null // ISO 8601形式
+  is_feasible: boolean | null // 希望納期に間に合うか
   process_schedules: ProcessSchedule[]
 }
 

@@ -31,11 +31,12 @@ _GAP_HORIZON_DAYS = 90
 
 
 class RoutingUnconfirmedError(ValueError):
-    """工程が未確定のためガント登録できない場合に送出する例外"""
+    """工程が未確定または未登録のためガント登録できない場合に送出する例外"""
 
-    def __init__(self, desired_deadline: str | None = None):
+    def __init__(self, desired_deadline: str | None = None, no_routing: bool = False):
         super().__init__("工程が未確定です。ガントチャートへの登録をスキップします")
         self.desired_deadline = desired_deadline
+        self.no_routing = no_routing
 
 
 def routings_are_confirmed(routings: list[dict[str, Any]]) -> bool:
@@ -86,7 +87,9 @@ def schedule_order(
     routings = product_repo.get_routings_by_product(product_id)
 
     if not routings:
-        raise ValueError(f"製品ID {product_id} に対する工程が見つかりません")
+        raise RoutingUnconfirmedError(
+            desired_deadline=desired_deadline, no_routing=True
+        )
 
     if not dry_run and not routings_are_confirmed(routings):
         raise RoutingUnconfirmedError(desired_deadline=desired_deadline)

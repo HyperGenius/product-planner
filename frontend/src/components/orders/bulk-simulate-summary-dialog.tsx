@@ -111,13 +111,13 @@ export function BulkSimulateSummaryDialog({ results, onClose, onBulkConfirm }: B
                       </p>
                       <p>
                         <span className="text-xs text-muted-foreground/70">回答　</span>
-                        {formatDate(r.result!.calculated_deadline)}
+                        {r.result!.calculated_deadline ? formatDate(r.result!.calculated_deadline) : "—"}
                       </p>
                     </>
                   ) : (
                     <p>
                       <span className="text-xs text-muted-foreground/70">回答　</span>
-                      {formatDate(r.result!.calculated_deadline)}
+                      {r.result!.calculated_deadline ? formatDate(r.result!.calculated_deadline) : "—"}
                     </p>
                   )}
                 </div>

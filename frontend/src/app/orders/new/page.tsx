@@ -3,21 +3,30 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Calculator, Check, Save } from "lucide-react"
+import { AlertTriangle, BookOpen, Calculator, Check, Save } from "lucide-react"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { SimulationResult } from "@/components/simulation-result"
+import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 import { useSimulateOrder, useCreateOrder, useConfirmOrder } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { getProductName, getCustomerName } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
+import type { Product } from "@/types/product"
 
 /**
  * 注文登録・納期回答シミュレーション画面
@@ -32,12 +41,17 @@ export default function NewOrderPage() {
   const [desiredDeadline, setDesiredDeadline] = useState("")
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [hasAttemptedSimulation, setHasAttemptedSimulation] = useState(false)
+  const [noRoutingDialogOpen, setNoRoutingDialogOpen] = useState(false)
+  const [routingDialogOpen, setRoutingDialogOpen] = useState(false)
 
   const simulateMutation = useSimulateOrder()
   const createMutation = useCreateOrder()
   const confirmMutation = useConfirmOrder()
   const { data: products } = useProducts()
   const { data: customers } = useCustomers()
+
+  const selectedProduct: Product | null =
+    products?.find((p) => p.id === parseInt(productId)) ?? null
 
   const handleSimulate = async () => {
     setHasAttemptedSimulation(true)
@@ -67,12 +81,49 @@ export default function NewOrderPage() {
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
       })
+
+      if (result.routing_status === "no_routing") {
+        setNoRoutingDialogOpen(true)
+        return
+      }
+
       setSimulationResult(result)
       toast.success("シミュレーションが完了しました")
     } catch (error) {
       console.error("Simulation error:", error)
       toast.error("シミュレーションに失敗しました")
     }
+  }
+
+  const handleSaveAsDraft = async () => {
+    const productIdNum = parseInt(productId)
+    const quantityNum = parseInt(quantity)
+
+    if (isNaN(productIdNum) || isNaN(quantityNum)) {
+      toast.error("製品IDまたは数量が無効です")
+      return
+    }
+
+    try {
+      await createMutation.mutateAsync({
+        order_no: orderNo || undefined,
+        product_id: productIdNum,
+        customer_id: customerId ? parseInt(customerId) : undefined,
+        quantity: quantityNum,
+        desired_deadline: desiredDeadline || undefined,
+      })
+      setNoRoutingDialogOpen(false)
+      toast.success("下書き保存しました。工程登録後に専門家キューから確定できます")
+      router.push("/orders")
+    } catch (error) {
+      console.error("Draft save error:", error)
+      toast.error("下書き保存に失敗しました")
+    }
+  }
+
+  const handleOpenRoutingRegistration = () => {
+    setNoRoutingDialogOpen(false)
+    setRoutingDialogOpen(true)
   }
 
   const handleConfirm = async () => {
@@ -270,7 +321,7 @@ export default function NewOrderPage() {
           <SimulationResult
             result={simulationResult}
             desiredDeadline={desiredDeadline}
-            summaryContent={simulationResult && (
+            summaryContent={simulationResult && simulationResult.calculated_deadline && (
               <div className="rounded-lg border p-4 space-y-3 text-sm">
                 <p className="font-semibold">注文内容の確認</p>
                 <dl className="space-y-1.5">
@@ -319,6 +370,51 @@ export default function NewOrderPage() {
           />
         </div>
       </div>
+
+      {/* 工程未登録選択ダイアログ */}
+      <Dialog open={noRoutingDialogOpen} onOpenChange={setNoRoutingDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>この製品には工程が登録されていません</DialogTitle>
+            <DialogDescription>
+              「{selectedProduct?.name ?? "選択中の製品"}」の生産工程が未登録のため、納期のシミュレーションができません。次の操作を選択してください。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 pt-2">
+            <button
+              onClick={handleOpenRoutingRegistration}
+              className="flex flex-col items-start gap-2 rounded-lg border-2 border-primary bg-primary/5 p-4 text-left hover:bg-primary/10 transition-colors"
+            >
+              <BookOpen className="h-6 w-6 text-primary" />
+              <p className="font-semibold text-sm">工程を登録してから注文する</p>
+              <p className="text-xs text-muted-foreground">
+                工程を登録し、その後シミュレーションを実行します
+              </p>
+            </button>
+            <button
+              onClick={handleSaveAsDraft}
+              disabled={createMutation.isPending}
+              className="flex flex-col items-start gap-2 rounded-lg border-2 border-muted bg-muted/30 p-4 text-left hover:bg-muted/50 transition-colors disabled:opacity-50"
+            >
+              <Save className="h-6 w-6 text-muted-foreground" />
+              <p className="font-semibold text-sm">下書きで保存する</p>
+              <p className="text-xs text-muted-foreground">
+                今すぐ下書き保存し、あとで工程登録・確定できます
+              </p>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 工程登録ダイアログ（既存コンポーネント流用） */}
+      <ProductRoutingsDialog
+        product={selectedProduct}
+        open={routingDialogOpen}
+        onOpenChange={(open) => {
+          setRoutingDialogOpen(open)
+          if (!open) handleSimulate()
+        }}
+      />
     </div>
   )
 }
