@@ -11,6 +11,7 @@ export interface Order {
   confirmed_deadline?: string // ISO 8601形式
   status: 'draft' | 'confirmed' | 'completed' | 'canceled'
   is_scheduled: boolean
+  has_unconfirmed_routings?: boolean
   source_type: 'manual' | 'email'
   source_raw?: string
   tenant_id: string

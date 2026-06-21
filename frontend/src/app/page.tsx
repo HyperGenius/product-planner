@@ -12,10 +12,12 @@ import {
   ArrowRight,
   CalendarDays,
   PackageSearch,
+  AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
+import { useUnconfirmedRoutingQueue } from "@/hooks/use-unconfirmed-routing-queue"
 import { format, startOfDay, addDays, startOfWeek } from "date-fns"
 import { ja } from "date-fns/locale"
 import { getProductName, getStatusLabel } from "@/lib/order-utils"
@@ -31,6 +33,7 @@ export default function Home() {
   const router = useRouter()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
+  const { data: routingQueue, isLoading: queueLoading } = useUnconfirmedRoutingQueue()
 
   const today = useMemo(() => startOfDay(new Date()), [])
   const tomorrow = useMemo(() => addDays(today, 1), [today])
@@ -56,6 +59,12 @@ export default function Home() {
     return orders?.filter((order) => order.created_at && new Date(order.created_at) >= weekStart).length ?? 0
   }, [orders, weekStart])
 
+  const unconfirmedRoutingKpi = useMemo(() => {
+    const count = routingQueue?.count ?? 0
+    const minBuffer = routingQueue?.items[0]?.buffer_days ?? null
+    return { count, minBuffer }
+  }, [routingQueue])
+
   const recentOrders = useMemo(() => {
     if (!orders) return []
     return [...orders]
@@ -72,6 +81,7 @@ export default function Home() {
       accent: "border-t-blue-500",
       iconBg: "bg-blue-50",
       iconColor: "text-blue-600",
+      sub: null,
     },
     {
       label: "未確定注文",
@@ -81,6 +91,7 @@ export default function Home() {
       accent: "border-t-orange-400",
       iconBg: "bg-orange-50",
       iconColor: "text-orange-500",
+      sub: null,
     },
     {
       label: "確定済み注文",
@@ -90,6 +101,7 @@ export default function Home() {
       accent: "border-t-green-500",
       iconBg: "bg-green-50",
       iconColor: "text-green-600",
+      sub: null,
     },
     {
       label: "今週の受注",
@@ -99,6 +111,19 @@ export default function Home() {
       accent: "border-t-purple-500",
       iconBg: "bg-purple-50",
       iconColor: "text-purple-600",
+      sub: null,
+    },
+    {
+      label: "工程未確定",
+      value: queueLoading ? "…" : unconfirmedRoutingKpi.count,
+      unit: "件",
+      icon: AlertTriangle,
+      accent: unconfirmedRoutingKpi.count > 0 ? "border-t-amber-500" : "border-t-gray-300",
+      iconBg: unconfirmedRoutingKpi.count > 0 ? "bg-amber-50" : "bg-gray-50",
+      iconColor: unconfirmedRoutingKpi.count > 0 ? "text-amber-600" : "text-gray-400",
+      sub: unconfirmedRoutingKpi.count > 0 && unconfirmedRoutingKpi.minBuffer !== null
+        ? `最短 ${unconfirmedRoutingKpi.minBuffer}日`
+        : null,
     },
   ]
 
@@ -119,7 +144,7 @@ export default function Home() {
       </div>
 
       {/* KPI カード */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
         {kpiCards.map((card) => (
           <div
             key={card.label}
@@ -132,6 +157,9 @@ export default function Home() {
                   <span className="text-4xl font-bold">{card.value}</span>
                   <span className="text-sm text-muted-foreground">{card.unit}</span>
                 </div>
+                {card.sub && (
+                  <p className="text-xs text-amber-700 mt-1 font-medium">{card.sub}</p>
+                )}
               </div>
               <div className={`rounded-lg ${card.iconBg} p-2.5`}>
                 <card.icon className={`h-5 w-5 ${card.iconColor}`} />

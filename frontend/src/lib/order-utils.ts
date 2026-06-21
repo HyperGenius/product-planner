@@ -2,7 +2,7 @@ import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
-export type StatusFilter = "" | "draft" | "confirmed" | "incomplete" | "completed" | "canceled"
+export type StatusFilter = "" | "draft" | "confirmed" | "incomplete" | "completed" | "canceled" | "unconfirmed_routing"
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
@@ -24,6 +24,7 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
 
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (statusFilter === "incomplete") return !order.customer_id || !order.desired_deadline
+  if (statusFilter === "unconfirmed_routing") return !!order.has_unconfirmed_routings
   if (statusFilter) return order.status === statusFilter
   return true
 }
