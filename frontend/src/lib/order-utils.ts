@@ -25,7 +25,7 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
 
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (statusFilter === "incomplete") return !order.customer_id || !order.desired_deadline
-  if (statusFilter === "unconfirmed_routing") return !!order.has_unconfirmed_routings
+  if (statusFilter === "unconfirmed_routing") return order.status === "draft" && !!order.has_unconfirmed_routings
   if (statusFilter) return order.status === statusFilter
   return true
 }
