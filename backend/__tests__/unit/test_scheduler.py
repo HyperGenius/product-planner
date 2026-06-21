@@ -226,7 +226,7 @@ class TestScheduleOrder:
             )
 
     def test_schedule_with_no_equipment_in_group(self) -> None:
-        """設備グループに設備が存在しない場合、ValueErrorを投げる"""
+        """設備グループに設備が存在しない場合、設備なし（equipment_id=None）でスケジュールを作成する"""
         mock_product_repo = MagicMock()
         mock_schedule_repo = MagicMock()
 
@@ -245,15 +245,18 @@ class TestScheduleOrder:
         # 設備グループに設備が存在しない
         mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
 
-        with pytest.raises(ValueError, match="設備が見つかりません"):
-            schedule_order(
-                order_id=5,
-                product_id=5,
-                quantity=1,
-                product_repo=mock_product_repo,
-                schedule_repo=mock_schedule_repo,
-                tenant_id="test-tenant-id",
-            )
+        result = schedule_order(
+            order_id=5,
+            product_id=5,
+            quantity=1,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            dry_run=True,
+        )
+
+        assert len(result) >= 1
+        assert result[0]["equipment_id"] is None
 
     def test_schedule_respects_calendar_logic(self) -> None:
         """カレンダーロジックが適用され、17:00を超える場合は分割される"""
