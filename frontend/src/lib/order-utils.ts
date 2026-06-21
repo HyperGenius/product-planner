@@ -10,6 +10,7 @@ export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "下書き", value: "draft" },
   { label: "確定済", value: "confirmed" },
   { label: "情報不足", value: "incomplete" },
+  { label: "工程未確定", value: "unconfirmed_routing" },
   { label: "完了", value: "completed" },
   { label: "キャンセル", value: "canceled" },
 ]
