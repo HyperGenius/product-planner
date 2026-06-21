@@ -62,22 +62,22 @@
 **カード2: 情報不足件数 (STEP 1)**
 - `customer_id === null` または `desired_deadline === null` の件数を表示（ステータス問わず）
 - カード自体はクリック不可（ナビゲーション役割なし）
-- カード内の「情報不足の注文を確認する →」ボタンを押すとフィルターを「情報不足」に絞り込み
+- 「情報不足」はフィルタータブに存在しないため、カードは件数の認知・注意喚起のみを担う
+  - 内訳（顧客未設定 N 件 / 希望納期未設定 N 件）を補足テキストで表示する
 
 件数が 0 の場合はカードを非表示にする（画面を圧迫しない）。
-
-フィルター切り替えはフィルターバーのタブに一本化されており、カードとの役割が重複しない。
 
 ### ステータスフィルター
 
 URL クエリパラメータ `?status=` で管理（マスタ画面と同じパターン）。
+
+フィルタータブは `orders.status` の値のみに限定する。「情報不足」「工程未確認」は `orders.status` に存在しない派生的な概念であり、同列に扱うと軸が混在してユーザーを混乱させる（詳細は「設計上の決定事項」参照）。
 
 | フィルター値 | 表示ラベル | 対象 |
 |---|---|---|
 | (なし) | すべて | 全注文 |
 | `draft` | 下書き | status='draft' |
 | `confirmed` | 確定済 | status='confirmed' |
-| `incomplete` | 情報不足 | customer_id IS NULL OR desired_deadline IS NULL |
 | `completed` | 完了 | status='completed' |
 | `canceled` | キャンセル | status='canceled' |
 
@@ -283,11 +283,10 @@ const draftOrders = useMemo(() =>
 const incompleteOrders = useMemo(() =>
   orders?.filter(o => !o.customer_id || !o.desired_deadline) ?? [], [orders])
 
-// 表示用フィルター
+// 表示用フィルター（statusFilter は orders.status の値のみ）
 const filteredOrders = useMemo(() => {
   if (!orders) return []
   return orders.filter(order => {
-    if (statusFilter === 'incomplete') return !order.customer_id || !order.desired_deadline
     if (statusFilter) return order.status === statusFilter
     return true
   })
@@ -355,6 +354,35 @@ frontend/src/
 
 ---
 
+## 設計上の決定事項
+
+### フィルタータブは `orders.status` のみに限定する (#215)
+
+**背景**
+
+かつてフィルタータブには「情報不足」（`incomplete`）と「工程未確認」（`unconfirmed_routing`）が含まれていた。しかしこれらは `orders.status` とは本来異なる軸である。
+
+| 軸 | 内容 | 管理場所 |
+|---|---|---|
+| ライフサイクル状態 | draft → confirmed → completed / canceled | `orders.status`（enum） |
+| 入力完全性 | customer_id / desired_deadline の充足状況 | 派生チェック（アプリ側計算） |
+| 工程確定状態 | process_routings の is_confirmed | 別テーブルとの JOIN が必要 |
+
+この混在により「下書きタブと情報不足タブの違いが分からない」状態になっていた（下書きタブの行はほぼ全行が顧客未設定であり、両タブが実質同じ集合）。
+
+**方針**
+
+- フィルタータブは `orders.status` の値のみ（すべて / 下書き / 確定済み / 完了 / キャンセル）
+- 「情報不足」「工程未確認」は STEP1〜3 バナー経由でのみ認知する
+- バナーの件数カウント・導線はフィルタータブと独立して動作する
+
+**将来の検討事項（今回スコープ外）**
+
+- 情報不足・工程未確認のバッジ/インジケーター化（行ごとの表示追加）
+- チップ形式の複数選択フィルタへの置き換え
+
+---
+
 ## 実装状況
 
 | 機能 | 優先度 | 状況 |
@@ -386,3 +414,4 @@ frontend/src/
 | 工程未確定注文の専門家キューとダッシュボードKPI | 高 | ✅ 実装済 (#200) |
 | 工程未確定注文の希望納期フォールバック表示 | 中 | ❌ 未実装 (#201) |
 | シミュレーション結果での設備衝突警告 | 中 | ❌ 未実装 (#202) |
+| フィルタータブを orders.status のみに限定（情報不足・工程未確認タブ削除） | 中 | ❌ 未実装 (#215) |
