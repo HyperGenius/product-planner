@@ -84,7 +84,7 @@ export function useOrdersPage() {
     [orders]
   )
   const unconfirmedRoutingCount = useMemo(
-    () => orders?.filter((o) => o.has_unconfirmed_routings).length ?? 0,
+    () => orders?.filter((o) => o.status === "draft" && o.has_unconfirmed_routings).length ?? 0,
     [orders]
   )
 
