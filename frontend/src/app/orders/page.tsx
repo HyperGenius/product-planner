@@ -37,6 +37,7 @@ export default function OrdersPage() {
     incompleteCount,
     noCustomerCount,
     noDeadlineCount,
+    unconfirmedRoutingCount,
     filteredOrders,
     pagedOrders,
     isEditDialogOpen,
@@ -99,8 +100,10 @@ export default function OrdersPage() {
             incompleteCount={incompleteCount}
             noCustomerCount={noCustomerCount}
             noDeadlineCount={noDeadlineCount}
+            unconfirmedRoutingCount={unconfirmedRoutingCount}
             onDraftClick={() => setParam("status", "draft")}
             onIncompleteClick={() => setParam("status", "incomplete")}
+            onUnconfirmedRoutingClick={() => setParam("status", "unconfirmed_routing")}
           />
         )}
 

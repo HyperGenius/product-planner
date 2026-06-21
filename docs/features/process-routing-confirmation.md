@@ -1,6 +1,6 @@
 # 工程確定UI（is_confirmed）
 
-Issue #197 / #199 で実装。
+Issue #197 / #199 / #200 で実装。
 
 ## 概要
 
@@ -44,3 +44,51 @@ Issue #197 / #199 で実装。
 - 確定済み工程の工程名に緑色バッジ（「確定済み」）を表示
 - 確定取消時は AlertDialog で「確定を取り消しますか？」確認ダイアログを表示
 - `useCurrentMember()` フックでロールを判定
+
+---
+
+## 専門家キュー（Issue #200）
+
+工程未確定の draft 注文を残バッファ昇順で可視化する機能。
+
+### Backend
+
+#### `GET /orders` の拡張
+
+`OrderRepository.get_all_with_routing_status()` を追加（2クエリ、N+1なし）。
+各注文に `has_unconfirmed_routings: bool` フラグを付与して返す。
+- 製品に工程が0件 → `true`
+- 1件でも `is_confirmed=false` → `true`
+- 全工程が確定済み → `false`
+
+#### `GET /orders/unconfirmed-routing-queue`
+
+新規エンドポイント。`has_unconfirmed_routings=true` の draft 注文を `buffer_days`（希望納期 - 本日）昇順で返す。null 納期は末尾。
+
+レスポンス形式:
+```json
+{
+  "count": 3,
+  "items": [
+    {
+      "order_id": 42,
+      "order_no": "ORD-001",
+      "product_name": "製品A",
+      "buffer_days": 2,
+      "desired_deadline": "2026-06-23",
+      "unconfirmed_routing_count": 2
+    }
+  ]
+}
+```
+
+### Frontend
+
+| ファイル | 変更内容 |
+|---|---|
+| `types/order.ts` | `has_unconfirmed_routings?: boolean` を `Order` に追加 |
+| `lib/order-utils.ts` | `StatusFilter` に `"unconfirmed_routing"` を追加、`filterOrder()` で処理 |
+| `hooks/use-orders-page.ts` | `unconfirmedRoutingCount` を追加 |
+| `components/orders/order-notification-cards.tsx` | アンバー系 STEP 3 カードを追加 |
+| `hooks/use-unconfirmed-routing-queue.ts` | 新規フック（TanStack Query） |
+| `app/page.tsx` | 5枚目 KPI カード「工程未確定」を追加（グリッドを `lg:grid-cols-5` に変更） |

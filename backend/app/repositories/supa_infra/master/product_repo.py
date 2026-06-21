@@ -90,3 +90,20 @@ class ProductRepository(BaseRepository[T]):
             return "不明"
         except Exception:
             return "不明"
+
+    def get_unconfirmed_routing_counts(self, product_ids: list[int]) -> dict[int, int]:
+        """製品IDごとの未確定工程数を返す"""
+        from collections import Counter
+
+        if not product_ids:
+            return {}
+        res = (
+            self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+            .select("product_id")
+            .in_("product_id", product_ids)
+            .eq("is_confirmed", False)
+            .execute()
+        )
+        rows = cast(list[dict[str, Any]], res.data or [])
+        counts: Counter[int] = Counter(r["product_id"] for r in rows)
+        return {pid: counts.get(pid, 0) for pid in product_ids}
