@@ -2,15 +2,13 @@ import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
-export type StatusFilter = "" | "draft" | "confirmed" | "incomplete" | "completed" | "canceled" | "unconfirmed_routing"
+export type StatusFilter = "" | "draft" | "confirmed" | "completed" | "canceled"
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "すべて", value: "" },
   { label: "下書き", value: "draft" },
   { label: "確定済", value: "confirmed" },
-  { label: "情報不足", value: "incomplete" },
-  { label: "工程未確定", value: "unconfirmed_routing" },
   { label: "完了", value: "completed" },
   { label: "キャンセル", value: "canceled" },
 ]
@@ -24,8 +22,6 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
 ]
 
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
-  if (statusFilter === "incomplete") return !order.customer_id || !order.desired_deadline
-  if (statusFilter === "unconfirmed_routing") return order.status === "draft" && !!order.has_unconfirmed_routings
   if (statusFilter) return order.status === statusFilter
   return true
 }
