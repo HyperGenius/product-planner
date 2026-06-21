@@ -78,7 +78,7 @@ class TestOrderRouter:
             {"id": 1, "order_number": "ORD-001", "product_id": 1, "quantity": 100},
             {"id": 2, "order_number": "ORD-002", "product_id": 2, "quantity": 200},
         ]
-        mock_repo.get_all.return_value = db_data
+        mock_repo.get_all_with_routing_status.return_value = db_data
 
         response = client.get("/orders")
 
@@ -86,7 +86,7 @@ class TestOrderRouter:
         result = response.json()
         assert result[0]["order_no"] == "ORD-001"
         assert result[1]["order_no"] == "ORD-002"
-        mock_repo.get_all.assert_called_once()
+        mock_repo.get_all_with_routing_status.assert_called_once()
 
     def test_get_order_by_id(self, mock_repo):
         """GET /{id}: 1件取得のテスト"""
@@ -234,6 +234,26 @@ class TestOrderRouter:
         assert response.status_code == 404
         assert response.json()["detail"] == "Order not found"
 
+    def test_simulate_without_id_no_routing(
+        self,
+        headers,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /simulate: 工程が未登録の製品に対するシミュレーションのテスト"""
+        mock_product_repo.get_routings_by_product.return_value = []
+
+        payload = {"product_id": 10009, "quantity": 1}
+        response = client.post("/orders/simulate", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["routing_status"] == "no_routing"
+        assert result["process_schedules"] == []
+        assert result["calculated_deadline"] is None
+        assert result["is_feasible"] is None
+
     def test_confirm_order(
         self,
         headers,
@@ -255,7 +275,7 @@ class TestOrderRouter:
         # Mockの設定
         mock_repo.get_by_id.return_value = order_data
 
-        # 工程データ
+        # 工程データ（is_confirmed=True で確定済み工程として設定）
         routings = [
             {
                 "id": 1,
@@ -263,6 +283,7 @@ class TestOrderRouter:
                 "setup_time_seconds": 1800,
                 "unit_time_seconds": 600,
                 "sequence_order": 1,
+                "is_confirmed": True,
             }
         ]
         mock_product_repo.get_routings_by_product.return_value = routings

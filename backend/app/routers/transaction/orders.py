@@ -189,6 +189,13 @@ def simulate_schedule_without_id(
         return build_simulate_response(
             result, order_data.deadline_date, product_repo, equipment_repo
         )
+    except RoutingUnconfirmedError as e:
+        return {
+            "routing_status": "no_routing" if e.no_routing else "unconfirmed",
+            "calculated_deadline": None,
+            "is_feasible": None,
+            "process_schedules": [],
+        }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 

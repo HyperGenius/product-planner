@@ -92,3 +92,41 @@ Issue #197 / #199 / #200 で実装。
 | `components/orders/order-notification-cards.tsx` | アンバー系 STEP 3 カードを追加 |
 | `hooks/use-unconfirmed-routing-queue.ts` | 新規フック（TanStack Query） |
 | `app/page.tsx` | 5枚目 KPI カード「工程未確定」を追加（グリッドを `lg:grid-cols-5` に変更） |
+
+---
+
+## 工程未登録製品の注文入力フロー改善（Issue #208）
+
+工程が1件も登録されていない製品に対してシミュレーションを実行した際、エラーではなく選択ダイアログを表示する。
+
+### Backend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `app/scheduler_logic.py` | `RoutingUnconfirmedError` に `no_routing: bool = False` フィールドを追加。工程0件時は `ValueError` ではなく `RoutingUnconfirmedError(no_routing=True)` を送出 |
+| `app/routers/transaction/orders.py` | `POST /orders/simulate` で `RoutingUnconfirmedError` を catch し、HTTP 200 + `{"routing_status": "no_routing", ...}` を返す |
+
+### Frontend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `types/order.ts` | `OrderSimulateResponse` に `routing_status?: "no_routing" \| "unconfirmed"` を追加。`calculated_deadline` / `is_feasible` を nullable に変更 |
+| `app/orders/new/page.tsx` | `routing_status === "no_routing"` 検出時に選択ダイアログを表示。Path A: `ProductRoutingsDialog` をインライン表示し工程登録後に自動再シミュレーション。Path B: `createMutation` で draft 保存後 `/orders` にリダイレクト |
+| `components/simulation-result.tsx` | `calculated_deadline` が null の場合に null ガードを追加 |
+| `components/orders/bulk-simulate-summary-dialog.tsx` | `calculated_deadline` が null の場合のフォールバック表示を追加 |
+
+### フロー
+
+```
+シミュレーション実行（工程未登録製品）
+  → routing_status: "no_routing"（HTTP 200）
+  → 選択ダイアログ
+      ├─ A: 工程を登録してから注文する
+      │      → ProductRoutingsDialog を開く
+      │      → ダイアログを閉じると自動再シミュレーション
+      │      → 確定まで通常フローで完結
+      └─ B: 下書きで保存する
+             → draft 注文として保存
+             → /orders にリダイレクト
+             → 専門家キューに自動表示（has_unconfirmed_routings=true）
+```
