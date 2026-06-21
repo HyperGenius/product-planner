@@ -181,7 +181,16 @@ def _select_best_machine(
     """設備グループから最も早く完了できる設備を選定してその候補情報を返す。"""
     machine_ids = _get_equipment_ids_by_group(product_repo, equipment_group_id)
     if not machine_ids:
-        raise ValueError(f"設備グループID {equipment_group_id} に設備が見つかりません")
+        # 設備グループにメンバーが未登録の場合は設備なし扱いでスケジュール
+        actual_start = get_next_available_start_time(
+            current_process_start, total_duration_min, calendar_config
+        )
+        return {
+            "machine_id": None,
+            "start": actual_start,
+            "duration_sec": total_duration_sec,
+            "segments": None,
+        }
 
     candidates = []
     for machine_id in machine_ids:

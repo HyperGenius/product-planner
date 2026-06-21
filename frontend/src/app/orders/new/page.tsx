@@ -90,8 +90,9 @@ export default function NewOrderPage() {
       setSimulationResult(result)
       toast.success("シミュレーションが完了しました")
     } catch (error) {
+      const message = error instanceof Error ? error.message : "シミュレーションに失敗しました"
       console.error("Simulation error:", error)
-      toast.error("シミュレーションに失敗しました")
+      toast.error(message)
     }
   }
 
@@ -116,8 +117,9 @@ export default function NewOrderPage() {
       toast.success("下書き保存しました。工程登録後に専門家キューから確定できます")
       router.push("/orders")
     } catch (error) {
+      const message = error instanceof Error ? error.message : "下書き保存に失敗しました"
       console.error("Draft save error:", error)
-      toast.error("下書き保存に失敗しました")
+      toast.error(message)
     }
   }
 
@@ -154,8 +156,9 @@ export default function NewOrderPage() {
       toast.success("注文を確定し、スケジュールを作成しました")
       router.push("/orders")
     } catch (error) {
+      const message = error instanceof Error ? error.message : "注文の登録または確定に失敗しました"
       console.error("Create/Confirm order error:", error)
-      toast.error("注文の登録または確定に失敗しました")
+      toast.error(message)
     }
   }
 
