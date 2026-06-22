@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { Circle, MoreHorizontal, Plus, Search } from "lucide-react"
+import { AlertTriangle, Circle, MoreHorizontal, Plus, Search } from "lucide-react"
 import { toast } from "sonner"
 import {
   useProducts,
@@ -51,7 +51,7 @@ import { MasterPagination } from "@/components/master-pagination"
 
 const PAGE_SIZE = 20
 
-type StatusFilter = "all" | "active" | "inactive"
+type StatusFilter = "all" | "active" | "inactive" | "no_process"
 type SortKey = "created_at" | "product_code" | "name"
 
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
@@ -102,7 +102,8 @@ export default function ProductsPage() {
         const matchesStatus =
           statusFilter === "all" ||
           (statusFilter === "active" && p.is_active) ||
-          (statusFilter === "inactive" && !p.is_active)
+          (statusFilter === "inactive" && !p.is_active) ||
+          (statusFilter === "no_process" && !p.has_process)
         return matchesSearch && matchesStatus
       })
       .sort((a, b) => {
@@ -268,6 +269,7 @@ export default function ProductsPage() {
             <SelectItem value="all">すべて</SelectItem>
             <SelectItem value="active">有効</SelectItem>
             <SelectItem value="inactive">無効</SelectItem>
+            <SelectItem value="no_process">工程未登録</SelectItem>
           </SelectContent>
         </Select>
         <Select
@@ -297,6 +299,7 @@ export default function ProductsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>品番 / 製品名</TableHead>
+                <TableHead className="w-[110px]">工程</TableHead>
                 <TableHead className="w-[100px]">状態</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
               </TableRow>
@@ -314,6 +317,19 @@ export default function ProductsPage() {
                           <div className="text-sm">{displayName}</div>
                         ) : (
                           <div className="text-sm text-muted-foreground">製品名未設定</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {product.has_process ? (
+                          <div className="flex items-center gap-2">
+                            <Circle className="h-2 w-2 fill-current text-green-500" />
+                            <span className="text-sm">登録済み</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="h-3 w-3 text-orange-500" />
+                            <span className="text-sm text-orange-500">未登録</span>
+                          </div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -363,7 +379,7 @@ export default function ProductsPage() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center py-10">
+                  <TableCell colSpan={4} className="text-center py-10">
                     {searchQuery || statusFilter !== "all"
                       ? "条件に一致する製品がありません"
                       : "製品がありません"}
