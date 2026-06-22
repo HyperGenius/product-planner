@@ -7,7 +7,7 @@
             "source.organizeImports": "explicit"
         }
     },
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
     "ruff.configuration": "backend/pyproject.toml",
     "files.exclude": {
         "**/.git": true,
@@ -24,7 +24,7 @@
     "cSpell.customDictionaries": {
         "pp-words": {
             "name": "pp-words",
-            "path": "${workspaceRoot}/.vscode/pp-words.txt",
+            "path": "${workspaceFolder}/.vscode/pp-words.txt",
             "description": "ProductPlannerプロジェクトでよく使われる単語を含むカスタム辞書",
             "addWords": true
         }

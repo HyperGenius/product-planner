@@ -8,10 +8,8 @@ interface OrderNotificationCardsProps {
   incompleteCount: number
   noCustomerCount: number
   noDeadlineCount: number
-  unconfirmedRoutingCount: number
   onDraftClick: () => void
   onIncompleteClick: () => void
-  onUnconfirmedRoutingClick: () => void
 }
 
 export function OrderNotificationCards({
@@ -19,12 +17,10 @@ export function OrderNotificationCards({
   incompleteCount,
   noCustomerCount,
   noDeadlineCount,
-  unconfirmedRoutingCount,
   onDraftClick,
   onIncompleteClick,
-  onUnconfirmedRoutingClick,
 }: OrderNotificationCardsProps) {
-  if (draftCount === 0 && incompleteCount === 0 && unconfirmedRoutingCount === 0) return null
+  if (draftCount === 0 && incompleteCount === 0) return null
 
   return (
     <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -59,25 +55,6 @@ export function OrderNotificationCards({
               onClick={onDraftClick}
             >
               下書きを確定する →
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-      {unconfirmedRoutingCount > 0 && (
-        <Card className="border-amber-400 bg-amber-50">
-          <CardContent className="pt-6">
-            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">STEP 3</p>
-            <p className="text-2xl font-bold text-amber-900">{unconfirmedRoutingCount}件 工程未確定</p>
-            <p className="text-sm text-amber-700 mt-1">
-              工程が未確定のためスケジュール確定できません
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              className="mt-3 border-amber-400 text-amber-800 hover:bg-amber-100"
-              onClick={onUnconfirmedRoutingClick}
-            >
-              工程未確定の注文を確認する →
             </Button>
           </CardContent>
         </Card>
