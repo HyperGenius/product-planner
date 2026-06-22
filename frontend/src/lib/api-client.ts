@@ -15,6 +15,15 @@ export class ApiError extends Error {
         this.status = status
         this.data = data
     }
+
+    // FastAPI は {"detail": {"error": "..."}} の形で返すため detail.error を参照する
+    get errorCode(): string | undefined {
+        const detail = this.data.detail
+        if (detail && typeof detail === 'object' && 'error' in detail) {
+            return (detail as Record<string, unknown>).error as string
+        }
+        return undefined
+    }
 }
 
 /**

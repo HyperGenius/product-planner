@@ -57,7 +57,7 @@ export default function OrderDetailPage() {
       setSimulationResult(result)
       toast.success("シミュレーションが完了しました")
     } catch (error) {
-      if (error instanceof ApiError && error.status === 422 && error.data.error === "no_routing") {
+      if (error instanceof ApiError && error.status === 422 && error.errorCode === "no_routing") {
         toast.error("工程が設定されていないため、シミュレーションを実行できません。", {
           description: "製品マスタから工程を設定してください。",
           action: {
