@@ -32,6 +32,7 @@ import {
   getStatusBadgeClass,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
+import { ApiError } from "@/lib/api-client"
 
 export default function OrderDetailPage() {
   const params = useParams()
@@ -55,8 +56,18 @@ export default function OrderDetailPage() {
       const result = await simulateMutation.mutateAsync(orderId)
       setSimulationResult(result)
       toast.success("シミュレーションが完了しました")
-    } catch {
-      toast.error("シミュレーションに失敗しました")
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 422 && error.errorCode === "no_routing") {
+        toast.error("工程が設定されていないため、シミュレーションを実行できません。", {
+          description: "製品マスタから工程を設定してください。",
+          action: {
+            label: "工程を設定する",
+            onClick: () => router.push("/master/products"),
+          },
+        })
+      } else {
+        toast.error("シミュレーションに失敗しました")
+      }
     }
   }
 

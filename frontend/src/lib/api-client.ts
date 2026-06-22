@@ -5,6 +5,27 @@ type FetchOptions = RequestInit & {
     headers?: Record<string, string>
 }
 
+export class ApiError extends Error {
+    status: number
+    data: Record<string, unknown>
+
+    constructor(status: number, data: Record<string, unknown>) {
+        super(typeof data.detail === 'string' ? data.detail : 'API Request Failed')
+        this.name = 'ApiError'
+        this.status = status
+        this.data = data
+    }
+
+    // FastAPI は {"detail": {"error": "..."}} の形で返すため detail.error を参照する
+    get errorCode(): string | undefined {
+        const detail = this.data.detail
+        if (detail && typeof detail === 'object' && 'error' in detail) {
+            return (detail as Record<string, unknown>).error as string
+        }
+        return undefined
+    }
+}
+
 /**
  * カスタムAPIクライアント
  * AuthorizationヘッダーにJWTトークンを付与し、テナントIDをヘッダー(x-tenant-id)に付与する
@@ -48,7 +69,7 @@ export async function apiClient<T>(endpoint: string, options: FetchOptions = {})
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || 'API Request Failed')
+        throw new ApiError(response.status, errorData)
     }
 
     return response.json()

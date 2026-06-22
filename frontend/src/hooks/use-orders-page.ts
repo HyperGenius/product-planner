@@ -20,6 +20,7 @@ import {
   type SortKey,
 } from "@/lib/order-utils"
 import type { Order, OrderSimulateResponse, BulkSimulateResult } from "@/types/order"
+import { ApiError } from "@/lib/api-client"
 
 const PAGE_SIZE = 20
 
@@ -136,9 +137,18 @@ export function useOrdersPage() {
       setExpandedOrderId(order.id)
       setExpandedSimResult(result)
     } catch (error) {
-      console.error("Simulation error:", error)
       setSimulationErrorOrderId(order.id)
-      toast.error("シミュレーションに失敗しました")
+      if (error instanceof ApiError && error.status === 422 && error.errorCode === "no_routing") {
+        toast.error("工程が設定されていないため、シミュレーションを実行できません。", {
+          description: "製品マスタから工程を設定してください。",
+          action: {
+            label: "工程を設定する",
+            onClick: () => router.push("/master/products"),
+          },
+        })
+      } else {
+        toast.error("シミュレーションに失敗しました")
+      }
     } finally {
       setSimulatingOrderId(null)
     }
