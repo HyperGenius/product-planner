@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Check, ChevronsUpDown } from "lucide-react"
+import { AlertTriangle, Check, ChevronsUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -98,7 +98,13 @@ export function ProductSelector({
                         value === product.id.toString() ? "opacity-100" : "opacity-0"
                       )}
                     />
-                    {[product.code, product.name].filter(Boolean).join(" - ")}
+                    {!product.has_process && (
+                      <AlertTriangle className="mr-1 h-3 w-3 shrink-0 text-orange-500" />
+                    )}
+                    <span className={!product.has_process ? "text-orange-600" : undefined}>
+                      {[product.code, product.name].filter(Boolean).join(" - ")}
+                      {!product.has_process && "（工程未登録）"}
+                    </span>
                   </CommandItem>
                 ))}
               </CommandGroup>

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { AlertTriangle, BookOpen, Calculator, Check, Save } from "lucide-react"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
@@ -251,6 +252,18 @@ export default function NewOrderPage() {
                 value={productId}
                 onValueChange={setProductId}
               />
+              {selectedProduct?.has_process === false && (
+                <div className="flex items-start gap-2 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-700">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>
+                    この製品は工程が登録されていないため、シミュレーションを実行できません。
+                    <Link href="/master/products" className="ml-1 underline underline-offset-2 hover:text-orange-900">
+                      マスタデータ &gt; 製品マスタ
+                    </Link>
+                    から工程を登録してください。
+                  </p>
+                </div>
+              )}
 
               {/* 顧客選択 */}
               <div>
@@ -300,7 +313,7 @@ export default function NewOrderPage() {
           <div className="flex gap-3">
             <Button
               onClick={handleSimulate}
-              disabled={simulateMutation.isPending}
+              disabled={simulateMutation.isPending || selectedProduct?.has_process === false}
               className="flex-1"
             >
               <Calculator className="mr-2 h-4 w-4" />
