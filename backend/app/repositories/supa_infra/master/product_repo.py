@@ -10,6 +10,21 @@ class ProductRepository(BaseRepository[T]):
     def __init__(self, client):
         super().__init__(client, SupabaseTableName.PRODUCTS.value)
 
+    def get_all(self) -> list[T]:
+        """製品を全件取得。process_routings の有無を has_process フラグとして付与する。"""
+        res = (
+            self.client.table(SupabaseTableName.PRODUCTS.value)
+            .select(f"*, {SupabaseTableName.PROCESS_ROUTINGS.value}(id)")
+            .execute()
+        )
+        result: list[dict[str, Any]] = []
+        for item in res.data or []:
+            row = cast(dict[str, Any], item)
+            routings = row.pop(SupabaseTableName.PROCESS_ROUTINGS.value, None) or []
+            row["has_process"] = len(routings) > 0
+            result.append(row)
+        return cast(list[T], result)
+
     def get_routings_by_product(self, product_id: int) -> list[T]:
         """製品IDに紐づく工程順序を取得"""
         res = (

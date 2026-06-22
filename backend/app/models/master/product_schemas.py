@@ -25,6 +25,9 @@ class Product(ProductBase):
     """読み取り用製品のスキーマ"""
 
     id: int
+    has_process: bool = Field(
+        default=False, description="工程が1件以上登録されているか"
+    )
 
 
 class ProductUpdateSchema(BaseSchema):
