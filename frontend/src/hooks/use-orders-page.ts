@@ -83,11 +83,6 @@ export function useOrdersPage() {
     () => orders?.filter((o) => !o.desired_deadline).length ?? 0,
     [orders]
   )
-  const unconfirmedRoutingCount = useMemo(
-    () => orders?.filter((o) => o.status === "draft" && o.has_unconfirmed_routings).length ?? 0,
-    [orders]
-  )
-
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
@@ -307,7 +302,6 @@ export function useOrdersPage() {
     incompleteCount,
     noCustomerCount,
     noDeadlineCount,
-    unconfirmedRoutingCount,
     filteredOrders,
     pagedOrders,
     // Dialog state
