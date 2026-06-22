@@ -233,6 +233,13 @@ def simulate_schedule(
         return build_simulate_response(
             result, order.get("deadline_date"), product_repo, equipment_repo
         )
+    except RoutingUnconfirmedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "no_routing" if e.no_routing else "routing_unconfirmed",
+            },
+        ) from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 

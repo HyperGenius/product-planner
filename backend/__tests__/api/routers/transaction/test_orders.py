@@ -234,6 +234,31 @@ class TestOrderRouter:
         assert response.status_code == 404
         assert response.json()["detail"] == "Order not found"
 
+    def test_simulate_schedule_no_routing(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /{order_id}/simulate: 工程が未登録の場合に422を返すテスト"""
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+        }
+        mock_repo.get_by_id.return_value = order_data
+        mock_product_repo.get_routings_by_product.return_value = []
+
+        response = client.post(f"/orders/{order_id}/simulate", headers=headers)
+
+        assert response.status_code == 422
+        result = response.json()
+        assert result["detail"]["error"] == "no_routing"
+
     def test_simulate_without_id_no_routing(
         self,
         headers,
