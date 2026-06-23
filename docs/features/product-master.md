@@ -19,10 +19,11 @@
 ```typescript
 interface Product {
   id: number
-  name: string       // 品番（実運用データでは品番がここに入る）
-  code: string       // 製品名（任意。旧データでは製品コードが入っている）
-  type: string       // 種別（旧フィールド。新規データでは空）
+  name: string        // 品番（実運用データでは品番がここに入る）
+  code: string        // 製品名（任意。旧データでは製品コードが入っている）
+  type: string        // 種別（旧フィールド。新規データでは空）
   is_active: boolean
+  has_process: boolean  // 工程が1件以上登録されているか（#223 追加）
   tenant_id: string
   created_at: string
 }
@@ -44,7 +45,7 @@ const displayName = product.code ? product.name : null  // 製品名として表
 
 ### 一覧表示
 
-- 3列構成：品番/製品名 / 状態 / 操作メニュー
+- 4列構成：品番/製品名 / 工程登録状況 / 状態 / 操作メニュー
 - 1ページ `PAGE_SIZE = 20` 件。件数が超えた場合のみページネーション表示
 - コンテンツ幅上限 `max-w-[860px]`（`master/layout.tsx` で全マスタ共通適用）
 
@@ -110,7 +111,16 @@ const displayName = product.code ? product.name : null  // 製品名として表
 - 工程が 0 件の製品も同様にガント登録不可
 - 確定操作時は `confirmed_by`（ユーザー ID）と `confirmed_at`（タイムスタンプ）が自動記録される
 
-Phase 3（Issue #199）にて、admin ロール限定の確定 UI をダイアログに追加予定。
+admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue #199）。
+
+### `has_process` フラグ（#223 追加）
+
+`ProductRepository.get_all()` が `process_routings` リレーションの件数を見て `has_process: bool` を計算して返す。
+工程が 1 件以上登録されていれば `true`。
+
+製品一覧では「工程登録状況」列として表示する。`has_process=false` の製品は、新規注文フォームの製品プルダウンで警告アイコンを表示する（#224）。
+
+---
 
 ## 変更履歴
 
@@ -119,3 +129,5 @@ Phase 3（Issue #199）にて、admin ロール限定の確定 UI をダイア�
 | #105 | 製品マスタ画面の再設計（Issue #104）。テーブル列統合・ケバブメニュー・検索フィルター追加 |
 | #106 | 並べ替え機能・状態変更モーダル化・ページネーション・幅制限追加（Issue #106） |
 | #204 | 工程確定フラグ（`is_confirmed` / `confirmed_by` / `confirmed_at`）をDBに追加（Issue #197） |
+| #226 | 製品マスタ画面に工程登録状況（`has_process`）を表示（Issue #223） |
+| #227 | 新規注文フォームの製品プルダウンに工程未登録警告を表示（Issue #224） |

@@ -155,35 +155,84 @@ interface OrderCreate {
 
 ---
 
-## 将来の拡張: メール解析パイプライン
+## メール解析パイプライン（実装済み）
 
-本機能はメール解析パイプラインとの接続を想定した土台。以下のフローで注文を自動起票する。
+`backend/app/services/` 配下に以下のサービスが実装済み。Vercel Cron または Azure Functions タイマートリガーから `poll_unread_emails()` を呼び出すことで動作する。
 
-**現在のアーキテクチャ**
+### 処理フロー
+
 ```
-[Vercel Cron] → [バックエンド API（Render）: Gmail ポーリング]
-              → Gmail API で未読メール取得
-              → LLM でフィールド抽出 (製品コード, 数量, 希望納期)
-              → POST /orders/ {source_type: "email", source_raw: "<メール本文>"}
-              → [人間によるレビュー・確定]
+[Cron/タイマー]
+  → poll_unread_emails() [gmail_service.py]
+      │
+      ├─ 1. Gmail ラベル `pp-pending/{テナント名}` の未読メール一覧取得
+      │      → ラベルを `pp-processing/{テナント名}` に移動（二重処理防止）
+      │
+      ├─ 2. メール本文取得（base64 デコード、マルチパート MIME 対応）
+      │
+      ├─ 3. テナント解決（`gmail_label_tenants` テーブルからテナント ID 取得）
+      │
+      ├─ 4. Claude API によるフィールド抽出 [email_extraction_service.py]
+      │      ツール: extract_order_fields
+      │      出力:   product_name, quantity, deadline_date, order_number (全て nullable)
+      │
+      ├─ 5. 製品マッチング [product_matching_service.py]
+      │      pg_trgm RPC `match_products_by_name` で類似度検索
+      │      → 単一一致: product_id を確定
+      │      → 複数候補: candidates リストを order_row に保存
+      │
+      ├─ 6. 顧客マッチング [customer_matching_service.py]
+      │      送信者メールアドレスで検索 → 未登録の場合は draft 顧客を自動作成
+      │
+      ├─ 7. draft 注文を Supabase に INSERT
+      │      (source_type="email", status="draft", source_raw=メール本文, ...)
+      │
+      └─ 8. ラベルを `pp-done/{テナント名}` に移動
+             （失敗時は `pp-error/{テナント名}` に移動）
 ```
 
-**将来のアーキテクチャ（スケールアップ時）**
-```
-[Cloud Scheduler] → [Cloud Run: Gmail ポーリング]
-              → Gmail API で未読メール取得
-              → LLM でフィールド抽出
-              → POST /orders/ {source_type: "email", source_raw: "<メール本文>"}
-              → [人間によるレビュー・確定]
-```
+### Gmail ラベル規約
 
-`source_raw` を保存することで、解析ミスが発生した場合に原文を参照して修正できる。
+| ラベル | 意味 |
+|---|---|
+| `pp-pending/{テナント名}` | 処理待ち（ポーリング対象） |
+| `pp-processing/{テナント名}` | 処理中（二重処理防止用） |
+| `pp-done/{テナント名}` | 処理成功 |
+| `pp-error/{テナント名}` | 処理失敗 |
+
+プレフィックスは環境変数で変更可能（デフォルト: `pp-pending`, `pp-processing`, `pp-done`, `pp-error`）。
+
+### 環境変数
+
+| 変数名 | デフォルト | 説明 |
+|---|---|---|
+| `GMAIL_CLIENT_ID` | — | Gmail OAuth クライアント ID（必須） |
+| `GMAIL_CLIENT_SECRET` | — | Gmail OAuth クライアントシークレット（必須） |
+| `GMAIL_REFRESH_TOKEN` | — | Gmail OAuth リフレッシュトークン（必須） |
+| `GMAIL_LABEL_PREFIX_PENDING` | `pp-pending` | 処理待ちラベルのプレフィックス |
+| `GMAIL_LABEL_PREFIX_PROCESSING` | `pp-processing` | 処理中ラベルのプレフィックス |
+| `GMAIL_LABEL_PREFIX_DONE` | `pp-done` | 完了ラベルのプレフィックス |
+| `GMAIL_LABEL_PREFIX_ERROR` | `pp-error` | エラーラベルのプレフィックス |
+| `EMAIL_EXTRACTION_MODEL` | `claude-haiku-4-5-20251001` | フィールド抽出に使用する Claude モデル |
+| `PRODUCT_MATCH_THRESHOLD` | `0.3` | pg_trgm 類似度の下限値 |
+| `PRODUCT_MATCH_TOP_N` | `5` | 候補製品の最大表示件数 |
+| `ANTHROPIC_API_KEY` | — | Claude API キー（必須） |
+
+### 主要ファイル
+
+| ファイル | 役割 |
+|---|---|
+| `backend/app/services/gmail_service.py` | Gmail ポーリングメインロジック |
+| `backend/app/services/email_extraction_service.py` | Claude API によるフィールド抽出 |
+| `backend/app/services/product_matching_service.py` | pg_trgm 製品名マッチング |
+| `backend/app/services/customer_matching_service.py` | 送信者メールアドレスによる顧客解決・自動作成 |
 
 ### 注意事項
 
-- メール解析の精度向上まで、`source_type === 'email'` の注文は `draft` のまま人間がレビューして確定する運用を推奨
+- `source_type === 'email'` の注文は `draft` のまま起票される。人間がレビューして確定する運用を推奨
 - 注文番号は解析できた場合のみ設定し、不明な場合は NULL のまま起票する
-- `source_raw` にはメール本文全体を保存し、個人情報の取り扱いに注意すること
+- `source_raw` にはメール本文全体を保存するため、個人情報の取り扱いに注意すること
+- 製品マッチングで候補が複数ある場合、`product_candidates` に候補リストが保存され、`product_id` は NULL になる
 
 ---
 
@@ -198,5 +247,7 @@ interface OrderCreate {
 | Frontend: `Order` 型更新 | ✅ #155 |
 | Frontend: 注文番号フィールド任意化 | ✅ #155 |
 | Frontend: メール本文折りたたみUI | ✅ #155 |
-| Vercel Cron: Gmail ポーリングジョブ | ❌ 未実装 (#165) |
-| LLM によるメール本文解析 | ❌ 未実装 |
+| Gmail ポーリング (`gmail_service.py`) | ✅ 実装済み |
+| Claude API によるメール本文解析 (`email_extraction_service.py`) | ✅ 実装済み |
+| pg_trgm 製品名マッチング (`product_matching_service.py`) | ✅ 実装済み |
+| 顧客自動解決・作成 (`customer_matching_service.py`) | ✅ 実装済み |
