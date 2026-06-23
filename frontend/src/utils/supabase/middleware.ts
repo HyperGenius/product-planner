@@ -41,6 +41,13 @@ export async function updateSession(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser()
 
+    // ログイン済みで /login へアクセスしたらトップへリダイレクト
+    if (user && request.nextUrl.pathname.startsWith('/login')) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/'
+        return NextResponse.redirect(url)
+    }
+
     // 未ログイン状態で、ログイン画面以外(/login, /authなど)にアクセスしようとしたら
     // ログイン画面へリダイレクト
     if (
