@@ -2,7 +2,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import { fetchMyTenantId } from '@/lib/auth-actions'
 import { Button } from '@/components/ui/button'
@@ -14,7 +13,6 @@ const DEFAULT_USER = process.env.NODE_ENV === 'development' ? process.env.NEXT_P
 const DEFAULT_PASSWORD = process.env.NODE_ENV === 'development' ? process.env.NEXT_PUBLIC_TEST_PASSWORD : ''
 
 export default function LoginPage() {
-    const router = useRouter()
     const [email, setEmail] = useState(DEFAULT_USER || '')
     const [password, setPassword] = useState(DEFAULT_PASSWORD || '')
     const [loading, setLoading] = useState(false)
@@ -50,9 +48,8 @@ export default function LoginPage() {
                 description: 'ダッシュボードへ移動します',
             })
 
-            // 4. リダイレクト (ルーターキャッシュをクリアして遷移)
-            router.refresh()
-            router.push('/')
+            // 4. リダイレクト (フルページリロードでサーバーが新セッションを確実に認識)
+            window.location.href = '/'
 
         } catch (error: any) {
             console.error(error)
