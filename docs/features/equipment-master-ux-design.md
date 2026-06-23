@@ -82,8 +82,43 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 
 ---
 
+## 設備グループへのアサイン機能（実装済み）
+
+`frontend/src/components/equipment-group-assignment-dialog.tsx` で、設備一覧から各設備をグループに追加・削除するダイアログを提供している。
+
+- `useEquipmentAssignment` フック（`hooks/use-equipment-assignment.ts`）が設備一覧・グループメンバー情報・追加/削除ミューテーションをまとめて管理
+- `GET /equipment-groups/members` で全グループのメンバーを一括取得（N+1なし）
+- グループへの追加: `POST /equipment-groups/{groupId}/members`
+- グループからの削除: `DELETE /equipment-groups/{groupId}/members/{equipmentId}`
+
+---
+
+## スケジューリングパラメータの設備/グループ別設定
+
+各設備・設備グループに個別のスケジューリングパラメータを設定できる（`equipments` / `equipment_groups` テーブルのカラム）。
+
+| パラメータ | 説明 |
+|---|---|
+| `guard_time_minutes` | スケジュール間の最小バッファ（段取り替え時間） |
+| `min_slot_minutes` | ギャップを利用可能と見なす最低時間 |
+| `max_fragments` | 1 工程あたりの最大セグメント分割数 |
+
+### パラメータ解決の優先順位
+
+実装ファイル: `backend/app/services/scheduling_settings_service.py` — `get_effective_params()`
+
+```
+設備レベル > 設備グループレベル > グローバル（テナント全体）
+```
+
+各パラメータは**独立して**解決される。例えば `guard_time_minutes` は設備に設定があれば設備値を使い、`max_fragments` はグループ値を使う、という組み合わせが可能。`None`（未設定）の場合は次のレベルにフォールバックする。
+
+---
+
 ## 参考
 
 - [master-screen-design.md](../features/master-screen-design.md) — マスタ画面の共通設計ガイド
 - DB定義: `supabase/migrations/20251219051639_init_schema_v2.sql`
 - 工程ルーティングUI: `frontend/src/components/product-routings-dialog.tsx`
+- 設備グループアサインUI: `frontend/src/components/equipment-group-assignment-dialog.tsx`
+- パラメータ解決: `backend/app/services/scheduling_settings_service.py`

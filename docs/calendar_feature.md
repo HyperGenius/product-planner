@@ -110,46 +110,58 @@ segments = split_work_across_days(
 )
 ```
 
-## API エンドポイント（実装例）
+## API エンドポイント
 
-休日管理用のAPIエンドポイントを追加する場合の例：
+実装ファイル: `backend/app/routers/master/calendars.py`
 
-```python
-from fastapi import APIRouter, Depends
-from app.dependencies import get_calendar_repo, get_current_tenant_id
-from app.models.common.work_calendar import WorkCalendarCreate
+### GET `/calendars?year={year}&month={month}`
 
-calendar_router = APIRouter(prefix="/calendars", tags=["Calendar"])
+指定月のカレンダー情報（`work_calendars` レコード）を返す。
 
-@calendar_router.post("/holidays")
-def create_holiday(
-    holiday_data: WorkCalendarCreate,
-    tenant_id: str = Depends(get_current_tenant_id),
-    repo: CalendarRepository = Depends(get_calendar_repo)
-):
-    """休日を登録"""
-    result = repo.create_or_update_holiday(
-        target_date=holiday_data.date,
-        is_holiday=holiday_data.is_holiday,
-        note=holiday_data.note
-    )
-    return result
-
-@calendar_router.get("/holidays/{year}/{month}")
-def get_monthly_holidays(
-    year: int,
-    month: int,
-    repo: CalendarRepository = Depends(get_calendar_repo)
-):
-    """月ごとの休日情報を取得"""
-    start_date = date(year, month, 1)
-    if month == 12:
-        end_date = date(year + 1, 1, 1)
-    else:
-        end_date = date(year, month + 1, 1)
-    
-    return repo.get_holidays_in_range(start_date, end_date)
 ```
+GET /calendars?year=2026&month=1
+→ [{date, is_holiday, note, ...}, ...]
+```
+
+### POST `/calendars`
+
+1件のカレンダー情報を作成または更新（upsert）。
+
+```json
+POST /calendars
+{
+  "date": "2026-01-01",
+  "is_holiday": true,
+  "note": "元日"
+}
+```
+
+### POST `/calendars/import-national-holidays?year={year}`
+
+内閣府の祝日 CSV（`https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv`、Shift-JIS 形式）を取得し、指定年の国民の祝日を一括 upsert する。
+
+```
+POST /calendars/import-national-holidays?year=2026
+→ {"imported_count": 16, "year": 2026}
+```
+
+エラー時は HTTP 502（外部 CSV 取得失敗）を返す。
+
+### POST `/calendars/batch`
+
+複数日のカレンダー情報を一括更新。
+
+```json
+POST /calendars/batch
+{
+  "dates": ["2026-08-10", "2026-08-11", "2026-08-12"],
+  "is_holiday": true,
+  "note": "夏季休業"
+}
+→ {"updated_count": 3, "total_count": 3}
+```
+
+個別の日付で失敗しても処理は継続され、`updated_count` に成功件数のみを反映する。
 
 ## テストのベストプラクティス
 
