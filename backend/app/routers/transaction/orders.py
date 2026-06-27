@@ -43,6 +43,8 @@ def _map_order_response(order: dict) -> dict:
         mapped["order_no"] = mapped.pop("order_number")
     if "deadline_date" in mapped:
         mapped["desired_deadline"] = mapped.pop("deadline_date")
+    if "order_date" in mapped:
+        mapped["created_at"] = mapped.pop("order_date")
     return mapped
 
 

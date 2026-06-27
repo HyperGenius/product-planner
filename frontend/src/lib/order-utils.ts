@@ -31,9 +31,9 @@ export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
     if (!a.created_at && !b.created_at) return 0
     if (!a.created_at) return 1
     if (!b.created_at) return -1
-    return sortKey === "created_at_desc"
-      ? b.created_at.localeCompare(a.created_at)
-      : a.created_at.localeCompare(b.created_at)
+    const timeA = new Date(a.created_at).getTime()
+    const timeB = new Date(b.created_at).getTime()
+    return sortKey === "created_at_desc" ? timeB - timeA : timeA - timeB
   }
   if (!a.desired_deadline && !b.desired_deadline) return 0
   if (!a.desired_deadline) return 1
