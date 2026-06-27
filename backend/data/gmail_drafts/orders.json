@@ -1,0 +1,81 @@
+[
+  {
+    "_comment": "パターンA-1: 単一製品マッチ済み（product_idは実行時にproduct_codeから解決）",
+    "order_number": "GMAIL-SEED-A001",
+    "product_code": "PRD-A001",
+    "quantity": 200,
+    "deadline_date": "2026-08-15",
+    "status": "draft",
+    "source_type": "email",
+    "extracted_product_name": "スタンダード ウィジェット",
+    "product_candidates": null,
+    "source_raw": "From: suzuki.taro@example-mfg.co.jp\nTo: orders@yourcompany.co.jp\nSubject: 受注依頼 PO-2026-A001\n\nいつもお世話になっております。\n鈴木製作所の鈴木太郎でございます。\n\n下記の通り受注をお願いいたします。\n\n品目：スタンダード ウィジェット\n数量：200個\n納期：2026年8月15日\n発注番号：PO-2026-A001\n\nご確認のほどよろしくお願いいたします。\n\n鈴木製作所\n鈴木 太郎\nTEL: 03-1234-5678"
+  },
+  {
+    "_comment": "パターンA-2: 単一製品マッチ済み",
+    "order_number": "GMAIL-SEED-A002",
+    "product_code": "PRD-C003",
+    "quantity": 500,
+    "deadline_date": "2026-07-31",
+    "status": "draft",
+    "source_type": "email",
+    "extracted_product_name": "エコノミー パーツ",
+    "product_candidates": null,
+    "source_raw": "From: yamada.hanako@takeda-ind.co.jp\nTo: orders@yourcompany.co.jp\nSubject: 【発注】エコノミーパーツ 500個\n\n貴社ますますご隆盛のこととお喜び申し上げます。\n武田工業の山田花子と申します。\n\n以下の商品を発注させていただきたく存じます。\n\n▼ 発注内容\n商品名：エコノミー パーツ\n発注数：500個\n希望納期：令和8年7月31日\n社内整理番号：TKD-2026-0731\n\nご対応のほどよろしくお願いいたします。\n\n武田工業株式会社\n購買部 山田 花子\nEmail: yamada.hanako@takeda-ind.co.jp"
+  },
+  {
+    "_comment": "パターンB-1: 複数候補あり（product_idはnull、candidatesはproduct_codeで指定し実行時にIDへ変換）",
+    "order_number": "GMAIL-SEED-B001",
+    "product_code": null,
+    "quantity": 150,
+    "deadline_date": "2026-09-01",
+    "status": "draft",
+    "source_type": "email",
+    "extracted_product_name": "プレミアム ガジェット モデルX",
+    "product_candidates": [
+      {"product_code": "PRD-B002", "name": "プレミアム・ガジェット", "score": 0.78},
+      {"product_code": "PRD-D004", "name": "カスタム・モジュール", "score": 0.45},
+      {"product_code": "PRD-A001", "name": "スタンダード・ウィジェット", "score": 0.32}
+    ],
+    "source_raw": "From: kobayashi@maruichi-seiki.jp\nTo: orders@yourcompany.co.jp\nSubject: Re: お見積もりの件 → 正式発注\n\nお世話になっております。丸一精機の小林です。\n先日のお見積もり内容で正式発注いたします。\n\n品名：プレミアム ガジェット モデルX\n数量：150\n納期：2026/09/01\n\n請求書は月末締めでお願いします。\n\n---\n丸一精機株式会社\n小林 誠\nkobayashi@maruichi-seiki.jp\n☎ 06-9876-5432"
+  },
+  {
+    "_comment": "パターンB-2: 複数候補あり",
+    "order_number": "GMAIL-SEED-B002",
+    "product_code": null,
+    "quantity": 80,
+    "deadline_date": "2026-08-20",
+    "status": "draft",
+    "source_type": "email",
+    "extracted_product_name": "ヘビーデューティー ユニット 大型",
+    "product_candidates": [
+      {"product_code": "PRD-E005", "name": "ヘビーデューティー・ユニット", "score": 0.85},
+      {"product_code": "PRD-D004", "name": "カスタム・モジュール", "score": 0.38}
+    ],
+    "source_raw": "From: nakamura.j@k-techno.co.jp\nTo: orders@yourcompany.co.jp\nSubject: 発注書送付について\n\n関係者各位\n\nKテクノの中村と申します。\n添付の発注書に基づきご手配をお願いします。\n\n品目：ヘビーデューティー ユニット 大型\n数量：80台\n納期：2026年8月20日\n発注番号：KT-2026-0820-001\n\n納品書は弊社倉庫（神奈川県）宛にご送付ください。\n\nKテクノ株式会社\n購買担当 中村 純一\nTEL: 045-123-4567"
+  },
+  {
+    "_comment": "パターンC-1: マッチなし（product_idもcandidatesもnull）",
+    "order_number": "GMAIL-SEED-C001",
+    "product_code": null,
+    "quantity": 30,
+    "deadline_date": "2026-10-01",
+    "status": "draft",
+    "source_type": "email",
+    "extracted_product_name": "超耐熱セラミックコーティング治具 φ50mm",
+    "product_candidates": null,
+    "source_raw": "From: ito.s@sunrise-mfg.com\nTo: orders@yourcompany.co.jp\nSubject: 新規部品の発注打診\n\nお世話になります。サンライズ製造の伊藤です。\n\n今回初めてのご依頼となります。\n以下の特注品について対応可否と納期をご確認いただけますでしょうか。\n\n品名：超耐熱セラミックコーティング治具 φ50mm\n数量：30個\n希望納期：2026年10月1日\n\n仕様書を別途メールにてお送りします。\nご検討よろしくお願いいたします。\n\nサンライズ製造株式会社\n技術部 伊藤 翔\nito.s@sunrise-mfg.com"
+  },
+  {
+    "_comment": "パターンC-2: マッチなし・数量も未抽出（量が不明な場合）",
+    "order_number": "GMAIL-SEED-C002",
+    "product_code": null,
+    "quantity": null,
+    "deadline_date": null,
+    "status": "draft",
+    "source_type": "email",
+    "extracted_product_name": "産業用ロボットアーム交換部品 型番TBD",
+    "product_candidates": null,
+    "source_raw": "From: logistics@fujisawa-corp.co.jp\nTo: orders@yourcompany.co.jp\nSubject: 部品補充依頼\n\nお世話になっております。\n藤沢コーポレーションのロジスティクス部です。\n\n緊急の補充依頼です。詳細は担当者から追って連絡いたします。\n品名は産業用ロボットアーム交換部品（型番は手配中）です。\n\n取り急ぎご連絡まで。\n\n藤沢コーポレーション\n物流管理部\nlogistics@fujisawa-corp.co.jp\nTEL: 0466-XX-XXXX"
+  }
+]
