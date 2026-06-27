@@ -17,11 +17,14 @@ Usage:
 
 Required environment variables (.env):
     SUPABASE_URL
-    SUPABASE_API_KEY
+    SUPABASE_PUBLISHABLE_KEY
     TEST_USER_EMAIL
     TEST_USER_PASS
     TEST_TENANT_ID
-    BACKEND_URL  # 省略時: http://localhost:8081 (docker-compose) / http://localhost:8000 (uvicorn直接)
+    BACKEND_URL  # 省略時: http://localhost:8000 (docker-compose) / http://localhost:8000 (uvicorn直接)
+
+注意: orders.json の product_name はDBに登録されている製品名と完全一致させること。
+      product_code は任意項目のため、名前ベースで解決します。
 """
 
 import argparse
@@ -55,34 +58,34 @@ def build_headers(token: str, tenant_id: str) -> dict:
 
 
 def fetch_product_map(headers: dict, backend_url: str) -> dict[str, int]:
-    """製品コード → product_id のマッピングを取得する."""
-    res = requests.get(f"{backend_url}/products/", headers=headers)
+    """製品名 → product_id のマッピングを取得する."""
+    res = requests.get(f"{backend_url}/products", headers=headers)
     if res.status_code != 200:
         raise Exception(f"Failed to fetch products: {res.status_code} {res.text}")
-    return {p["code"]: int(p["id"]) for p in res.json() if p.get("code")}
+    return {p["name"]: int(p["id"]) for p in res.json() if p.get("name")}
 
 
 def resolve_candidates(
     candidates: list[dict] | None, product_map: dict[str, int]
 ) -> list[dict] | None:
-    """product_candidatesのproduct_codeをproduct_idに変換する."""
+    """product_candidatesのproduct_nameをproduct_idに変換する."""
     if not candidates:
         return None
 
     resolved = []
     for c in candidates:
-        code = c.get("product_code")
-        if code and code in product_map:
+        product_name = c.get("product_name")
+        if product_name and product_name in product_map:
             resolved.append(
                 {
-                    "product_id": product_map[code],
+                    "product_id": product_map[product_name],
                     "name": c["name"],
                     "score": c["score"],
                 }
             )
         else:
             print(
-                f"  ⚠️  Product code not found in candidates: {code}, skipping candidate"
+                f"  ⚠️  Product name not found in candidates: {product_name}, skipping candidate"
             )
     return resolved if resolved else None
 
@@ -95,7 +98,7 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
     email = os.environ.get("TEST_USER_EMAIL", "")
     password = os.environ.get("TEST_USER_PASS", "")
     tenant_id = os.environ.get("TEST_TENANT_ID", "")
-    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8081")
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
     if not all([email, password, tenant_id]):
         raise ValueError(
@@ -114,7 +117,9 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
 
     print("\n📦 Fetching product map...")
     product_map = fetch_product_map(headers, backend_url)
-    print(f"  Found {len(product_map)} products: {list(product_map.keys())}")
+    print(
+        f"  Found {len(product_map)} products: {list(product_map.keys())[:5]}{'...' if len(product_map) > 5 else ''}"
+    )
 
     action = "Would insert" if dry_run else "Inserting"
     print(f"\n📦 {action} draft orders...")
@@ -123,17 +128,17 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
 
     for order in orders_data:
         order_number = order["order_number"]
-        product_code = order.get("product_code")
+        product_name = order.get("product_name")
 
         product_id: int | None = None
-        if product_code:
-            if product_code not in product_map:
+        if product_name:
+            if product_name not in product_map:
                 print(
-                    f"  ⚠️  Product code not found: {product_code}, skipping {order_number}"
+                    f"  ⚠️  Product name not found: {product_name}, skipping {order_number}"
                 )
                 skipped += 1
                 continue
-            product_id = product_map[product_code]
+            product_id = product_map[product_name]
 
         candidates = resolve_candidates(order.get("product_candidates"), product_map)
 
@@ -165,7 +170,7 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
             inserted += 1
             continue
 
-        res = requests.post(f"{backend_url}/orders/", headers=headers, json=payload)
+        res = requests.post(f"{backend_url}/orders", headers=headers, json=payload)
 
         if res.status_code == 400 and "注文番号は既に使用" in res.text:
             print(f"  - {order_number} — スキップ（既存）")

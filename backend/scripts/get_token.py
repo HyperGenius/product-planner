@@ -10,9 +10,9 @@ load_dotenv()
 
 def get_supabase_client():
     url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_API_KEY")
+    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY")
     if not url or not key:
-        raise ValueError("SUPABASE_URL or SUPABASE_API_KEY is not set")
+        raise ValueError("SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY is not set")
 
     supabase = create_client(url, key)
     return supabase
