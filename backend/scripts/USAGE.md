@@ -1,4 +1,69 @@
-# シナリオデータ投入スクリプト (seed_scenario.py)
+# スクリプト使い方ガイド
+
+---
+
+## seed_gmail_drafts.py — Gmail受注下書きサンプルデータ投入
+
+Gmail連携機能（GMAIL_ORDER_INTAKE）で生成される下書き受注（`source_type='email'`）のサンプルデータをローカル開発環境に投入します。下書き確認UI開発・動作確認用です。
+
+### 投入されるデータ
+
+`backend/data/gmail_drafts/orders.json` に定義された以下の3パターン × 2件、計6件の `draft` 受注が作成されます。
+
+| パターン | `product_id` | `product_candidates` | 説明 |
+|----------|-------------|----------------------|------|
+| A（単一マッチ済み） | 解決済み | null | Claudeが1件に絞り込んだケース |
+| B（複数候補あり） | null | JSON配列あり | 候補が複数あり、ユーザーが選択するケース |
+| C（マッチなし） | null | null | 製品を特定できなかったケース |
+
+### 前提条件
+
+以下の環境変数が `.env` に設定されている必要があります（`seed_scenario.py` と共通）。
+
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `TEST_USER_EMAIL`
+- `TEST_USER_PASS`
+- `TEST_TENANT_ID`
+
+> **注意:** `standard_demo` シナリオ（`seed_scenario.py standard_demo`）を先に実行して製品データが存在していること。製品コードが見つからない場合はその注文はスキップされます。
+
+### 使い方
+
+```bash
+# backend ディレクトリで実行
+python scripts/seed_gmail_drafts.py
+```
+
+### 実行例
+
+```
+============================================================
+🚀 Seeding Gmail draft orders
+============================================================
+✅ Authenticated as admin@example.com
+
+📦 Fetching product map...
+  Found 5 products: ['PRD-A001', 'PRD-B002', 'PRD-C003', 'PRD-D004', 'PRD-E005']
+
+📦 Inserting draft orders...
+  ✓ GMAIL-SEED-A001 — パターンA（単一マッチ）
+  ✓ GMAIL-SEED-A002 — パターンA（単一マッチ）
+  ✓ GMAIL-SEED-B001 — パターンB（複数候補）
+  ✓ GMAIL-SEED-B002 — パターンB（複数候補）
+  ✓ GMAIL-SEED-C001 — パターンC（マッチなし）
+  ✓ GMAIL-SEED-C002 — パターンC（マッチなし）
+
+============================================================
+✅ Done: 6 orders inserted/updated, 0 skipped
+============================================================
+```
+
+冪等性が保証されているため、複数回実行しても重複インサートは発生しません。
+
+---
+
+## seed_scenario.py — シナリオデータ投入
 
 このスクリプトは、指定されたシナリオに基づいてSupabaseデータベースにデモデータを投入するためのツールです。
 順序依存関係を考慮して、設備、製品、工程、注文データを一括で登録します。
