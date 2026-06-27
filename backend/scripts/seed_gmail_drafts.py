@@ -12,7 +12,8 @@ Gmail連携機能（GMAIL_ORDER_INTAKE）で生成される下書き受注のサ
 冪等性: order_number の一意制約を利用してupsertするため、複数回実行しても安全。
 
 Usage:
-    python scripts/seed_gmail_drafts.py
+    python scripts/seed_gmail_drafts.py           # 実際に投入
+    python scripts/seed_gmail_drafts.py --dry-run  # DBに書き込まず内容を確認
 
 Required environment variables (.env):
     SUPABASE_URL
@@ -22,6 +23,7 @@ Required environment variables (.env):
     TEST_TENANT_ID
 """
 
+import argparse
 import json
 import os
 import sys
@@ -98,9 +100,9 @@ def resolve_candidates(
     return resolved if resolved else None
 
 
-def seed_gmail_drafts() -> None:
+def seed_gmail_drafts(dry_run: bool = False) -> None:
     print("\n" + "=" * 60)
-    print("🚀 Seeding Gmail draft orders")
+    print("🚀 Seeding Gmail draft orders" + (" [DRY RUN]" if dry_run else ""))
     print("=" * 60)
 
     client, tenant_id = init_client()
@@ -112,7 +114,8 @@ def seed_gmail_drafts() -> None:
     product_map = fetch_product_map(client, tenant_id)
     print(f"  Found {len(product_map)} products: {list(product_map.keys())}")
 
-    print("\n📦 Inserting draft orders...")
+    action = "Would insert" if dry_run else "Inserting"
+    print(f"\n📦 {action} draft orders...")
     inserted = 0
     skipped = 0
 
@@ -145,27 +148,53 @@ def seed_gmail_drafts() -> None:
             "product_candidates": candidates,
         }
 
-        client.table("orders").upsert(
-            record,
-            on_conflict="tenant_id, order_number",
-        ).execute()
-
         pattern = (
             "A（単一マッチ）"
             if product_id
             else ("B（複数候補）" if candidates else "C（マッチなし）")
         )
-        print(f"  ✓ {order_number} — パターン{pattern}")
+
+        if dry_run:
+            print(f"  [DRY RUN] {order_number} — パターン{pattern}")
+            print(
+                f"    product_id={product_id}, quantity={record['quantity']}, deadline={record['deadline_date']}"
+            )
+            print(f"    extracted_product_name={record['extracted_product_name']!r}")
+            n_candidates = len(candidates) if candidates else 0
+            print(f"    product_candidates={n_candidates}件")
+        else:
+            client.table("orders").upsert(
+                record,
+                on_conflict="tenant_id, order_number",
+            ).execute()
+            print(f"  ✓ {order_number} — パターン{pattern}")
+
         inserted += 1
 
     print(f"\n{'=' * 60}")
-    print(f"✅ Done: {inserted} orders upserted, {skipped} skipped")
+    if dry_run:
+        print(
+            f"✅ Dry run: {inserted} orders would be inserted/updated, {skipped} skipped"
+        )
+        print("   実際に投入するには --dry-run を外して実行してください")
+    else:
+        print(f"✅ Done: {inserted} orders inserted/updated, {skipped} skipped")
     print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Gmail受注下書きサンプルデータ投入スクリプト"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="DBに書き込まず、投入予定の内容を表示する",
+    )
+    args = parser.parse_args()
+
     try:
-        seed_gmail_drafts()
+        seed_gmail_drafts(dry_run=args.dry_run)
     except Exception as e:
         print(f"\n❌ Error: {e}")
         sys.exit(1)

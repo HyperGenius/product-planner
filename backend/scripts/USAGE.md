@@ -102,7 +102,11 @@ Gmail連携機能（GMAIL_ORDER_INTAKE）で生成される下書き受注（`so
 ### 使い方
 
 ```bash
+# 実際に投入する
 python scripts/seed_gmail_drafts.py
+
+# DBに書き込まず投入予定内容を確認する（ドライラン）
+python scripts/seed_gmail_drafts.py --dry-run
 ```
 
 ### 実行例
