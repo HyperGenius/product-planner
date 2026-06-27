@@ -87,7 +87,15 @@ python scripts/seed_scenario.py standard_demo
 
 Gmail連携機能（GMAIL_ORDER_INTAKE）で生成される下書き受注（`source_type='email'`）のサンプルをローカルに投入します。下書き確認UI（フェーズ7）の開発・動作確認用です。
 
-> **注意:** 製品データが必要なため、先に `seed_scenario.py standard_demo` を実行してください。
+バックエンドAPIを経由してデータを登録します（直接DBアクセスなし）。
+
+### 追加の前提条件
+
+- バックエンドが起動していること（`func host start`）
+- `SUPABASE_API_KEY`（`get_token.py` が参照するキー）
+- `BACKEND_URL`（省略時: `http://localhost:7071`）
+
+> **注意:** 先に `seed_scenario.py standard_demo` を実行して製品データを用意してください。`orders.json` 内の製品コードが見つからない場合はその注文はスキップされます。
 
 ### 投入されるデータ
 

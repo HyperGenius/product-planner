@@ -9,7 +9,7 @@ Gmail連携機能（GMAIL_ORDER_INTAKE）で生成される下書き受注のサ
   B: 複数候補あり     (product_id=null、product_candidates=[...])
   C: マッチなし       (product_id=null、product_candidates=null)
 
-冪等性: order_number の一意制約を利用してupsertするため、複数回実行しても安全。
+冪等性: order_number が重複した場合はスキップするため、複数回実行しても安全。
 
 Usage:
     python scripts/seed_gmail_drafts.py           # 実際に投入
@@ -17,10 +17,11 @@ Usage:
 
 Required environment variables (.env):
     SUPABASE_URL
-    SUPABASE_PUBLISHABLE_KEY
+    SUPABASE_API_KEY
     TEST_USER_EMAIL
     TEST_USER_PASS
     TEST_TENANT_ID
+    BACKEND_URL  # 省略時: http://localhost:7071
 """
 
 import argparse
@@ -30,9 +31,9 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
+import requests
 from dotenv import load_dotenv
-
-from supabase import Client, create_client  # type: ignore
+from get_token import get_access_token
 
 load_dotenv()
 
@@ -45,34 +46,20 @@ DATA_FILE = os.path.join(
 )
 
 
-def init_client() -> tuple[Client, str]:
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
-    email = os.environ.get("TEST_USER_EMAIL", "")
-    password = os.environ.get("TEST_USER_PASS", "")
-    tenant_id = os.environ.get("TEST_TENANT_ID", "")
-
-    if not all([url, key, email, password, tenant_id]):
-        raise ValueError(
-            "Required environment variables are missing: "
-            "SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEST_USER_EMAIL, TEST_USER_PASS, TEST_TENANT_ID"
-        )
-
-    client = create_client(url, key)
-    res = client.auth.sign_in_with_password({"email": email, "password": password})
-    if not res.session:
-        raise ValueError("Authentication failed")
-
-    print(f"✅ Authenticated as {email}")
-    return client, tenant_id
+def build_headers(token: str, tenant_id: str) -> dict:
+    return {
+        "Authorization": f"Bearer {token}",
+        "x-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+    }
 
 
-def fetch_product_map(client: Client, tenant_id: str) -> dict[str, int]:
+def fetch_product_map(headers: dict, backend_url: str) -> dict[str, int]:
     """製品コード → product_id のマッピングを取得する."""
-    res = (
-        client.table("products").select("id, code").eq("tenant_id", tenant_id).execute()
-    )
-    return {row["code"]: int(row["id"]) for row in (res.data or [])}
+    res = requests.get(f"{backend_url}/api/products/", headers=headers)
+    if res.status_code != 200:
+        raise Exception(f"Failed to fetch products: {res.status_code} {res.text}")
+    return {p["code"]: int(p["id"]) for p in res.json() if p.get("code")}
 
 
 def resolve_candidates(
@@ -105,13 +92,28 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
     print("🚀 Seeding Gmail draft orders" + (" [DRY RUN]" if dry_run else ""))
     print("=" * 60)
 
-    client, tenant_id = init_client()
+    email = os.environ.get("TEST_USER_EMAIL", "")
+    password = os.environ.get("TEST_USER_PASS", "")
+    tenant_id = os.environ.get("TEST_TENANT_ID", "")
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:7071")
+
+    if not all([email, password, tenant_id]):
+        raise ValueError(
+            "Required environment variables are missing: "
+            "TEST_USER_EMAIL, TEST_USER_PASS, TEST_TENANT_ID"
+        )
+
+    token = get_access_token(email, password)
+    if not token:
+        raise ValueError("Authentication failed")
+
+    headers = build_headers(token, tenant_id)
 
     with open(DATA_FILE, encoding="utf-8") as f:
         orders_data = json.load(f)
 
     print("\n📦 Fetching product map...")
-    product_map = fetch_product_map(client, tenant_id)
+    product_map = fetch_product_map(headers, backend_url)
     print(f"  Found {len(product_map)} products: {list(product_map.keys())}")
 
     action = "Would insert" if dry_run else "Inserting"
@@ -135,13 +137,11 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
 
         candidates = resolve_candidates(order.get("product_candidates"), product_map)
 
-        record: dict = {
-            "tenant_id": tenant_id,
+        payload = {
             "order_number": order_number,
             "product_id": product_id,
             "quantity": order.get("quantity"),
             "deadline_date": order.get("deadline_date"),
-            "status": order.get("status", "draft"),
             "source_type": order.get("source_type", "email"),
             "source_raw": order.get("source_raw"),
             "extracted_product_name": order.get("extracted_product_name"),
@@ -157,28 +157,33 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
         if dry_run:
             print(f"  [DRY RUN] {order_number} — パターン{pattern}")
             print(
-                f"    product_id={product_id}, quantity={record['quantity']}, deadline={record['deadline_date']}"
+                f"    product_id={product_id}, quantity={payload['quantity']}, deadline={payload['deadline_date']}"
             )
-            print(f"    extracted_product_name={record['extracted_product_name']!r}")
+            print(f"    extracted_product_name={payload['extracted_product_name']!r}")
             n_candidates = len(candidates) if candidates else 0
             print(f"    product_candidates={n_candidates}件")
-        else:
-            client.table("orders").upsert(
-                record,
-                on_conflict="tenant_id, order_number",
-            ).execute()
-            print(f"  ✓ {order_number} — パターン{pattern}")
+            inserted += 1
+            continue
 
-        inserted += 1
+        res = requests.post(f"{backend_url}/api/orders/", headers=headers, json=payload)
+
+        if res.status_code == 400 and "注文番号は既に使用" in res.text:
+            print(f"  - {order_number} — スキップ（既存）")
+            skipped += 1
+        elif res.status_code != 200:
+            raise Exception(
+                f"Failed to create order {order_number}: {res.status_code} {res.text}"
+            )
+        else:
+            print(f"  ✓ {order_number} — パターン{pattern}")
+            inserted += 1
 
     print(f"\n{'=' * 60}")
     if dry_run:
-        print(
-            f"✅ Dry run: {inserted} orders would be inserted/updated, {skipped} skipped"
-        )
+        print(f"✅ Dry run: {inserted} orders would be inserted, {skipped} skipped")
         print("   実際に投入するには --dry-run を外して実行してください")
     else:
-        print(f"✅ Done: {inserted} orders inserted/updated, {skipped} skipped")
+        print(f"✅ Done: {inserted} orders inserted, {skipped} skipped")
     print(f"{'=' * 60}\n")
 
 
