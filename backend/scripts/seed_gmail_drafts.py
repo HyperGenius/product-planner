@@ -21,7 +21,7 @@ Required environment variables (.env):
     TEST_USER_EMAIL
     TEST_USER_PASS
     TEST_TENANT_ID
-    BACKEND_URL  # 省略時: http://localhost:7071
+    BACKEND_URL  # 省略時: http://localhost:8081 (docker-compose) / http://localhost:8000 (uvicorn直接)
 """
 
 import argparse
@@ -56,7 +56,7 @@ def build_headers(token: str, tenant_id: str) -> dict:
 
 def fetch_product_map(headers: dict, backend_url: str) -> dict[str, int]:
     """製品コード → product_id のマッピングを取得する."""
-    res = requests.get(f"{backend_url}/api/products/", headers=headers)
+    res = requests.get(f"{backend_url}/products/", headers=headers)
     if res.status_code != 200:
         raise Exception(f"Failed to fetch products: {res.status_code} {res.text}")
     return {p["code"]: int(p["id"]) for p in res.json() if p.get("code")}
@@ -95,7 +95,7 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
     email = os.environ.get("TEST_USER_EMAIL", "")
     password = os.environ.get("TEST_USER_PASS", "")
     tenant_id = os.environ.get("TEST_TENANT_ID", "")
-    backend_url = os.environ.get("BACKEND_URL", "http://localhost:7071")
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8081")
 
     if not all([email, password, tenant_id]):
         raise ValueError(
@@ -165,7 +165,7 @@ def seed_gmail_drafts(dry_run: bool = False) -> None:
             inserted += 1
             continue
 
-        res = requests.post(f"{backend_url}/api/orders/", headers=headers, json=payload)
+        res = requests.post(f"{backend_url}/orders/", headers=headers, json=payload)
 
         if res.status_code == 400 and "注文番号は既に使用" in res.text:
             print(f"  - {order_number} — スキップ（既存）")
