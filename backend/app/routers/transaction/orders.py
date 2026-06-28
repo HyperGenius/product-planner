@@ -232,6 +232,7 @@ def simulate_schedule(
             dry_run=True,
             settings_repo=settings_repo,
         )
+        order_repo.mark_as_scheduled(order_id)
         return build_simulate_response(
             result, order.get("deadline_date"), product_repo, equipment_repo
         )
