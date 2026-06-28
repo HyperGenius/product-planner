@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -36,10 +36,20 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   )
   const [duplicateError, setDuplicateError] = useState("")
 
+  useEffect(() => {
+    if (!order) return
+    setOrderNo(order.order_no ?? "")
+    setProductId(order.product_id?.toString() ?? "")
+    setCustomerId(order.customer_id?.toString() ?? "")
+    setQuantity(order.quantity?.toString() ?? "")
+    setDesiredDeadline(order.desired_deadline ? order.desired_deadline.slice(0, 16) : "")
+    setDuplicateError("")
+  }, [order])
+
   if (!order) return null
 
-  const productChanged = productId !== order.product_id.toString()
-  const quantityChanged = quantity !== order.quantity.toString()
+  const productChanged = productId !== (order.product_id?.toString() ?? "")
+  const quantityChanged = quantity !== (order.quantity?.toString() ?? "")
   const showScheduleWarning = order.is_scheduled && (productChanged || quantityChanged)
 
   const handleSubmit = () => {
