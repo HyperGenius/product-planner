@@ -19,7 +19,7 @@ import { useUpdateOrder } from "@/hooks/use-orders"
 import type { Order } from "@/types/order"
 
 interface EditOrderDialogProps {
-  order: Order
+  order: Order | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -27,14 +27,16 @@ interface EditOrderDialogProps {
 export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogProps) {
   const updateOrder = useUpdateOrder()
 
-  const [orderNo, setOrderNo] = useState(order.order_no ?? "")
-  const [productId, setProductId] = useState(order.product_id.toString())
-  const [customerId, setCustomerId] = useState(order.customer_id?.toString() ?? "")
-  const [quantity, setQuantity] = useState(order.quantity.toString())
+  const [orderNo, setOrderNo] = useState(order?.order_no ?? "")
+  const [productId, setProductId] = useState(order?.product_id?.toString() ?? "")
+  const [customerId, setCustomerId] = useState(order?.customer_id?.toString() ?? "")
+  const [quantity, setQuantity] = useState(order?.quantity?.toString() ?? "")
   const [desiredDeadline, setDesiredDeadline] = useState(
-    order.desired_deadline ? order.desired_deadline.slice(0, 16) : ""
+    order?.desired_deadline ? order.desired_deadline.slice(0, 16) : ""
   )
   const [duplicateError, setDuplicateError] = useState("")
+
+  if (!order) return null
 
   const productChanged = productId !== order.product_id.toString()
   const quantityChanged = quantity !== order.quantity.toString()

@@ -236,7 +236,7 @@ export default function OrderDetailPage() {
       </div>
 
       <EditOrderDialog
-        order={order}
+        order={isEditDialogOpen ? order : null}
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
       />
