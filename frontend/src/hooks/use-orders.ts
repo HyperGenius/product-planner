@@ -123,10 +123,15 @@ export function useOrder(orderId: number) {
  * 既存の注文IDでシミュレーションを実行するフック
  */
 export function useSimulateOrderById() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: (orderId: number) =>
       apiClient<OrderSimulateResponse>(`/orders/${orderId}/simulate`, {
         method: "POST",
       }),
+    onSuccess: (_data, orderId) => {
+      queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
+    },
   })
 }

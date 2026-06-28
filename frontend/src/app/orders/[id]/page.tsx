@@ -173,14 +173,12 @@ export default function OrderDetailPage() {
 
           {/* メール本文パネル (メール起票時のみ) */}
           {order.source_type === 'email' && order.source_raw && (
-            <details className="rounded-lg border bg-muted/50 p-4">
-              <summary className="cursor-pointer text-sm font-medium">
-                メール本文を表示
-              </summary>
-              <pre className="mt-2 text-xs whitespace-pre-wrap break-words text-muted-foreground">
+            <div className="rounded-lg border bg-muted/50 p-4">
+              <p className="text-sm font-medium mb-2">メール本文</p>
+              <pre className="text-xs whitespace-pre-wrap break-words text-muted-foreground max-h-48 overflow-y-auto">
                 {order.source_raw}
               </pre>
-            </details>
+            </div>
           )}
 
           {/* アクションボタン */}
@@ -238,7 +236,7 @@ export default function OrderDetailPage() {
       </div>
 
       <EditOrderDialog
-        order={order}
+        order={isEditDialogOpen ? order : null}
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
       />

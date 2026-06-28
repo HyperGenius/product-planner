@@ -294,7 +294,7 @@ export function ProductRoutingsDialog({
         <DialogHeader className="shrink-0">
           <DialogTitle>工程管理 - {product?.name}</DialogTitle>
           <DialogDescription>
-            製品の製造工程（ルーティング）を管理します
+            製品の製造工程を管理します
           </DialogDescription>
         </DialogHeader>
 
