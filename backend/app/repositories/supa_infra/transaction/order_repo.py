@@ -38,6 +38,24 @@ class OrderRepository(BaseRepository):
             result.append({**order, "has_unconfirmed_routings": has_unconfirmed})
         return result
 
+    def get_by_id_with_routing_status(self, order_id: int) -> dict | None:
+        """注文を1件取得し has_unconfirmed_routings フラグを付与"""
+        order = self.get_by_id(order_id)
+        if not order:
+            return None
+        pid = order.get("product_id")
+        if pid is None:
+            return {**order, "has_unconfirmed_routings": True}
+        res = (
+            self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+            .select("product_id, is_confirmed")
+            .eq("product_id", pid)
+            .execute()
+        )
+        routings = cast(list[dict[str, Any]], res.data or [])
+        has_unconfirmed = not routings or any(not r["is_confirmed"] for r in routings)
+        return {**order, "has_unconfirmed_routings": has_unconfirmed}
+
     def mark_as_scheduled(self, order_id: int) -> None:
         """
         注文をスケジュール済みとしてマークする。
