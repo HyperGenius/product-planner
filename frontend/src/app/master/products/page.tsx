@@ -1,8 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { AlertTriangle, Circle, MoreHorizontal, Plus, Search } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
   useProducts,
@@ -65,6 +66,7 @@ export default function ProductsPage() {
   const router = useRouter()
   const sortKey = (searchParams.get("sort") as SortKey) ?? "created_at"
   const page = Number(searchParams.get("page") ?? "1")
+  const highlightId = Number(searchParams.get("highlight") ?? "") || null
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -117,6 +119,26 @@ export default function ProductsPage() {
     const offset = (page - 1) * PAGE_SIZE
     return filteredProducts.slice(offset, offset + PAGE_SIZE)
   }, [filteredProducts, page])
+
+  // highlight パラメータが指すページへ自動移動
+  useEffect(() => {
+    if (!highlightId || !filteredProducts.length) return
+    const idx = filteredProducts.findIndex((p) => p.id === highlightId)
+    if (idx === -1) return
+    const targetPage = Math.floor(idx / PAGE_SIZE) + 1
+    if (targetPage === page) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", String(targetPage))
+    router.replace(`/master/products?${params.toString()}`)
+  }, [highlightId, filteredProducts, page, searchParams, router])
+
+  // highlight 対象行へスクロール
+  useEffect(() => {
+    if (!highlightId) return
+    const el = document.getElementById(`product-row-${highlightId}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, [highlightId, pagedProducts])
 
   const handleOpenCreateDialog = () => {
     setProductName("")
@@ -310,7 +332,11 @@ export default function ProductsPage() {
                   const displayCode = product.code || "品番なし"
                   const displayName = product.name || null
                   return (
-                    <TableRow key={product.id}>
+                    <TableRow
+                      key={product.id}
+                      id={`product-row-${product.id}`}
+                      className={cn(highlightId === product.id && "ring-2 ring-inset ring-primary bg-primary/5")}
+                    >
                       <TableCell>
                         <div className="text-xs text-muted-foreground">{displayCode}</div>
                         {displayName ? (

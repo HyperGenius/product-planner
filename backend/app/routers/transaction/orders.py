@@ -121,9 +121,9 @@ def get_unconfirmed_routing_queue(
 
 @orders_router.get("/{order_id}")
 def get_order(order_id: int, repo: OrderRepository = Depends(get_order_repo)):
-    """注文を1件取得"""
+    """注文を1件取得（has_unconfirmed_routings フラグ付き）"""
     logger.info(f"Fetching order {order_id}")
-    result = repo.get_by_id(order_id)
+    result = repo.get_by_id_with_routing_status(order_id)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
     return _map_order_response(result)
