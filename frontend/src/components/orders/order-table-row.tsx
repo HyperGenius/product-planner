@@ -1,6 +1,7 @@
 "use client"
 
-import { AlertCircle, Loader2, MoreHorizontal } from "lucide-react"
+import { AlertCircle, Loader2, Mail, MoreHorizontal } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
@@ -63,8 +64,18 @@ export function OrderTableRow({
   onDelete,
   onToggleSelect,
 }: OrderTableRowProps) {
+  const router = useRouter()
+  const isEmailOrder = order.source_type === "email"
+
+  let rowClassName: string | undefined
+  if (hasBulkSimFailed) {
+    rowClassName = "border-l-[3px] border-l-destructive bg-destructive/5"
+  } else if (isEmailOrder) {
+    rowClassName = "bg-blue-50/60"
+  }
+
   return (
-      <TableRow className={hasBulkSimFailed ? "border-l-[3px] border-l-destructive bg-destructive/5" : undefined}>
+      <TableRow className={rowClassName}>
         <TableCell className="w-10">
           {order.status === "draft" ? (
             <div className="relative flex items-center justify-center">
@@ -82,7 +93,17 @@ export function OrderTableRow({
             </div>
           ) : null}
         </TableCell>
-        <TableCell className="font-medium">{order.order_no}</TableCell>
+        <TableCell className="font-medium">
+          <div className="flex flex-col gap-1">
+            {order.order_no}
+            {isEmailOrder && (
+              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-blue-100 text-blue-700 w-fit">
+                <Mail className="h-3 w-3" />
+                自動起票
+              </span>
+            )}
+          </div>
+        </TableCell>
         <TableCell>{getProductName(order.product_id, products)}</TableCell>
         <TableCell>
           {order.customer_id == null ? (
@@ -136,21 +157,31 @@ export function OrderTableRow({
               </Tooltip>
             )}
             {order.status === "draft" && !order.is_scheduled && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onSimulate(order)}
-                disabled={isSimulating || isBulkOperationInProgress}
-              >
-                {isSimulating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    実行中...
-                  </>
-                ) : (
-                  "シミュレーション実行"
-                )}
-              </Button>
+              isEmailOrder ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => router.push(`/orders/${order.id}`)}
+                >
+                  確認する
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onSimulate(order)}
+                  disabled={isSimulating || isBulkOperationInProgress}
+                >
+                  {isSimulating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      実行中...
+                    </>
+                  ) : (
+                    "シミュレーション実行"
+                  )}
+                </Button>
+              )
             )}
             {order.status === "draft" && order.is_scheduled && (
               <Button
