@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import type {
   Order,
+  OrderAttachment,
   OrderCreate,
   OrderSimulateRequest,
   OrderSimulateResponse,
@@ -115,6 +116,17 @@ export function useOrder(orderId: number) {
   return useQuery<Order>({
     queryKey: ["orders", orderId],
     queryFn: () => apiClient<Order>(`/orders/${orderId}`),
+    enabled: !!orderId,
+  })
+}
+
+/**
+ * 注文に紐づく添付ファイル一覧を取得するフック
+ */
+export function useOrderAttachments(orderId: number) {
+  return useQuery<OrderAttachment[]>({
+    queryKey: ["orders", orderId, "attachments"],
+    queryFn: () => apiClient<OrderAttachment[]>(`/orders/${orderId}/attachments`),
     enabled: !!orderId,
   })
 }

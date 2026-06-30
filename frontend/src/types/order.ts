@@ -70,3 +70,23 @@ export interface BulkSimulateResult {
   desiredDeadline?: string // ユーザー希望納期 (ISO 8601形式)
   result: OrderSimulateResponse | null // null = シミュレーション失敗
 }
+
+/**
+ * 注文添付ファイルのデータ型
+ */
+export interface OrderAttachment {
+  id: string
+  order_id: number
+  storage_path: string
+  original_filename: string
+  content_type: string | null
+  size_bytes: number | null
+  parse_status:
+    | 'pending'
+    | 'success'
+    | 'failed_encrypted'
+    | 'failed_image'
+    | 'failed_no_attachment'
+  signed_url: string
+  created_at: string
+}

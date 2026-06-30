@@ -1,6 +1,6 @@
 # models/transaction/order_schema.py
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.common.base_schema import BaseSchema
 
@@ -42,3 +42,17 @@ class OrderUpdate(BaseSchema):
     quantity: int | None = None
     deadline_date: str | None = Field(None, alias="desired_deadline")
     customer_id: int | None = None
+
+
+class OrderAttachmentResponse(BaseModel):
+    """注文添付ファイルのレスポンススキーマ"""
+
+    id: str
+    order_id: int
+    storage_path: str
+    original_filename: str
+    content_type: str | None
+    size_bytes: int | None
+    parse_status: str
+    signed_url: str
+    created_at: str

@@ -7,6 +7,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
+from app.services.attachment_service import upload_attachment
 from app.services.customer_matching_service import (
     extract_sender_email,
     resolve_or_create_customer,
@@ -92,6 +93,34 @@ def _lookup_tenant_id(db: Client, tenant_name: str) -> str | None:
     return str(rows[0]["tenant_id"]) if rows else None
 
 
+def _get_attachments(service, msg_id: str, payload: dict) -> list[dict[str, Any]]:
+    """
+    Gmail メッセージの parts から添付ファイル情報を収集し、バイナリデータと共に返す。
+    返り値: [{"filename": str, "content_type": str, "data": bytes}, ...]
+    """
+    results: list[dict[str, Any]] = []
+    parts = payload.get("parts", [])
+    for part in parts:
+        attachment_id = part.get("body", {}).get("attachmentId")
+        filename = part.get("filename", "")
+        if not attachment_id or not filename:
+            continue
+        content_type = part.get("mimeType", "application/octet-stream")
+        attachment = (
+            service.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=msg_id, id=attachment_id)
+            .execute()
+        )
+        raw = attachment.get("data", "")
+        data = base64.urlsafe_b64decode(raw + "==")
+        results.append(
+            {"filename": filename, "content_type": content_type, "data": data}
+        )
+    return results
+
+
 def _move_label(
     service, msg_id: str, add_id: str | None, remove_id: str | None
 ) -> None:
@@ -172,10 +201,52 @@ def _process_message(
             "product_candidates": candidates if candidates else None,
             "customer_id": customer_id,
         }
-        db.table(SupabaseTableName.ORDERS.value).insert(order_row).execute()
-        logger.info(f"msg {msg_id}: order draft created for tenant {tenant_id}")
+        insert_result = (
+            db.table(SupabaseTableName.ORDERS.value).insert(order_row).execute()
+        )
+        order_id: int = cast(list[dict[str, Any]], insert_result.data)[0]["id"]
+        logger.info(
+            f"msg {msg_id}: order draft created (id={order_id}) for tenant {tenant_id}"
+        )
 
-        # 8. 処理中 → 処理済み
+        # 8. 添付ファイルを Storage に保存し order_attachments に記録
+        attachments = _get_attachments(service, msg_id, msg.get("payload", {}))
+        if attachments:
+            # 現在は1メール1添付を前提とし、最初の添付のみ処理する
+            att = attachments[0]
+            storage_path = upload_attachment(
+                db,
+                tenant_id,
+                order_id,
+                att["filename"],
+                att["data"],
+                att["content_type"],
+            )
+            db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+                {
+                    "order_id": order_id,
+                    "tenant_id": tenant_id,
+                    "storage_path": storage_path,
+                    "original_filename": att["filename"],
+                    "content_type": att["content_type"],
+                    "size_bytes": len(att["data"]),
+                    "parse_status": "pending",
+                }
+            ).execute()
+            logger.info(f"msg {msg_id}: attachment saved to {storage_path}")
+        else:
+            db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+                {
+                    "order_id": order_id,
+                    "tenant_id": tenant_id,
+                    "storage_path": "",
+                    "original_filename": "",
+                    "parse_status": "failed_no_attachment",
+                }
+            ).execute()
+            logger.info(f"msg {msg_id}: no attachment found")
+
+        # 9. 処理中 → 処理済み
         _move_label(service, msg_id, done_id, processing_id)
 
     except Exception as exc:
