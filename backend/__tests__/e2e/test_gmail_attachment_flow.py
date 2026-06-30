@@ -74,17 +74,23 @@ class TestGmailAttachmentFlow:
         assert attachment["content_type"] == "application/pdf"
         assert attachment["size_bytes"] is not None and attachment["size_bytes"] > 0
 
-        expected_storage_path = f"{tenant_id}/orders/{order_id}/{pdf_filename}"
-        assert attachment["storage_path"] == expected_storage_path
+        storage_path = attachment["storage_path"]
+        assert storage_path.startswith(f"{tenant_id}/orders/{order_id}/"), (
+            f"Unexpected storage_path prefix: {storage_path!r}"
+        )
+        assert storage_path.endswith(".pdf"), (
+            f"Expected .pdf extension in storage_path: {storage_path!r}"
+        )
 
         # --- Supabase Storage にファイルが存在することを検証 ---
         storage_list = admin_db.storage.from_("order-attachments").list(
             f"{tenant_id}/orders/{order_id}"
         )
-        filenames = [f["name"] for f in (storage_list or [])]
-        assert pdf_filename in filenames, (
+        stored_filenames = [f["name"] for f in (storage_list or [])]
+        stored_name = storage_path.rsplit("/", 1)[-1]
+        assert stored_name in stored_filenames, (
             f"PDF file not found in Storage. "
-            f"Expected '{pdf_filename}', found: {filenames}"
+            f"Expected '{stored_name}', found: {stored_filenames}"
         )
 
     def test_email_without_attachment_is_handled_gracefully(

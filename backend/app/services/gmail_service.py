@@ -126,6 +126,8 @@ def _move_label(
 ) -> None:
     add_ids = [add_id] if add_id else []
     remove_ids = [remove_id] if remove_id else []
+    if not add_ids and not remove_ids:
+        return
     service.users().messages().modify(
         userId="me",
         id=msg_id,
@@ -170,14 +172,16 @@ def _process_message(
             raise ValueError(f"tenant not found for label: {tenant_name}")
 
         # 4. Claude で注文フィールド抽出
-        fields = extract_email_fields(body)
+        raw_fields = extract_email_fields(body)
+        fields = {k: (None if v == "<UNKNOWN>" else v) for k, v in raw_fields.items()}
         logger.info(f"msg {msg_id}: extracted fields={fields}")
 
         # 5. 製品マッチング
         product_id: int | None = None
         candidates: list[dict] = []
-        if fields.get("product_name"):
-            match = match_products(db, tenant_id, fields["product_name"])
+        product_name: str | None = fields.get("product_name")
+        if product_name:
+            match = match_products(db, tenant_id, product_name)
             product_id = match["product_id"]
             candidates = match["candidates"]
 
