@@ -6,9 +6,12 @@ import { toast } from "sonner"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import {
+  AlertTriangle,
   ArrowLeft,
   Calculator,
   Check,
+  Download,
+  Paperclip,
   Pencil,
   Trash2,
 } from "lucide-react"
@@ -19,6 +22,7 @@ import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import {
   useOrder,
+  useOrderAttachments,
   useSimulateOrderById,
   useConfirmOrder,
   useDeleteOrder,
@@ -42,6 +46,7 @@ export default function OrderDetailPage() {
   const { data: order, isLoading, isError } = useOrder(orderId)
   const { data: products } = useProducts()
   const { data: customers } = useCustomers()
+  const { data: attachments } = useOrderAttachments(orderId)
 
   const simulateMutation = useSimulateOrderById()
   const confirmMutation = useConfirmOrder()
@@ -179,6 +184,50 @@ export default function OrderDetailPage() {
               <pre className="text-xs whitespace-pre-wrap break-words text-muted-foreground max-h-48 overflow-y-auto">
                 {order.source_raw}
               </pre>
+            </div>
+          )}
+
+          {/* 添付ファイルパネル (メール起票時のみ) */}
+          {order.source_type === 'email' && attachments && attachments.length > 0 && (
+            <div className="rounded-lg border bg-muted/50 p-4">
+              <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                <Paperclip className="h-3.5 w-3.5" />
+                添付ファイル
+              </p>
+              <ul className="space-y-2">
+                {attachments.map((att) => (
+                  <li key={att.id} className="text-xs">
+                    {att.parse_status === 'failed_no_attachment' ? (
+                      <span className="text-muted-foreground">添付ファイルなし</span>
+                    ) : att.parse_status === 'failed_encrypted' || att.parse_status === 'failed_image' ? (
+                      <span className="flex items-center gap-1 text-amber-600">
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                        自動読み取り不可 — ファイルを直接確認してください
+                        {att.signed_url && (
+                          <a
+                            href={att.signed_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1 underline text-primary"
+                          >
+                            {att.original_filename}
+                          </a>
+                        )}
+                      </span>
+                    ) : (
+                      <a
+                        href={att.signed_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-primary underline"
+                      >
+                        <Download className="h-3 w-3 shrink-0" />
+                        {att.original_filename}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

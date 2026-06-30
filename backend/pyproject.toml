@@ -62,6 +62,11 @@ addopts = "-ra -q"
 testpaths = [
     "__tests__",
 ]
+markers = [
+    "unit: DB不要のユニットテスト",
+    "integration: Supabase接続が必要なインテグレーションテスト (--run-integration で実行)",
+    "e2e: Gmail と Supabase の実接続が必要な E2E テスト (--run-e2e で実行)",
+]
 filterwarnings = [
     # pyiceberg ライブラリ内部の非推奨警告を無視する
     "ignore::DeprecationWarning:pyiceberg.*",
