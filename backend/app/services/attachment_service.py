@@ -61,6 +61,11 @@ def upload_staged_attachment(
     return storage_path
 
 
+def download_attachment(admin_client: Client, storage_path: str) -> bytes:
+    """Supabase Storage から添付ファイルの内容をダウンロードする。"""
+    return bytes(admin_client.storage.from_(_BUCKET).download(storage_path))
+
+
 def create_signed_url(
     admin_client: Client,
     storage_path: str,

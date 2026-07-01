@@ -1,6 +1,7 @@
 import os
 from typing import Any, cast
 
+from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -8,6 +9,25 @@ logger = get_logger(__name__)
 
 _THRESHOLD = float(os.environ.get("PRODUCT_MATCH_THRESHOLD", "0.3"))
 _TOP_N = int(os.environ.get("PRODUCT_MATCH_TOP_N", "5"))
+
+
+def match_product_by_code(db: Client, tenant_id: str, code: str) -> int | None:
+    """
+    品番 (products.code) の完全一致で製品を検索する。
+    一致する製品が唯一存在すればその product_id を返し、それ以外は None を返す。
+    """
+    result = (
+        db.table(SupabaseTableName.PRODUCTS.value)
+        .select("id")
+        .eq("tenant_id", tenant_id)
+        .eq("code", code)
+        .limit(2)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    if len(rows) == 1:
+        return int(rows[0]["id"])
+    return None
 
 
 def match_products(db: Client, tenant_id: str, product_name: str) -> dict[str, Any]:
