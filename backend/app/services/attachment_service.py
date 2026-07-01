@@ -39,6 +39,28 @@ def upload_attachment(
     return storage_path
 
 
+def upload_staged_attachment(
+    admin_client: Client,
+    tenant_id: str,
+    gmail_message_id: str,
+    filename: str,
+    content: bytes,
+    content_type: str,
+) -> str:
+    """
+    order 未確定の添付ファイルを Supabase Storage にステージング保存し、storage_path を返す。
+    パス形式: {tenant_id}/inbox/{gmail_message_id}/{safe_filename}
+    元のファイル名は呼び出し元が original_filename カラムに保存する。
+    """
+    storage_path = f"{tenant_id}/inbox/{gmail_message_id}/{_safe_filename(filename)}"
+    admin_client.storage.from_(_BUCKET).upload(
+        path=storage_path,
+        file=content,
+        file_options={"content-type": content_type, "upsert": "true"},
+    )
+    return storage_path
+
+
 def create_signed_url(
     admin_client: Client,
     storage_path: str,

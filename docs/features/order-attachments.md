@@ -2,7 +2,12 @@
 
 Gmail 自動伝票起票フローで受信した注文書 PDF を Supabase Storage に保存し、
 注文詳細画面からダウンロードできるようにする。
-将来の PDF パース処理（Issue B）の前提インフラでもある。
+
+> [!IMPORTANT]
+> Issue #248 により、PDF 添付メールの取り込みフローは「メール受信時点で即時 order 作成」から
+> 「PDF をステージング保存し、パース処理（後続Issue）完了後に order を作成」に変更された。
+> 添付なし・非PDF添付メールの既存フロー（即時 order 作成）は変更されていない。
+> 詳細は本ドキュメント内の「PDF添付メールのステージング保存（Issue #248）」を参照。
 
 ---
 
@@ -13,7 +18,7 @@ Gmail 自動起票フロー（`gmail_service.py`）は現状メール本文の�
 
 - **ISO 対応**: 注文書の原本保管が必要（社長承認フローの証跡）
 - **パース元の参照**: 担当者が UI 上から添付ファイルを確認・ダウンロードできる必要がある
-- **将来の PDF パース基盤**: Issue B で実装する PDF パース処理の前提インフラ
+- **将来の PDF パース基盤**: 後続Issue（PDF パース＋複数 order 生成）の前提インフラ
 
 ---
 
@@ -26,23 +31,32 @@ Gmail 自動起票フロー（`gmail_service.py`）は現状メール本文の�
 
 ### パス構造
 
-```
-{tenant_id}/orders/{order_id}/{original_filename}
-```
+- 非PDF添付・添付なしメール（既存フロー、`order_id` 確定済み）:
+  ```
+  {tenant_id}/orders/{order_id}/{original_filename}
+  ```
+  `order_id` は orders INSERT 後に確定するため、Storage 保存は INSERT の後に実施する。
 
-`order_id` は orders INSERT 後に確定するため、Storage 保存は INSERT の後に実施する。
+- PDF添付メール（ステージング、`order_id` 未確定。Issue #248 で追加）:
+  ```
+  {tenant_id}/inbox/{gmail_message_id}/{original_filename}
+  ```
+  いずれのパスも `tenant_id` prefix を維持するため、既存のバケットポリシーでカバーされる。
 
 ---
 
 ## DB スキーマ
 
-### 新規テーブル: `order_attachments`
+### `order_attachments` テーブル
 
 ```sql
 create table order_attachments (
   id                uuid primary key default gen_random_uuid(),
-  order_id          uuid not null references orders(id) on delete cascade,
+  order_id          bigint references orders(id) on delete cascade,  -- nullable (Issue #248)
   tenant_id         uuid not null references tenants(id),
+  customer_id       bigint references customers(id),                 -- Issue #248 で追加
+  source_raw        text,                                             -- Issue #248 で追加
+  gmail_message_id  text,                                             -- Issue #248 で追加
   storage_path      text not null,
   original_filename text not null,
   content_type      text,
@@ -56,11 +70,15 @@ create policy "tenant isolation" on order_attachments
   using (tenant_id = (auth.jwt() ->> 'tenant_id')::uuid);
 ```
 
+`order_id` は当初 NOT NULL だったが、Issue #248 で nullable 化された。PDF添付メールの
+ステージング行は `order_id=NULL` で作成され、後続Issue（PDFパース）が実際の `orders` 行を
+生成した時点で `order_id` を持つ行が別途 INSERT される想定。
+
 ### `parse_status` の定義
 
 | 値                       | 意味                            |
 |--------------------------|---------------------------------|
-| `pending`                | 未処理（Issue B で更新）        |
+| `pending`                | 未処理（後続Issueで更新）       |
 | `success`                | テキスト抽出成功                |
 | `failed_encrypted`       | PPAP などパスワード保護         |
 | `failed_image`           | 画像 PDF で抽出不可             |
@@ -70,20 +88,43 @@ create policy "tenant isolation" on order_attachments
 
 ## バックエンド処理フロー
 
-既存の `_process_message()` (`backend/app/services/gmail_service.py:107`) に以下を追加:
+### 非PDF添付・添付なしメール（既存フロー、変更なし）
+
+`_process_message()` (`backend/app/services/gmail_service.py`):
 
 ```
 1. Gmail API で添付ファイルを取得（payload.parts から attachmentId を収集）
-2. orders INSERT（既存処理: 行 162-175）
+2. Claude で単一フィールド抽出 → 製品・顧客照合 → orders INSERT
 3. 添付ファイルを Supabase Storage にアップロード
    パス: {tenant_id}/orders/{order_id}/{original_filename}
 4. order_attachments に INSERT（parse_status='pending'）
 5. 添付なしの場合は parse_status='failed_no_attachment' で INSERT
 ```
 
+### PDF添付メール（ステージング、Issue #248 で追加）
+
+添付に `content_type == 'application/pdf'` のパートが含まれる場合、上記とは別の分岐に入る:
+
+```
+1. 送信者アドレスから顧客照合（既存 resolve_or_create_customer を再利用）
+2. Claudeによる単一フィールド抽出（extract_email_fields）は呼ばない
+3. orders 行は作成しない
+4. PDFを Storage の {tenant_id}/inbox/{gmail_message_id}/{filename} に保存
+   （upload_staged_attachment()）
+5. order_attachments にステージング行を INSERT:
+   order_id=NULL, tenant_id, customer_id, gmail_message_id, source_raw=body,
+   storage_path, original_filename, content_type, size_bytes, parse_status='pending'
+```
+
+このステージング行から実際の `orders` 行を生成する処理（PDFテキスト抽出・複数明細パース）は
+後続Issueで実装する。
+
 ### 新規ファイル: `backend/app/services/attachment_service.py`
 
 - `upload_attachment(admin_client, tenant_id, order_id, filename, content, content_type) -> str`
+  — 既存フロー用（`order_id` 確定済み）
+- `upload_staged_attachment(admin_client, tenant_id, gmail_message_id, filename, content, content_type) -> str`
+  — PDFステージング用（Issue #248 で追加）
 - `create_signed_url(admin_client, storage_path, expires_in=3600) -> str`
 
 ### 新規 API エンドポイント
@@ -133,22 +174,27 @@ export interface OrderAttachment {
 
 ## 受け入れ条件
 
-- [ ] Supabase Storage に `order-attachments` バケットが作成されている
-- [ ] テナント分離のバケットポリシーが設定されている
-- [ ] `order_attachments` テーブルが作成されている（マイグレーション済み）
-- [ ] メール処理時に添付 PDF が Storage に保存される
-- [ ] 添付なしメールでも処理が継続する（エラーにならない）
-- [ ] 注文詳細画面から添付ファイルをダウンロードできる
-- [ ] `parse_status` が失敗系の場合、UI に警告が表示される
+- [x] Supabase Storage に `order-attachments` バケットが作成されている
+- [x] テナント分離のバケットポリシーが設定されている
+- [x] `order_attachments` テーブルが作成されている（マイグレーション済み）
+- [x] 添付なしメールでも処理が継続する（エラーにならない）
+- [x] 注文詳細画面から添付ファイルをダウンロードできる
+- [x] `parse_status` が失敗系の場合、UI に警告が表示される
+- [x] PDF添付メール受信時、`orders` 行が作成されない（Issue #248）
+- [x] PDF添付メール受信時、`order_attachments` にステージング行
+      （`order_id=NULL`, `parse_status='pending'`）が作成される（Issue #248）
+- [x] PDFが `{tenant_id}/inbox/{gmail_message_id}/{filename}` に保存される（Issue #248）
+- [x] `order_attachments.order_id` が nullable になっている（Issue #248）
 
 ---
 
 ## スコープ外
 
-- PDF の内容パース・テキスト抽出（→ Issue B）
+- PDF の内容パース・テキスト抽出・ステージング行からの複数 order 生成（→ 後続Issue）
 - PPAP（パスワード付き PDF）の自動復号
 - 複数添付ファイルへの対応（まず 1 メール 1 添付を前提）
-- 注文変更時の添付ファイル更新（→ Issue C）
+- 注文変更時の添付ファイル更新（→ 将来Issue）
+- ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 
 ---
 

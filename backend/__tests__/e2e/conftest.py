@@ -284,22 +284,20 @@ def _cleanup_supabase(
 ) -> None:
     """
     E2E テストで作成した Supabase レコードと Storage ファイルを削除する。
-    source_raw に run_id が含まれる order を特定して削除する。
+    source_raw に run_id が含まれる order / order_attachments (ステージング行) を
+    特定して削除する。
     """
-    # run_id を含む order を検索
-    result = (
+    # run_id を含む order を検索（非PDF添付・添付なしメールの既存フロー）
+    order_result = (
         admin_db.table("orders")
         .select("id, tenant_id")
         .like("source_raw", f"%run_id={run_id}%")
         .execute()
     )
-    rows = cast(list[dict[str, Any]], result.data or [])
-    if not rows:
-        return
+    order_rows = cast(list[dict[str, Any]], order_result.data or [])
 
-    for row in rows:
+    for row in order_rows:
         order_id = row["id"]
-        tenant_id = row["tenant_id"]
 
         # order_attachments の storage_path を取得してから Storage を削除
         att_result = (
@@ -319,17 +317,19 @@ def _cleanup_supabase(
         # order を削除 (order_attachments は cascade で削除される)
         admin_db.table("orders").delete().eq("id", order_id).execute()
 
-    # Storage に残骸ファイルがないか確認・削除（念のため）
-    for row in rows:
-        tenant_id = row["tenant_id"]
-        try:
-            files = admin_db.storage.from_("order-attachments").list(
-                f"{tenant_id}/orders"
-            )
-            for f in files or []:
-                if run_id in f.get("name", ""):
-                    admin_db.storage.from_("order-attachments").remove(
-                        [f"{tenant_id}/orders/{f['name']}"]
-                    )
-        except Exception:
-            pass
+    # run_id を含む order_attachments ステージング行を検索（PDF添付メールの新フロー）
+    staging_result = (
+        admin_db.table("order_attachments")
+        .select("id, storage_path")
+        .is_("order_id", "null")
+        .like("source_raw", f"%run_id={run_id}%")
+        .execute()
+    )
+    for att in cast(list[dict[str, Any]], staging_result.data or []):
+        path = str(att.get("storage_path", ""))
+        if path:
+            try:
+                admin_db.storage.from_("order-attachments").remove([path])
+            except Exception:
+                pass
+        admin_db.table("order_attachments").delete().eq("id", att["id"]).execute()
