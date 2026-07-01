@@ -7,7 +7,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
-from app.services.attachment_service import upload_attachment
+from app.services.attachment_service import upload_attachment, upload_staged_attachment
 from app.services.customer_matching_service import (
     extract_sender_email,
     resolve_or_create_customer,
@@ -171,12 +171,61 @@ def _process_message(
         if not tenant_id:
             raise ValueError(f"tenant not found for label: {tenant_name}")
 
-        # 4. Claude で注文フィールド抽出
+        # 4. 添付ファイル取得（PDF判定のため単一フィールド抽出より前に行う）
+        attachments = _get_attachments(service, msg_id, msg.get("payload", {}))
+        pdf_attachment = next(
+            (a for a in attachments if a["content_type"] == "application/pdf"), None
+        )
+
+        if pdf_attachment is not None:
+            # PDF添付メール: orderは作成せず、order_attachments にステージング保存する
+            # （パースして複数orderを生成する処理は後続Issueで実装）
+            sender_email = extract_sender_email(body)
+            customer_id = (
+                resolve_or_create_customer(db, tenant_id, sender_email)
+                if sender_email
+                else None
+            )
+
+            storage_path = upload_staged_attachment(
+                db,
+                tenant_id,
+                msg_id,
+                pdf_attachment["filename"],
+                pdf_attachment["data"],
+                pdf_attachment["content_type"],
+            )
+            db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+                {
+                    "order_id": None,
+                    "tenant_id": tenant_id,
+                    "customer_id": customer_id,
+                    "gmail_message_id": msg_id,
+                    "source_raw": body,
+                    "storage_path": storage_path,
+                    "original_filename": pdf_attachment["filename"],
+                    "content_type": pdf_attachment["content_type"],
+                    "size_bytes": len(pdf_attachment["data"]),
+                    "parse_status": "pending",
+                }
+            ).execute()
+            logger.info(
+                f"msg {msg_id}: PDF attachment staged at {storage_path} "
+                f"(tenant={tenant_id}, order not created)"
+            )
+
+            # 5. 処理中 → 処理済み
+            _move_label(service, msg_id, done_id, processing_id)
+            return
+
+        # 添付なし・非PDF添付メール: 既存フロー（即時order作成）を維持する
+
+        # 5. Claude で注文フィールド抽出
         raw_fields = extract_email_fields(body)
         fields = {k: (None if v == "<UNKNOWN>" else v) for k, v in raw_fields.items()}
         logger.info(f"msg {msg_id}: extracted fields={fields}")
 
-        # 5. 製品マッチング
+        # 6. 製品マッチング
         product_id: int | None = None
         candidates: list[dict] = []
         product_name: str | None = fields.get("product_name")
@@ -185,13 +234,13 @@ def _process_message(
             product_id = match["product_id"]
             candidates = match["candidates"]
 
-        # 6. 顧客マッチング
-        customer_id: int | None = None
+        # 7. 顧客マッチング
+        customer_id = None
         sender_email = extract_sender_email(body)
         if sender_email:
             customer_id = resolve_or_create_customer(db, tenant_id, sender_email)
 
-        # 7. ドラフト注文を Supabase に登録
+        # 8. ドラフト注文を Supabase に登録
         order_row: dict[str, Any] = {
             "tenant_id": tenant_id,
             "source_type": "email",
@@ -213,8 +262,7 @@ def _process_message(
             f"msg {msg_id}: order draft created (id={order_id}) for tenant {tenant_id}"
         )
 
-        # 8. 添付ファイルを Storage に保存し order_attachments に記録
-        attachments = _get_attachments(service, msg_id, msg.get("payload", {}))
+        # 9. 添付ファイル（非PDF）を Storage に保存し order_attachments に記録
         if attachments:
             # 現在は1メール1添付を前提とし、最初の添付のみ処理する
             att = attachments[0]
@@ -250,7 +298,7 @@ def _process_message(
             ).execute()
             logger.info(f"msg {msg_id}: no attachment found")
 
-        # 9. 処理中 → 処理済み
+        # 10. 処理中 → 処理済み
         _move_label(service, msg_id, done_id, processing_id)
 
     except Exception as exc:

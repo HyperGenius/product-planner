@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from app.services.gmail_service import poll_unread_emails
+from app.services.gmail_service import _process_message, poll_unread_emails
 
 
 @pytest.mark.unit
@@ -87,3 +87,124 @@ class TestPollUnreadEmails:
 
         assert result["processed"] == 0
         assert result["errors"] == 1
+
+
+@pytest.mark.unit
+class TestProcessMessagePdfStaging:
+    """PDF添付メールのステージング保存分岐 (Issue #248) の単体テスト。"""
+
+    def _mock_gmail_service(self):
+        mock_service = MagicMock()
+        mock_service.users().messages().get().execute.return_value = {
+            "payload": {"parts": []}
+        }
+        return mock_service
+
+    def test_pdf_attachment_stages_without_creating_order(self):
+        mock_service = self._mock_gmail_service()
+        mock_db = MagicMock()
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[
+                    {
+                        "filename": "order.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-1.4",
+                    }
+                ],
+            ),
+            patch(
+                "app.services.gmail_service.extract_sender_email",
+                return_value="customer@example.com",
+            ),
+            patch(
+                "app.services.gmail_service.resolve_or_create_customer",
+                return_value=42,
+            ) as mock_resolve_customer,
+            patch(
+                "app.services.gmail_service.upload_staged_attachment",
+                return_value="tenant-1/inbox/msg-1/abc.pdf",
+            ) as mock_upload_staged,
+            patch("app.services.gmail_service.extract_email_fields") as mock_extract,
+        ):
+            _process_message(mock_service, mock_db, "msg-1", "tenantA", {})
+
+        # Claudeによる単一フィールド抽出は呼ばれない（後続Issueに置き換わるため）
+        mock_extract.assert_not_called()
+
+        # orders テーブルへの INSERT は発生しない
+        assert not any(
+            call.args and call.args[0] == "orders"
+            for call in mock_db.table.call_args_list
+        )
+
+        mock_upload_staged.assert_called_once_with(
+            mock_db, "tenant-1", "msg-1", "order.pdf", b"%PDF-1.4", "application/pdf"
+        )
+        mock_resolve_customer.assert_called_once_with(
+            mock_db, "tenant-1", "customer@example.com"
+        )
+
+        inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert inserted_row["order_id"] is None
+        assert inserted_row["tenant_id"] == "tenant-1"
+        assert inserted_row["customer_id"] == 42
+        assert inserted_row["gmail_message_id"] == "msg-1"
+        assert inserted_row["storage_path"] == "tenant-1/inbox/msg-1/abc.pdf"
+        assert inserted_row["parse_status"] == "pending"
+
+    def test_non_pdf_attachment_keeps_existing_immediate_order_flow(self):
+        mock_service = self._mock_gmail_service()
+        mock_db = MagicMock()
+        mock_db.table("orders").insert().execute.return_value = MagicMock(
+            data=[{"id": 99}]
+        )
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[
+                    {
+                        "filename": "memo.txt",
+                        "content_type": "text/plain",
+                        "data": b"hello",
+                    }
+                ],
+            ),
+            patch(
+                "app.services.gmail_service.extract_email_fields",
+                return_value={
+                    "product_name": "<UNKNOWN>",
+                    "quantity": "<UNKNOWN>",
+                    "deadline_date": "<UNKNOWN>",
+                    "order_number": "<UNKNOWN>",
+                },
+            ),
+            patch("app.services.gmail_service.extract_sender_email", return_value=None),
+            patch(
+                "app.services.gmail_service.upload_attachment",
+                return_value="tenant-1/orders/99/def.txt",
+            ) as mock_upload,
+            patch(
+                "app.services.gmail_service.upload_staged_attachment"
+            ) as mock_upload_staged,
+        ):
+            _process_message(mock_service, mock_db, "msg-2", "tenantA", {})
+
+        # 既存フロー: 添付が非PDFなら即時orderが作成され、ステージング保存は呼ばれない
+        mock_upload_staged.assert_not_called()
+        mock_upload.assert_called_once()
+        assert any(
+            call.args and call.args[0] == "orders"
+            for call in mock_db.table.call_args_list
+        )

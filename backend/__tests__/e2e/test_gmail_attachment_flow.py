@@ -21,19 +21,20 @@ from app.services.gmail_service import poll_unread_emails
 class TestGmailAttachmentFlow:
     """Gmail → Supabase Storage の添付ファイル保存フロー E2E テスト"""
 
-    def test_pdf_attachment_is_saved_to_storage(
+    def test_pdf_attachment_is_staged_without_creating_order(
         self,
         inject_email_with_pdf: dict[str, Any],
         admin_db,
     ) -> None:
         """
-        PDF 添付付きメールを受信したとき:
-        - orders レコードが source_type='email' で作成される
-        - order_attachments レコードが parse_status='pending' で作成される
-        - Supabase Storage に PDF ファイルが保存される
+        PDF 添付付きメールを受信したとき (Issue #248):
+        - orders レコードは作成されない（パース処理は後続Issue）
+        - order_attachments にステージング行（order_id=NULL, parse_status='pending'）が作成される
+        - Supabase Storage の {tenant_id}/inbox/{gmail_message_id}/ に PDF ファイルが保存される
         """
         run_id = inject_email_with_pdf["run_id"]
         pdf_filename = inject_email_with_pdf["pdf_filename"]
+        message_id = inject_email_with_pdf["message_id"]
 
         # Gmail ポーリングを実行
         result = poll_unread_emails(admin_db)
@@ -43,39 +44,42 @@ class TestGmailAttachmentFlow:
         # Gmail の処理完了を少し待つ（ラベル移動が非同期のため）
         time.sleep(1)
 
-        # --- orders レコードの検証 ---
+        # --- orders レコードが作成されないことの検証 ---
         order_result = (
             admin_db.table("orders")
-            .select("id, source_type, source_raw, tenant_id")
+            .select("id")
             .like("source_raw", f"%run_id={run_id}%")
             .execute()
         )
-        orders = order_result.data or []
-        assert len(orders) == 1, f"Expected 1 order, got {len(orders)}. run_id={run_id}"
-        order = orders[0]
-        assert order["source_type"] == "email"
-        order_id = order["id"]
-        tenant_id = order["tenant_id"]
+        assert not (order_result.data or []), (
+            f"Expected no order to be created for PDF attachment email, "
+            f"got {order_result.data}"
+        )
 
-        # --- order_attachments レコードの検証 ---
+        # --- order_attachments ステージング行の検証 ---
         att_result = (
             admin_db.table("order_attachments")
             .select("*")
-            .eq("order_id", order_id)
+            .is_("order_id", "null")
+            .like("source_raw", f"%run_id={run_id}%")
             .execute()
         )
         attachments = att_result.data or []
         assert len(attachments) == 1, (
-            f"Expected 1 order_attachment, got {len(attachments)}. order_id={order_id}"
+            f"Expected 1 staged order_attachment, got {len(attachments)}. "
+            f"run_id={run_id}"
         )
         attachment = attachments[0]
+        assert attachment["order_id"] is None
+        assert attachment["gmail_message_id"] == message_id
         assert attachment["parse_status"] == "pending"
         assert attachment["original_filename"] == pdf_filename
         assert attachment["content_type"] == "application/pdf"
         assert attachment["size_bytes"] is not None and attachment["size_bytes"] > 0
 
+        tenant_id = attachment["tenant_id"]
         storage_path = attachment["storage_path"]
-        assert storage_path.startswith(f"{tenant_id}/orders/{order_id}/"), (
+        assert storage_path.startswith(f"{tenant_id}/inbox/{message_id}/"), (
             f"Unexpected storage_path prefix: {storage_path!r}"
         )
         assert storage_path.endswith(".pdf"), (
@@ -84,7 +88,7 @@ class TestGmailAttachmentFlow:
 
         # --- Supabase Storage にファイルが存在することを検証 ---
         storage_list = admin_db.storage.from_("order-attachments").list(
-            f"{tenant_id}/orders/{order_id}"
+            f"{tenant_id}/inbox/{message_id}"
         )
         stored_filenames = [f["name"] for f in (storage_list or [])]
         stored_name = storage_path.rsplit("/", 1)[-1]
@@ -138,14 +142,14 @@ class TestGmailAttachmentFlow:
         assert attachments[0]["parse_status"] == "failed_no_attachment"
         assert attachments[0]["storage_path"] == ""
 
-    def test_signed_url_is_accessible_via_api(
+    def test_signed_url_is_accessible_for_staged_attachment(
         self,
         inject_email_with_pdf: dict[str, Any],
         admin_db,
     ) -> None:
         """
-        order_attachments API が署名付き URL を返すことを確認する。
-        (Storage に保存済みの前提 — 前のテストと同じメールを使う場合は順序依存に注意)
+        PDF ステージング行 (order_id=NULL) の storage_path からも
+        署名付き URL を生成できることを確認する。
         """
         from app.services.attachment_service import create_signed_url
 
@@ -157,22 +161,12 @@ class TestGmailAttachmentFlow:
 
         time.sleep(1)
 
-        # order_id を取得
-        order_result = (
-            admin_db.table("orders")
-            .select("id")
-            .like("source_raw", f"%run_id={run_id}%")
-            .execute()
-        )
-        orders = order_result.data or []
-        assert len(orders) == 1
-        order_id = orders[0]["id"]
-
-        # order_attachments から storage_path を取得
+        # order_attachments ステージング行から storage_path を取得
         att_result = (
             admin_db.table("order_attachments")
             .select("storage_path, parse_status")
-            .eq("order_id", order_id)
+            .is_("order_id", "null")
+            .like("source_raw", f"%run_id={run_id}%")
             .execute()
         )
         attachments = att_result.data or []
