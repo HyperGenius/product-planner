@@ -31,6 +31,12 @@ Issue #248 により PDF添付メールは `order_attachments` に `order_id=NUL
 4. 明細ごとに (pdf_order_parsing_service._process_line_item):
    a. 品番 (product_number_raw) の完全一致 (match_product_by_code) → 見つからなければ
       品名のpg_trgm類似度検索 (match_products) にフォールバック
+      - `match_products` の自動確定条件は「候補が1件だけ」ではなく、
+        「最上位候補のスコアが `PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD` 以上、かつ
+        次点候補とのスコア差が `PRODUCT_MATCH_AUTO_CONFIRM_MARGIN` 以上」。
+        品番は1文字違いで別製品を指すことがあり（例: `25760-63C-...` と
+        実在する `22760-63C-...` は pg_trgm 上高い類似度になる）、
+        「候補1件のみ」は自動確定の根拠として弱いため
    b. どちらも失敗した場合: order を生成せず order_parse_log に reason='no_product_match' で記録
    c. certainty → orders.status へ1:1マッピング (confirmed/forecast/forecast_tentative)
    d. customer_id はステージング行のものをそのまま使用（再照合しない）
@@ -112,6 +118,10 @@ SQL RPC 関数（`INSERT ... ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTH
 ```
 # Claude API
 PDF_EXTRACTION_MODEL=claude-sonnet-5  # デフォルト。EMAIL_EXTRACTION_MODEL とは別軸で管理
+
+# 製品マッチング (pg_trgm) の自動確定しきい値
+PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD=0.75  # 最上位候補スコアの下限
+PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の下限
 ```
 
 ---
