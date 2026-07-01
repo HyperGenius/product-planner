@@ -122,6 +122,48 @@ class TestProcessLineItem:
         assert log_insert["reason"] == "no_product_match"
         assert log_insert["order_attachment_id"] == "att-1"
 
+    def test_falls_back_to_name_search_using_product_number_raw(self):
+        """
+        products.code が未整備で name 列に品番文字列が入っているテナントでは、
+        code完全一致に失敗した後、product_number_raw で products.name を
+        pg_trgm検索するフォールバックが機能すること。
+        """
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"id": 555, "inserted": True}]
+        )
+        line = {
+            "product_name_raw": "FILTER COMP （φ10.6）",
+            "product_number_raw": "22750-50P-0000-01",
+            "quantity": 15000,
+            "delivery_date": "2026-07-13",
+            "certainty": "confirmed",
+        }
+
+        def fake_match_products(db, tenant_id, query_text):
+            if query_text == "22750-50P-0000-01":
+                return {"product_id": 10534, "candidates": []}
+            return {"product_id": None, "candidates": []}
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=None,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+                side_effect=fake_match_products,
+            ) as mock_match_products,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), line)
+
+        assert created is True
+        # product_name_raw ではなく product_number_raw で先にマッチしたはず
+        first_call_query = mock_match_products.call_args_list[0].args[2]
+        assert first_call_query == "22750-50P-0000-01"
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] == 10534
+
     def test_duplicate_order_logs_and_skips(self):
         mock_db = MagicMock()
         mock_db.rpc().execute.return_value = MagicMock(

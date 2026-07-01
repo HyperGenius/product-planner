@@ -29,15 +29,18 @@ Issue #248 により PDF添付メールは `order_attachments` に `order_id=NUL
 3. 抽出成功時、Claude tool-use (pdf_order_extraction_service.py) で明細行の配列を取得
    { product_name_raw, product_number_raw, quantity, delivery_date, certainty }
 4. 明細ごとに (pdf_order_parsing_service._process_line_item):
-   a. 品番 (product_number_raw) の完全一致 (match_product_by_code) → 見つからなければ
-      品名のpg_trgm類似度検索 (match_products) にフォールバック
+   a. 製品照合は3段階のフォールバックで行う:
+      1. `products.code` の完全一致 (match_product_by_code)
+      2. `products.name` に対する品番文字列 (product_number_raw) でのpg_trgm検索
+         （`code` 列が未整備で、`name` 列に品番文字列が入っているテナントに対応）
+      3. `products.name` に対する品名文字列 (product_name_raw) でのpg_trgm検索
       - `match_products` の自動確定条件は「候補が1件だけ」ではなく、
         「最上位候補のスコアが `PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD` 以上、かつ
         次点候補とのスコア差が `PRODUCT_MATCH_AUTO_CONFIRM_MARGIN` 以上」。
         品番は1文字違いで別製品を指すことがあり（例: `25760-63C-...` と
         実在する `22760-63C-...` は pg_trgm 上高い類似度になる）、
         「候補1件のみ」は自動確定の根拠として弱いため
-   b. どちらも失敗した場合: order を生成せず order_parse_log に reason='no_product_match' で記録
+   b. すべて失敗した場合: order を生成せず order_parse_log に reason='no_product_match' で記録
    c. certainty → orders.status へ1:1マッピング (confirmed/forecast/forecast_tentative)
    d. customer_id はステージング行のものをそのまま使用（再照合しない）
    e. SQL RPC create_order_skip_duplicate で orders に INSERT
@@ -128,7 +131,9 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 
 ## 受け入れ条件
 
-- [x] サンプルPDFから複数orderが正しく生成される（単体テストでモック検証。実PDFでの精度検証は運用後に実施）
+- [x] サンプルPDFから複数orderが正しく生成される（単体テストでモック検証に加え、
+      `backend/__tests__/e2e/test_pdf_order_parsing_flow.py` で実PDF・実Claude API・
+      実Supabaseを用いたe2e検証を実施）
 - [x] `certainty` に応じて `orders.status` が `confirmed`/`forecast`/`forecast_tentative` に正しくセットされる
 - [x] 品番・品名の照合失敗時はorderを生成せず、`order_parse_log` に記録される
 - [x] 暗号化PDF・画像PDF（テキスト抽出不可）でもクラッシュせず `parse_status` が適切に更新される
@@ -147,6 +152,40 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 - 重複スキップ・照合失敗の通知UI（将来Issue、`order_parse_log` を参照する前提）
 - ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 - `forecast`/`forecast_tentative` のUIフィルタータブ追加（別途検討）
+
+---
+
+## E2Eテスト
+
+`backend/__tests__/e2e/test_pdf_order_parsing_flow.py`（実行: `pytest __tests__/e2e/ -v --run-e2e`）。
+
+order-attachments バケットに事前アップロード済みの実PDF（飯野製作所フォーマット、複数品番・
+複数納期・確度混在の注文一覧表）を対象に、`pdf_order_parsing_staging_row` フィクスチャ
+（`conftest.py`）でステージング行をDBに直接INSERTしてから `parse_pending_order_pdfs()` を
+実行し、実際の Supabase Storage・Claude API を使って以下を検証する:
+
+- 配線・データフロー: ステージング行 → テキスト抽出 → Claude抽出 → 製品照合 → order生成 →
+  order_attachments紐付け、という一連の処理が完走し `parse_status` が `success` になること
+- 抽出精度: 実在する製品については正しい数量・妥当な納期でorderが生成され、実在しない製品
+  （1文字違いの類似製品が製品マスタに存在するケース）は誤って別製品にマッチせず
+  `no_product_match` としてスキップされること
+
+テスト対象のPDF実体はfixtureとして使い回すため削除しない。生成された `orders` /
+ステージング行 / `order_parse_log` はテストごとに `run_id` で識別してteardownで削除する。
+
+### このテストで発見・修正した実装上の問題
+
+1. **`match_products` の自動確定条件**: 「pg_trgm候補が1件だけなら自動確定」というロジックは、
+   品番の1文字違いの別製品（デコイ）が唯一の候補としてヒットした場合に誤って自動確定して
+   しまう。「最上位候補のスコアが一定以上、かつ次点候補との差が一定以上」の条件に変更した
+   （`PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD` / `PRODUCT_MATCH_AUTO_CONFIRM_MARGIN`）。
+2. **品番でのproducts.name検索フォールバックの欠落**: `products.code` が未整備で、`name` 列に
+   品番文字列がそのまま登録されているテナントでは、旧ロジック（`product_name_raw` のみで
+   フォールバック検索）では品番と品名が別々に抽出されるPDFの明細をほぼマッチできなかった。
+   `product_number_raw` でも `products.name` をpg_trgm検索するフォールバックを追加した。
+3. **`customer_matching_service.resolve_or_create_customer` の既存バグ**: 存在しない
+   `customers.status` カラムへのINSERTを試みており、新規送信者からのメール受信時（本番の
+   メール起票フロー含む）に顧客自動作成が失敗していた。存在しないカラムへの参照を削除した。
 
 ---
 

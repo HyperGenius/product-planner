@@ -12,6 +12,13 @@ E2E テスト共通フィクスチャ
   E2E_GMAIL_TENANT_NAME     Gmailラベルのテナント名部分 (例: "株式会社テスト")
                             このテナントが gmail_label_tenants テーブルに登録済みであること
 
+test_pdf_order_parsing_flow.py の実行には追加で以下が必要:
+  ANTHROPIC_API_KEY         実際にClaude APIを呼び出すため
+  E2E_PDF_SAMPLE_STORAGE_PATH  order-attachments バケットに事前アップロード済みの
+                            実PDFのstorage_path（省略時は開発環境の既知のパスを使用）
+  E2E_GMAIL_TENANT_NAME のテナントの products テーブルに、上記PDF内の品番と
+  一致する製品（品名に品番文字列を含むもの）が登録されていること
+
 テスト実行:
   cd backend && pytest __tests__/e2e/ -v --run-e2e
 """
@@ -144,6 +151,89 @@ def admin_db(e2e_config: dict[str, str]) -> Client:
         e2e_config["SUPABASE_URL"],
         e2e_config["SUPABASE_SERVICE_ROLE_KEY"],
     )
+
+
+@pytest.fixture(scope="session")
+def e2e_tenant_id(admin_db: Client, e2e_config: dict[str, str]) -> str:
+    """E2E_GMAIL_TENANT_NAME に対応する tenant_id を返す。"""
+    tenant_name = e2e_config["E2E_GMAIL_TENANT_NAME"]
+    result = (
+        admin_db.table("gmail_label_tenants")
+        .select("tenant_id")
+        .eq("label_name", tenant_name)
+        .limit(1)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    if not rows:
+        pytest.skip(f"gmail_label_tenants に '{tenant_name}' が登録されていません。")
+    return str(rows[0]["tenant_id"])
+
+
+# ---------------------------------------------------------------------------
+# 受注PDF自動パース (Issue #249) 用フィクスチャ
+# ---------------------------------------------------------------------------
+
+# order-attachments バケットに事前アップロード済みの実PDF（飯野製作所フォーマット）。
+# PDF自体はfixtureとして使い回すため、テストのteardownで削除しない。
+_PDF_ORDER_PARSING_SAMPLE_STORAGE_PATH = os.environ.get(
+    "E2E_PDF_SAMPLE_STORAGE_PATH",
+    "22222222-2222-2222-2222-222222222222/inbox/"
+    "19f11bf6c43e9fb3/95b05a24b202428a9cf07ece25a8290d.pdf",
+)
+
+
+@pytest.fixture()
+def pdf_order_parsing_staging_row(
+    admin_db: Client, e2e_tenant_id: str
+) -> Generator[dict[str, Any], None, None]:
+    """
+    order-attachments バケットに既にアップロード済みの実PDFを指す
+    order_attachments ステージング行 (order_id=NULL, parse_status='pending') を
+    DBへ直接INSERTし、テスト後に削除する。PDF実体はStorageに残したまま。
+
+    yield するdict: ステージング行 + "_run_id" (このテスト実行を識別する文字列)
+    """
+    from app.services.customer_matching_service import resolve_or_create_customer
+
+    run_id = uuid.uuid4().hex[:8]
+    # 実際のPDF送信元（飯野製作所）を模したE2Eテスト専用顧客。
+    # resolve_or_create_customer は既存顧客があれば再利用するため、
+    # 複数回のテスト実行で顧客レコードが増殖することはない。
+    customer_id = resolve_or_create_customer(
+        admin_db, e2e_tenant_id, "e2e-pdf-parsing-test@example.com"
+    )
+
+    inserted = (
+        admin_db.table("order_attachments")
+        .insert(
+            {
+                "order_id": None,
+                "tenant_id": e2e_tenant_id,
+                "customer_id": customer_id,
+                "gmail_message_id": f"e2e-pdf-parsing-{run_id}",
+                "source_raw": f"E2Eテスト(PDFパース) run_id={run_id}",
+                "storage_path": _PDF_ORDER_PARSING_SAMPLE_STORAGE_PATH,
+                "original_filename": "sample_order.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": None,
+                "parse_status": "pending",
+            }
+        )
+        .execute()
+    )
+    row = cast(list[dict[str, Any]], inserted.data)[0]
+    row["_run_id"] = run_id
+
+    yield row
+
+    # --- teardown ---
+    # このテスト実行で生成された orders を削除（order_attachments は cascade で削除される）
+    admin_db.table("orders").delete().eq("tenant_id", e2e_tenant_id).like(
+        "source_raw", f"%run_id={run_id}%"
+    ).execute()
+    # ステージング行自体を削除（order_parse_log は cascade で削除される）
+    admin_db.table("order_attachments").delete().eq("id", row["id"]).execute()
 
 
 # ---------------------------------------------------------------------------

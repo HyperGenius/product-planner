@@ -102,9 +102,16 @@ def _process_line_item(
     product_number_raw = line.get("product_number_raw")
     product_name_raw = line.get("product_name_raw")
 
+    # 1. products.code の完全一致
+    # 2. products.name に対する品番文字列でのpg_trgm検索
+    #    （code列が未整備で、name列に品番文字列が入っているテナントに対応するため）
+    # 3. products.name に対する品名文字列でのpg_trgm検索
     product_id: int | None = None
     if product_number_raw:
         product_id = match_product_by_code(db, tenant_id, product_number_raw)
+    if product_id is None and product_number_raw:
+        match = match_products(db, tenant_id, product_number_raw)
+        product_id = match["product_id"]
     if product_id is None and product_name_raw:
         match = match_products(db, tenant_id, product_name_raw)
         product_id = match["product_id"]
