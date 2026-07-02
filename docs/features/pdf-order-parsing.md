@@ -3,6 +3,8 @@
 [order-attachments.md](order-attachments.md) の PDF ステージング基盤（Issue #248）を前提に、
 ステージングされた PDF を実際にパースし、1ファイルに含まれる複数品番・複数納期の明細を、
 確度別ステータス（確定/内示/内々示）付きの複数 `orders` 行として自動生成する（Issue #249）。
+さらに、同一dedupeキーの既存orderが見つかった場合はステータス昇格・数量更新を行う
+upsert処理に対応する（Issue #252）。
 
 ---
 
@@ -43,12 +45,16 @@ Issue #248 により PDF添付メールは `order_attachments` に `order_id=NUL
    b. すべて失敗した場合: order を生成せず order_parse_log に reason='no_product_match' で記録
    c. certainty → orders.status へ1:1マッピング (confirmed/forecast/forecast_tentative)
    d. customer_id はステージング行のものをそのまま使用（再照合しない）
-   e. SQL RPC create_order_skip_duplicate で orders に INSERT
-      (tenant_id, customer_id, product_id, deadline_date) の重複時は ON CONFLICT DO NOTHING
-      でスキップし、order_parse_log に reason='duplicate_skipped' で記録
-   f. 生成できた場合、対応する order_attachments 行を追加INSERT
+   e. SQL RPC upsert_order_by_dedupe_key で orders に INSERT/UPDATE
+      (tenant_id, customer_id, product_id, deadline_date) の重複時は既存orderの
+      ステータス昇格・数量更新を試み、`action` (inserted/updated/skipped_downgrade/
+      skipped_no_change/skipped_draft_conflict) に応じて分岐する（Issue #252、詳細後述）
+   f. `inserted`/`updated` の場合、対応する order_attachments 行を追加INSERT
       (order_id 設定済み、storage_path はステージング行と同一、parse_status='success')
       → 既存の `/orders/{order_id}/attachments` エンドポイント・UIがそのまま流用できる
+   g. `inserted` の場合のみ、同一 (tenant_id, customer_id, product_id) で異なる
+      deadline_date を持つ未来日付の forecast/forecast_tentative レコードに
+      `superseded_at = now()` をセットする（`_mark_superseded_orders`、Issue #252）
 5. 処理後、ステージング行自体の parse_status を更新する
    (テキスト抽出・Claude抽出が完走すれば、生成された order 数によらず 'success' とする。
    0件生成となるケース＝全明細が重複/照合失敗＝も、パース処理自体は正常に完了しているため。
@@ -57,16 +63,51 @@ Issue #248 により PDF添付メールは `order_attachments` に `order_id=NUL
 
 ### なぜ postgrest-py の `on_conflict` を使わないか
 
-supabase-py（postgrest-py）の `.insert(..., on_conflict=...)` は UPSERT（マージ）用であり、
-「重複時に何もしない」動作は表現できない。そのため `create_order_skip_duplicate` という
-SQL RPC 関数（`INSERT ... ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTHING RETURNING id`）
-を新設し、`inserted: boolean` で成否を返している。
+supabase-py（postgrest-py）の `.insert(..., on_conflict=...)` は単純なマージ用であり、
+「ステータスは昇格のみ許可・数量は差分があれば更新・draft/completed/canceledは対象外」
+といった条件付きロジックは表現できない。そのため SQL RPC 関数 `upsert_order_by_dedupe_key`
+（`orders%ROWTYPE` を `FOR UPDATE` で取得し、優先順位判定してINSERT/UPDATEを分岐）
+を実装し、`action` で結果を返している。
+
+### 既存orderのupsert処理（Issue #252）
+
+`upsert_order_by_dedupe_key` は `(tenant_id, customer_id, product_id, deadline_date)` の
+dedupeキーに一致する既存orderが見つかった場合、以下のルールで判定する。
+
+- ステータスの優先順位（数値が大きいほど確定度が高い）:
+  `forecast_tentative(0) < forecast(1) < confirmed(2) < completed(3)`。
+  既存 > 新規（格下げ）の場合は更新しない（`skipped_downgrade`）。
+  優先順位表にない `canceled` の既存orderも同様に上書き対象外（`skipped_downgrade`）
+- `status = 'draft'`（手動下書き）の既存orderは優先順位判定に入れず、常に
+  `skipped_draft_conflict` としてコンフリクト記録のみ行う（PDF自動処理で意図せず
+  上書きされないようにするため）
+- 優先順位が同じかつ数量も一致する場合は完全重複とみなし `skipped_no_change`
+  （この場合のみ `order_parse_log` への記録なし）
+- それ以外（昇格 or 同ステータスでの数量差分）は `status`/`quantity`/`source_*`/
+  `extracted_product_name` を更新し `updated` を返す
+
+`_process_line_item` は `action` に応じて分岐する:
+
+| action                    | order_attachments追加 | order_parse_log |
+|---------------------------|:---:|---|
+| `inserted`                | ○ | なし |
+| `updated`                 | ○ | なし |
+| `skipped_downgrade`       | - | `reason='downgrade_skipped'` |
+| `skipped_draft_conflict`  | - | `reason='draft_conflict_skipped'` |
+| `skipped_no_change`       | - | なし |
+
+`deadline_date` はdedupeキーの一部のため、内示の納期が翌月にずれるようなケースは
+既存の仕組みでは別レコードとして新規INSERTされる（旧レコードは残り続ける）。これは
+現時点で正式な引き継ぎ機能としては対応しないが、旧 `forecast`/`forecast_tentative`
+レコードが一覧に溜まり続けないよう、`inserted` の都度 `_mark_superseded_orders` で
+同一 `(tenant_id, customer_id, product_id)` の異なる未来日付レコードに
+`superseded_at = now()` をセットし、注文一覧 (`OrderRepository.get_all`) から除外する。
 
 ---
 
 ## DB スキーマ変更
 
-`supabase/migrations/20260702000000_add_order_status_forecast.sql`:
+`supabase/migrations/20260702000000_add_order_status_forecast.sql`（Issue #249）:
 
 - `orders.status` の CHECK制約を DROP + 再作成し、`forecast` / `forecast_tentative` を追加
   （text CHECK制約のため `ALTER TYPE ADD VALUE` は使えない）
@@ -75,8 +116,14 @@ SQL RPC 関数（`INSERT ... ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTH
     デデュープキーとして機能しない。パース処理側は `product_id` が確定した場合のみ
     このUNIQUE制約に依拠したINSERTを行うことで運用上回避している
 - 新規テーブル `order_parse_log`: `id, tenant_id, order_attachment_id (FK), reason, detail (jsonb), created_at`
-  - `reason`: `duplicate_skipped` / `no_product_match`
-- 新規 RPC 関数 `create_order_skip_duplicate`
+  - `reason`: `no_product_match` / `downgrade_skipped` / `draft_conflict_skipped`
+    （Issue #249時点の `duplicate_skipped` は Issue #252 で上記2種に置き換え）
+
+`supabase/migrations/20260702000001_add_order_upsert_by_dedupe_key.sql`（Issue #252）:
+
+- `orders.superseded_at timestamptz`（nullable）を追加
+- `create_order_skip_duplicate` を削除し、`upsert_order_by_dedupe_key` を新設
+  （唯一の呼び出し元 `pdf_order_parsing_service._process_line_item` を置き換え）
 
 ### `orders.status` の全定義
 
@@ -114,6 +161,14 @@ SQL RPC 関数（`INSERT ... ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTH
 - `backend/app/repositories/supa_infra/common/table_name.py`: `ORDER_PARSE_LOG` を追加
 - `backend/requirements.txt`: `pdfplumber==0.11.10`
 
+Issue #252 での追加:
+
+- `supabase/migrations/20260702000001_add_order_upsert_by_dedupe_key.sql`
+- `backend/app/services/pdf_order_parsing_service.py`: `_process_line_item` の
+  RPC呼び出しを `upsert_order_by_dedupe_key` に置き換え、`_mark_superseded_orders()` を追加
+- `backend/app/repositories/supa_infra/transaction/order_repo.py`: `get_all()` を
+  オーバーライドし `superseded_at IS NULL` でフィルタ
+
 ---
 
 ## 環境変数
@@ -141,17 +196,27 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 - [x] 生成された各orderから、対応する添付PDFが注文詳細画面からダウンロードできる
       （既存の `/orders/{order_id}/attachments` エンドポイントを変更なしで再利用）
 - [x] マイグレーション（CHECK制約変更、UNIQUE制約、`order_parse_log`）が適用済み
+- [x] 同一dedupeキーで `forecast` → `confirmed` の更新が正しく反映される（Issue #252）
+- [x] 同一dedupeキーで数量のみ変わった場合、数量が更新される（Issue #252）
+- [x] `confirmed` な既存orderへの `forecast` 明細は更新されず `downgrade_skipped` として記録される（Issue #252）
+- [x] `status='draft'` の既存orderへの明細は更新されず `draft_conflict_skipped` として記録される（Issue #252）
+- [x] 完全に値が一致する重複はログ記録なしでスキップされる（Issue #252）
+- [x] `updated` の場合も `order_attachments` に新しいPDFの添付レコードが追加で紐付けられる（Issue #252）
+- [x] `deadline_date` が変わった内示は新規orderとして生成され、旧レコードに `superseded_at` がセットされる（Issue #252）
+- [x] `superseded_at` が設定されたorderは注文一覧APIのレスポンスに含まれない（Issue #252）
 
 ---
 
 ## スコープ外
 
-- 既存orderへのupsert・更新処理（将来Issue）
 - PPAP（パスワード付きPDF）の自動復号
 - 複数添付ファイルへの対応（1メール1添付の前提を維持）
 - 重複スキップ・照合失敗の通知UI（将来Issue、`order_parse_log` を参照する前提）
 - ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 - `forecast`/`forecast_tentative` のUIフィルタータブ追加（別途検討）
+- `deadline_date` 変更を「同一注文の引き継ぎ」として明示的にUI上で提示する機能（Issue #252スコープ外）
+- `order_history`（変更履歴・監査ログ）テーブルの新設（Issue #252スコープ外）
+- ステータスの手動格下げ操作、`superseded_at` レコードの物理削除・アーカイブ処理（Issue #252スコープ外）
 
 ---
 
@@ -192,4 +257,5 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 ## 関連
 
 - [order-attachments.md](order-attachments.md): PDFステージング保存基盤（Issue #248、前提）
-- 後続: 既存order upsert処理、処理ログ通知基盤（`order_parse_log` を利用）
+- Issue #252: 既存orderのupsert処理（内示→確定の昇格・数量更新対応）。本ドキュメントに統合
+- 後続: 処理ログ通知基盤（`order_parse_log` を利用）
