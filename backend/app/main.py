@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.admin import admin_router
-from app.routers.cron import cron_router
+from app.routers.cron import cron_router, parse_order_pdfs_router
 from app.routers.master import (
     calendar_router,
     customer_router,
@@ -58,6 +58,7 @@ app.include_router(scheduling_settings_router)
 app.include_router(member_router)
 app.include_router(admin_router)
 app.include_router(cron_router)
+app.include_router(parse_order_pdfs_router)
 
 
 @app.get("/health")

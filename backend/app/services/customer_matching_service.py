@@ -23,7 +23,7 @@ def extract_sender_email(body: str) -> str | None:
 def resolve_or_create_customer(db: Client, tenant_id: str, email: str) -> int:
     """
     メールアドレスで顧客を検索し、存在すれば customer_id を返す。
-    存在しなければ draft 顧客を自動作成して返す。
+    存在しなければ顧客を自動作成して返す。
     """
     table = SupabaseTableName.CUSTOMERS.value
     result = (
@@ -41,9 +41,7 @@ def resolve_or_create_customer(db: Client, tenant_id: str, email: str) -> int:
 
     created = (
         db.table(table)
-        .insert(
-            {"tenant_id": tenant_id, "email": email, "name": email, "status": "draft"}
-        )
+        .insert({"tenant_id": tenant_id, "email": email, "name": email})
         .execute()
     )
     created_rows = cast(list[dict[str, Any]], created.data or [])

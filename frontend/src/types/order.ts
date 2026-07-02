@@ -9,7 +9,7 @@ export interface Order {
   quantity: number
   desired_deadline?: string // ISO 8601形式
   confirmed_deadline?: string // ISO 8601形式
-  status: 'draft' | 'confirmed' | 'completed' | 'canceled'
+  status: 'draft' | 'confirmed' | 'completed' | 'canceled' | 'forecast' | 'forecast_tentative'
   is_scheduled: boolean
   has_unconfirmed_routings?: boolean
   source_type: 'manual' | 'email'
