@@ -220,6 +220,22 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 
 ---
 
+## Integrationテスト（Issue #252）
+
+`backend/__tests__/integration/test_order_upsert_by_dedupe_key.py`
+（実行: `supabase start` の上で `pytest __tests__/integration/test_order_upsert_by_dedupe_key.py -v --run-integration`）。
+
+`upsert_order_by_dedupe_key` のステータス優先順位判定・数量更新・draft/canceledの
+上書き除外、および `_mark_superseded_orders` のクエリチェーンは Claude API・Gmail API
+の出力に依存しない決定的なDB/SQLロジックのため、実PDF・実Claude APIを使うe2e tierでは
+なく、ローカル Supabase のみで完結する integration tier で検証する
+（方針の詳細は `backend/__tests__/e2e/CLAUDE.md`, `backend/__tests__/integration/CLAUDE.md` を参照）。
+テストごとに専用の tenant/customer/product を作成し、`upsert_order_by_dedupe_key` RPC を
+直接呼び出して `action`（inserted/updated/skipped_downgrade/skipped_draft_conflict/
+skipped_no_change）と実DB上の状態を検証したのち、テナントごと削除してteardownする。
+
+---
+
 ## E2Eテスト
 
 `backend/__tests__/e2e/test_pdf_order_parsing_flow.py`（実行: `pytest __tests__/e2e/ -v --run-e2e`）。
