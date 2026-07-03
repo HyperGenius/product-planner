@@ -211,7 +211,7 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 
 - PPAP（パスワード付きPDF）の自動復号
 - 複数添付ファイルへの対応（1メール1添付の前提を維持）
-- 重複スキップ・照合失敗の通知UI（将来Issue、`order_parse_log` を参照する前提）
+- 重複スキップ・照合失敗の通知UI（[notifications.md](notifications.md) Issue #254 で対応）
 - ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 - `forecast`/`forecast_tentative` のUIフィルタータブ追加（別途検討）
 - `deadline_date` 変更を「同一注文の引き継ぎ」として明示的にUI上で提示する機能（Issue #252スコープ外）
@@ -274,4 +274,4 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 
 - [order-attachments.md](order-attachments.md): PDFステージング保存基盤（Issue #248、前提）
 - Issue #252: 既存orderのupsert処理（内示→確定の昇格・数量更新対応）。本ドキュメントに統合
-- 後続: 処理ログ通知基盤（`order_parse_log` を利用）
+- [notifications.md](notifications.md): 処理ログの通知UI（Issue #254、`order_parse_log` を利用）

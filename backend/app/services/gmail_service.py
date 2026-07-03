@@ -13,6 +13,7 @@ from app.services.customer_matching_service import (
     resolve_or_create_customer,
 )
 from app.services.email_extraction_service import extract_email_fields
+from app.services.notification_service import create_notification
 from app.services.product_matching_service import match_products
 from app.utils.logger import get_logger
 from supabase import Client
@@ -224,6 +225,27 @@ def _process_message(
         raw_fields = extract_email_fields(body)
         fields = {k: (None if v == "<UNKNOWN>" else v) for k, v in raw_fields.items()}
         logger.info(f"msg {msg_id}: extracted fields={fields}")
+
+        # 5.5 受注メールでない（本文から注文項目が一切抽出できない）場合は
+        #     orderを作成せず通知のみ記録する。顧客レコードも作成しない
+        #     （迷惑メール送信元で顧客テーブルを汚染しないため）。
+        if all(
+            fields.get(k) is None
+            for k in ("product_name", "quantity", "deadline_date", "order_number")
+        ):
+            create_notification(
+                db,
+                tenant_id,
+                "non_order_email",
+                "gmail_message",
+                msg_id,
+                {"body_snippet": body[:200]},
+            )
+            logger.info(
+                f"msg {msg_id}: no order fields extracted, skipping order creation"
+            )
+            _move_label(service, msg_id, done_id, processing_id)
+            return
 
         # 6. 製品マッチング
         product_id: int | None = None

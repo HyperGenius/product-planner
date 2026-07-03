@@ -17,7 +17,11 @@ from app.routers.master import (
     scheduling_settings_router,
 )
 from app.routers.tenant import member_router
-from app.routers.transaction import orders_router, production_schedules_router
+from app.routers.transaction import (
+    notifications_router,
+    orders_router,
+    production_schedules_router,
+)
 
 # .envファイルの読み込み
 load_dotenv()
@@ -53,6 +57,7 @@ app.include_router(process_routing_router)
 app.include_router(calendar_router)
 app.include_router(customer_router)
 app.include_router(orders_router)
+app.include_router(notifications_router)
 app.include_router(production_schedules_router)
 app.include_router(scheduling_settings_router)
 app.include_router(member_router)
