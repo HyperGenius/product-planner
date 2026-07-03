@@ -221,6 +221,43 @@ class TestUpsertOrderByDedupeKey:
         assert order["status"] == "confirmed"
         assert order["quantity"] == 10
 
+    def test_completed_existing_rejects_same_priority_quantity_change(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            status="completed",
+        )
+
+        # completed 同士でも数量差分だけでは上書きしない
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=999,
+            deadline_date=_FUTURE_DEADLINE,
+            status="completed",
+        )
+
+        assert second["action"] == "skipped_downgrade"
+
+        order = (
+            admin_db.table("orders")
+            .select("status, quantity")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["status"] == "completed"
+        assert order["quantity"] == 10
+
     def test_canceled_existing_rejects_any_update(self, admin_db, dedupe_fixture):
         first = _upsert(
             admin_db,

@@ -17,6 +17,14 @@ _CERTAINTY_TO_STATUS = {
     "forecast_tentative": "forecast_tentative",
 }
 
+_KNOWN_UPSERT_ACTIONS = {
+    "inserted",
+    "updated",
+    "skipped_no_change",
+    "skipped_downgrade",
+    "skipped_draft_conflict",
+}
+
 
 def parse_pending_order_pdfs(db: Client) -> dict[str, int]:
     """
@@ -151,6 +159,12 @@ def _process_line_item(
     rpc_rows = cast(list[dict[str, Any]], rpc_result.data or [])
     action = rpc_rows[0]["action"] if rpc_rows else None
 
+    if action not in _KNOWN_UPSERT_ACTIONS:
+        raise RuntimeError(
+            f"upsert_order_by_dedupe_key returned unexpected result "
+            f"for attachment {attachment_id}: rows={rpc_rows}"
+        )
+
     if action == "skipped_downgrade":
         _log_parse_event(
             db,
@@ -171,7 +185,7 @@ def _process_line_item(
         )
         return False
 
-    if action == "skipped_no_change" or action is None:
+    if action == "skipped_no_change":
         return False
 
     # action == "inserted" or "updated"

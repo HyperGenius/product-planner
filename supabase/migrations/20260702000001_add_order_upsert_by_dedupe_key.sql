@@ -12,7 +12,7 @@ ALTER TABLE orders ADD COLUMN superseded_at timestamptz;
 
 COMMENT ON COLUMN orders.superseded_at IS
   '内示の納期が前後した等の理由で後続のorderに引き継がれたレコードにセットされる。'
-  'NULLでない場合は注文一覧から除外表示される（物理削除はしない）。';
+  ' NULLでない場合は注文一覧から除外表示される（物理削除はしない）。';
 
 -- ==========================================
 -- create_order_skip_duplicate を削除し、upsert_order_by_dedupe_key を新設
@@ -44,6 +44,26 @@ DECLARE
   v_existing_priority int;
   v_new_priority      int;
 BEGIN
+  -- 先にINSERTを試み、UNIQUE制約(orders_dedupe_key)の競合でしか
+  -- 「既存あり」を判定しない。SELECTしてから未存在ならINSERTする順序だと、
+  -- 同一dedupeキーへの並行呼び出しが両方SELECTでNOT FOUNDと判定してしまい、
+  -- 片方が23505で例外終了する競合が起こり得るため。
+  INSERT INTO orders (
+    tenant_id, customer_id, product_id, quantity, deadline_date,
+    status, source_type, source_raw, extracted_product_name
+  )
+  VALUES (
+    p_tenant_id, p_customer_id, p_product_id, p_quantity, p_deadline_date,
+    p_status, p_source_type, p_source_raw, p_extracted_product_name
+  )
+  ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTHING
+  RETURNING orders.id INTO v_new_id;
+
+  IF v_new_id IS NOT NULL THEN
+    RETURN QUERY SELECT v_new_id, 'inserted'::text;
+    RETURN;
+  END IF;
+
   SELECT * INTO v_existing
   FROM orders
   WHERE tenant_id = p_tenant_id
@@ -52,24 +72,18 @@ BEGIN
     AND deadline_date = p_deadline_date
   FOR UPDATE;
 
-  IF NOT FOUND THEN
-    INSERT INTO orders (
-      tenant_id, customer_id, product_id, quantity, deadline_date,
-      status, source_type, source_raw, extracted_product_name
-    )
-    VALUES (
-      p_tenant_id, p_customer_id, p_product_id, p_quantity, p_deadline_date,
-      p_status, p_source_type, p_source_raw, p_extracted_product_name
-    )
-    RETURNING orders.id INTO v_new_id;
-
-    RETURN QUERY SELECT v_new_id, 'inserted'::text;
-    RETURN;
-  END IF;
-
   -- draft（手動下書き）は自動更新の対象外。常にコンフリクトとしてログのみ記録する。
   IF v_existing.status = 'draft' THEN
     RETURN QUERY SELECT v_existing.id, 'skipped_draft_conflict'::text;
+    RETURN;
+  END IF;
+
+  -- completed（完了）は自動更新の対象外。同一優先度での数量差分でも
+  -- 上書きしてはならないため、優先順位判定に入る前に早期returnする。
+  -- canceled は優先順位テーブルに存在せず NULL 優先度として下記の
+  -- skipped_downgrade 分岐で同様に保護される。
+  IF v_existing.status = 'completed' THEN
+    RETURN QUERY SELECT v_existing.id, 'skipped_downgrade'::text;
     RETURN;
   END IF;
 
