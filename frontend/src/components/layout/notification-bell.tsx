@@ -39,15 +39,17 @@ export function NotificationBell() {
   const unreadCount = notifications.filter((n) => n.read_at === null).length
   const groups = groupByType(notifications)
 
-  const handleOpenChange = (nextOpen: boolean) => {
-    setOpen(nextOpen)
-    if (nextOpen && unreadCount > 0) {
+  // Popoverが開いている間、初回ロード遅延や再フェッチで未読が後から
+  // 増えるケースでも取りこぼさず既読化する（isPendingで多重送信を防ぐ）
+  React.useEffect(() => {
+    if (open && unreadCount > 0 && !markRead.isPending) {
       markRead.mutate()
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, unreadCount])
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="size-5" />

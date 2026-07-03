@@ -30,9 +30,21 @@ _PARSE_LOG_NOTIF_TYPES = {
 
 
 def _resolve_link_url(
-    admin_client: Client, notif_type: str, source_table: str, source_id: str | None
+    admin_client: Client,
+    tenant_id: str,
+    notif_type: str,
+    source_table: str,
+    source_id: str | None,
 ) -> str | None:
-    """通知の遷移先URLを解決する。取得できない場合は None。"""
+    """
+    通知の遷移先URLを解決する。取得できない場合は None。
+
+    admin_client（Service Role Key、RLSバイパス）を使うため、参照先クエリには
+    必ず notifications 行自身の tenant_id を条件に含める。source_id は notifications
+    行の値をそのまま使っているため、これを怠ると他テナントの order_parse_log /
+    order_attachments 行を参照でき、他テナントの添付ファイルの署名付きURLが
+    生成できてしまう（IDOR）。
+    """
     if source_id is None:
         return None
 
@@ -47,6 +59,7 @@ def _resolve_link_url(
             admin_client.table(SupabaseTableName.ORDER_PARSE_LOG.value)
             .select("order_attachment_id")
             .eq("id", source_id)
+            .eq("tenant_id", tenant_id)
             .limit(1)
             .execute()
         )
@@ -60,6 +73,7 @@ def _resolve_link_url(
         admin_client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
         .select("storage_path")
         .eq("id", attachment_id)
+        .eq("tenant_id", tenant_id)
         .limit(1)
         .execute()
     )
@@ -100,6 +114,7 @@ def get_notifications(
             created_at=str(row["created_at"]),
             link_url=_resolve_link_url(
                 admin_client,
+                row["tenant_id"],
                 row["notif_type"],
                 row["source_table"],
                 row.get("source_id"),
@@ -112,12 +127,19 @@ def get_notifications(
 @notifications_router.patch("/read")
 def mark_notifications_read(
     tenant_id: str = Depends(get_current_tenant_id),
-    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """未読の通知を全件既読化する"""
+    """
+    未読の通知を全件既読化する。
+
+    notifications は認証ユーザーに SELECT のみ許可しており（他テナントの
+    行を経由した情報漏えいを避けるため）、UPDATE は admin_client 経由で行う。
+    x-tenant-id ヘッダー由来の tenant_id で対象を絞り込む
+    （他の admin_client 使用箇所と同じパターン）。
+    """
     logger.info("Marking notifications as read")
     now = datetime.now(UTC).isoformat()
-    client.table(SupabaseTableName.NOTIFICATIONS.value).update({"read_at": now}).eq(
-        "tenant_id", tenant_id
-    ).is_("read_at", "null").execute()
+    admin_client.table(SupabaseTableName.NOTIFICATIONS.value).update(
+        {"read_at": now}
+    ).eq("tenant_id", tenant_id).is_("read_at", "null").execute()
     return {"status": "read"}
