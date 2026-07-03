@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
@@ -14,6 +15,14 @@ _CERTAINTY_TO_STATUS = {
     "confirmed": "confirmed",
     "forecast": "forecast",
     "forecast_tentative": "forecast_tentative",
+}
+
+_KNOWN_UPSERT_ACTIONS = {
+    "inserted",
+    "updated",
+    "skipped_no_change",
+    "skipped_downgrade",
+    "skipped_draft_conflict",
 }
 
 
@@ -131,15 +140,16 @@ def _process_line_item(
 
     certainty = cast(str | None, line.get("certainty"))
     status = _CERTAINTY_TO_STATUS.get(certainty or "", "forecast_tentative")
+    deadline_date = line.get("delivery_date")
 
     rpc_result = db.rpc(
-        "create_order_skip_duplicate",
+        "upsert_order_by_dedupe_key",
         {
             "p_tenant_id": tenant_id,
             "p_customer_id": staging_row.get("customer_id"),
             "p_product_id": product_id,
             "p_quantity": line.get("quantity"),
-            "p_deadline_date": line.get("delivery_date"),
+            "p_deadline_date": deadline_date,
             "p_status": status,
             "p_source_type": "email",
             "p_source_raw": staging_row.get("source_raw"),
@@ -147,18 +157,39 @@ def _process_line_item(
         },
     ).execute()
     rpc_rows = cast(list[dict[str, Any]], rpc_result.data or [])
+    action = rpc_rows[0]["action"] if rpc_rows else None
 
-    if not rpc_rows or not rpc_rows[0].get("inserted"):
+    if action not in _KNOWN_UPSERT_ACTIONS:
+        raise RuntimeError(
+            f"upsert_order_by_dedupe_key returned unexpected result "
+            f"for attachment {attachment_id}: rows={rpc_rows}"
+        )
+
+    if action == "skipped_downgrade":
         _log_parse_event(
             db,
             tenant_id,
             attachment_id,
-            "duplicate_skipped",
-            {"product_id": product_id, "deadline_date": line.get("delivery_date")},
+            "downgrade_skipped",
+            {"product_id": product_id, "deadline_date": deadline_date},
         )
         return False
 
-    order_id = rpc_rows[0]["id"]
+    if action == "skipped_draft_conflict":
+        _log_parse_event(
+            db,
+            tenant_id,
+            attachment_id,
+            "draft_conflict_skipped",
+            {"product_id": product_id, "deadline_date": deadline_date},
+        )
+        return False
+
+    if action == "skipped_no_change":
+        return False
+
+    # action == "inserted" or "updated"
+    order_id = rpc_rows[0]["order_id"]
     db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
         {
             "order_id": order_id,
@@ -171,9 +202,46 @@ def _process_line_item(
         }
     ).execute()
     logger.info(
-        f"pdf_order_parsing: order {order_id} created from attachment {attachment_id}"
+        f"pdf_order_parsing: order {order_id} {action} from attachment {attachment_id}"
     )
+
+    if action == "inserted":
+        _mark_superseded_orders(db, tenant_id, staging_row, product_id, deadline_date)
+
     return True
+
+
+def _mark_superseded_orders(
+    db: Client,
+    tenant_id: str,
+    staging_row: dict[str, Any],
+    product_id: int,
+    deadline_date: str | None,
+) -> None:
+    """
+    同一 (tenant_id, customer_id, product_id) で異なる deadline_date の
+    forecast/forecast_tentative かつ未来日付のレコードを superseded_at で無効化する。
+
+    deadline_date がdedupeキーの一部であるため、内示の納期が前後した場合は
+    別レコードとして新規INSERTされる。旧レコードが一覧に残り続けないようにする
+    最低限のケア（Issue #252）。
+    """
+    if deadline_date is None:
+        return
+
+    now = datetime.now(UTC).isoformat()
+    (
+        db.table(SupabaseTableName.ORDERS.value)
+        .update({"superseded_at": now})
+        .eq("tenant_id", tenant_id)
+        .eq("customer_id", staging_row.get("customer_id"))
+        .eq("product_id", product_id)
+        .neq("deadline_date", deadline_date)
+        .gt("deadline_date", datetime.now(UTC).date().isoformat())
+        .in_("status", ["forecast", "forecast_tentative"])
+        .is_("superseded_at", "null")
+        .execute()
+    )
 
 
 def _log_parse_event(

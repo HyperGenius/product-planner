@@ -3,7 +3,7 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from supabase import create_client
+from supabase import Client, create_client
 
 load_dotenv()
 
@@ -27,3 +27,17 @@ def auth_token(real_supabase_client):
         {"email": TEST_USER_EMAIL, "password": TEST_USER_PASS}
     )
     return res.session.access_token
+
+
+@pytest.fixture(scope="session")
+def admin_db() -> Client:
+    """
+    Service Role Key を使った Supabase 管理者クライアント。
+    RLSを経由せずテスト用データのセットアップ・後始末を行うために使う。
+    Gmail/Claude APIには依存しないため、ローカル `supabase start` があれば動く。
+    """
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        pytest.skip("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set")
+    return create_client(url, key)

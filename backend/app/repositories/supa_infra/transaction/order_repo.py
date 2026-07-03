@@ -8,6 +8,16 @@ class OrderRepository(BaseRepository):
     def __init__(self, client):
         super().__init__(client, SupabaseTableName.ORDERS.value)
 
+    def get_all(self) -> list[dict]:
+        """全件取得（superseded_at がセットされた注文は一覧から除外する）"""
+        res = (
+            self.client.table(self.table_name)
+            .select("*")
+            .is_("superseded_at", "null")
+            .execute()
+        )
+        return cast(list[dict[str, Any]], res.data or [])
+
     def get_all_with_routing_status(self) -> list[dict]:
         """全注文を has_unconfirmed_routings フラグ付きで取得（2クエリ、N+1なし）"""
         orders = self.get_all()
