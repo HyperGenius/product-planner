@@ -141,8 +141,35 @@ CREATE TABLE notifications (
 
 ---
 
+## テスト（Issue #256）
+
+単体テストのみでカバーできなかった、実際のPostgres（RLS込み）でしか検証できない挙動を
+`backend/__tests__/integration/test_notifications_rls.py` に追加した。
+
+- `notifications` の RLSポリシー（SELECTのみ許可、INSERT/UPDATE/DELETEはデフォルト拒否）
+  — 自テナント/他テナントの可視性、ユーザーJWT経由の直接書き込みが拒否されること
+- `GET /notifications` の `_resolve_link_url` におけるIDOR修正（commit 868a45f）の回帰テスト
+  — `order_attachments` / `order_parse_log` いずれの経路でも、`source_id` が他テナントの行を
+  指していても `link_url` が `None` になること
+- `PATCH /notifications/read` が自テナントの未読分のみを対象にすること、既読済み行への
+  再実行が冪等であること
+
+あわせて、`backend/__tests__/integration/conftest.py` の `TEST_USER_EMAIL` / `TEST_USER_PASS` /
+`TEST_TENANT_ID` が `.env` の実際のシード値と乖離したハードコード値（`user_a@example.com` 等）
+になっており、ログイン自体に失敗する状態だったため `.env` の値を読むよう修正した
+（`real_supabase_client` の `SUPABASE_KEY` → `SUPABASE_ANON_KEY` の誤りも合わせて修正）。
+`test_rls_scenarios.py` は本Issueのスコープ外のため未着手（`/api/products/` という誤った
+パスを使っており引き続き失敗する既知の問題）。
+
+実行:
+```bash
+supabase start
+cd backend && pytest __tests__/integration/test_notifications_rls.py -v --run-integration
+```
+
 ## 関連
 
 - [pdf-order-parsing.md](pdf-order-parsing.md): PDF自動パース処理（Issue #249, #252、通知発生元）
 - [email-order-intake.md](email-order-intake.md): メール起票の基盤設計
 - Issue #249, #252: `order_parse_log` への記録処理（本Issueの通知発生元）
+- Issue #256: integrationテスト追加（RLS/IDOR回帰）
