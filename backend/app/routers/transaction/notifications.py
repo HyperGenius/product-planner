@@ -91,14 +91,22 @@ def _resolve_link_url(
 
 @notifications_router.get("", response_model=list[NotificationResponse])
 def get_notifications(
+    tenant_id: str = Depends(get_current_tenant_id),
     client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """通知を新着順に全件取得（各通知の遷移先URL付き）"""
+    """通知を新着順に全件取得（各通知の遷移先URL付き）
+
+    RLS の is_tenant_member(tenant_id) は所属する全テナントの行を許可するため、
+    複数テナントに所属するユーザーが他テナントの通知を受け取らないよう
+    x-tenant-id ヘッダーの tenant_id で明示的に絞り込む
+    （PATCH /notifications/read と同じ絞り込みに揃える）。
+    """
     logger.info("Fetching notifications")
     result = (
         client.table(SupabaseTableName.NOTIFICATIONS.value)
         .select("*")
+        .eq("tenant_id", tenant_id)
         .order("created_at", desc=True)
         .execute()
     )

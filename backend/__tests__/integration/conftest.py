@@ -18,8 +18,10 @@ TEST_TENANT_ID = os.environ.get("TEST_TENANT_ID", "")
 
 @pytest.fixture(scope="session")
 def real_supabase_client():
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_ANON_KEY"]
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_ANON_KEY")
+    if not url or not key:
+        pytest.skip("SUPABASE_URL / SUPABASE_ANON_KEY not set")
     return create_client(url, key)
 
 
@@ -31,6 +33,8 @@ def auth_session(real_supabase_client):
     ため、以降 real_supabase_client.table(...) 経由のクエリはこのユーザーの
     JWTでRLSを通る（notifications への直接INSERT/UPDATE拒否の検証等で利用）。
     """
+    if not TEST_USER_EMAIL or not TEST_USER_PASS:
+        pytest.skip("TEST_USER_EMAIL / TEST_USER_PASS not set")
     return real_supabase_client.auth.sign_in_with_password(
         {"email": TEST_USER_EMAIL, "password": TEST_USER_PASS}
     )

@@ -158,6 +158,43 @@ class TestNotificationsRls:
         source_ids = [n["source_id"] for n in res.json()]
         assert "msg-other-hidden" not in source_ids
 
+    def test_notification_of_other_membership_is_not_mixed_in(
+        self, auth_token, admin_db, auth_user_id, notif_tenants
+    ):
+        """
+        ユーザーが own/other 両テナントに所属する場合の回帰テスト。
+        is_tenant_member(tenant_id) は所属する全テナントの行を許可するため、
+        x-tenant-id で明示的に絞り込まないと other テナントの通知が
+        own テナント選択時の一覧に混ざってしまう。
+        """
+        admin_db.table("organization_members").insert(
+            {"user_id": auth_user_id, "tenant_id": notif_tenants["other_id"]}
+        ).execute()
+        try:
+            admin_db.table("notifications").insert(
+                {
+                    "tenant_id": notif_tenants["other_id"],
+                    "notif_type": "non_order_email",
+                    "source_table": "gmail_message",
+                    "source_id": "msg-other-membership-hidden",
+                }
+            ).execute()
+
+            res = client.get(
+                "/notifications",
+                headers={
+                    "Authorization": f"Bearer {auth_token}",
+                    "x-tenant-id": notif_tenants["own_id"],
+                },
+            )
+            assert res.status_code == 200
+            source_ids = [n["source_id"] for n in res.json()]
+            assert "msg-other-membership-hidden" not in source_ids
+        finally:
+            admin_db.table("organization_members").delete().eq(
+                "user_id", auth_user_id
+            ).eq("tenant_id", notif_tenants["other_id"]).execute()
+
     def test_direct_insert_via_user_jwt_is_rejected(
         self, real_supabase_client, notif_tenants
     ):
