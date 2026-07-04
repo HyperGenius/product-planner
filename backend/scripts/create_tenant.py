@@ -5,7 +5,8 @@ Usage:
     python scripts/create_tenant.py \
         --company-name "株式会社〇〇" \
         --owner-email "xxx@example.com" \
-        --owner-name "山田太郎"
+        --owner-name "山田太郎" \
+        --gmail-label "株式会社〇〇"  # Gmail受注起票を使う場合のみ指定
 """
 
 import argparse
@@ -50,7 +51,12 @@ def _get_admin_client():
     return create_client(url, key)
 
 
-def create_tenant(company_name: str, owner_email: str, owner_name: str) -> None:
+def create_tenant(
+    company_name: str,
+    owner_email: str,
+    owner_name: str,
+    gmail_label: str | None = None,
+) -> None:
     admin_client = _get_admin_client()
     password = _generate_password()
 
@@ -115,6 +121,29 @@ def create_tenant(company_name: str, owner_email: str, owner_name: str) -> None:
         print("Supabase Studio で手動確認してください。", file=sys.stderr)
         sys.exit(1)
 
+    # Step 4: gmail_label_tenants へ登録（--gmail-label 指定時のみ）
+    gmail_label_registered = False
+    if gmail_label:
+        try:
+            admin_client.table("gmail_label_tenants").insert(
+                {"label_name": gmail_label, "tenant_id": tenant_id}
+            ).execute()
+            gmail_label_registered = True
+        except Exception as e:
+            print(
+                f"警告: gmail_label_tenants の登録に失敗しました: {e}",
+                file=sys.stderr,
+            )
+            print(
+                "  テナント作成自体は完了しています。手動でSupabase SQL Editorから登録してください:",
+                file=sys.stderr,
+            )
+            print(
+                f"  INSERT INTO gmail_label_tenants (label_name, tenant_id) "
+                f"VALUES ('{gmail_label}', '{tenant_id}');",
+                file=sys.stderr,
+            )
+
     # 結果を stdout のみに表示
     print("=== テナント作成完了 ===")
     print(f"テナント名  : {company_name}")
@@ -124,6 +153,15 @@ def create_tenant(company_name: str, owner_email: str, owner_name: str) -> None:
     print(f"初期パスワード: {password}")
     print("======================")
     print("※ 初期パスワードを安全に顧客へ伝達してください")
+
+    if gmail_label_registered:
+        print()
+        print("=== Gmail連携: 次のステップ (要手動対応) ===")
+        print(f"gmail_label_tenants への登録は完了しました（label_name={gmail_label}）")
+        print("受信用Gmailアカウント側で以下のラベルを作成してください:")
+        for prefix in ("pp-pending", "pp-processing", "pp-done", "pp-error"):
+            print(f"  {prefix}/{gmail_label}")
+        print("==========================================")
 
 
 def _rollback(admin_client, user_id: str, tenant_id: str | None) -> None:
@@ -162,6 +200,14 @@ def main() -> None:
     parser.add_argument("--owner-email", required=True, help="オーナーのメールアドレス")
     parser.add_argument("--owner-name", required=True, help="オーナーの氏名")
     parser.add_argument(
+        "--gmail-label",
+        default=None,
+        help=(
+            "Gmail受注起票を有効にする場合の gmail_label_tenants.label_name "
+            "（Gmail側のラベルサフィックスと完全一致させること。省略時は登録しない）"
+        ),
+    )
+    parser.add_argument(
         "--env-file",
         default=None,
         help="読み込む .env ファイルのパス（省略時は scripts/.env）",
@@ -179,6 +225,7 @@ def main() -> None:
         company_name=args.company_name,
         owner_email=args.owner_email,
         owner_name=args.owner_name,
+        gmail_label=args.gmail_label,
     )
 
 

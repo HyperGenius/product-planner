@@ -115,7 +115,19 @@ Gmail の設定 → フィルタ → フィルタを作成 で以下を設定す
 
 ## Step 5: gmail_label_tenants テーブルにエントリを追加する
 
-Supabase ダッシュボード → SQL Editor で以下を実行する。
+新規テナント作成時は `backend/scripts/create_tenant.py` に `--gmail-label` を指定すると自動で登録される。
+
+```bash
+python scripts/create_tenant.py \
+    --company-name "テナントA" \
+    --owner-email "xxx@example.com" \
+    --owner-name "山田太郎" \
+    --gmail-label "テナントA"
+```
+
+既存テナントへの追加登録やラベル名の変更など、上記スクリプトでカバーされないメンテナンスは
+Supabase ダッシュボード → SQL Editor で直接行う（このテーブルはアプリ管理者のみが関心を持つ運用データのため、
+専用の管理APIは設けていない）。
 
 ```sql
 INSERT INTO gmail_label_tenants (label_name, tenant_id)
@@ -127,6 +139,9 @@ VALUES ('テナントA', '<tenant_id_uuid>');
 ```sql
 SELECT id, name FROM tenants;
 ```
+
+登録後、Gmail アカウント側で `pp-pending/テナントA` 等のラベルを実際に作成することを忘れないこと
+（`gmail_label_tenants` への登録と Gmail 上のラベル作成は別々の手作業であり、自動連携されない）。
 
 ---
 
