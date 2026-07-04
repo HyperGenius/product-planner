@@ -47,6 +47,14 @@ def auth_token(auth_session):
 
 
 @pytest.fixture(scope="session")
+def tenant_id():
+    """ログインユーザーの所属テナントID（.env の TEST_TENANT_ID）。"""
+    if not TEST_TENANT_ID:
+        pytest.skip("TEST_TENANT_ID not set")
+    return TEST_TENANT_ID
+
+
+@pytest.fixture(scope="session")
 def auth_user_id(auth_session):
     """ログインユーザーの auth.users.id。テスト用テナントへのメンバー登録に使う。"""
     return auth_session.user.id
