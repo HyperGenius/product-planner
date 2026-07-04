@@ -99,6 +99,11 @@ CREATE TABLE notifications (
 署名付きURL生成のため admin クライアント（Service Role Key）を使用する
 （既存 `/orders/{order_id}/attachments` と同じパターン）。
 
+RLSの `is_tenant_member(tenant_id)` は所属する全テナントの行を許可するため、
+複数テナントに所属するユーザーの場合に他テナントの通知が混ざらないよう
+`x-tenant-id` ヘッダーの tenant_id で明示的に絞り込む（`PATCH /notifications/read`
+と同じ絞り込みに揃えている）。
+
 ---
 
 ## フロントエンド設計
@@ -112,6 +117,7 @@ CREATE TABLE notifications (
   - 各通知は `link_url` があればクリックで新規タブ遷移、なければテキスト表示のみ
   - `Popover` の `onOpenChange(true)` タイミングで未読があれば既読化 mutation を発火
     （mount時の `useEffect` では発火させない。ユーザーが見る前にバッジが消えるのを防ぐため）
+  - ベルボタンはアイコンのみのため `aria-label`（未読件数を含む）でスクリーンリーダー向けに補足
 - マウント位置: `frontend/src/components/layout/authenticated-layout.tsx` のheader内
   （ページタイトルと同じ行、右端）
 
@@ -153,11 +159,17 @@ CREATE TABLE notifications (
   指していても `link_url` が `None` になること
 - `PATCH /notifications/read` が自テナントの未読分のみを対象にすること、既読済み行への
   再実行が冪等であること
+- ユーザーが複数テナント（own/other）に所属する場合、`GET /notifications` が
+  `x-tenant-id` で選択したテナント以外の通知を混ぜないこと（Copilotレビュー指摘の回帰テスト。
+  `is_tenant_member(tenant_id)` だけでは所属する全テナントの行を許可してしまうため、
+  ルータ側で明示的に `tenant_id` を絞り込む必要がある）
 
 あわせて、`backend/__tests__/integration/conftest.py` の `TEST_USER_EMAIL` / `TEST_USER_PASS` /
 `TEST_TENANT_ID` が `.env` の実際のシード値と乖離したハードコード値（`user_a@example.com` 等）
 になっており、ログイン自体に失敗する状態だったため `.env` の値を読むよう修正した
 （`real_supabase_client` の `SUPABASE_KEY` → `SUPABASE_ANON_KEY` の誤りも合わせて修正）。
+必須環境変数（`SUPABASE_URL` / `SUPABASE_ANON_KEY` / `TEST_USER_EMAIL` / `TEST_USER_PASS`）が
+未設定の場合は `KeyError` や分かりにくいログイン失敗ではなく `pytest.skip` で明示的にスキップする。
 `test_rls_scenarios.py` は本Issueのスコープ外のため未着手（`/api/products/` という誤った
 パスを使っており引き続き失敗する既知の問題）。
 
