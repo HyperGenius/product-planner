@@ -202,6 +202,18 @@ interface OrderCreate {
 
 プレフィックスは環境変数で変更可能（デフォルト: `pp-pending`, `pp-processing`, `pp-done`, `pp-error`）。
 
+### テナント登録（`gmail_label_tenants`）
+
+Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail_label_tenants` テーブルで管理する。
+この登録が漏れると該当メールは `pp-error/{テナント名}` に落ちて起票されない（`tenant not found for label` エラー）。
+
+新規テナント作成時は `backend/scripts/create_tenant.py --gmail-label <ラベル名>` で自動登録できる。
+このテーブルはアプリ管理者専用の運用データであり、アプリユーザー向けAPIは設けていない。
+既存テナントへの追加・変更はSupabase SQL Editorで直接行う（詳細は `docs/infra/env-setup-gmail-cron.md` Step 5）。
+
+登録後、Gmail アカウント側で `pp-pending/{テナント名}` 等のラベルを実際に作成する作業は別途手動で必要
+（`gmail_label_tenants` への登録とGmail上のラベル作成は自動連携されない）。
+
 ### 環境変数
 
 | 変数名 | デフォルト | 説明 |
