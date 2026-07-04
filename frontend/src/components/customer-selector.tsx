@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useCustomers } from "@/hooks/use-customers"
+import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 
 interface CustomerSelectorProps {
@@ -52,7 +53,12 @@ export function CustomerSelector({
               <SelectItem value={CLEAR_SELECTION_VALUE}>選択を解除</SelectItem>
               {customers.map((customer) => (
                 <SelectItem key={customer.id} value={customer.id.toString()}>
-                  {customer.name}
+                  <span className="flex items-center gap-2">
+                    {customer.name}
+                    {customer.status === "draft" && (
+                      <Badge variant="secondary">下書き</Badge>
+                    )}
+                  </span>
                 </SelectItem>
               ))}
             </>

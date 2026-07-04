@@ -96,7 +96,8 @@ class TestProcessMessagePdfStaging:
     def _mock_gmail_service(self):
         mock_service = MagicMock()
         mock_service.users().messages().get().execute.return_value = {
-            "payload": {"parts": []}
+            "payload": {"parts": []},
+            "internalDate": "1751500000000",
         }
         return mock_service
 
@@ -125,7 +126,7 @@ class TestProcessMessagePdfStaging:
             ),
             patch(
                 "app.services.gmail_service.resolve_or_create_customer",
-                return_value=42,
+                return_value=(42, False),
             ) as mock_resolve_customer,
             patch(
                 "app.services.gmail_service.upload_staged_attachment",
@@ -148,7 +149,7 @@ class TestProcessMessagePdfStaging:
             mock_db, "tenant-1", "msg-1", "order.pdf", b"%PDF-1.4", "application/pdf"
         )
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "customer@example.com"
+            mock_db, "tenant-1", "customer@example.com", "1751500000000"
         )
 
         inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
@@ -196,6 +197,10 @@ class TestProcessMessagePdfStaging:
                 return_value={"product_id": None, "candidates": []},
             ),
             patch(
+                "app.services.gmail_service.resolve_or_create_customer",
+                return_value=(7, True),
+            ) as mock_resolve_customer,
+            patch(
                 "app.services.gmail_service.upload_attachment",
                 return_value="tenant-1/orders/99/def.txt",
             ) as mock_upload,
@@ -208,6 +213,20 @@ class TestProcessMessagePdfStaging:
         # 既存フロー: 添付が非PDFなら即時orderが作成され、ステージング保存は呼ばれない
         mock_upload_staged.assert_not_called()
         mock_upload.assert_called_once()
+
+        # メールアドレスが取れない場合も customer_id は必ず設定され、下書き作成の通知が記録される
+        mock_resolve_customer.assert_called_once_with(
+            mock_db, "tenant-1", None, "1751500000000"
+        )
+        notif_inserts = [
+            call.args[0]
+            for call in mock_db.table("notifications").insert.call_args_list
+            if call.args and "notif_type" in call.args[0]
+        ]
+        assert len(notif_inserts) == 1
+        assert notif_inserts[0]["notif_type"] == "customer_draft_created"
+        assert notif_inserts[0]["source_id"] == "msg-2"
+        assert notif_inserts[0]["detail"]["customer_id"] == 7
         assert any(
             call.args and call.args[0] == "orders"
             for call in mock_db.table.call_args_list

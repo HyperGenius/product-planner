@@ -10,6 +10,7 @@ import {
   useDeleteCustomer,
 } from "@/hooks/use-customers"
 import type { Customer } from "@/types/customer"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -201,7 +202,14 @@ export default function CustomersPage() {
                 customers.map((customer) => (
                   <TableRow key={customer.id}>
                     <TableCell className="font-medium">{customer.id}</TableCell>
-                    <TableCell>{customer.name}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {customer.name}
+                        {customer.status === "draft" && (
+                          <Badge variant="secondary">下書き</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{customer.alias || "-"}</TableCell>
                     <TableCell>{customer.representative_name || "-"}</TableCell>
                     <TableCell>{customer.phone_number || "-"}</TableCell>
