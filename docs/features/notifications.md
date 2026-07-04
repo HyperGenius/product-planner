@@ -183,5 +183,7 @@ cd backend && pytest __tests__/integration/test_notifications_rls.py -v --run-in
 
 - [pdf-order-parsing.md](pdf-order-parsing.md): PDF自動パース処理（Issue #249, #252、通知発生元）
 - [email-order-intake.md](email-order-intake.md): メール起票の基盤設計
+- [order-attachments.md](order-attachments.md): `order_attachments` テーブル・`parse_status`
+  の定義（`failed_encrypted` / `failed_image` の発生元、対象外メール検知時の挙動変更）
 - Issue #249, #252: `order_parse_log` への記録処理（本Issueの通知発生元）
 - Issue #256: integrationテスト追加（RLS/IDOR回帰）
