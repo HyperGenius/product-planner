@@ -202,6 +202,26 @@ interface OrderCreate {
 
 プレフィックスは環境変数で変更可能（デフォルト: `pp-pending`, `pp-processing`, `pp-done`, `pp-error`）。
 
+### 2段階Cronのスケジューリング設計 (#259)
+
+メール起票パイプラインは実際には2つの独立したcronエンドポイントで構成されている。
+
+| エンドポイント | 役割 |
+|---|---|
+| `GET /api/cron/gmail-poll` | メール取得・フィールド抽出・非PDF添付の即時起票／PDF添付は `order_attachments` へのステージング保存のみ |
+| `GET /api/cron/parse-order-pdfs` | ステージング済みPDF（`order_attachments.parse_status='pending'`）をテキスト抽出・製品照合し、`orders` を実際にINSERT |
+
+**設計方針（案1）: 2段目を高頻度で独立実行し、実行順序のズレを許容する。**
+
+- `gmail_service.py` は「Storageへのアップロード完了 → `order_attachments` へのINSERT」の順で処理し、INSERTは単一の `.execute()` で完結する。そのため `order_attachments` に行が見える時点でPDFは必ずアップロード完了済みであり、「半端な状態」の行は存在しない
+- `parse_pending_order_pdfs()` は `order_id IS NULL AND parse_status='pending'` の行のみを都度SELECTして処理するため、`gmail-poll` の実行途中で `parse-order-pdfs` が走っても、その時点までにINSERT済みの行だけが正しく処理され、未INSERTの分は `parse_status='pending'` のまま残り次回のポーリングで拾われる
+- つまり2段目の実行タイミングが1段目より早くても、起きるのは**データ破損ではなく「今回処理されず次サイクルに持ち越されるだけ」の遅延**。この遅延を実用上無視できる範囲に収めるため、2段目はできるだけ高頻度（5〜15分間隔目安）にスケジュールする
+
+**現状のギャップ（既知の課題、#259で対応中）**
+
+- `frontend/vercel.json` には `gmail-poll` のみ登録されており、`parse-order-pdfs` はどのスケジューラにも登録されていない。そのため現状PDF添付メールは「ステージングまでは自動化されているが、受注確定までは自動実行されない」状態になっている
+- Vercel Cronは無料（Hobby）プランでは実行回数制限（1日2回まで）があり、上記の高頻度実行（5〜15分間隔）を満たせない。Cloud Run + Cloud Scheduler等、Vercel Cron以外のスケジューラへの移行を検討中
+
 ### 環境変数
 
 | 変数名 | デフォルト | 説明 |
