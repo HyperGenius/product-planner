@@ -200,6 +200,18 @@ Vercel ダッシュボード → プロジェクト選択 → **Settings → Env
 
 Vercel ダッシュボード → プロジェクト → **Cron Jobs** タブから手動実行できる（Pro プラン以上）。
 
+### 既知のギャップ: parse-order-pdfs が未登録 (#259)
+
+現在 `frontend/vercel.json` には `gmail-poll` のみ登録されており、PDF添付メールの受注確定を行う
+`GET /api/cron/parse-order-pdfs` はどのスケジューラにも登録されていない。そのためPDF添付メールは
+Storageへのステージング保存までしか自動化されておらず、受注として起票するには手動で
+`parse-order-pdfs` を実行する必要がある（詳細な設計判断は [email-order-intake.md](../features/email-order-intake.md) の
+「2段階Cronのスケジューリング設計」を参照）。
+
+`parse-order-pdfs` は取りこぼしを避けるため5〜15分間隔程度の高頻度実行が望ましいが、
+Vercel Cronは無料（Hobby）プランでは実行回数制限（1日2回まで）があり要件を満たせない。
+そのため Cloud Run + Cloud Scheduler 等、Vercel Cron以外のスケジューラへの移行を検討中。
+
 ---
 
 ## ローカル開発での設定
@@ -252,3 +264,4 @@ curl -s http://localhost:8000/api/cron/gmail-poll \
 - #170: Secret Manager リソース管理（[secret-manager-terraform.md](secret-manager-terraform.md)）
 - #171: Gmail OAuth2 認証情報セットアップ（[gmail-oauth-setup.md](gmail-oauth-setup.md)）
 - #165 / #166 / #167: Gmail メール → 注文下書き自動作成パイプライン実装
+- #259: 2段階Cronの実行頻度に関する仕様整理・スケジューラ移行検討
