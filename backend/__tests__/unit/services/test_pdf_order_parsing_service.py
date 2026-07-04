@@ -64,6 +64,9 @@ class TestParsePendingOrderPdfs:
             c.args[0] == {"parse_status": "failed_encrypted"} for c in update_calls
         )
 
+        insert_calls = mock_db.table().insert.call_args_list
+        assert any(c.args[0]["notif_type"] == "failed_encrypted" for c in insert_calls)
+
     def test_exception_during_processing_counts_as_error(self):
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().execute.return_value = MagicMock(
@@ -118,9 +121,13 @@ class TestProcessLineItem:
             created = _process_line_item(mock_db, self._staging_row(), line)
 
         assert created is False
-        log_insert = mock_db.table("order_parse_log").insert.call_args.args[0]
+        insert_calls = mock_db.table().insert.call_args_list
+        log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "no_product_match"
         assert log_insert["order_attachment_id"] == "att-1"
+        notif_insert = insert_calls[1].args[0]
+        assert notif_insert["notif_type"] == "no_product_match"
+        assert notif_insert["source_table"] == "order_parse_log"
 
     def test_falls_back_to_name_search_using_product_number_raw(self):
         """
@@ -184,8 +191,11 @@ class TestProcessLineItem:
             created = _process_line_item(mock_db, self._staging_row(), line)
 
         assert created is False
-        log_insert = mock_db.table("order_parse_log").insert.call_args.args[0]
+        insert_calls = mock_db.table().insert.call_args_list
+        log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "downgrade_skipped"
+        notif_insert = insert_calls[1].args[0]
+        assert notif_insert["notif_type"] == "downgrade_skipped"
 
     def test_draft_conflict_logs_and_skips(self):
         mock_db = MagicMock()
@@ -207,8 +217,11 @@ class TestProcessLineItem:
             created = _process_line_item(mock_db, self._staging_row(), line)
 
         assert created is False
-        log_insert = mock_db.table("order_parse_log").insert.call_args.args[0]
+        insert_calls = mock_db.table().insert.call_args_list
+        log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "draft_conflict_skipped"
+        notif_insert = insert_calls[1].args[0]
+        assert notif_insert["notif_type"] == "draft_conflict_skipped"
 
     def test_no_change_skips_without_logging(self):
         mock_db = MagicMock()

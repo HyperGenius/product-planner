@@ -3,6 +3,7 @@ from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import download_attachment
+from app.services.notification_service import create_notification
 from app.services.pdf_order_extraction_service import extract_order_lines
 from app.services.pdf_text_service import extract_text
 from app.services.product_matching_service import match_product_by_code, match_products
@@ -79,6 +80,14 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         db.table(table).update({"parse_status": text_result.failure_reason}).eq(
             "id", attachment_id
         ).execute()
+        create_notification(
+            db,
+            row["tenant_id"],
+            text_result.failure_reason,
+            SupabaseTableName.ORDER_ATTACHMENTS.value,
+            attachment_id,
+            {},
+        )
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "
             f"marked {text_result.failure_reason}"
@@ -126,15 +135,20 @@ def _process_line_item(
         product_id = match["product_id"]
 
     if product_id is None:
-        _log_parse_event(
+        detail = {
+            "product_number_raw": product_number_raw,
+            "product_name_raw": product_name_raw,
+        }
+        log_id = _log_parse_event(
+            db, tenant_id, attachment_id, "no_product_match", detail
+        )
+        create_notification(
             db,
             tenant_id,
-            attachment_id,
             "no_product_match",
-            {
-                "product_number_raw": product_number_raw,
-                "product_name_raw": product_name_raw,
-            },
+            SupabaseTableName.ORDER_PARSE_LOG.value,
+            log_id,
+            detail,
         )
         return False
 
@@ -166,22 +180,32 @@ def _process_line_item(
         )
 
     if action == "skipped_downgrade":
-        _log_parse_event(
+        detail = {"product_id": product_id, "deadline_date": deadline_date}
+        log_id = _log_parse_event(
+            db, tenant_id, attachment_id, "downgrade_skipped", detail
+        )
+        create_notification(
             db,
             tenant_id,
-            attachment_id,
             "downgrade_skipped",
-            {"product_id": product_id, "deadline_date": deadline_date},
+            SupabaseTableName.ORDER_PARSE_LOG.value,
+            log_id,
+            detail,
         )
         return False
 
     if action == "skipped_draft_conflict":
-        _log_parse_event(
+        detail = {"product_id": product_id, "deadline_date": deadline_date}
+        log_id = _log_parse_event(
+            db, tenant_id, attachment_id, "draft_conflict_skipped", detail
+        )
+        create_notification(
             db,
             tenant_id,
-            attachment_id,
             "draft_conflict_skipped",
-            {"product_id": product_id, "deadline_date": deadline_date},
+            SupabaseTableName.ORDER_PARSE_LOG.value,
+            log_id,
+            detail,
         )
         return False
 
@@ -250,15 +274,22 @@ def _log_parse_event(
     attachment_id: str,
     reason: str,
     detail: dict[str, Any],
-) -> None:
-    db.table(SupabaseTableName.ORDER_PARSE_LOG.value).insert(
-        {
-            "tenant_id": tenant_id,
-            "order_attachment_id": attachment_id,
-            "reason": reason,
-            "detail": detail,
-        }
-    ).execute()
+) -> str | None:
+    """order_parse_log に1行記録し、挿入した行の id を返す。"""
+    result = (
+        db.table(SupabaseTableName.ORDER_PARSE_LOG.value)
+        .insert(
+            {
+                "tenant_id": tenant_id,
+                "order_attachment_id": attachment_id,
+                "reason": reason,
+                "detail": detail,
+            }
+        )
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
     logger.info(
         f"pdf_order_parsing: logged {reason} for attachment {attachment_id}: {detail}"
     )
+    return rows[0]["id"] if rows else None

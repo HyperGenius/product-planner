@@ -8,6 +8,13 @@ Gmail 自動伝票起票フローで受信した注文書 PDF を Supabase Stora
 > 「PDF をステージング保存し、パース処理（後続Issue）完了後に order を作成」に変更された。
 > 添付なし・非PDF添付メールの既存フロー（即時 order 作成）は変更されていない。
 > 詳細は本ドキュメント内の「PDF添付メールのステージング保存（Issue #248）」を参照。
+>
+> [!IMPORTANT]
+> Issue #254 により、非PDF添付メール（本文テキスト抽出ルート）で `product_name` /
+> `quantity` / `deadline_date` / `order_number` が全て抽出できなかった場合、
+> order 作成・添付保存・`order_attachments` INSERT を含む処理全体をスキップし、
+> 通知記録のみ行うよう変更された。詳細は本ドキュメント内の「対象外メール検知
+> （Issue #254）」および [notifications.md](notifications.md) を参照。
 
 ---
 
@@ -84,6 +91,11 @@ create policy "tenant isolation" on order_attachments
 | `failed_image`           | 画像 PDF で抽出不可             |
 | `failed_no_attachment`   | 添付なし（本文のみで処理）      |
 
+`failed_encrypted` / `failed_image` は Issue #254 でアプリ内通知（`notifications` テーブル）
+にも記録されるようになった。`order_attachments.parse_status` が一次情報として残る点は変わらず、
+`notifications` は横断的な「担当者への通知」専用の薄いテーブルとして別途書き込まれる
+（詳細は [notifications.md](notifications.md) 参照）。
+
 ---
 
 ## バックエンド処理フロー
@@ -118,6 +130,26 @@ create policy "tenant isolation" on order_attachments
 
 このステージング行から実際の `orders` 行を生成する処理（PDFテキスト抽出・複数明細パース）は
 後続Issueで実装する。
+
+### 対象外メール検知（Issue #254）
+
+添付なし・非PDF添付メールの既存フロー内、Claude による単一フィールド抽出（`extract_email_fields`）
+直後・製品マッチングより前に判定ゲートを追加した（`_process_message`、
+`backend/app/services/gmail_service.py`）。
+
+`product_name` / `quantity` / `deadline_date` / `order_number` が全て `None`
+（`<UNKNOWN>`）の場合、「受注メールでない」と判定し以下のように挙動を変更する:
+
+- `orders` INSERT・添付ファイルの Storage 保存・`order_attachments` INSERT を
+  いずれも行わない（従来は添付なしでも `parse_status='failed_no_attachment'` で
+  `order_attachments` に行が作成されていたが、対象外メールの場合はこの行自体を作らない）
+- 顧客レコード（`resolve_or_create_customer`）も作成しない
+  （迷惑メール送信元で顧客テーブルを汚染しないため）
+- 代わりに `notification_service.create_notification()` で `notif_type='non_order_email'`
+  （`source_table='gmail_message'`, `source_id=msg_id`）の通知を1件記録する
+- 処理済みラベルへ移動して return する（エラー扱いにはしない）
+
+詳細は [notifications.md](notifications.md) を参照。
 
 ### 新規ファイル: `backend/app/services/attachment_service.py`
 
@@ -185,6 +217,10 @@ export interface OrderAttachment {
       （`order_id=NULL`, `parse_status='pending'`）が作成される（Issue #248）
 - [x] PDFが `{tenant_id}/inbox/{gmail_message_id}/{filename}` に保存される（Issue #248）
 - [x] `order_attachments.order_id` が nullable になっている（Issue #248）
+- [x] 非PDF添付メールで注文項目が全く抽出できない場合、`orders` / `order_attachments`
+      いずれも作成されず `non_order_email` 通知のみ記録される（Issue #254）
+- [x] `failed_encrypted` / `failed_image` の発生時、`order_attachments.parse_status`
+      更新に加えてアプリ内通知が記録される（Issue #254）
 
 ---
 
@@ -203,3 +239,5 @@ export interface OrderAttachment {
 - Issue B: PDF パース＋複数 order 生成
 - Issue C: 既存 order upsert（予定）
 - [email-order-intake.md](email-order-intake.md): メール起票基盤の設計
+- [notifications.md](notifications.md): 自動処理パイプラインの通知UI（Issue #254）。
+  `failed_encrypted` / `failed_image` / `non_order_email` の通知記録の詳細はこちらを参照

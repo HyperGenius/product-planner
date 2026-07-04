@@ -184,13 +184,17 @@ class TestProcessMessagePdfStaging:
             patch(
                 "app.services.gmail_service.extract_email_fields",
                 return_value={
-                    "product_name": "<UNKNOWN>",
+                    "product_name": "製品A",
                     "quantity": "<UNKNOWN>",
                     "deadline_date": "<UNKNOWN>",
                     "order_number": "<UNKNOWN>",
                 },
             ),
             patch("app.services.gmail_service.extract_sender_email", return_value=None),
+            patch(
+                "app.services.gmail_service.match_products",
+                return_value={"product_id": None, "candidates": []},
+            ),
             patch(
                 "app.services.gmail_service.upload_attachment",
                 return_value="tenant-1/orders/99/def.txt",
@@ -208,3 +212,50 @@ class TestProcessMessagePdfStaging:
             call.args and call.args[0] == "orders"
             for call in mock_db.table.call_args_list
         )
+
+    def test_no_extracted_fields_skips_order_and_creates_notification(self):
+        """本文から注文項目が一切抽出できない場合、orderを作成せず
+        non_order_email として通知のみ記録すること（顧客レコードも作成しない）。"""
+        mock_service = self._mock_gmail_service()
+        mock_db = MagicMock()
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[],
+            ),
+            patch(
+                "app.services.gmail_service.extract_email_fields",
+                return_value={
+                    "product_name": "<UNKNOWN>",
+                    "quantity": "<UNKNOWN>",
+                    "deadline_date": "<UNKNOWN>",
+                    "order_number": "<UNKNOWN>",
+                },
+            ),
+            patch(
+                "app.services.gmail_service.extract_sender_email",
+                return_value="spam@example.com",
+            ),
+            patch(
+                "app.services.gmail_service.resolve_or_create_customer"
+            ) as mock_resolve_customer,
+            patch("app.services.gmail_service.upload_attachment") as mock_upload,
+        ):
+            _process_message(mock_service, mock_db, "msg-3", "tenantA", {})
+
+        mock_resolve_customer.assert_not_called()
+        mock_upload.assert_not_called()
+        assert not any(
+            call.args and call.args[0] == "orders"
+            for call in mock_db.table.call_args_list
+        )
+
+        notif_insert = mock_db.table("notifications").insert.call_args.args[0]
+        assert notif_insert["notif_type"] == "non_order_email"
+        assert notif_insert["source_table"] == "gmail_message"
+        assert notif_insert["source_id"] == "msg-3"

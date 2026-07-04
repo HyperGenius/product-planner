@@ -19,3 +19,4 @@ class SupabaseTableName(Enum):
     GMAIL_LABEL_TENANTS = "gmail_label_tenants"
     ORDER_ATTACHMENTS = "order_attachments"
     ORDER_PARSE_LOG = "order_parse_log"
+    NOTIFICATIONS = "notifications"
