@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
+import { PRODUCTS_QUERY_KEY } from "@/hooks/use-products"
 import type { ProcessRouting, ProcessRoutingCreate, ProcessRoutingUpdate } from "@/types/process-routing"
 
 // クエリキーを生成する関数
@@ -32,9 +33,11 @@ export function useCreateProcessRouting() {
       }),
     onSuccess: (data) => {
       // 該当製品の工程ルーティング一覧を再取得
-      queryClient.invalidateQueries({ 
-        queryKey: getProcessRoutingsQueryKey(data.product_id) 
+      queryClient.invalidateQueries({
+        queryKey: getProcessRoutingsQueryKey(data.product_id)
       })
+      // 製品一覧の工程確定状況バッジも再取得
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
     },
   })
 }
@@ -53,9 +56,11 @@ export function useUpdateProcessRouting() {
       }),
     onSuccess: (data) => {
       // 該当製品の工程ルーティング一覧を再取得
-      queryClient.invalidateQueries({ 
-        queryKey: getProcessRoutingsQueryKey(data.product_id) 
+      queryClient.invalidateQueries({
+        queryKey: getProcessRoutingsQueryKey(data.product_id)
       })
+      // 製品一覧の工程確定状況バッジも再取得
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
     },
   })
 }
@@ -73,9 +78,11 @@ export function useDeleteProcessRouting() {
       }),
     onSuccess: (_, variables) => {
       // 該当製品の工程ルーティング一覧を再取得
-      queryClient.invalidateQueries({ 
-        queryKey: getProcessRoutingsQueryKey(variables.productId) 
+      queryClient.invalidateQueries({
+        queryKey: getProcessRoutingsQueryKey(variables.productId)
       })
+      // 製品一覧の工程確定状況バッジも再取得
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
     },
   })
 }

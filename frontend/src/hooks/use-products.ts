@@ -5,7 +5,7 @@ import { apiClient } from "@/lib/api-client"
 import type { Product, ProductCreate, ProductUpdate } from "@/types/product"
 
 // クエリキーを定数化
-const PRODUCTS_QUERY_KEY = ["products"]
+export const PRODUCTS_QUERY_KEY = ["products"]
 
 /**
  * 製品一覧を取得するフック
