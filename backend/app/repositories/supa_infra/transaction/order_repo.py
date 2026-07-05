@@ -24,14 +24,18 @@ class OrderRepository(BaseRepository):
         if not orders:
             return []
 
-        product_ids = list({o["product_id"] for o in orders if o.get("product_id")})
-        res = (
-            self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
-            .select("product_id, is_confirmed")
-            .in_("product_id", product_ids)
-            .execute()
+        product_ids = list(
+            {o["product_id"] for o in orders if o.get("product_id") is not None}
         )
-        routings = cast(list[dict[str, Any]], res.data or [])
+        routings: list[dict[str, Any]] = []
+        if product_ids:
+            res = (
+                self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+                .select("product_id, is_confirmed")
+                .in_("product_id", product_ids)
+                .execute()
+            )
+            routings = cast(list[dict[str, Any]], res.data or [])
         products_with_routings = {r["product_id"] for r in routings}
         products_with_unconfirmed = {
             r["product_id"] for r in routings if not r["is_confirmed"]

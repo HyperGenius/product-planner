@@ -118,3 +118,22 @@ class TestOrderRepositoryRoutingStatus:
         assert by_id[2]["has_unconfirmed_routings"] is True
         assert by_id[3]["has_no_routings"] is False
         assert by_id[3]["has_unconfirmed_routings"] is False
+
+    def test_get_all_with_routing_status_all_orders_without_product_id(self):
+        """全注文が product_id=None（product_ids が空）でも例外にならず両フラグが True になる"""
+        orders_data = [
+            {"id": 1, "product_id": None},
+            {"id": 2, "product_id": None},
+        ]
+        mock_client = self._make_client(orders_data, [])
+        repo = OrderRepository(mock_client)
+        cast(Any, repo).get_all = MagicMock(return_value=orders_data)
+
+        result = repo.get_all_with_routing_status()
+
+        mock_client.table.return_value.select.return_value.in_.assert_not_called()
+        by_id = {o["id"]: o for o in result}
+        assert by_id[1]["has_no_routings"] is True
+        assert by_id[1]["has_unconfirmed_routings"] is True
+        assert by_id[2]["has_no_routings"] is True
+        assert by_id[2]["has_unconfirmed_routings"] is True
