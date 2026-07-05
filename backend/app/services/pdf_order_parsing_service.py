@@ -12,6 +12,8 @@ from supabase import Client
 
 logger = get_logger(__name__)
 
+_VALID_CUSTOMER_CERTAINTIES = {"confirmed", "forecast", "forecast_tentative"}
+
 _KNOWN_UPSERT_ACTIONS = {
     "inserted",
     "updated",
@@ -146,7 +148,14 @@ def _process_line_item(
         )
         return False
 
-    certainty = cast(str | None, line.get("certainty")) or "forecast_tentative"
+    certainty_raw = cast(str | None, line.get("certainty"))
+    # Claude抽出結果の揺れ・想定外値でも orders.customer_certainty のCHECK制約に
+    # 違反してRPCが失敗しないよう、許容値以外は最も確度が低い値にフォールバックする
+    certainty = (
+        certainty_raw
+        if certainty_raw in _VALID_CUSTOMER_CERTAINTIES
+        else "forecast_tentative"
+    )
     deadline_date = line.get("delivery_date")
 
     rpc_result = db.rpc(

@@ -360,6 +360,52 @@ class TestUpsertOrderByDedupeKey:
         assert order["quantity"] == 10
         assert order["customer_certainty"] is None
 
+    def test_email_draft_without_certainty_is_upgraded(self, admin_db, dedupe_fixture):
+        """本文のみのメール起票 (gmail_service.py 経由) は customer_certainty=NULL の
+        draft注文として作成される。これに対する後続のPDF取込は、NULLを最も低い
+        優先度として扱い、正しく確度・数量を更新できる。"""
+        email_order = (
+            admin_db.table("orders")
+            .insert(
+                {
+                    "tenant_id": dedupe_fixture["tenant_id"],
+                    "customer_id": dedupe_fixture["customer_id"],
+                    "product_id": dedupe_fixture["product_id"],
+                    "quantity": 10,
+                    "deadline_date": _FUTURE_DEADLINE,
+                    "status": "draft",
+                    "source_type": "email",
+                }
+            )
+            .execute()
+        )
+        email_order_id = cast(list[dict[str, Any]], email_order.data)[0]["id"]
+
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=999,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast_tentative",
+        )
+
+        assert second["action"] == "updated"
+        assert second["order_id"] == email_order_id
+
+        order = (
+            admin_db.table("orders")
+            .select("status, quantity, customer_certainty")
+            .eq("id", email_order_id)
+            .single()
+            .execute()
+            .data
+        )
+        assert order["status"] == "draft"
+        assert order["quantity"] == 999
+        assert order["customer_certainty"] == "forecast_tentative"
+
     def test_exact_duplicate_is_skipped_without_change(self, admin_db, dedupe_fixture):
         first = _upsert(
             admin_db,

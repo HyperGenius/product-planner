@@ -131,11 +131,14 @@ BEGIN
   -- ここから先は既存行が draft かつ source_type != 'manual'
   -- (メール/PDF起票の確認待ちdraft) のケース。
   -- customer_certainty の優先順位（数値が大きいほど確度が高い）で判定する。
+  -- 既存行の customer_certainty が NULL（本文のみのメール起票等、確度情報を
+  -- 持たないdraft）の場合は最も低い優先度(-1)として扱い、PDF取込による
+  -- 確度付け・更新を妨げないようにする。
   v_existing_priority := CASE v_existing.customer_certainty
     WHEN 'forecast_tentative' THEN 0
     WHEN 'forecast'           THEN 1
     WHEN 'confirmed'          THEN 2
-    ELSE NULL
+    ELSE -1
   END;
   v_new_priority := CASE p_customer_certainty
     WHEN 'forecast_tentative' THEN 0
@@ -144,8 +147,9 @@ BEGIN
     ELSE NULL
   END;
 
-  IF v_existing_priority IS NULL
-     OR v_new_priority IS NULL
+  -- p_customer_certainty がCHECK制約の許容値以外だった場合
+  -- (呼び出し元での正規化漏れ等) は更新せずコンフリクト扱いにする
+  IF v_new_priority IS NULL
      OR v_new_priority < v_existing_priority THEN
     RETURN QUERY SELECT v_existing.id, 'skipped_downgrade'::text;
     RETURN;
