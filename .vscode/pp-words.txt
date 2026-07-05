@@ -6,3 +6,5 @@ creds
 googleapiclient
 gantt
 autouse
+trgm
+pdfs
