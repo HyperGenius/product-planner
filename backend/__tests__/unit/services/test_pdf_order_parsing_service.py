@@ -270,7 +270,7 @@ class TestProcessLineItem:
         assert rpc_call_args.args[0] == "upsert_order_by_dedupe_key"
         rpc_params = rpc_call_args.args[1]
         assert rpc_params["p_product_id"] == 100
-        assert rpc_params["p_status"] == "forecast"
+        assert rpc_params["p_customer_certainty"] == "forecast"
         assert rpc_params["p_customer_id"] == 7
 
         attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]

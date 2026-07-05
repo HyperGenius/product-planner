@@ -12,12 +12,6 @@ from supabase import Client
 
 logger = get_logger(__name__)
 
-_CERTAINTY_TO_STATUS = {
-    "confirmed": "confirmed",
-    "forecast": "forecast",
-    "forecast_tentative": "forecast_tentative",
-}
-
 _KNOWN_UPSERT_ACTIONS = {
     "inserted",
     "updated",
@@ -152,8 +146,7 @@ def _process_line_item(
         )
         return False
 
-    certainty = cast(str | None, line.get("certainty"))
-    status = _CERTAINTY_TO_STATUS.get(certainty or "", "forecast_tentative")
+    certainty = cast(str | None, line.get("certainty")) or "forecast_tentative"
     deadline_date = line.get("delivery_date")
 
     rpc_result = db.rpc(
@@ -164,7 +157,7 @@ def _process_line_item(
             "p_product_id": product_id,
             "p_quantity": line.get("quantity"),
             "p_deadline_date": deadline_date,
-            "p_status": status,
+            "p_customer_certainty": certainty,
             "p_source_type": "email",
             "p_source_raw": staging_row.get("source_raw"),
             "p_extracted_product_name": product_name_raw,
@@ -262,7 +255,8 @@ def _mark_superseded_orders(
         .eq("product_id", product_id)
         .neq("deadline_date", deadline_date)
         .gt("deadline_date", datetime.now(UTC).date().isoformat())
-        .in_("status", ["forecast", "forecast_tentative"])
+        .eq("status", "draft")
+        .in_("customer_certainty", ["forecast", "forecast_tentative"])
         .is_("superseded_at", "null")
         .execute()
     )

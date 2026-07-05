@@ -103,7 +103,14 @@ class TestPdfOrderParsingFlow:
         )
         for order in orders_for_existing_product:
             assert order["quantity"] == 15000
-            assert order["status"] in ("confirmed", "forecast", "forecast_tentative")
+            # メール/PDF転送起票の注文は、顧客側の確度(customer_certainty)に
+            # 関わらず常に status='draft' で作成される (Issue #267)
+            assert order["status"] == "draft"
+            assert order["customer_certainty"] in (
+                "confirmed",
+                "forecast",
+                "forecast_tentative",
+            )
             assert order["customer_id"] == pdf_order_parsing_staging_row["customer_id"]
 
         deadline_dates = {

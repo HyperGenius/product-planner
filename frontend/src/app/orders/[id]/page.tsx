@@ -34,6 +34,8 @@ import {
   getCustomerName,
   getStatusLabel,
   getStatusBadgeClass,
+  getCertaintyLabel,
+  getCertaintyBadgeClass,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import { ApiError } from "@/lib/api-client"
@@ -174,6 +176,16 @@ export default function OrderDetailPage() {
                   </Badge>
                 </dd>
               </div>
+              {order.customer_certainty && (
+                <div className="flex justify-between items-center">
+                  <dt className="text-muted-foreground">顧客側の確度</dt>
+                  <dd>
+                    <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
+                      {getCertaintyLabel(order.customer_certainty)}
+                    </Badge>
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 
