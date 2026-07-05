@@ -130,3 +130,24 @@ Issue #197 / #199 / #200 で実装。
              → /orders にリダイレクト
              → 専門家キューに自動表示（has_unconfirmed_routings=true）
 ```
+
+---
+
+## 注文詳細画面のメッセージ区別（Issue #269）
+
+注文詳細画面で、製品に工程が「1件も登録されていない」場合と「登録済みだが未確定」の場合を区別せず、どちらも「工程が設定されていません。製品マスタから工程を設定してください。」と表示していたため、実態と異なる誤解を招いていた。
+
+### Backend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `app/repositories/supa_infra/transaction/order_repo.py` | `get_all_with_routing_status()` / `get_by_id_with_routing_status()` に `has_no_routings: bool` を追加。`has_unconfirmed_routings` は従来通り「工程0件 または 未確定あり」を表す |
+
+`has_no_routings` は製品に工程が1件も登録されていない場合のみ `true`。`has_unconfirmed_routings` はそれに加えて「登録済みだが `is_confirmed=false` の工程が1件でもある」場合も `true` になる。
+
+### Frontend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `types/order.ts` | `Order` に `has_no_routings?: boolean` を追加 |
+| `app/orders/[id]/page.tsx` | `hasNoRouting`（工程0件）と `hasUnconfirmedRouting`（工程はあるが未確定）を分離。前者は「工程が設定されていません」、後者は「未確定の工程があります」とメッセージを出し分け |

@@ -19,19 +19,23 @@ class OrderRepository(BaseRepository):
         return cast(list[dict[str, Any]], res.data or [])
 
     def get_all_with_routing_status(self) -> list[dict]:
-        """全注文を has_unconfirmed_routings フラグ付きで取得（2クエリ、N+1なし）"""
+        """全注文を has_no_routings / has_unconfirmed_routings フラグ付きで取得（2クエリ、N+1なし）"""
         orders = self.get_all()
         if not orders:
             return []
 
-        product_ids = list({o["product_id"] for o in orders if o.get("product_id")})
-        res = (
-            self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
-            .select("product_id, is_confirmed")
-            .in_("product_id", product_ids)
-            .execute()
+        product_ids = list(
+            {o["product_id"] for o in orders if o.get("product_id") is not None}
         )
-        routings = cast(list[dict[str, Any]], res.data or [])
+        routings: list[dict[str, Any]] = []
+        if product_ids:
+            res = (
+                self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+                .select("product_id, is_confirmed")
+                .in_("product_id", product_ids)
+                .execute()
+            )
+            routings = cast(list[dict[str, Any]], res.data or [])
         products_with_routings = {r["product_id"] for r in routings}
         products_with_unconfirmed = {
             r["product_id"] for r in routings if not r["is_confirmed"]
@@ -40,22 +44,25 @@ class OrderRepository(BaseRepository):
         result = []
         for order in orders:
             pid = order.get("product_id")
-            has_unconfirmed = (
-                pid is None
-                or pid not in products_with_routings
-                or pid in products_with_unconfirmed
+            has_no_routings = pid is None or pid not in products_with_routings
+            has_unconfirmed = has_no_routings or pid in products_with_unconfirmed
+            result.append(
+                {
+                    **order,
+                    "has_no_routings": has_no_routings,
+                    "has_unconfirmed_routings": has_unconfirmed,
+                }
             )
-            result.append({**order, "has_unconfirmed_routings": has_unconfirmed})
         return result
 
     def get_by_id_with_routing_status(self, order_id: int) -> dict | None:
-        """注文を1件取得し has_unconfirmed_routings フラグを付与"""
+        """注文を1件取得し has_no_routings / has_unconfirmed_routings フラグを付与"""
         order = self.get_by_id(order_id)
         if not order:
             return None
         pid = order.get("product_id")
         if pid is None:
-            return {**order, "has_unconfirmed_routings": True}
+            return {**order, "has_no_routings": True, "has_unconfirmed_routings": True}
         res = (
             self.client.table(SupabaseTableName.PROCESS_ROUTINGS.value)
             .select("product_id, is_confirmed")
@@ -63,8 +70,15 @@ class OrderRepository(BaseRepository):
             .execute()
         )
         routings = cast(list[dict[str, Any]], res.data or [])
-        has_unconfirmed = not routings or any(not r["is_confirmed"] for r in routings)
-        return {**order, "has_unconfirmed_routings": has_unconfirmed}
+        has_no_routings = not routings
+        has_unconfirmed = has_no_routings or any(
+            not r["is_confirmed"] for r in routings
+        )
+        return {
+            **order,
+            "has_no_routings": has_no_routings,
+            "has_unconfirmed_routings": has_unconfirmed,
+        }
 
     def mark_as_scheduled(self, order_id: int) -> None:
         """

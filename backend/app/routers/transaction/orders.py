@@ -70,7 +70,7 @@ def create_order(
 
 @orders_router.get("")
 def get_orders(repo: OrderRepository = Depends(get_order_repo)):
-    """注文を全件取得（has_unconfirmed_routings フラグ付き）"""
+    """注文を全件取得（has_no_routings / has_unconfirmed_routings フラグ付き）"""
     logger.info("Fetching all orders")
     results = repo.get_all_with_routing_status()
     return [_map_order_response(order) for order in results]
@@ -126,7 +126,7 @@ def get_unconfirmed_routing_queue(
 
 @orders_router.get("/{order_id}")
 def get_order(order_id: int, repo: OrderRepository = Depends(get_order_repo)):
-    """注文を1件取得（has_unconfirmed_routings フラグ付き）"""
+    """注文を1件取得（has_no_routings / has_unconfirmed_routings フラグ付き）"""
     logger.info(f"Fetching order {order_id}")
     result = repo.get_by_id_with_routing_status(order_id)
     if not result:

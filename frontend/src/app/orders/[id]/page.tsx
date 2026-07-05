@@ -123,7 +123,10 @@ export default function OrderDetailPage() {
 
   const isDraft = order.status === "draft"
   const canDelete = order.status === "draft" || order.status === "canceled"
-  const hasNoRouting = order.has_unconfirmed_routings === true && !order.is_scheduled
+  const hasNoRouting = order.has_no_routings === true && !order.is_scheduled
+  const hasUnconfirmedRouting =
+    order.has_unconfirmed_routings === true && !hasNoRouting && !order.is_scheduled
+  const blocksSimulation = hasNoRouting || hasUnconfirmedRouting
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -249,7 +252,7 @@ export default function OrderDetailPage() {
               <div className="flex-1 space-y-1">
                 <Button
                   onClick={handleSimulate}
-                  disabled={simulateMutation.isPending || hasNoRouting}
+                  disabled={simulateMutation.isPending || blocksSimulation}
                   className="w-full"
                 >
                   <Calculator className="mr-2 h-4 w-4" />
@@ -263,6 +266,17 @@ export default function OrderDetailPage() {
                       className="underline text-primary"
                     >
                       製品マスタから工程を設定してください。
+                    </a>
+                  </p>
+                )}
+                {hasUnconfirmedRouting && (
+                  <p className="text-xs text-muted-foreground">
+                    未確定の工程があります。{" "}
+                    <a
+                      href={`/master/products?highlight=${order.product_id}`}
+                      className="underline text-primary"
+                    >
+                      製品マスタから工程を確定してください。
                     </a>
                   </p>
                 )}
