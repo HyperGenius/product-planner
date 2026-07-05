@@ -1,4 +1,4 @@
-# 顧客が特定できないメール/PDF起票での下書き顧客自動作成（Issue #263）
+# 顧客が特定できないメール/PDF起票での下書き顧客自動作成（Issue #263, #265）
 
 メール/PDF起票で送信者の顧客が特定できない場合に `customer_id` が NULL のまま起票されてしまう
 問題（#262 の根本原因の一つ）を解消する。顧客情報を事前に登録していなくても、下書き状態の
@@ -73,6 +73,82 @@ def resolve_or_create_customer(
 新規作成された場合は `create_notification` で `customer_draft_created` を記録する
 （`source_table="gmail_message"`, `source_id=msg_id`）。
 
+---
+
+## メールアドレス/顧客名抽出の改善（Issue #265）
+
+Issue #263 の実装では、メールアドレス抽出そのもの（`extract_sender_email`）と本文取得
+（`_get_message_body`）に不具合があり、転送メールの一部パターンで顧客が正しく特定できなかった。
+本Issueでこれらを修正し、あわせて顧客名の抽出ロジックを新設した。
+
+### 前提（運用フロー）
+
+- ユーザ（テナントの担当者）がユーザの顧客からの受注メールを、意思をもって intake 用
+  Gmail アドレスへ**転送する**運用を前提とする
+- そのため実際の Gmail `From` ヘッダは常に転送した社内ユーザのアドレスであり、
+  顧客の特定には使えない。顧客の情報は本文中に引用された「元メッセージ」（`From:`/`差出人:`
+  ヘッダ、署名ブロック）にのみ含まれる
+- 顧客のメールアドレスが既知であれば `customers` テーブルに事前登録されている
+
+### 発覚した不具合
+
+1. **`_get_message_body` の本文取得漏れ (`gmail_service.py`)**
+   PDF添付メールは Gmail API 上で `multipart/mixed`（PDF添付部分と本文部分）の直下に
+   `multipart/alternative`（`text/plain`/`text/html`）がネストする構造になる。
+   従来の実装はトップレベルの `parts` しか見ておらず、本文が常に空文字になっていた
+   → `_find_part_data` で `parts` を再帰的に探索するよう修正（`text/plain` 優先、
+   `text/html` にフォールバック）
+
+2. **`extract_sender_email` の候補選択が曖昧 (`customer_matching_service.py`)**
+   本文中に複数の `From:`/`差出人:` 行が存在する場合（多段転送や返信の引用が重なる場合）に
+   `re.search`（最初の1件のみ）を使っており、どれを顧客として採用するかが不定だった
+   → 全候補を抽出したうえで「最後に出現したもの（一番奥＝最初にメールを書いた本人）」を
+   優先するように変更
+
+3. **顧客名抽出ロジックが存在しない**
+   新規下書き顧客の `name` は常に生のメールアドレス文字列（`email`）がそのまま入っており、
+   会社名・氏名は一切抽出されていなかった
+
+### `resolve_or_create_customer` のシグネチャ変更
+
+```python
+def extract_sender_email_candidates(body: str) -> list[str]: ...
+
+def extract_customer_name(body: str, email: str) -> str | None: ...
+
+def resolve_or_create_customer(
+    db: Client,
+    tenant_id: str,
+    body: str,
+    received_at: str | int | None = None,
+) -> tuple[int, bool]:
+    ...
+```
+
+- 引数を `email: str | None` から `body: str`（メール本文そのもの）に変更し、
+  マッチング処理自体を `customer_matching_service.py` に集約した
+- `extract_sender_email_candidates(body)` で本文中の全候補メールアドレス
+  （出現順・重複排除）を抽出し、`customers.email` との積集合を取る
+  - **積集合が1件** → その顧客に確定（`customer_id` を返す、`status`/`name` は変更せず、
+    顧客名抽出も行わない）
+  - **積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）** → 候補集合のうち
+    「最後に出現したもの」1件に絞り込み、従来通りメールアドレス単体での検索/下書き作成
+    （`_resolve_or_create_by_single_email`）にフォールバックする
+    - 0件の場合のみ `extract_customer_name(body, email)` で署名ブロックから
+      会社名・氏名を抽出し、下書きの `name` に使う（抽出できなければ email 文字列にフォールバック）
+- `extract_sender_email(body)` は後方互換・通知ログ用に残置（候補集合のうち最後の1件を返す）
+
+### `extract_customer_name` の署名ブロック解析
+
+- 本文中で対象メールアドレスが最後に出現する行を署名欄とみなし、その直前の罫線区切り
+  （`----` 等、なければ最大40行遡る）から会社名・氏名を探索する
+- 会社名: `株式会社`/`有限会社`/`合同会社`/`合資会社`/`㈱`/`㈲` を含む行
+- 氏名: 会社名より後の行のうち、`TEL`/`FAX`/`〒`/`e-mail` や数字を含まない行から、
+  全角/半角スペース2つ以上で区切られた末尾（「部署名　　氏名」形式を想定）を候補とし、
+  最後に見つかったものを採用する
+- 会社名・氏名の両方が取れれば `"会社名 氏名"`、会社名のみなら会社名を返す。
+  どちらも取れなければ `None`（呼び出し元で email 文字列にフォールバック）
+
 ### 顧客編集フォームでの「確定」(`routers/master/customers.py`)
 
 `PATCH /customers/{id}` (`update_customer`) は、リクエストの更新内容に関わらず `status` を
@@ -110,6 +186,20 @@ def resolve_or_create_customer(
       (`__tests__/unit/services/test_customer_matching_service.py`)
 - [x] 型・Lint エラーが出ていないこと
 
+### Issue #265 で追加した受け入れ条件
+
+- [x] PDF添付メール（`multipart/mixed` に `multipart/alternative` がネストする構造）でも
+      本文が正しく取得できること
+- [x] 本文中に複数の `From:`/`差出人:` 候補がある場合、既存顧客との積集合により
+      1件に絞り込めるケースでは顧客名抽出を行わずに確定できること
+- [x] 積集合が0件・2件以上の場合は最後に出現した候補にフォールバックすること
+- [x] 新規下書き顧客の `name` が、抽出できた場合は署名ブロックの会社名/氏名になり、
+      抽出できない場合はメールアドレスにフォールバックすること
+- [x] 既存のテストをパスし、新規ロジックのユニットテストを追加すること
+      (`__tests__/unit/services/test_customer_matching_service.py`,
+      `__tests__/unit/services/test_gmail_service.py`)
+- [x] 型・Lint エラーが出ていないこと
+
 ---
 
 ## スコープ外（このIssueではやらない）
@@ -117,6 +207,11 @@ def resolve_or_create_customer(
 - `_mark_superseded_orders` の NULL customer_id ハンドリング自体のバグ修正（#262 で対応予定）
 - 下書き顧客専用の「確定」ボタンや一括確定UI
 - 顧客詳細ページの新設（現状は一覧ページの編集ダイアログのみ）
+- （#265）積集合が0件の場合の重複ドラフト作成防止ロジック（同一顧客からの複数メールで
+  下書きが重複しうるが、実データを見てから優先度を判断する）
+- （#265）積集合が2件以上の場合のタイブレーク方法の改善（現状は最後に出現した候補への
+  フォールバックのみ）
+- （#265）同一会社の別担当者アドレスをドメイン単位でマッチさせる拡張
 
 ---
 
@@ -126,3 +221,4 @@ def resolve_or_create_customer(
 - [notifications.md](notifications.md): `notifications` テーブル・`create_notification` の共通設計
 - Issue #262: `customer_id=NULL` によるbigint型エラー（本Issueで新規発生分はほぼ解消見込み）
 - Issue #259, #168: 関連Issue
+- Issue #265: 転送メールの顧客メールアドレス/顧客名抽出が正しく行われない不具合の修正
