@@ -200,7 +200,7 @@ def pdf_order_parsing_staging_row(
     # 実際のPDF送信元（飯野製作所）を模したE2Eテスト専用顧客。
     # resolve_or_create_customer は既存顧客があれば再利用するため、
     # 複数回のテスト実行で顧客レコードが増殖することはない。
-    customer_id = resolve_or_create_customer(
+    customer_id, _ = resolve_or_create_customer(
         admin_db, e2e_tenant_id, "e2e-pdf-parsing-test@example.com"
     )
 
