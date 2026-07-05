@@ -23,6 +23,52 @@ class TestProductRepository:
 
     # --- 以下は独自メソッドのテスト ---
 
+    def test_get_all_flags_no_process(self, product_repo, mock_client):
+        """工程が0件の製品は has_process=False, has_unconfirmed_process=False"""
+        (
+            mock_client.table.return_value.select.return_value.execute.return_value.data
+        ) = [{"id": 1, "process_routings": []}]
+
+        result = product_repo.get_all()
+
+        assert result[0]["has_process"] is False
+        assert result[0]["has_unconfirmed_process"] is False
+
+    def test_get_all_flags_unconfirmed_process(self, product_repo, mock_client):
+        """工程はあるが未確定を含む製品は has_process=True, has_unconfirmed_process=True"""
+        (
+            mock_client.table.return_value.select.return_value.execute.return_value.data
+        ) = [
+            {
+                "id": 1,
+                "process_routings": [
+                    {"id": 100, "is_confirmed": True},
+                    {"id": 101, "is_confirmed": False},
+                ],
+            }
+        ]
+
+        result = product_repo.get_all()
+
+        assert result[0]["has_process"] is True
+        assert result[0]["has_unconfirmed_process"] is True
+
+    def test_get_all_flags_all_confirmed(self, product_repo, mock_client):
+        """全工程が確定済みの製品は has_process=True, has_unconfirmed_process=False"""
+        (
+            mock_client.table.return_value.select.return_value.execute.return_value.data
+        ) = [
+            {
+                "id": 1,
+                "process_routings": [{"id": 100, "is_confirmed": True}],
+            }
+        ]
+
+        result = product_repo.get_all()
+
+        assert result[0]["has_process"] is True
+        assert result[0]["has_unconfirmed_process"] is False
+
     @pytest.mark.parametrize(
         "product_id, expected",
         [

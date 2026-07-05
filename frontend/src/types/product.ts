@@ -8,6 +8,7 @@ export interface Product {
   type: string
   is_active: boolean
   has_process: boolean
+  has_unconfirmed_process: boolean
   tenant_id: string
   created_at: string
   updated_at: string

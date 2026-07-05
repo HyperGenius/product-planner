@@ -151,3 +151,28 @@ Issue #197 / #199 / #200 で実装。
 |---|---|
 | `types/order.ts` | `Order` に `has_no_routings?: boolean` を追加 |
 | `app/orders/[id]/page.tsx` | `hasNoRouting`（工程0件）と `hasUnconfirmedRouting`（工程はあるが未確定）を分離。前者は「工程が設定されていません」、後者は「未確定の工程があります」とメッセージを出し分け |
+
+---
+
+## 製品マスタの工程確定状態表示（Issue #271）
+
+製品マスタ一覧の「工程」列が「登録済み/未登録」の2状態のみで、工程が登録済みでも確定（`is_confirmed`）済みかどうかが分からなかった。3状態（未登録 / 未確定あり / 確定済み）に分けて表示するよう変更。
+
+### Backend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `app/repositories/supa_infra/master/product_repo.py` | `get_all()` の `process_routings` select に `is_confirmed` を追加し、`has_unconfirmed_process: bool`（登録済み工程のうち未確定が1件でもあれば true）を新設 |
+
+### Frontend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `types/product.ts` | `Product` に `has_unconfirmed_process: boolean` を追加 |
+| `app/master/products/page.tsx` | 「工程」列を `未登録`（オレンジ） / `未確定あり`（アンバー） / `確定済み`（緑）の3状態表示に変更 |
+| `hooks/use-products.ts` | `PRODUCTS_QUERY_KEY` を export し、他フックから製品一覧キャッシュを invalidate できるように変更 |
+| `hooks/use-process-routings.ts` | 工程の作成・更新・削除時に `PRODUCTS_QUERY_KEY` も invalidate するよう修正（**バグ修正**: 従来は工程を追加/確定してもダイアログを閉じるまで製品一覧の状態バッジが更新されなかった） |
+
+### E2E テスト（Playwright、新規導入）
+
+`frontend/e2e/product-routing-status.spec.ts` で、製品マスタ上での工程未登録/未確定/確定済みの3状態表示をブラウザ経由で検証。ローカル実行専用（CI 未組み込み）。前提条件・実行方法は `frontend/e2e/README.md` を参照。

@@ -346,15 +346,20 @@ export default function ProductsPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {product.has_process ? (
-                          <div className="flex items-center gap-2">
-                            <Circle className="h-2 w-2 fill-current text-green-500" />
-                            <span className="text-sm">登録済み</span>
-                          </div>
-                        ) : (
+                        {!product.has_process ? (
                           <div className="flex items-center gap-2">
                             <AlertTriangle className="h-3 w-3 text-orange-500" />
                             <span className="text-sm text-orange-500">未登録</span>
+                          </div>
+                        ) : product.has_unconfirmed_process ? (
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            <span className="text-sm text-amber-500">未確定あり</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Circle className="h-2 w-2 fill-current text-green-500" />
+                            <span className="text-sm">確定済み</span>
                           </div>
                         )}
                       </TableCell>

@@ -11,10 +11,11 @@ class ProductRepository(BaseRepository[T]):
         super().__init__(client, SupabaseTableName.PRODUCTS.value)
 
     def get_all(self) -> list[T]:
-        """製品を全件取得。process_routings の有無を has_process フラグとして付与する。"""
+        """製品を全件取得。process_routings の有無・確定状況を
+        has_process / has_unconfirmed_process フラグとして付与する。"""
         res = (
             self.client.table(SupabaseTableName.PRODUCTS.value)
-            .select(f"*, {SupabaseTableName.PROCESS_ROUTINGS.value}(id)")
+            .select(f"*, {SupabaseTableName.PROCESS_ROUTINGS.value}(id, is_confirmed)")
             .execute()
         )
         result: list[dict[str, Any]] = []
@@ -22,6 +23,9 @@ class ProductRepository(BaseRepository[T]):
             row = cast(dict[str, Any], item)
             routings = row.pop(SupabaseTableName.PROCESS_ROUTINGS.value, None) or []
             row["has_process"] = len(routings) > 0
+            row["has_unconfirmed_process"] = any(
+                not r.get("is_confirmed", False) for r in routings
+            )
             result.append(row)
         return cast(list[T], result)
 
