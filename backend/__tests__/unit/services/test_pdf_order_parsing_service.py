@@ -270,13 +270,39 @@ class TestProcessLineItem:
         assert rpc_call_args.args[0] == "upsert_order_by_dedupe_key"
         rpc_params = rpc_call_args.args[1]
         assert rpc_params["p_product_id"] == 100
-        assert rpc_params["p_status"] == "forecast"
+        assert rpc_params["p_customer_certainty"] == "forecast"
         assert rpc_params["p_customer_id"] == 7
 
         attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
         assert attachment_insert["order_id"] == 555
         assert attachment_insert["parse_status"] == "success"
         assert attachment_insert["storage_path"] == "tenant-1/inbox/msg-1/order.pdf"
+
+    def test_unknown_certainty_falls_back_to_forecast_tentative(self):
+        """Claude抽出結果が想定外の値（揺れ・スキーマ変更等）を返した場合でも、
+        orders.customer_certainty のCHECK制約に違反しないよう
+        forecast_tentative にフォールバックしてRPCへ渡すこと。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "予定",  # 許容値(confirmed/forecast/forecast_tentative)以外
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), line)
+
+        assert created is True
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_certainty"] == "forecast_tentative"
 
     def test_inserted_order_marks_superseded_orders(self):
         """新規orderが挿入された場合、同一(tenant,customer,product)で

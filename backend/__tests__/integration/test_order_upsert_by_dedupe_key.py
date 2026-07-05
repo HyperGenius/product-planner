@@ -1,10 +1,15 @@
 """
-Integration テスト: 既存orderのupsert処理 (Issue #252)
+Integration テスト: 既存orderのupsert処理 (Issue #252, Issue #267で customer_certainty 分離)
 
-`upsert_order_by_dedupe_key` RPC のステータス優先順位判定・数量更新・
-draft/canceledの上書き除外は Claude API・Gmail APIの出力に依存しない
-決定的なSQLロジックのため、e2e (実PDF・実Claude API) ではなく
-integration tier (実Supabaseのみ) で検証する。
+`upsert_order_by_dedupe_key` RPC は、顧客側の確度 (`customer_certainty`:
+confirmed/forecast/forecast_tentative) と ProductPlanner側のワークフロー
+ステータス (`status`: draft/confirmed/completed/canceled) を分離して扱う。
+INSERT時は常に status='draft' で作成し、既存行が confirmed/completed/canceled、
+または手動下書き (status='draft' AND source_type='manual') の場合は自動更新
+から保護する。それ以外 (メール/PDF起票の確認待ちdraft) は customer_certainty
+の優先順位で upsert 判定を行う。
+このロジックはClaude API・Gmail APIの出力に依存しない決定的なSQLロジックのため、
+e2e (実PDF・実Claude API) ではなく integration tier (実Supabaseのみ) で検証する。
 詳細な方針は __tests__/e2e/CLAUDE.md, __tests__/integration/CLAUDE.md を参照。
 
 実行:
@@ -28,7 +33,7 @@ def _upsert(
     product_id: int,
     quantity: int,
     deadline_date: str,
-    status: str,
+    certainty: str,
 ) -> dict[str, Any]:
     result = admin_db.rpc(
         "upsert_order_by_dedupe_key",
@@ -38,7 +43,7 @@ def _upsert(
             "p_product_id": product_id,
             "p_quantity": quantity,
             "p_deadline_date": deadline_date,
-            "p_status": status,
+            "p_customer_certainty": certainty,
             "p_source_type": "email",
             "p_source_raw": "integration-test upsert_order_by_dedupe_key",
             "p_extracted_product_name": "integration test product",
@@ -90,7 +95,9 @@ def dedupe_fixture(admin_db):
 
 @pytest.mark.integration
 class TestUpsertOrderByDedupeKey:
-    def test_inserts_new_order_when_no_existing_match(self, admin_db, dedupe_fixture):
+    def test_inserts_new_order_as_draft_with_customer_certainty(
+        self, admin_db, dedupe_fixture
+    ):
         result = _upsert(
             admin_db,
             dedupe_fixture["tenant_id"],
@@ -98,23 +105,27 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         assert result["action"] == "inserted"
 
         order = (
             admin_db.table("orders")
-            .select("status, quantity")
+            .select("status, customer_certainty, quantity")
             .eq("id", result["order_id"])
             .single()
             .execute()
             .data
         )
-        assert order["status"] == "forecast"
+        # INSERT時は顧客側の確度に関わらず常に status='draft' で作成される
+        assert order["status"] == "draft"
+        assert order["customer_certainty"] == "forecast"
         assert order["quantity"] == 10
 
-    def test_forecast_is_upgraded_to_confirmed(self, admin_db, dedupe_fixture):
+    def test_certainty_forecast_is_upgraded_to_confirmed_without_changing_status(
+        self, admin_db, dedupe_fixture
+    ):
         first = _upsert(
             admin_db,
             dedupe_fixture["tenant_id"],
@@ -122,7 +133,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         second = _upsert(
@@ -132,7 +143,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="confirmed",
+            certainty="confirmed",
         )
 
         assert second["action"] == "updated"
@@ -140,13 +151,16 @@ class TestUpsertOrderByDedupeKey:
 
         order = (
             admin_db.table("orders")
-            .select("status")
+            .select("status, customer_certainty")
             .eq("id", first["order_id"])
             .single()
             .execute()
             .data
         )
-        assert order["status"] == "confirmed"
+        # customer_certainty は昇格するが、status はユーザーの確定操作なしに
+        # 変化してはならない
+        assert order["status"] == "draft"
+        assert order["customer_certainty"] == "confirmed"
 
     def test_quantity_only_change_updates_existing_order(
         self, admin_db, dedupe_fixture
@@ -158,7 +172,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         second = _upsert(
@@ -168,7 +182,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=25,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         assert second["action"] == "updated"
@@ -181,12 +195,12 @@ class TestUpsertOrderByDedupeKey:
             .execute()
             .data
         )
-        assert order["status"] == "forecast"
+        assert order["status"] == "draft"
         assert order["quantity"] == 25
 
-    def test_confirmed_existing_rejects_forecast_downgrade(
-        self, admin_db, dedupe_fixture
-    ):
+    def test_confirmed_existing_rejects_any_update(self, admin_db, dedupe_fixture):
+        """ユーザーが /orders/{id}/confirm で確定させた注文 (status='confirmed') は
+        PDF自動処理から完全に保護され、certainty='confirmed' の再取込でも上書きされない。"""
         first = _upsert(
             admin_db,
             dedupe_fixture["tenant_id"],
@@ -194,8 +208,12 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="confirmed",
+            certainty="confirmed",
         )
+        # confirm_order 相当の操作をシミュレート
+        admin_db.table("orders").update(
+            {"status": "confirmed", "confirmed_at": datetime.now(UTC).isoformat()}
+        ).eq("id", first["order_id"]).execute()
 
         second = _upsert(
             admin_db,
@@ -204,7 +222,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=999,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="confirmed",
         )
 
         assert second["action"] == "skipped_downgrade"
@@ -231,10 +249,12 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="completed",
+            certainty="confirmed",
         )
+        admin_db.table("orders").update({"status": "completed"}).eq(
+            "id", first["order_id"]
+        ).execute()
 
-        # completed 同士でも数量差分だけでは上書きしない
         second = _upsert(
             admin_db,
             dedupe_fixture["tenant_id"],
@@ -242,7 +262,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=999,
             deadline_date=_FUTURE_DEADLINE,
-            status="completed",
+            certainty="confirmed",
         )
 
         assert second["action"] == "skipped_downgrade"
@@ -266,7 +286,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
         admin_db.table("orders").update({"status": "canceled"}).eq(
             "id", first["order_id"]
@@ -279,7 +299,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=999,
             deadline_date=_FUTURE_DEADLINE,
-            status="confirmed",
+            certainty="confirmed",
         )
 
         assert second["action"] == "skipped_downgrade"
@@ -295,21 +315,26 @@ class TestUpsertOrderByDedupeKey:
         assert order["status"] == "canceled"
         assert order["quantity"] == 10
 
-    def test_draft_existing_always_conflicts(self, admin_db, dedupe_fixture):
-        first = _upsert(
-            admin_db,
-            dedupe_fixture["tenant_id"],
-            dedupe_fixture["customer_id"],
-            dedupe_fixture["product_id"],
-            quantity=10,
-            deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+    def test_manual_draft_existing_always_conflicts(self, admin_db, dedupe_fixture):
+        """手動起票 (source_type='manual') の下書きは、メール/PDF自動処理からの
+        上書きを一切許さない。"""
+        manual_order = (
+            admin_db.table("orders")
+            .insert(
+                {
+                    "tenant_id": dedupe_fixture["tenant_id"],
+                    "customer_id": dedupe_fixture["customer_id"],
+                    "product_id": dedupe_fixture["product_id"],
+                    "quantity": 10,
+                    "deadline_date": _FUTURE_DEADLINE,
+                    "status": "draft",
+                    "source_type": "manual",
+                }
+            )
+            .execute()
         )
-        admin_db.table("orders").update({"status": "draft"}).eq(
-            "id", first["order_id"]
-        ).execute()
+        manual_order_id = cast(list[dict[str, Any]], manual_order.data)[0]["id"]
 
-        # draft は昇格方向 (forecast -> confirmed) の更新でも常にコンフリクト扱い
         second = _upsert(
             admin_db,
             dedupe_fixture["tenant_id"],
@@ -317,21 +342,69 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=999,
             deadline_date=_FUTURE_DEADLINE,
-            status="confirmed",
+            certainty="confirmed",
         )
 
         assert second["action"] == "skipped_draft_conflict"
+        assert second["order_id"] == manual_order_id
 
         order = (
             admin_db.table("orders")
-            .select("status, quantity")
-            .eq("id", first["order_id"])
+            .select("status, quantity, customer_certainty")
+            .eq("id", manual_order_id)
             .single()
             .execute()
             .data
         )
         assert order["status"] == "draft"
         assert order["quantity"] == 10
+        assert order["customer_certainty"] is None
+
+    def test_email_draft_without_certainty_is_upgraded(self, admin_db, dedupe_fixture):
+        """本文のみのメール起票 (gmail_service.py 経由) は customer_certainty=NULL の
+        draft注文として作成される。これに対する後続のPDF取込は、NULLを最も低い
+        優先度として扱い、正しく確度・数量を更新できる。"""
+        email_order = (
+            admin_db.table("orders")
+            .insert(
+                {
+                    "tenant_id": dedupe_fixture["tenant_id"],
+                    "customer_id": dedupe_fixture["customer_id"],
+                    "product_id": dedupe_fixture["product_id"],
+                    "quantity": 10,
+                    "deadline_date": _FUTURE_DEADLINE,
+                    "status": "draft",
+                    "source_type": "email",
+                }
+            )
+            .execute()
+        )
+        email_order_id = cast(list[dict[str, Any]], email_order.data)[0]["id"]
+
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=999,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast_tentative",
+        )
+
+        assert second["action"] == "updated"
+        assert second["order_id"] == email_order_id
+
+        order = (
+            admin_db.table("orders")
+            .select("status, quantity, customer_certainty")
+            .eq("id", email_order_id)
+            .single()
+            .execute()
+            .data
+        )
+        assert order["status"] == "draft"
+        assert order["quantity"] == 999
+        assert order["customer_certainty"] == "forecast_tentative"
 
     def test_exact_duplicate_is_skipped_without_change(self, admin_db, dedupe_fixture):
         first = _upsert(
@@ -341,7 +414,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         second = _upsert(
@@ -351,7 +424,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         assert second["action"] == "skipped_no_change"
@@ -368,7 +441,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
         second = _upsert(
             admin_db,
@@ -377,7 +450,7 @@ class TestUpsertOrderByDedupeKey:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE_2,
-            status="forecast",
+            certainty="forecast",
         )
 
         assert second["action"] == "inserted"
@@ -388,7 +461,7 @@ class TestUpsertOrderByDedupeKey:
 class TestMarkSupersededOrders:
     """
     _mark_superseded_orders はPDFパースサービス内のPython関数だが、実DBに対する
-    UPDATEクエリチェーンの組み合わせ (.eq/.neq/.gt/.in_/.is_) が意図通りかは
+    UPDATEクエリチェーン (.eq/.neq/.gt/.in_/.is_) が意図通りかは
     実DBでの検証が必要なため integration tier に置く。
     """
 
@@ -404,7 +477,7 @@ class TestMarkSupersededOrders:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
 
         _mark_superseded_orders(
@@ -426,17 +499,22 @@ class TestMarkSupersededOrders:
         assert order["superseded_at"] is not None
 
     def test_confirmed_order_is_not_superseded(self, admin_db, dedupe_fixture):
+        """status='confirmed'（ユーザー確定済み）の注文は、customer_certainty の値に
+        関わらずsupersedeされない。"""
         from app.services.pdf_order_parsing_service import _mark_superseded_orders
 
-        confirmed = _upsert(
+        order_row = _upsert(
             admin_db,
             dedupe_fixture["tenant_id"],
             dedupe_fixture["customer_id"],
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="confirmed",
+            certainty="forecast",
         )
+        admin_db.table("orders").update(
+            {"status": "confirmed", "confirmed_at": datetime.now(UTC).isoformat()}
+        ).eq("id", order_row["order_id"]).execute()
 
         _mark_superseded_orders(
             admin_db,
@@ -449,7 +527,7 @@ class TestMarkSupersededOrders:
         order = (
             admin_db.table("orders")
             .select("superseded_at")
-            .eq("id", confirmed["order_id"])
+            .eq("id", order_row["order_id"])
             .single()
             .execute()
             .data
@@ -471,7 +549,7 @@ class TestMarkSupersededOrders:
             dedupe_fixture["product_id"],
             quantity=10,
             deadline_date=_FUTURE_DEADLINE,
-            status="forecast",
+            certainty="forecast",
         )
         _mark_superseded_orders(
             admin_db,

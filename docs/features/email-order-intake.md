@@ -261,12 +261,21 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ### 注意事項
 
-- `source_type === 'email'` の注文は `draft` のまま起票される。人間がレビューして確定する運用を推奨
+- `source_type === 'email'` の注文は `status='draft'` のまま起票される。`status` が
+  `confirmed` に遷移するのはユーザーが `POST /orders/{id}/confirm` を実行した時のみで、
+  PDF添付メール経由（`pdf_order_parsing_service.py`）でも certainty の値に関わらず
+  常に `draft` で作成される。人間がレビューして確定する運用を徹底するための設計であり、
+  当初これが徹底されていなかった不具合の是正については
+  [pdf-order-parsing.md](pdf-order-parsing.md)（Issue #267）を参照
 - 注文番号は解析できた場合のみ設定し、不明な場合は NULL のまま起票する
 - `source_raw` にはメール本文全体を保存するため、個人情報の取り扱いに注意すること
 - 製品マッチングで候補が複数ある場合、`product_candidates` に候補リストが保存され、`product_id` は NULL になる
 - 顧客が特定できない場合でも `customer_id` は必ず設定される（下書き顧客の自動作成）。
   詳細は [customer-draft-auto-create.md](customer-draft-auto-create.md) を参照
+- PDF添付メール経由で起票された注文は、PDF文面から抽出した顧客側の確度（確定/内示/内々示）
+  を `orders.customer_certainty` に保持する。これは ProductPlanner側のワークフロー
+  ステータス（`status`）とは独立した参考情報であり、UI上は別バッジとして表示される。
+  詳細は [pdf-order-parsing.md](pdf-order-parsing.md) を参照
 
 ---
 

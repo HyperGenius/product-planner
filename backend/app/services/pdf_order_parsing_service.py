@@ -12,11 +12,7 @@ from supabase import Client
 
 logger = get_logger(__name__)
 
-_CERTAINTY_TO_STATUS = {
-    "confirmed": "confirmed",
-    "forecast": "forecast",
-    "forecast_tentative": "forecast_tentative",
-}
+_VALID_CUSTOMER_CERTAINTIES = {"confirmed", "forecast", "forecast_tentative"}
 
 _KNOWN_UPSERT_ACTIONS = {
     "inserted",
@@ -152,8 +148,14 @@ def _process_line_item(
         )
         return False
 
-    certainty = cast(str | None, line.get("certainty"))
-    status = _CERTAINTY_TO_STATUS.get(certainty or "", "forecast_tentative")
+    certainty_raw = cast(str | None, line.get("certainty"))
+    # Claude抽出結果の揺れ・想定外値でも orders.customer_certainty のCHECK制約に
+    # 違反してRPCが失敗しないよう、許容値以外は最も確度が低い値にフォールバックする
+    certainty = (
+        certainty_raw
+        if certainty_raw in _VALID_CUSTOMER_CERTAINTIES
+        else "forecast_tentative"
+    )
     deadline_date = line.get("delivery_date")
 
     rpc_result = db.rpc(
@@ -164,7 +166,7 @@ def _process_line_item(
             "p_product_id": product_id,
             "p_quantity": line.get("quantity"),
             "p_deadline_date": deadline_date,
-            "p_status": status,
+            "p_customer_certainty": certainty,
             "p_source_type": "email",
             "p_source_raw": staging_row.get("source_raw"),
             "p_extracted_product_name": product_name_raw,
@@ -262,7 +264,8 @@ def _mark_superseded_orders(
         .eq("product_id", product_id)
         .neq("deadline_date", deadline_date)
         .gt("deadline_date", datetime.now(UTC).date().isoformat())
-        .in_("status", ["forecast", "forecast_tentative"])
+        .eq("status", "draft")
+        .in_("customer_certainty", ["forecast", "forecast_tentative"])
         .is_("superseded_at", "null")
         .execute()
     )

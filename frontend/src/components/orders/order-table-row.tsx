@@ -24,6 +24,8 @@ import {
   getCustomerName,
   getStatusLabel,
   getStatusBadgeClass,
+  getCertaintyLabel,
+  getCertaintyBadgeClass,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -142,9 +144,16 @@ export function OrderTableRow({
             : "-"}
         </TableCell>
         <TableCell>
-          <Badge className={getStatusBadgeClass(order.status)}>
-            {getStatusLabel(order.status)}
-          </Badge>
+          <div className="flex flex-col items-start gap-1">
+            <Badge className={getStatusBadgeClass(order.status)}>
+              {getStatusLabel(order.status)}
+            </Badge>
+            {order.customer_certainty && (
+              <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
+                {getCertaintyLabel(order.customer_certainty)}
+              </Badge>
+            )}
+          </div>
         </TableCell>
         <TableCell className="text-right">
           <div className="flex items-center justify-end gap-2">
