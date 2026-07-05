@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from app.services.gmail_service import (
+    _b64url_decode,
     _get_message_body,
     _process_message,
     poll_unread_emails,
@@ -92,6 +93,18 @@ class TestPollUnreadEmails:
 
         assert result["processed"] == 0
         assert result["errors"] == 1
+
+
+@pytest.mark.unit
+class TestB64UrlDecode:
+    """固定 "==" 付与だと元データの長さによってはパディングが不足/過剰になりうるため、
+    長さに応じて必要な分だけ補うことを確認する回帰テスト。"""
+
+    @pytest.mark.parametrize("length", range(0, 12))
+    def test_decodes_correctly_regardless_of_original_length(self, length):
+        original = ("x" * length).encode("utf-8")
+        encoded = base64.urlsafe_b64encode(original).decode().rstrip("=")
+        assert _b64url_decode(encoded) == original
 
 
 @pytest.mark.unit

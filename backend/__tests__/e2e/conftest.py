@@ -201,7 +201,9 @@ def pdf_order_parsing_staging_row(
     # resolve_or_create_customer は既存顧客があれば再利用するため、
     # 複数回のテスト実行で顧客レコードが増殖することはない。
     customer_id, _ = resolve_or_create_customer(
-        admin_db, e2e_tenant_id, "e2e-pdf-parsing-test@example.com"
+        admin_db,
+        e2e_tenant_id,
+        "From: e2e-pdf-parsing-test@example.com\n",
     )
 
     inserted = (

@@ -58,6 +58,16 @@ def _get_label_id_map(service) -> dict[str, str]:
     return {lbl["name"]: lbl["id"] for lbl in result.get("labels", [])}
 
 
+def _b64url_decode(data: str) -> bytes:
+    """Gmail API が返すパディング無しの base64url 文字列をデコードする。
+
+    固定で "==" を付与すると、元データの長さによっては
+    ("Incorrect padding") エラーになるため、不足分だけ "=" を補う。
+    """
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
+
+
 def _find_part_data(parts: list[dict], mime_type: str) -> str | None:
     """parts を再帰的に探索し、指定 mimeType の body.data を返す。
 
@@ -83,7 +93,7 @@ def _get_message_body(msg: dict) -> str:
     payload = msg.get("payload", {})
 
     def _decode(data: str) -> str:
-        return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+        return _b64url_decode(data).decode("utf-8", errors="replace")
 
     parts = payload.get("parts", [])
     if parts:
@@ -132,7 +142,7 @@ def _get_attachments(service, msg_id: str, payload: dict) -> list[dict[str, Any]
             .execute()
         )
         raw = attachment.get("data", "")
-        data = base64.urlsafe_b64decode(raw + "==")
+        data = _b64url_decode(raw)
         results.append(
             {"filename": filename, "content_type": content_type, "data": data}
         )
