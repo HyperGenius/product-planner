@@ -57,6 +57,7 @@ CREATE TABLE notifications (
 | `failed_encrypted` | `pdf_order_parsing_service._parse_one` | `order_attachments` | `attachment_id` |
 | `failed_image` | 同上 | `order_attachments` | `attachment_id` |
 | `non_order_email` | `gmail_service._process_message` | `gmail_message` | Gmail `msg_id` |
+| `customer_draft_created` | `resolve_or_create_customer` 呼び出し元（`gmail_service._process_message`）| `gmail_message` | Gmail `msg_id` |
 
 ---
 
@@ -185,5 +186,7 @@ cd backend && pytest __tests__/integration/test_notifications_rls.py -v --run-in
 - [email-order-intake.md](email-order-intake.md): メール起票の基盤設計
 - [order-attachments.md](order-attachments.md): `order_attachments` テーブル・`parse_status`
   の定義（`failed_encrypted` / `failed_image` の発生元、対象外メール検知時の挙動変更）
+- [customer-draft-auto-create.md](customer-draft-auto-create.md): `customer_draft_created`
+  の追加（Issue #263）
 - Issue #249, #252: `order_parse_log` への記録処理（本Issueの通知発生元）
 - Issue #256: integrationテスト追加（RLS/IDOR回帰）

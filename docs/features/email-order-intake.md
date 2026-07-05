@@ -265,6 +265,8 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 - 注文番号は解析できた場合のみ設定し、不明な場合は NULL のまま起票する
 - `source_raw` にはメール本文全体を保存するため、個人情報の取り扱いに注意すること
 - 製品マッチングで候補が複数ある場合、`product_candidates` に候補リストが保存され、`product_id` は NULL になる
+- 顧客が特定できない場合でも `customer_id` は必ず設定される（下書き顧客の自動作成）。
+  詳細は [customer-draft-auto-create.md](customer-draft-auto-create.md) を参照
 
 ---
 

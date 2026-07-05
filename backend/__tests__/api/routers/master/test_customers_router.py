@@ -111,6 +111,7 @@ class TestCustomerRouter:
             "id": customer_id,
             "name": "Updated Name",
             "alias": "A社",
+            "status": "active",
         }
 
         mock_repo.update.return_value = updated_data
@@ -120,11 +121,12 @@ class TestCustomerRouter:
         assert response.status_code == 200
         assert response.json() == updated_data
 
-        # exclude_unset=True が効いているか確認
+        # exclude_unset=True が効いていること、かつ status は常に 'active' に
+        # 上書きされること（下書き顧客の「確定」は専用ボタンではなく保存で行う仕様）
         mock_repo.update.assert_called_once()
         called_id, called_data = mock_repo.update.call_args[0]
         assert called_id == customer_id
-        assert called_data == payload
+        assert called_data == {"name": "Updated Name", "status": "active"}
 
     def test_delete_customer_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

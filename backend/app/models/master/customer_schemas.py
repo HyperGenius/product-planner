@@ -26,6 +26,9 @@ class Customer(CustomerBase):
     """読み取り用顧客のスキーマ"""
 
     id: int
+    status: str = Field(
+        default="active", description="顧客ステータス: active(登録済み), draft(下書き)"
+    )
 
 
 class CustomerUpdateSchema(BaseSchema):

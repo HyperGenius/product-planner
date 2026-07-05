@@ -44,9 +44,12 @@ def update_customer(
     customer_data: CustomerUpdateSchema,
     repo: CustomerRepository = Depends(get_customer_repo),
 ):
-    """顧客を更新"""
+    """顧客を更新。専用の「確定」ボタンは設けず、保存するだけで下書きが解除される
+    （status は常に 'active' に上書きする）"""
     logger.info(f"Updating customer {customer_id}")
-    return repo.update(customer_id, customer_data.model_dump(exclude_unset=True))
+    update_data = customer_data.model_dump(exclude_unset=True)
+    update_data["status"] = "active"
+    return repo.update(customer_id, update_data)
 
 
 @customer_router.delete("/{customer_id}")

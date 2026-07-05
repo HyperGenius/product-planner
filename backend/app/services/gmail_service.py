@@ -182,11 +182,18 @@ def _process_message(
             # PDF添付メール: orderは作成せず、order_attachments にステージング保存する
             # （パースして複数orderを生成する処理は後続Issueで実装）
             sender_email = extract_sender_email(body)
-            customer_id = (
-                resolve_or_create_customer(db, tenant_id, sender_email)
-                if sender_email
-                else None
+            customer_id, created_draft = resolve_or_create_customer(
+                db, tenant_id, sender_email, msg.get("internalDate")
             )
+            if created_draft:
+                create_notification(
+                    db,
+                    tenant_id,
+                    "customer_draft_created",
+                    "gmail_message",
+                    msg_id,
+                    {"customer_id": customer_id, "email": sender_email},
+                )
 
             storage_path = upload_staged_attachment(
                 db,
@@ -257,10 +264,19 @@ def _process_message(
             candidates = match["candidates"]
 
         # 7. 顧客マッチング
-        customer_id = None
         sender_email = extract_sender_email(body)
-        if sender_email:
-            customer_id = resolve_or_create_customer(db, tenant_id, sender_email)
+        customer_id, created_draft = resolve_or_create_customer(
+            db, tenant_id, sender_email, msg.get("internalDate")
+        )
+        if created_draft:
+            create_notification(
+                db,
+                tenant_id,
+                "customer_draft_created",
+                "gmail_message",
+                msg_id,
+                {"customer_id": customer_id, "email": sender_email},
+            )
 
         # 8. ドラフト注文を Supabase に登録
         order_row: dict[str, Any] = {

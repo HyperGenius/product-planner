@@ -8,6 +8,7 @@ export interface Customer {
   representative_name?: string
   phone_number?: string
   email?: string
+  status: "active" | "draft"
   tenant_id: string
   created_at: string
   updated_at: string
