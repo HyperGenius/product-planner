@@ -12,6 +12,7 @@ export interface Order {
   status: 'draft' | 'confirmed' | 'completed' | 'canceled'
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean
+  has_no_routings?: boolean
   has_unconfirmed_routings?: boolean
   source_type: 'manual' | 'email'
   source_raw?: string
