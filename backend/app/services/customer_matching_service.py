@@ -15,10 +15,80 @@ _FORWARDED_EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# 日本のビジネスメール署名でよく使われる罫線区切り（"---" 等）
+_SIGNATURE_SEPARATOR_RE = re.compile(r"^[-=_ー―−‐]{5,}$")
+_COMPANY_KEYWORDS_RE = re.compile(r"(株式会社|有限会社|合同会社|合資会社|㈱|㈲)")
+# 住所・電話・メールなど、会社名/氏名の行から除外する行
+_CONTACT_LINE_RE = re.compile(r"(TEL|FAX|〒|e-mail|email)", re.IGNORECASE)
+
+
+def extract_sender_email_candidates(body: str) -> list[str]:
+    """本文中の "From:"/"差出人:" 行にマッチする全メールアドレスを出現順・重複排除で返す。
+
+    多段転送・返信の引用が重なっている場合、本文中には複数のヘッダが出現しうるため、
+    1件に絞り込まず候補集合として返す（呼び出し元で既存顧客との突合に使う）。
+    """
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for m in _FORWARDED_EMAIL_RE.finditer(body):
+        email = m.group(1)
+        if email not in seen:
+            seen.add(email)
+            candidates.append(email)
+    return candidates
+
 
 def extract_sender_email(body: str) -> str | None:
-    m = _FORWARDED_EMAIL_RE.search(body)
-    return m.group(1) if m else None
+    # 候補が複数ある場合、一番奥（最初にメールを書いた本人）が実際の顧客であることが
+    # 多いため、最後に出現したものを採用する。
+    candidates = extract_sender_email_candidates(body)
+    return candidates[-1] if candidates else None
+
+
+def extract_customer_name(body: str, email: str) -> str | None:
+    """email が記載された署名ブロックから会社名（取得できれば氏名も併記）を抽出する。
+
+    見つからない場合は None を返す（呼び出し元でメールアドレスにフォールバックする）。
+    """
+    lines = body.splitlines()
+    # 署名欄は本文の後方に現れることが多く、かつヘッダ行の "From:" にも同じ
+    # アドレスが再掲されることがあるため、最後に出現した行を署名ブロックとみなす
+    matching_indices = [i for i, line in enumerate(lines) if email in line]
+    if not matching_indices:
+        return None
+    email_idx = matching_indices[-1]
+
+    # 署名ブロックの開始位置: 直前の罫線区切りがあればそこから、なければ最大40行遡る
+    # （Outlook由来の署名は1行ごとに空行を挟むことが多く、実質の行数以上に遡る必要がある）
+    search_floor = max(0, email_idx - 40)
+    start = search_floor
+    for i in range(email_idx - 1, search_floor - 1, -1):
+        if _SIGNATURE_SEPARATOR_RE.match(lines[i].strip()):
+            start = i + 1
+            break
+
+    block = [line.strip() for line in lines[start:email_idx] if line.strip()]
+
+    company_name: str | None = None
+    person_name: str | None = None
+    for line in block:
+        if _CONTACT_LINE_RE.search(line) or re.search(r"\d", line):
+            continue
+        if company_name is None and _COMPANY_KEYWORDS_RE.search(line):
+            company_name = line
+            continue
+        if company_name is not None:
+            # 「部署名　　氏名」のように全角/半角スペースで区切られた末尾を氏名候補とする。
+            # 会社名の下に部署名が複数行続き、氏名は住所欄の直前に来ることが多いため、
+            # 該当する行が見つかるたびに更新し、最後に見つかったものを採用する。
+            segments = re.split(r"[ 　]{2,}", line)
+            candidate = segments[-1].strip() if segments else line
+            if candidate and not _COMPANY_KEYWORDS_RE.search(candidate):
+                person_name = candidate
+
+    if company_name and person_name:
+        return f"{company_name} {person_name}"
+    return company_name
 
 
 def _placeholder_customer_name(received_at: str | int | None) -> str:
@@ -32,17 +102,20 @@ def _placeholder_customer_name(received_at: str | int | None) -> str:
     return f"不明な顧客 ({dt.strftime('%Y-%m-%d %H:%M')})"
 
 
-def resolve_or_create_customer(
+def _resolve_or_create_by_single_email(
     db: Client,
     tenant_id: str,
     email: str | None,
-    received_at: str | int | None = None,
+    received_at: str | int | None,
+    name_hint: str | None,
 ) -> tuple[int, bool]:
     """
-    メールアドレスで顧客を検索し、存在すれば customer_id を返す（status は変更しない）。
+    メールアドレス1件で顧客を検索し、存在すれば customer_id を返す（status は変更しない）。
     存在しなければ status='draft' の下書き顧客を自動作成して返す。
     email が None の場合は既存顧客と紐付けようがないため、常に新規の下書き顧客を作成する
     （name は受信日時ベースのプレースホルダー）。
+    name_hint（署名ブロックから抽出した会社名/氏名）が渡された場合は、新規作成時の
+    name にそれを使う。渡されない場合は email をそのまま name とする。
 
     Returns: (customer_id, 新規に下書き作成したかどうか)
     """
@@ -64,7 +137,8 @@ def resolve_or_create_customer(
 
     insert_row: dict[str, Any] = {
         "tenant_id": tenant_id,
-        "name": email if email else _placeholder_customer_name(received_at),
+        "name": name_hint
+        or (email if email else _placeholder_customer_name(received_at)),
         "status": "draft",
     }
     if email:
@@ -75,3 +149,49 @@ def resolve_or_create_customer(
     new_id = int(created_rows[0]["id"])
     logger.info(f"draft customer auto-created: id={new_id} email={email}")
     return new_id, True
+
+
+def resolve_or_create_customer(
+    db: Client,
+    tenant_id: str,
+    body: str,
+    received_at: str | int | None = None,
+) -> tuple[int, bool]:
+    """
+    本文から抽出した候補メールアドレス群と既存顧客（customers.email）を突合し、
+    customer_id を解決する。
+
+    - 候補集合と既存顧客の積集合が1件 → その顧客にマッチ確定
+      （name抽出は行わない。status/nameも変更しない）
+    - 積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）の場合は、
+      候補集合のうち「最後に出現したもの」1件に絞り込み、メールアドレス単体の
+      検索/下書き作成にフォールバックする（0件の場合のみ署名ブロックから
+      customer_name を抽出し、下書きのnameに使う）
+
+    Returns: (customer_id, 新規に下書き作成したかどうか)
+    """
+    table = SupabaseTableName.CUSTOMERS.value
+    candidates = extract_sender_email_candidates(body)
+
+    if candidates:
+        result = (
+            db.table(table)
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .in_("email", candidates)
+            .execute()
+        )
+        rows = cast(list[dict[str, Any]], result.data or [])
+        if len(rows) == 1:
+            customer_id = int(rows[0]["id"])
+            logger.info(
+                f"customer found via candidate match: id={customer_id} "
+                f"candidates={candidates}"
+            )
+            return customer_id, False
+
+    email = candidates[-1] if candidates else None
+    name_hint = extract_customer_name(body, email) if email else None
+    return _resolve_or_create_by_single_email(
+        db, tenant_id, email, received_at, name_hint
+    )

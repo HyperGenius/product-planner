@@ -1,7 +1,12 @@
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
-from app.services.gmail_service import _process_message, poll_unread_emails
+from app.services.gmail_service import (
+    _get_message_body,
+    _process_message,
+    poll_unread_emails,
+)
 
 
 @pytest.mark.unit
@@ -90,6 +95,69 @@ class TestPollUnreadEmails:
 
 
 @pytest.mark.unit
+class TestGetMessageBody:
+    """PDF添付メール（multipart/mixed の中に multipart/alternative がネストする構造）で
+    本文が空文字になってしまう不具合の回帰テスト。"""
+
+    @staticmethod
+    def _b64(text: str) -> str:
+        return base64.urlsafe_b64encode(text.encode("utf-8")).decode().rstrip("=")
+
+    def test_extracts_text_plain_nested_inside_multipart_alternative(self):
+        text = "From: taro@example.com\n本文"
+        msg = {
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "mimeType": "multipart/alternative",
+                        "body": {},
+                        "parts": [
+                            {
+                                "mimeType": "text/plain",
+                                "body": {"data": self._b64(text)},
+                            },
+                            {
+                                "mimeType": "text/html",
+                                "body": {"data": self._b64("<p>本文</p>")},
+                            },
+                        ],
+                    },
+                    {
+                        "mimeType": "application/pdf",
+                        "filename": "order.pdf",
+                        "body": {"attachmentId": "att-1"},
+                    },
+                ],
+            }
+        }
+
+        assert _get_message_body(msg) == text
+
+    def test_falls_back_to_text_html_when_no_text_plain_part(self):
+        html = "<p>本文のみ</p>"
+        msg = {
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "parts": [
+                    {
+                        "mimeType": "multipart/alternative",
+                        "body": {},
+                        "parts": [
+                            {
+                                "mimeType": "text/html",
+                                "body": {"data": self._b64(html)},
+                            },
+                        ],
+                    },
+                ],
+            }
+        }
+
+        assert _get_message_body(msg) == html
+
+
+@pytest.mark.unit
 class TestProcessMessagePdfStaging:
     """PDF添付メールのステージング保存分岐 (Issue #248) の単体テスト。"""
 
@@ -149,7 +217,7 @@ class TestProcessMessagePdfStaging:
             mock_db, "tenant-1", "msg-1", "order.pdf", b"%PDF-1.4", "application/pdf"
         )
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "customer@example.com", "1751500000000"
+            mock_db, "tenant-1", "", "1751500000000"
         )
 
         inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
@@ -216,7 +284,7 @@ class TestProcessMessagePdfStaging:
 
         # メールアドレスが取れない場合も customer_id は必ず設定され、下書き作成の通知が記録される
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", None, "1751500000000"
+            mock_db, "tenant-1", "", "1751500000000"
         )
         notif_inserts = [
             call.args[0]

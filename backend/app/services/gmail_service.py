@@ -58,6 +58,26 @@ def _get_label_id_map(service) -> dict[str, str]:
     return {lbl["name"]: lbl["id"] for lbl in result.get("labels", [])}
 
 
+def _find_part_data(parts: list[dict], mime_type: str) -> str | None:
+    """parts を再帰的に探索し、指定 mimeType の body.data を返す。
+
+    PDF添付メールは multipart/mixed の中に multipart/alternative がネストし、
+    その中に text/plain・text/html が入る構造になる。トップレベルの parts しか
+    見ないと本文が空文字になってしまうため、ネストした parts も探索する。
+    """
+    for part in parts:
+        if part.get("mimeType") == mime_type:
+            data = part.get("body", {}).get("data", "")
+            if data:
+                return data
+        nested = part.get("parts")
+        if nested:
+            found = _find_part_data(nested, mime_type)
+            if found:
+                return found
+    return None
+
+
 def _get_message_body(msg: dict) -> str:
     """Gmail API メッセージからプレーンテキスト本文を抽出する。"""
     payload = msg.get("payload", {})
@@ -67,14 +87,11 @@ def _get_message_body(msg: dict) -> str:
 
     parts = payload.get("parts", [])
     if parts:
-        for part in parts:
-            if part.get("mimeType") == "text/plain":
-                body_data = part.get("body", {}).get("data", "")
-                if body_data:
-                    return _decode(body_data)
-        # fallback: first part
-        body_data = parts[0].get("body", {}).get("data", "")
-        return _decode(body_data) if body_data else ""
+        data = _find_part_data(parts, "text/plain")
+        if data:
+            return _decode(data)
+        data = _find_part_data(parts, "text/html")
+        return _decode(data) if data else ""
 
     body_data = payload.get("body", {}).get("data", "")
     return _decode(body_data) if body_data else ""
@@ -183,7 +200,7 @@ def _process_message(
             # （パースして複数orderを生成する処理は後続Issueで実装）
             sender_email = extract_sender_email(body)
             customer_id, created_draft = resolve_or_create_customer(
-                db, tenant_id, sender_email, msg.get("internalDate")
+                db, tenant_id, body, msg.get("internalDate")
             )
             if created_draft:
                 create_notification(
@@ -266,7 +283,7 @@ def _process_message(
         # 7. 顧客マッチング
         sender_email = extract_sender_email(body)
         customer_id, created_draft = resolve_or_create_customer(
-            db, tenant_id, sender_email, msg.get("internalDate")
+            db, tenant_id, body, msg.get("internalDate")
         )
         if created_draft:
             create_notification(
