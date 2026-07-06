@@ -172,7 +172,11 @@ class TestGetMessageBody:
 
 @pytest.mark.unit
 class TestProcessMessagePdfStaging:
-    """PDF添付メールのステージング保存分岐 (Issue #248) の単体テスト。"""
+    """メール受信時のステージング保存分岐 (Issue #248, #280) の単体テスト。
+
+    実際の抽出・order生成は parse_pending_order_pdfs（cron）が非同期に行うため、
+    ここでは _process_message が常に order_attachments へステージング行を
+    作成するだけであることを検証する。"""
 
     def _mock_gmail_service(self):
         mock_service = MagicMock()
@@ -213,14 +217,10 @@ class TestProcessMessagePdfStaging:
                 "app.services.gmail_service.upload_staged_attachment",
                 return_value="tenant-1/inbox/msg-1/abc.pdf",
             ) as mock_upload_staged,
-            patch("app.services.gmail_service.extract_email_fields") as mock_extract,
         ):
             _process_message(mock_service, mock_db, "msg-1", "tenantA", {})
 
-        # Claudeによる単一フィールド抽出は呼ばれない（後続Issueに置き換わるため）
-        mock_extract.assert_not_called()
-
-        # orders テーブルへの INSERT は発生しない
+        # orders テーブルへの INSERT は発生しない（パースは後続の非同期処理）
         assert not any(
             call.args and call.args[0] == "orders"
             for call in mock_db.table.call_args_list
@@ -241,12 +241,11 @@ class TestProcessMessagePdfStaging:
         assert inserted_row["storage_path"] == "tenant-1/inbox/msg-1/abc.pdf"
         assert inserted_row["parse_status"] == "pending"
 
-    def test_non_pdf_attachment_keeps_existing_immediate_order_flow(self):
+    def test_non_pdf_attachment_is_staged_via_same_path_as_pdf(self):
+        """非PDF添付メールも、PDF添付メールと同じくステージング保存され、
+        即時のorder作成は行われないこと（Issue #280: 1ソース1回保存への統一）。"""
         mock_service = self._mock_gmail_service()
         mock_db = MagicMock()
-        mock_db.table("orders").insert().execute.return_value = MagicMock(
-            data=[{"id": 99}]
-        )
 
         with (
             patch(
@@ -263,37 +262,21 @@ class TestProcessMessagePdfStaging:
                     }
                 ],
             ),
-            patch(
-                "app.services.gmail_service.extract_email_fields",
-                return_value={
-                    "product_name": "製品A",
-                    "quantity": "<UNKNOWN>",
-                    "deadline_date": "<UNKNOWN>",
-                    "order_number": "<UNKNOWN>",
-                },
-            ),
             patch("app.services.gmail_service.extract_sender_email", return_value=None),
-            patch(
-                "app.services.gmail_service.match_products",
-                return_value={"product_id": None, "candidates": []},
-            ),
             patch(
                 "app.services.gmail_service.resolve_or_create_customer",
                 return_value=(7, True),
             ) as mock_resolve_customer,
             patch(
-                "app.services.gmail_service.upload_attachment",
-                return_value="tenant-1/orders/99/def.txt",
-            ) as mock_upload,
-            patch(
-                "app.services.gmail_service.upload_staged_attachment"
+                "app.services.gmail_service.upload_staged_attachment",
+                return_value="tenant-1/inbox/msg-2/def.txt",
             ) as mock_upload_staged,
         ):
             _process_message(mock_service, mock_db, "msg-2", "tenantA", {})
 
-        # 既存フロー: 添付が非PDFなら即時orderが作成され、ステージング保存は呼ばれない
-        mock_upload_staged.assert_not_called()
-        mock_upload.assert_called_once()
+        mock_upload_staged.assert_called_once_with(
+            mock_db, "tenant-1", "msg-2", "memo.txt", b"hello", "text/plain"
+        )
 
         # メールアドレスが取れない場合も customer_id は必ず設定され、下書き作成の通知が記録される
         mock_resolve_customer.assert_called_once_with(
@@ -308,14 +291,19 @@ class TestProcessMessagePdfStaging:
         assert notif_inserts[0]["notif_type"] == "customer_draft_created"
         assert notif_inserts[0]["source_id"] == "msg-2"
         assert notif_inserts[0]["detail"]["customer_id"] == 7
-        assert any(
+        assert not any(
             call.args and call.args[0] == "orders"
             for call in mock_db.table.call_args_list
         )
 
-    def test_no_extracted_fields_skips_order_and_creates_notification(self):
-        """本文から注文項目が一切抽出できない場合、orderを作成せず
-        non_order_email として通知のみ記録すること（顧客レコードも作成しない）。"""
+        inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert inserted_row["order_id"] is None
+        assert inserted_row["storage_path"] == "tenant-1/inbox/msg-2/def.txt"
+        assert inserted_row["parse_status"] == "pending"
+
+    def test_no_attachment_email_is_staged_with_empty_storage_path(self):
+        """添付なしメールも同様にステージング保存され、storage_path は
+        空文字で保存されること（parse_pending_order_pdfs 側で本文抽出に回る）。"""
         mock_service = self._mock_gmail_service()
         mock_db = MagicMock()
 
@@ -329,33 +317,28 @@ class TestProcessMessagePdfStaging:
                 return_value=[],
             ),
             patch(
-                "app.services.gmail_service.extract_email_fields",
-                return_value={
-                    "product_name": "<UNKNOWN>",
-                    "quantity": "<UNKNOWN>",
-                    "deadline_date": "<UNKNOWN>",
-                    "order_number": "<UNKNOWN>",
-                },
-            ),
-            patch(
                 "app.services.gmail_service.extract_sender_email",
                 return_value="spam@example.com",
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer"
-            ) as mock_resolve_customer,
-            patch("app.services.gmail_service.upload_attachment") as mock_upload,
+                "app.services.gmail_service.resolve_or_create_customer",
+                return_value=(3, False),
+            ),
+            patch(
+                "app.services.gmail_service.upload_staged_attachment"
+            ) as mock_upload_staged,
         ):
             _process_message(mock_service, mock_db, "msg-3", "tenantA", {})
 
-        mock_resolve_customer.assert_not_called()
-        mock_upload.assert_not_called()
+        mock_upload_staged.assert_not_called()
         assert not any(
             call.args and call.args[0] == "orders"
             for call in mock_db.table.call_args_list
         )
 
-        notif_insert = mock_db.table("notifications").insert.call_args.args[0]
-        assert notif_insert["notif_type"] == "non_order_email"
-        assert notif_insert["source_table"] == "gmail_message"
-        assert notif_insert["source_id"] == "msg-3"
+        inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert inserted_row["order_id"] is None
+        assert inserted_row["storage_path"] == ""
+        assert inserted_row["original_filename"] == ""
+        assert inserted_row["content_type"] is None
+        assert inserted_row["parse_status"] == "pending"

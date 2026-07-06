@@ -159,7 +159,13 @@ interface OrderCreate {
 
 `backend/app/services/` 配下に以下のサービスが実装済み。Vercel Cron または Azure Functions タイマートリガーから `poll_unread_emails()` を呼び出すことで動作する。
 
-### 処理フロー
+### 処理フロー（Issue #280 でPDF添付・非PDF添付・添付なしを統一）
+
+以前は非PDF添付・添付なしメールのみ `poll_unread_emails()` 内で即座に単一の `orders`
+行を作成していたが、「1メール = 1受注」前提が崩れているケース（1通に複数品番・複数月分の
+内示数量が含まれる等）に対応するため、Issue #280 で **すべてのソース種別（PDF添付・非PDF
+添付・添付なし）を同じステージング経路に統一**した。実際の注文情報抽出・`orders` 生成は
+`gmail_service.py` からは行わず、`parse_pending_order_pdfs()`（cron）が非同期に行う。
 
 ```
 [Cron/タイマー]
@@ -172,24 +178,26 @@ interface OrderCreate {
       │
       ├─ 3. テナント解決（`gmail_label_tenants` テーブルからテナント ID 取得）
       │
-      ├─ 4. Claude API によるフィールド抽出 [email_extraction_service.py]
-      │      ツール: extract_order_fields
-      │      出力:   product_name, quantity, deadline_date, order_number (全て nullable)
+      ├─ 4. 添付ファイル取得。PDFがあれば優先し、無ければ最初の添付を使う
+      │      （複数添付の個別処理は対象外。1メール1添付が前提）
       │
-      ├─ 5. 製品マッチング [product_matching_service.py]
-      │      pg_trgm RPC `match_products_by_name` で類似度検索
-      │      → 単一一致: product_id を確定
-      │      → 複数候補: candidates リストを order_row に保存
-      │
-      ├─ 6. 顧客マッチング [customer_matching_service.py]
+      ├─ 5. 顧客マッチング [customer_matching_service.py]
       │      送信者メールアドレスで検索 → 未登録の場合は draft 顧客を自動作成
+      │      （受注メールか否かに関わらず、ソース単位で1回だけ解決する）
       │
-      ├─ 7. draft 注文を Supabase に INSERT
-      │      (source_type="email", status="draft", source_raw=メール本文, ...)
+      ├─ 6. 添付ファイル（あれば）を Storage にステージング保存し、
+      │      `order_attachments` に order_id=NULL のステージング行を1件INSERT
+      │      （storage_path は添付が無ければ空文字）
       │
-      └─ 8. ラベルを `pp-done/{テナント名}` に移動
+      └─ 7. ラベルを `pp-done/{テナント名}` に移動
              （失敗時は `pp-error/{テナント名}` に移動）
 ```
+
+実際の注文抽出（`line_items` 配列形式でのメール本文/PDF解析、製品照合、
+`orders` へのUPSERT、`non_order_email`/`multi_order_suspected` 通知）は
+`parse_pending_order_pdfs()` が行う。詳細は
+[pdf-order-parsing.md](pdf-order-parsing.md) の「非PDF添付・添付なしメールの
+本処理への統一（Issue #280）」を参照。
 
 ### Gmail ラベル規約
 
@@ -208,8 +216,8 @@ interface OrderCreate {
 
 | エンドポイント | 役割 |
 |---|---|
-| `GET /api/cron/gmail-poll` | メール取得・フィールド抽出・非PDF添付の即時起票／PDF添付は `order_attachments` へのステージング保存のみ |
-| `GET /api/cron/parse-order-pdfs` | ステージング済みPDF（`order_attachments.parse_status='pending'`）をテキスト抽出・製品照合し、`orders` を実際にINSERT |
+| `GET /api/cron/gmail-poll` | メール取得・顧客解決・添付（あれば）のStorage保存を行い、`order_attachments` へのステージング保存のみ行う（Issue #280でPDF添付・非PDF添付・添付なしすべてこの経路に統一） |
+| `GET /api/cron/parse-order-pdfs` | ステージング済み行（`order_attachments.parse_status='pending'`）をテキスト抽出/本文抽出・製品照合し、`orders` を実際にINSERT/UPDATE |
 
 **設計方針（案1）: 2段目を高頻度で独立実行し、実行順序のズレを許容する。**
 
@@ -245,7 +253,8 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | `GMAIL_LABEL_PREFIX_PROCESSING` | `pp-processing` | 処理中ラベルのプレフィックス |
 | `GMAIL_LABEL_PREFIX_DONE` | `pp-done` | 完了ラベルのプレフィックス |
 | `GMAIL_LABEL_PREFIX_ERROR` | `pp-error` | エラーラベルのプレフィックス |
-| `EMAIL_EXTRACTION_MODEL` | `claude-haiku-4-5-20251001` | フィールド抽出に使用する Claude モデル |
+| `EMAIL_EXTRACTION_MODEL` | `claude-haiku-4-5-20251001` | メール本文からの明細行(`line_items`)抽出に使用する Claude モデル |
+| `MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD` | `100000` | 自動抽出時に複数受注が1明細にマージされた疑いを検知する数量閾値（Issue #280） |
 | `PRODUCT_MATCH_THRESHOLD` | `0.3` | pg_trgm 類似度の下限値 |
 | `PRODUCT_MATCH_TOP_N` | `5` | 候補製品の最大表示件数 |
 | `ANTHROPIC_API_KEY` | — | Claude API キー（必須） |

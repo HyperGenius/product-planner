@@ -1,9 +1,10 @@
+import os
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import download_attachment
-from app.services.email_extraction_service import extract_email_fields
+from app.services.email_extraction_service import extract_email_order_lines
 from app.services.notification_service import create_notification
 from app.services.pdf_order_extraction_service import extract_order_lines
 from app.services.pdf_text_service import extract_text
@@ -23,11 +24,18 @@ _KNOWN_UPSERT_ACTIONS = {
     "skipped_draft_conflict",
 }
 
+# 自動抽出時に複数受注が1明細にマージされてしまった疑いを検知する粗いヒューリスティック。
+# まずは数量の異常値のみを対象とし、本番データの精度を見ながら閾値・条件を調整する前提
+# （Issue #280 未解決の論点）。
+_MULTI_ORDER_QUANTITY_THRESHOLD = int(
+    os.environ.get("MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD", "100000")
+)
+
 
 def parse_pending_order_pdfs(db: Client) -> dict[str, int]:
     """
     order_attachments のステージング行 (order_id IS NULL, parse_status='pending') を
-    ポーリングし、PDFをパースして複数の orders 行を生成する。
+    ポーリングし、PDF・メール本文をパースして複数の orders 行を生成する。
     """
     table = SupabaseTableName.ORDER_ATTACHMENTS.value
     result = (
@@ -70,41 +78,47 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
     table = SupabaseTableName.ORDER_ATTACHMENTS.value
     attachment_id = row["id"]
 
-    content = download_attachment(db, row["storage_path"])
-    text_result = extract_text(content)
+    # PDF添付があればPDFのテキストから明細抽出を試み、明細が0件ならメール本文に
+    # フォールバックする。非PDF添付・添付なしメール（storage_path が空）は、
+    # そもそもPDFが存在しないため直接メール本文から抽出する（Issue #280）。
+    if row.get("content_type") == "application/pdf" and row.get("storage_path"):
+        content = download_attachment(db, row["storage_path"])
+        text_result = extract_text(content)
 
-    if text_result.failure_reason is not None:
-        db.table(table).update({"parse_status": text_result.failure_reason}).eq(
-            "id", attachment_id
-        ).execute()
-        create_notification(
-            db,
-            row["tenant_id"],
-            text_result.failure_reason,
-            SupabaseTableName.ORDER_ATTACHMENTS.value,
-            attachment_id,
-            {},
-        )
+        if text_result.failure_reason is not None:
+            db.table(table).update({"parse_status": text_result.failure_reason}).eq(
+                "id", attachment_id
+            ).execute()
+            create_notification(
+                db,
+                row["tenant_id"],
+                text_result.failure_reason,
+                SupabaseTableName.ORDER_ATTACHMENTS.value,
+                attachment_id,
+                {},
+            )
+            logger.info(
+                f"pdf_order_parsing: attachment {attachment_id} "
+                f"marked {text_result.failure_reason}"
+            )
+            return 0
+
+        line_items = extract_order_lines(cast(str, text_result.text))
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "
-            f"marked {text_result.failure_reason}"
+            f"extracted {len(line_items)} line items"
         )
-        return 0
 
-    line_items = extract_order_lines(cast(str, text_result.text))
-    logger.info(
-        f"pdf_order_parsing: attachment {attachment_id} "
-        f"extracted {len(line_items)} line items"
-    )
-
-    if line_items:
-        created_count = sum(
-            1 for line in line_items if _process_line_item(db, row, line)
-        )
+        if line_items:
+            created_count = sum(
+                1 for line in line_items if _process_line_item(db, row, line)
+            )
+        else:
+            # PDFの内容が注文と無関係で明細が1件も抽出できなかった場合、
+            # メール本文（source_raw）からの抽出にフォールバックする（Issue #278）
+            created_count = _process_email_body(db, row)
     else:
-        # PDFの内容が注文と無関係で明細が1件も抽出できなかった場合、
-        # メール本文（source_raw）からの抽出にフォールバックする（Issue #278）
-        created_count = _fallback_to_body_extraction(db, row)
+        created_count = _process_email_body(db, row)
 
     db.table(table).update({"parse_status": "success"}).eq(
         "id", attachment_id
@@ -112,25 +126,24 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
     return created_count
 
 
-def _fallback_to_body_extraction(db: Client, row: dict[str, Any]) -> int:
+def _process_email_body(db: Client, row: dict[str, Any]) -> int:
     """
-    PDFから明細が1件も抽出できなかった場合に、メール本文（source_raw）から
-    注文情報の抽出を試みるフォールバック。
+    メール本文（source_raw）から注文明細行を抽出し、order を生成する。
 
-    抽出できた場合は order を1件作成して1を返す。本文からも注文情報が
-    抽出できなかった場合は non_order_email として通知のみ記録し0を返す。
+    PDFから明細が1件も抽出できなかった場合のフォールバック（Issue #278）と、
+    非PDF添付・添付なしメールの本処理（Issue #280）を兼ねる共通経路。
+    1通のメールに複数明細が含まれる場合も line_items 配列として抽出できる。
+
+    本文からも注文情報が抽出できなかった場合は non_order_email として
+    通知のみ記録し0を返す。
     """
     tenant_id = row["tenant_id"]
     attachment_id = row["id"]
     body = cast(str, row.get("source_raw") or "")
 
-    raw_fields = extract_email_fields(body)
-    fields = {k: (None if v == "<UNKNOWN>" else v) for k, v in raw_fields.items()}
+    line_items = extract_email_order_lines(body)
 
-    if all(
-        fields.get(k) is None
-        for k in ("product_name", "quantity", "deadline_date", "order_number")
-    ):
+    if not line_items:
         detail = {"body_snippet": body[:200]}
         _log_parse_event(db, tenant_id, attachment_id, "non_order_email", detail)
         # non_order_email 通知は notifications router 側で source_id を
@@ -146,50 +159,48 @@ def _fallback_to_body_extraction(db: Client, row: dict[str, Any]) -> int:
         )
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "
-            "PDF had no order lines and body extraction also failed"
+            "no order information found in email body"
         )
         return 0
 
-    product_id: int | None = None
-    candidates: list[dict[str, Any]] = []
-    product_name = cast(str | None, fields.get("product_name"))
-    if product_name:
-        match = match_products(db, tenant_id, product_name)
-        product_id = match["product_id"]
-        candidates = match["candidates"]
-
-    order_row: dict[str, Any] = {
-        "tenant_id": tenant_id,
-        "source_type": "email",
-        "source_raw": body,
-        "status": "draft",
-        "product_id": product_id,
-        "quantity": fields.get("quantity"),
-        "deadline_date": fields.get("deadline_date"),
-        "order_number": fields.get("order_number"),
-        "extracted_product_name": product_name,
-        "product_candidates": candidates if candidates else None,
-        "customer_id": row.get("customer_id"),
-    }
-    insert_result = db.table(SupabaseTableName.ORDERS.value).insert(order_row).execute()
-    order_id = cast(list[dict[str, Any]], insert_result.data)[0]["id"]
-
-    db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
-        {
-            "order_id": order_id,
-            "tenant_id": tenant_id,
-            "storage_path": row["storage_path"],
-            "original_filename": row.get("original_filename", ""),
-            "content_type": row.get("content_type"),
-            "size_bytes": row.get("size_bytes"),
-            "parse_status": "success",
-        }
-    ).execute()
+    created_count = sum(1 for line in line_items if _process_line_item(db, row, line))
     logger.info(
-        f"pdf_order_parsing: order {order_id} created from body fallback "
-        f"for attachment {attachment_id} (PDF had no order lines)"
+        f"pdf_order_parsing: attachment {attachment_id} "
+        f"extracted {len(line_items)} line items from email body, "
+        f"created {created_count} orders"
     )
-    return 1
+    return created_count
+
+
+def _check_multi_order_suspected(
+    db: Client, tenant_id: str, attachment_id: str, line: dict[str, Any]
+) -> None:
+    """
+    1メール/1PDFに複数受注が含まれるにもかかわらず1明細にマージされてしまった
+    疑いのあるケースを粗く検知し、通知する（Issue #280）。
+
+    現時点では数量が閾値を超える場合のみを対象とする単純なヒューリスティックであり、
+    受注の作成自体はブロックしない（情報提供目的の通知のみ）。
+    """
+    quantity = line.get("quantity")
+    if not isinstance(quantity, int) or quantity < _MULTI_ORDER_QUANTITY_THRESHOLD:
+        return
+    detail = {
+        "quantity": quantity,
+        "product_number_raw": line.get("product_number_raw"),
+        "product_name_raw": line.get("product_name_raw"),
+    }
+    log_id = _log_parse_event(
+        db, tenant_id, attachment_id, "multi_order_suspected", detail
+    )
+    create_notification(
+        db,
+        tenant_id,
+        "multi_order_suspected",
+        SupabaseTableName.ORDER_PARSE_LOG.value,
+        log_id,
+        detail,
+    )
 
 
 def _process_line_item(
@@ -246,6 +257,8 @@ def _process_line_item(
     )
     deadline_date = line.get("delivery_date")
 
+    _check_multi_order_suspected(db, tenant_id, attachment_id, line)
+
     rpc_result = db.rpc(
         "upsert_order_by_dedupe_key",
         {
@@ -258,6 +271,7 @@ def _process_line_item(
             "p_source_type": "email",
             "p_source_raw": staging_row.get("source_raw"),
             "p_extracted_product_name": product_name_raw,
+            "p_source_attachment_id": attachment_id,
         },
     ).execute()
     rpc_rows = cast(list[dict[str, Any]], rpc_result.data or [])
@@ -304,15 +318,20 @@ def _process_line_item(
 
     # action == "inserted" or "updated"
     order_id = rpc_rows[0]["order_id"]
+    # ソースに添付ファイル本体が無い場合（非PDF添付・添付なしメール由来）は、
+    # フロントエンドの表示分岐と揃えるため parse_status を "failed_no_attachment" にする
+    attachment_parse_status = (
+        "success" if staging_row.get("storage_path") else "failed_no_attachment"
+    )
     db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
         {
             "order_id": order_id,
             "tenant_id": tenant_id,
-            "storage_path": staging_row["storage_path"],
+            "storage_path": staging_row.get("storage_path", ""),
             "original_filename": staging_row.get("original_filename", ""),
             "content_type": staging_row.get("content_type"),
             "size_bytes": staging_row.get("size_bytes"),
-            "parse_status": "success",
+            "parse_status": attachment_parse_status,
         }
     ).execute()
     logger.info(

@@ -70,12 +70,14 @@ class TestParsePendingOrderPdfs:
 
     def test_pdf_with_no_order_lines_falls_back_to_body_extraction(self):
         """PDFの内容が注文と無関係で明細が0件の場合、メール本文から抽出した
-        情報を使ってorderが作成されること（Issue #278）。"""
+        line_itemsを使ってorderが作成されること（Issue #278/#280）。"""
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().execute.return_value = MagicMock(
             data=[self._staging_row()]
         )
-        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 42}])
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "inserted"}]
+        )
 
         with (
             patch(
@@ -93,13 +95,20 @@ class TestParsePendingOrderPdfs:
                 return_value=[],
             ),
             patch(
-                "app.services.pdf_order_parsing_service.extract_email_fields",
-                return_value={
-                    "product_name": "製品A",
-                    "quantity": 5,
-                    "deadline_date": "2026-08-01",
-                    "order_number": "PO-1",
-                },
+                "app.services.pdf_order_parsing_service.extract_email_order_lines",
+                return_value=[
+                    {
+                        "product_name_raw": "製品A",
+                        "product_number_raw": None,
+                        "quantity": 5,
+                        "delivery_date": "2026-08-01",
+                        "certainty": "confirmed",
+                    }
+                ],
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=None,
             ),
             patch(
                 "app.services.pdf_order_parsing_service.match_products",
@@ -110,17 +119,67 @@ class TestParsePendingOrderPdfs:
 
         assert result == {"processed": 1, "orders_created": 1, "errors": 0}
 
-        insert_calls = [c for c in mock_db.table().insert.call_args_list if c.args]
-        order_insert = next(c.args[0] for c in insert_calls if "status" in c.args[0])
-        assert order_insert["product_id"] == 100
-        assert order_insert["quantity"] == 5
-        assert order_insert["customer_id"] == 7
-        assert order_insert["source_type"] == "email"
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] == 100
+        assert rpc_params["p_quantity"] == 5
+        assert rpc_params["p_customer_id"] == 7
+        assert rpc_params["p_source_type"] == "email"
+        assert rpc_params["p_source_attachment_id"] == "att-1"
 
-        attachment_insert = next(
-            c.args[0] for c in insert_calls if c.args[0].get("order_id") == 42
-        )
+        attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert attachment_insert["order_id"] == 42
         assert attachment_insert["storage_path"] == "tenant-1/inbox/msg-1/order.pdf"
+
+    def test_body_fallback_with_multiple_line_items_creates_multiple_orders(self):
+        """1通のメールに部品番号ごとの複数月分の内示数量が含まれる場合
+        （Issue #280の実例）、line_items配列として複数明細を抽出し、
+        それぞれ別のorderとして作成すること。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[self._staging_row()]
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 1, "action": "inserted"}]
+        )
+
+        line_items = [
+            {
+                "product_name_raw": "B115105",
+                "product_number_raw": "B115105",
+                "quantity": q,
+                "delivery_date": f"2026-{month:02d}-01",
+                "certainty": "forecast",
+            }
+            for month, q in zip(range(10, 13), [100, 110, 120], strict=True)
+        ]
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(
+                    text="無関係な文書です", failure_reason=None
+                ),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value=[],
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_order_lines",
+                return_value=line_items,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=100,
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 3, "errors": 0}
 
     def test_pdf_and_body_both_yield_no_order_notifies_non_order_email(self):
         """PDFに明細がなく、メール本文からも注文情報が抽出できない場合、
@@ -146,13 +205,8 @@ class TestParsePendingOrderPdfs:
                 return_value=[],
             ),
             patch(
-                "app.services.pdf_order_parsing_service.extract_email_fields",
-                return_value={
-                    "product_name": "<UNKNOWN>",
-                    "quantity": None,
-                    "deadline_date": None,
-                    "order_number": None,
-                },
+                "app.services.pdf_order_parsing_service.extract_email_order_lines",
+                return_value=[],
             ),
         ):
             result = parse_pending_order_pdfs(mock_db)
@@ -174,6 +228,59 @@ class TestParsePendingOrderPdfs:
         )
         assert notif_insert["source_table"] == "gmail_message"
         assert notif_insert["source_id"] == "msg-1"
+
+    def test_non_pdf_staging_row_skips_pdf_extraction_and_uses_email_body(self):
+        """非PDF添付・添付なしメール由来のステージング行（Issue #280）は、
+        PDFテキスト抽出を経由せず直接メール本文から抽出すること。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[
+                self._staging_row(
+                    storage_path="",
+                    original_filename="",
+                    content_type=None,
+                    size_bytes=None,
+                )
+            ]
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 9, "action": "inserted"}]
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment"
+            ) as mock_download,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text"
+            ) as mock_extract_text,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_order_lines",
+                return_value=[
+                    {
+                        "product_name_raw": "製品B",
+                        "product_number_raw": "CODE-B",
+                        "quantity": 3,
+                        "delivery_date": "2026-11-30",
+                        "certainty": "forecast_tentative",
+                    }
+                ],
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=200,
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        mock_download.assert_not_called()
+        mock_extract_text.assert_not_called()
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+
+        attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert attachment_insert["order_id"] == 9
+        assert attachment_insert["parse_status"] == "failed_no_attachment"
+        assert attachment_insert["storage_path"] == ""
 
     def test_exception_during_processing_counts_as_error(self):
         mock_db = MagicMock()
@@ -380,11 +487,44 @@ class TestProcessLineItem:
         assert rpc_params["p_product_id"] == 100
         assert rpc_params["p_customer_certainty"] == "forecast"
         assert rpc_params["p_customer_id"] == 7
+        assert rpc_params["p_source_attachment_id"] == "att-1"
 
         attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
         assert attachment_insert["order_id"] == 555
         assert attachment_insert["parse_status"] == "success"
         assert attachment_insert["storage_path"] == "tenant-1/inbox/msg-1/order.pdf"
+
+    def test_no_storage_path_marks_attachment_failed_no_attachment(self):
+        """添付なしメール由来のステージング行（storage_path=""）から生成された
+        orderの order_attachments 行は parse_status='failed_no_attachment' で
+        作成されること（フロントエンドの表示分岐と揃える）。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "forecast",
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(
+                mock_db,
+                self._staging_row(
+                    storage_path="", original_filename="", content_type=None
+                ),
+                line,
+            )
+
+        assert created is True
+        attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert attachment_insert["parse_status"] == "failed_no_attachment"
 
     def test_unknown_certainty_falls_back_to_forecast_tentative(self):
         """Claude抽出結果が想定外の値（揺れ・スキーマ変更等）を返した場合でも、
@@ -477,3 +617,62 @@ class TestProcessLineItem:
         attachment_insert = insert_calls[0].args[0]
         assert attachment_insert["order_id"] == 777
         assert not any("reason" in c.args[0] for c in insert_calls)
+
+    def test_quantity_above_threshold_notifies_multi_order_suspected(self):
+        """1明細の数量が閾値を超える場合、複数受注が1明細にマージされた疑いを
+        検知して multi_order_suspected を通知すること（Issue #280）。
+        通知はあくまで情報提供であり、order作成自体はブロックしない。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "B115105",
+            "product_number_raw": "B115105",
+            "quantity": 999_999,
+            "delivery_date": "2026-08-01",
+            "certainty": "forecast",
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), line)
+
+        assert created is True
+        insert_calls = [
+            c.args[0] for c in mock_db.table().insert.call_args_list if c.args
+        ]
+        log_insert = next(
+            c for c in insert_calls if c.get("reason") == "multi_order_suspected"
+        )
+        assert log_insert["detail"]["quantity"] == 999_999
+        notif_insert = next(
+            c for c in insert_calls if c.get("notif_type") == "multi_order_suspected"
+        )
+        assert notif_insert["source_table"] == "order_parse_log"
+
+    def test_quantity_below_threshold_does_not_notify(self):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "forecast",
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            _process_line_item(mock_db, self._staging_row(), line)
+
+        insert_calls = [
+            c.args[0] for c in mock_db.table().insert.call_args_list if c.args
+        ]
+        assert not any(c.get("reason") == "multi_order_suspected" for c in insert_calls)

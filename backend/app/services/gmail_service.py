@@ -7,14 +7,12 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
-from app.services.attachment_service import upload_attachment, upload_staged_attachment
+from app.services.attachment_service import upload_staged_attachment
 from app.services.customer_matching_service import (
     extract_sender_email,
     resolve_or_create_customer,
 )
-from app.services.email_extraction_service import extract_email_fields
 from app.services.notification_service import create_notification
-from app.services.product_matching_service import match_products
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -199,98 +197,15 @@ def _process_message(
         if not tenant_id:
             raise ValueError(f"tenant not found for label: {tenant_name}")
 
-        # 4. 添付ファイル取得（PDF判定のため単一フィールド抽出より前に行う）
+        # 4. 添付ファイル取得。PDFがあれば優先し、無ければ最初の添付を使う
+        #    （複数添付の個別処理は本Issueのスコープ外。1メール1添付を前提とする）
         attachments = _get_attachments(service, msg_id, msg.get("payload", {}))
         pdf_attachment = next(
             (a for a in attachments if a["content_type"] == "application/pdf"), None
         )
+        staged_attachment = pdf_attachment or (attachments[0] if attachments else None)
 
-        if pdf_attachment is not None:
-            # PDF添付メール: orderは作成せず、order_attachments にステージング保存する
-            # （パースして複数orderを生成する処理は後続Issueで実装）
-            sender_email = extract_sender_email(body)
-            customer_id, created_draft = resolve_or_create_customer(
-                db, tenant_id, body, msg.get("internalDate")
-            )
-            if created_draft:
-                create_notification(
-                    db,
-                    tenant_id,
-                    "customer_draft_created",
-                    "gmail_message",
-                    msg_id,
-                    {"customer_id": customer_id, "email": sender_email},
-                )
-
-            storage_path = upload_staged_attachment(
-                db,
-                tenant_id,
-                msg_id,
-                pdf_attachment["filename"],
-                pdf_attachment["data"],
-                pdf_attachment["content_type"],
-            )
-            db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
-                {
-                    "order_id": None,
-                    "tenant_id": tenant_id,
-                    "customer_id": customer_id,
-                    "gmail_message_id": msg_id,
-                    "source_raw": body,
-                    "storage_path": storage_path,
-                    "original_filename": pdf_attachment["filename"],
-                    "content_type": pdf_attachment["content_type"],
-                    "size_bytes": len(pdf_attachment["data"]),
-                    "parse_status": "pending",
-                }
-            ).execute()
-            logger.info(
-                f"msg {msg_id}: PDF attachment staged at {storage_path} "
-                f"(tenant={tenant_id}, order not created)"
-            )
-
-            # 5. 処理中 → 処理済み
-            _move_label(service, msg_id, done_id, processing_id)
-            return
-
-        # 添付なし・非PDF添付メール: 既存フロー（即時order作成）を維持する
-
-        # 5. Claude で注文フィールド抽出
-        raw_fields = extract_email_fields(body)
-        fields = {k: (None if v == "<UNKNOWN>" else v) for k, v in raw_fields.items()}
-        logger.info(f"msg {msg_id}: extracted fields={fields}")
-
-        # 5.5 受注メールでない（本文から注文項目が一切抽出できない）場合は
-        #     orderを作成せず通知のみ記録する。顧客レコードも作成しない
-        #     （迷惑メール送信元で顧客テーブルを汚染しないため）。
-        if all(
-            fields.get(k) is None
-            for k in ("product_name", "quantity", "deadline_date", "order_number")
-        ):
-            create_notification(
-                db,
-                tenant_id,
-                "non_order_email",
-                "gmail_message",
-                msg_id,
-                {"body_snippet": body[:200]},
-            )
-            logger.info(
-                f"msg {msg_id}: no order fields extracted, skipping order creation"
-            )
-            _move_label(service, msg_id, done_id, processing_id)
-            return
-
-        # 6. 製品マッチング
-        product_id: int | None = None
-        candidates: list[dict] = []
-        product_name: str | None = fields.get("product_name")
-        if product_name:
-            match = match_products(db, tenant_id, product_name)
-            product_id = match["product_id"]
-            candidates = match["candidates"]
-
-        # 7. 顧客マッチング
+        # 5. 顧客マッチング（メールの受注可否に関わらず、ソース単位で1回解決する）
         sender_email = extract_sender_email(body)
         customer_id, created_draft = resolve_or_create_customer(
             db, tenant_id, body, msg.get("internalDate")
@@ -305,65 +220,48 @@ def _process_message(
                 {"customer_id": customer_id, "email": sender_email},
             )
 
-        # 8. ドラフト注文を Supabase に登録
-        order_row: dict[str, Any] = {
-            "tenant_id": tenant_id,
-            "source_type": "email",
-            "source_raw": body,
-            "status": "draft",
-            "product_id": product_id,
-            "quantity": fields.get("quantity"),
-            "deadline_date": fields.get("deadline_date"),
-            "order_number": fields.get("order_number"),
-            "extracted_product_name": fields.get("product_name"),
-            "product_candidates": candidates if candidates else None,
-            "customer_id": customer_id,
-        }
-        insert_result = (
-            db.table(SupabaseTableName.ORDERS.value).insert(order_row).execute()
-        )
-        order_id: int = cast(list[dict[str, Any]], insert_result.data)[0]["id"]
-        logger.info(
-            f"msg {msg_id}: order draft created (id={order_id}) for tenant {tenant_id}"
-        )
-
-        # 9. 添付ファイル（非PDF）を Storage に保存し order_attachments に記録
-        if attachments:
-            # 現在は1メール1添付を前提とし、最初の添付のみ処理する
-            att = attachments[0]
-            storage_path = upload_attachment(
+        # 6. 添付ファイル（あれば）をStorageにステージング保存し、
+        #    order_attachments に order_id=NULL のステージング行として保存する。
+        #    実際のパース（本文/PDFからの line_items 抽出・複数order生成）は
+        #    parse_pending_order_pdfs（cron）が非同期に行う（Issue #248, #280）。
+        if staged_attachment is not None:
+            storage_path = upload_staged_attachment(
                 db,
                 tenant_id,
-                order_id,
-                att["filename"],
-                att["data"],
-                att["content_type"],
+                msg_id,
+                staged_attachment["filename"],
+                staged_attachment["data"],
+                staged_attachment["content_type"],
             )
-            db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
-                {
-                    "order_id": order_id,
-                    "tenant_id": tenant_id,
-                    "storage_path": storage_path,
-                    "original_filename": att["filename"],
-                    "content_type": att["content_type"],
-                    "size_bytes": len(att["data"]),
-                    "parse_status": "pending",
-                }
-            ).execute()
-            logger.info(f"msg {msg_id}: attachment saved to {storage_path}")
+            original_filename = staged_attachment["filename"]
+            content_type = staged_attachment["content_type"]
+            size_bytes = len(staged_attachment["data"])
         else:
-            db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
-                {
-                    "order_id": order_id,
-                    "tenant_id": tenant_id,
-                    "storage_path": "",
-                    "original_filename": "",
-                    "parse_status": "failed_no_attachment",
-                }
-            ).execute()
-            logger.info(f"msg {msg_id}: no attachment found")
+            storage_path = ""
+            original_filename = ""
+            content_type = None
+            size_bytes = None
 
-        # 10. 処理中 → 処理済み
+        db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+            {
+                "order_id": None,
+                "tenant_id": tenant_id,
+                "customer_id": customer_id,
+                "gmail_message_id": msg_id,
+                "source_raw": body,
+                "storage_path": storage_path,
+                "original_filename": original_filename,
+                "content_type": content_type,
+                "size_bytes": size_bytes,
+                "parse_status": "pending",
+            }
+        ).execute()
+        logger.info(
+            f"msg {msg_id}: staged for deferred parsing "
+            f"(tenant={tenant_id}, attachment={'yes' if staged_attachment else 'no'})"
+        )
+
+        # 7. 処理中 → 処理済み
         _move_label(service, msg_id, done_id, processing_id)
 
     except Exception as exc:
