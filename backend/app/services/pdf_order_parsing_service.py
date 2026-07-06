@@ -131,13 +131,18 @@ def _fallback_to_body_extraction(db: Client, row: dict[str, Any]) -> int:
         fields.get(k) is None
         for k in ("product_name", "quantity", "deadline_date", "order_number")
     ):
+        detail = {"body_snippet": body[:200]}
+        _log_parse_event(db, tenant_id, attachment_id, "non_order_email", detail)
+        # non_order_email 通知は notifications router 側で source_id を
+        # Gmail メッセージIDとしてそのままリンク生成に使うため、
+        # order_attachments.id ではなく gmail_message_id を渡す必要がある
         create_notification(
             db,
             tenant_id,
             "non_order_email",
-            SupabaseTableName.ORDER_ATTACHMENTS.value,
-            attachment_id,
-            {"body_snippet": body[:200]},
+            "gmail_message",
+            row.get("gmail_message_id"),
+            detail,
         )
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "

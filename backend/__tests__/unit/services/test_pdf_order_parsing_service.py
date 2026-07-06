@@ -15,6 +15,7 @@ class TestParsePendingOrderPdfs:
             "id": "att-1",
             "tenant_id": "tenant-1",
             "customer_id": 7,
+            "gmail_message_id": "msg-1",
             "source_raw": "本文 run_id=abc123",
             "storage_path": "tenant-1/inbox/msg-1/order.pdf",
             "original_filename": "order.pdf",
@@ -158,9 +159,21 @@ class TestParsePendingOrderPdfs:
 
         assert result == {"processed": 1, "orders_created": 0, "errors": 0}
 
-        insert_calls = mock_db.table().insert.call_args_list
-        assert not any(c.args[0].get("status") == "draft" for c in insert_calls)
-        assert any(c.args[0]["notif_type"] == "non_order_email" for c in insert_calls)
+        insert_calls = [
+            c.args[0] for c in mock_db.table().insert.call_args_list if c.args
+        ]
+        assert not any(c.get("status") == "draft" for c in insert_calls)
+
+        log_insert = next(
+            c for c in insert_calls if c.get("reason") == "non_order_email"
+        )
+        assert log_insert["order_attachment_id"] == "att-1"
+
+        notif_insert = next(
+            c for c in insert_calls if c.get("notif_type") == "non_order_email"
+        )
+        assert notif_insert["source_table"] == "gmail_message"
+        assert notif_insert["source_id"] == "msg-1"
 
     def test_exception_during_processing_counts_as_error(self):
         mock_db = MagicMock()
