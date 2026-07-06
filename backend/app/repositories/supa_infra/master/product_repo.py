@@ -87,6 +87,38 @@ class ProductRepository(BaseRepository[T]):
         )
         return res.count is not None and res.count > 0
 
+    def replace_routings_for_product(
+        self, product_id: int, tenant_id: str, items: list[dict[str, Any]]
+    ) -> list[T]:
+        """製品の工程セット全体を一括で置き換える（追加・更新・削除・並べ替えの一括保存用）。
+
+        items に id を含むものは既存工程の更新、id が無いものは新規作成として扱う。
+        既存工程のうち items に含まれない id は削除する。
+        is_confirmed / confirmed_by / confirmed_at は変更しない（確定操作は別APIで行う）。
+        """
+        existing = self.get_routings_by_product(product_id)
+        existing_ids = {cast(int, r["id"]) for r in existing}
+        incoming_ids = {item["id"] for item in items if item.get("id") is not None}
+
+        for routing_id in existing_ids - incoming_ids:
+            self.delete_routing(routing_id)
+
+        for item in items:
+            data = dict(item)
+            routing_id = data.pop("id", None)
+            if routing_id is not None:
+                if routing_id not in existing_ids:
+                    raise ValueError(
+                        f"工程ID {routing_id} は製品 {product_id} に属していません"
+                    )
+                self.update_routing(routing_id, data)
+            else:
+                data["product_id"] = product_id
+                data["tenant_id"] = tenant_id
+                self.create_routing(data)
+
+        return self.get_routings_by_product(product_id)
+
     def get_routings_confirmed_status(self, product_id: int) -> bool:
         """製品の全工程が確定済みかどうかを返す。工程が0件の場合は False。"""
         routings = self.get_routings_by_product(product_id)
