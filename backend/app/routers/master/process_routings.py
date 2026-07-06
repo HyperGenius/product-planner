@@ -56,11 +56,14 @@ def bulk_replace_process_routings(
     PATCH /process-routings/{routing_id} を利用すること。
     """
     logger.info(f"Bulk replacing process routings for product {product_id}")
-    return repo.replace_routings_for_product(
-        product_id,
-        tenant_id,
-        [item.model_dump() for item in items],
-    )
+    try:
+        return repo.replace_routings_for_product(
+            product_id,
+            tenant_id,
+            [item.model_dump() for item in items],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
 
 
 @process_routing_router.get("/{routing_id}")

@@ -205,3 +205,33 @@ class TestProductRepository:
             {"id": 1, "sequence_order": 1, "process_name": "工程A"},
             {"id": 3, "sequence_order": 2, "process_name": "工程C"},
         ]
+
+    def test_replace_routings_for_product_unknown_id_raises(self, product_repo):
+        """items に存在しない工程IDが含まれる場合、無断で新規作成せず ValueError を送出する"""
+        items: list[dict[str, Any]] = [
+            {
+                "id": 999,
+                "sequence_order": 1,
+                "process_name": "工程A",
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 1.0,
+            },
+        ]
+
+        with (
+            patch.object(
+                product_repo,
+                "get_routings_by_product",
+                return_value=[{"id": 1, "sequence_order": 1, "process_name": "工程A"}],
+            ),
+            patch.object(product_repo, "delete_routing") as mock_delete,
+            patch.object(product_repo, "create_routing") as mock_create,
+        ):
+            with pytest.raises(ValueError, match="999"):
+                product_repo.replace_routings_for_product(1, "tenant-1", items)
+
+            # 不正なidを検知した時点でinsertにフォールバックしていないこと
+            mock_create.assert_not_called()
+            # 既存工程(id=1)はitemsに含まれないため削除対象と判定されている
+            mock_delete.assert_called_once_with(1)

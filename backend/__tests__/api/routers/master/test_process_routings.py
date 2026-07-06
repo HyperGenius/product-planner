@@ -163,3 +163,28 @@ class TestProcessRoutingRouter:
         assert called_product_id == product_id
         assert called_tenant_id == headers["x-tenant-id"]
         assert [item["id"] for item in called_items] == [1, None]
+
+    def test_bulk_replace_process_routings_unknown_id(self, headers, mock_repo):
+        """PUT /: 存在しない工程IDが渡された場合は404を返す"""
+        product_id = 1
+        payload = [
+            {
+                "id": 999,
+                "sequence_order": 1,
+                "process_name": "不明な工程",
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 1.0,
+            },
+        ]
+        mock_repo.replace_routings_for_product.side_effect = ValueError(
+            "工程ID 999 は製品 1 に属していません"
+        )
+
+        response = client.put(
+            f"/process-routings?product_id={product_id}",
+            json=payload,
+            headers=headers,
+        )
+
+        assert response.status_code == 404

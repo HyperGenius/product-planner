@@ -106,7 +106,11 @@ class ProductRepository(BaseRepository[T]):
         for item in items:
             data = dict(item)
             routing_id = data.pop("id", None)
-            if routing_id is not None and routing_id in existing_ids:
+            if routing_id is not None:
+                if routing_id not in existing_ids:
+                    raise ValueError(
+                        f"工程ID {routing_id} は製品 {product_id} に属していません"
+                    )
                 self.update_routing(routing_id, data)
             else:
                 data["product_id"] = product_id

@@ -132,6 +132,7 @@ export function ProductRoutingsDialog({
   useEffect(() => {
     if (!open) {
       initializedRef.current = false
+      resetForm()
       return
     }
     if (initializedRef.current || !routings) return
@@ -442,7 +443,7 @@ export function ProductRoutingsDialog({
                               <button
                                 type="button"
                                 onClick={() => moveRouting(index, -1)}
-                                disabled={index === 0}
+                                disabled={index === 0 || bulkSaveMutation.isPending}
                                 aria-label={`${routing.process_name}を上へ移動`}
                                 className="disabled:opacity-25 disabled:cursor-not-allowed hover:text-primary"
                               >
@@ -451,7 +452,7 @@ export function ProductRoutingsDialog({
                               <button
                                 type="button"
                                 onClick={() => moveRouting(index, 1)}
-                                disabled={index === draftRoutings.length - 1}
+                                disabled={index === draftRoutings.length - 1 || bulkSaveMutation.isPending}
                                 aria-label={`${routing.process_name}を下へ移動`}
                                 className="disabled:opacity-25 disabled:cursor-not-allowed hover:text-primary"
                               >
