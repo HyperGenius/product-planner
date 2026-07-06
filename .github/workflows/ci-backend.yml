@@ -1,0 +1,40 @@
+name: CI Backend
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci-backend.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy .
+
+      # integration/e2e は conftest.py の仕様上 --run-integration / --run-e2e を
+      # 渡さない限り自動でスキップされるため、素の pytest で unit/api のみ実行される
+      - name: Unit & API tests
+        run: pytest __tests__/unit __tests__/api
