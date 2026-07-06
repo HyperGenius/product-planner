@@ -34,6 +34,21 @@ class RoutingUpdate(BaseSchema):
     # setup_method_id: int | None = Field(default=None, description="段取り方法ID")
 
 
+class RoutingBulkItem(BaseSchema):
+    """一括保存における1工程分のスキーマ。新規工程は id=None で送信する"""
+
+    id: int | None = Field(
+        default=None, description="既存工程のID（新規追加の場合はNone）"
+    )
+    sequence_order: int = Field(default=..., description="シーケンス番号")
+    process_name: str = Field(default=..., description="工程名")
+    equipment_group_id: int | None = Field(
+        default=..., description="設備グループID（Noneの場合は設備なし）"
+    )
+    setup_time_seconds: int = Field(default=0, description="セットアップ時間")
+    unit_time_seconds: float = Field(default=0, description="単位時間")
+
+
 class RoutingResponse(RoutingCreate):
     """工程ルーティングのレスポンススキーマ"""
 

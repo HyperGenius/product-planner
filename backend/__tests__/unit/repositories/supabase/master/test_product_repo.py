@@ -1,5 +1,6 @@
 # __tests__/repositories/supabase/master/test_product_repo.py
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from app.repositories.supa_infra import ProductRepository, SupabaseTableName
@@ -143,3 +144,64 @@ class TestProductRepository:
 
         assert result == expected
         mock_client.table.assert_called_with(SupabaseTableName.PROCESS_ROUTINGS.value)
+
+    def test_replace_routings_for_product(self, product_repo):
+        """一括保存: 更新・新規作成・削除が items との差分に応じて行われる"""
+        items: list[dict[str, Any]] = [
+            {
+                "id": 1,
+                "sequence_order": 1,
+                "process_name": "工程A",
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 1.0,
+            },
+            {
+                "id": None,
+                "sequence_order": 2,
+                "process_name": "工程C",
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 1.0,
+            },
+        ]
+
+        with (
+            patch.object(
+                product_repo,
+                "get_routings_by_product",
+                side_effect=[
+                    # 1回目: 既存取得（工程1,2が既存）
+                    [
+                        {"id": 1, "sequence_order": 1, "process_name": "旧工程A"},
+                        {"id": 2, "sequence_order": 2, "process_name": "工程B"},
+                    ],
+                    # 2回目: 保存後の再取得結果
+                    [
+                        {"id": 1, "sequence_order": 1, "process_name": "工程A"},
+                        {"id": 3, "sequence_order": 2, "process_name": "工程C"},
+                    ],
+                ],
+            ),
+            patch.object(product_repo, "delete_routing") as mock_delete,
+            patch.object(product_repo, "update_routing") as mock_update,
+            patch.object(product_repo, "create_routing") as mock_create,
+        ):
+            result = product_repo.replace_routings_for_product(1, "tenant-1", items)
+
+            # 工程2はitemsに含まれないため削除
+            mock_delete.assert_called_once_with(2)
+            # 工程1はitemsに含まれるため更新（idはpayloadから除去される）
+            mock_update.assert_called_once_with(
+                1, {k: v for k, v in items[0].items() if k != "id"}
+            )
+            # id=Noneの工程は新規作成、product_id/tenant_idが付与される
+            mock_create.assert_called_once_with(
+                {k: v for k, v in items[1].items() if k != "id"}
+                | {"product_id": 1, "tenant_id": "tenant-1"}
+            )
+
+        assert result == [
+            {"id": 1, "sequence_order": 1, "process_name": "工程A"},
+            {"id": 3, "sequence_order": 2, "process_name": "工程C"},
+        ]

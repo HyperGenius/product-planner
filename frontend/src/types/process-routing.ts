@@ -41,3 +41,16 @@ export interface ProcessRoutingUpdate {
   unit_time_seconds?: number
   is_confirmed?: boolean
 }
+
+/**
+ * 一括保存（PUT /process-routings）における1工程分のデータ型。
+ * id が null の場合は新規追加として扱われる。is_confirmed はここでは扱わない。
+ */
+export interface ProcessRoutingBulkItem {
+  id: number | null
+  process_name: string
+  equipment_group_id: number | null
+  sequence_order: number
+  setup_time_seconds: number
+  unit_time_seconds: number
+}

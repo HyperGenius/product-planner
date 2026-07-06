@@ -119,3 +119,47 @@ class TestProcessRoutingRouter:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Not found"
+
+    def test_bulk_replace_process_routings(self, headers, mock_repo):
+        """PUT /: 一括保存（追加・更新・削除・並べ替え）のテスト"""
+        product_id = 1
+        payload = [
+            {
+                "id": 1,
+                "sequence_order": 1,
+                "process_name": "既存工程（更新）",
+                "equipment_group_id": 2,
+                "setup_time_seconds": 100,
+                "unit_time_seconds": 5.0,
+            },
+            {
+                "id": None,
+                "sequence_order": 2,
+                "process_name": "新規工程",
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 3.0,
+            },
+        ]
+        expected_data = [
+            {"id": 1, "product_id": product_id, "process_name": "既存工程（更新）"},
+            {"id": 2, "product_id": product_id, "process_name": "新規工程"},
+        ]
+        mock_repo.replace_routings_for_product.return_value = expected_data
+
+        response = client.put(
+            f"/process-routings?product_id={product_id}",
+            json=payload,
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == expected_data
+
+        mock_repo.replace_routings_for_product.assert_called_once()
+        called_product_id, called_tenant_id, called_items = (
+            mock_repo.replace_routings_for_product.call_args[0]
+        )
+        assert called_product_id == product_id
+        assert called_tenant_id == headers["x-tenant-id"]
+        assert [item["id"] for item in called_items] == [1, None]

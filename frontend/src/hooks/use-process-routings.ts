@@ -3,7 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import { PRODUCTS_QUERY_KEY } from "@/hooks/use-products"
-import type { ProcessRouting, ProcessRoutingCreate, ProcessRoutingUpdate } from "@/types/process-routing"
+import type {
+  ProcessRouting,
+  ProcessRoutingBulkItem,
+  ProcessRoutingCreate,
+  ProcessRoutingUpdate,
+} from "@/types/process-routing"
 
 // クエリキーを生成する関数
 const getProcessRoutingsQueryKey = (productId: number) => ["process-routings", productId]
@@ -60,6 +65,33 @@ export function useUpdateProcessRouting() {
         queryKey: getProcessRoutingsQueryKey(data.product_id)
       })
       // 製品一覧の工程確定状況バッジも再取得
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 製品の工程セット全体を一括保存するフック（追加・更新・削除・並べ替えをまとめて反映）
+ */
+export function useBulkSaveProcessRoutings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      productId,
+      items,
+    }: {
+      productId: number
+      items: ProcessRoutingBulkItem[]
+    }) =>
+      apiClient<ProcessRouting[]>(`/process-routings?product_id=${productId}`, {
+        method: "PUT",
+        body: JSON.stringify(items),
+      }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: getProcessRoutingsQueryKey(variables.productId),
+      })
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
     },
   })

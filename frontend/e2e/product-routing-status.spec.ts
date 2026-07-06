@@ -49,7 +49,13 @@ async function addProcess(page: Page, dialog: Locator, processName: string) {
   await dialog.locator('input[placeholder="例: 切削加工"]').fill(processName)
   const select = dialog.locator("select")
   await select.selectOption({ label: "設備なし" })
+  // 追加はローカルの下書きに反映されるのみで、サーバーへは保存されない
   await dialog.getByRole("button", { name: "追加" }).click()
+  await page.waitForTimeout(300)
+}
+
+async function saveChanges(page: Page, dialog: Locator) {
+  await dialog.getByRole("button", { name: "変更を保存" }).click()
   await page.waitForTimeout(500)
 }
 
@@ -90,6 +96,7 @@ test.describe("製品マスタ: 工程の確定状態表示", () => {
     // 工程あり・未確定: 「未確定あり」バッジ
     const unconfirmedDialog = await openRoutingsDialog(page, products.unconfirmed.name)
     await addProcess(page, unconfirmedDialog, "検査工程")
+    await saveChanges(page, unconfirmedDialog)
     await page.keyboard.press("Escape")
     await page.waitForTimeout(300)
 
@@ -99,6 +106,7 @@ test.describe("製品マスタ: 工程の確定状態表示", () => {
     // 工程あり・確定済み: 「確定済み」バッジ
     const confirmedDialog = await openRoutingsDialog(page, products.confirmed.name)
     await addProcess(page, confirmedDialog, "検査工程2")
+    await saveChanges(page, confirmedDialog)
     await confirmedDialog.getByRole("button", { name: "確定する" }).click()
     await page.waitForTimeout(500)
     await page.keyboard.press("Escape")

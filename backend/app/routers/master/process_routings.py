@@ -10,7 +10,7 @@ from app.dependencies import (
     get_product_repo,
     get_supabase_client,
 )
-from app.models.master import RoutingCreate, RoutingUpdate
+from app.models.master import RoutingBulkItem, RoutingCreate, RoutingUpdate
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
@@ -41,6 +41,26 @@ def get_process_routings(
     """製品IDに紐づく工程順序を取得"""
     logger.info(f"Fetching process routings for product {product_id}")
     return repo.get_routings_by_product(product_id)
+
+
+@process_routing_router.put("")
+def bulk_replace_process_routings(
+    items: list[RoutingBulkItem],
+    product_id: int = Query(..., description="製品ID"),
+    tenant_id: str = Depends(get_current_tenant_id),
+    repo: ProductRepository = Depends(get_product_repo),
+):
+    """製品の工程セット全体を一括保存する（追加・更新・削除・並べ替えをまとめて反映）。
+
+    確定フラグ (is_confirmed) はここでは変更しない。確定・確定取消は
+    PATCH /process-routings/{routing_id} を利用すること。
+    """
+    logger.info(f"Bulk replacing process routings for product {product_id}")
+    return repo.replace_routings_for_product(
+        product_id,
+        tenant_id,
+        [item.model_dump() for item in items],
+    )
 
 
 @process_routing_router.get("/{routing_id}")

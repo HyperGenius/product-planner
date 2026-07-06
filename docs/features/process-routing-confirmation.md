@@ -176,3 +176,36 @@ Issue #197 / #199 / #200 で実装。
 ### E2E テスト（Playwright、新規導入）
 
 `frontend/e2e/product-routing-status.spec.ts` で、製品マスタ上での工程未登録/未確定/確定済みの3状態表示をブラウザ経由で検証。ローカル実行専用（CI 未組み込み）。前提条件・実行方法は `frontend/e2e/README.md` を参照。
+
+---
+
+## 工程管理モーダルのUX改善（Issue #273）
+
+工程管理モーダル（`product-routings-dialog.tsx`）で、追加・編集・削除・並べ替えのたびにサーバーと都度通信していたため、ライン上でのタブレット操作や誤操作時の事故につながっていた。ローカル下書き＋明示保存方式に変更し、並べ替えUIを新設した。
+
+### 設計判断の記録
+
+- **確定フラグ (`is_confirmed`) の粒度**: 工程単位のまま維持することとした。`get_unconfirmed_routing_counts()`（工程単位カウント、Issue #200 専門家キューで使用）や Issue #203（工程単位のロール制限）など、工程単位の情報に依存する既存・計画中の機能があるため、製品単位への統合はスコープ外とする。
+- **確定フラグのトグル操作**: 一括保存の下書きには含めず、従来通り即時にサーバーへ反映する。`confirmed_by` / `confirmed_at` という監査ログの正確性を、操作の一貫性より優先した。未保存（サーバーに存在しない）新規工程は確定操作自体を不可とする。
+- **一括保存の実装方式**: `PUT /process-routings?product_id={id}` バルクAPIを新設。フロントの下書き配列（`id: null` = 新規）をそのまま送信し、サーバー側で既存工程との差分から insert/update/delete を行う。複数の個別リクエストを束ねる方式ではなく単一エンドポイントにしたことで、通信の途中失敗による並び順崩れ・部分反映を避けやすくした。ただし DB トランザクションでは括っていない（Supabase 経由でテーブル単位の逐次実行）。
+- **同時編集の競合検知**: 本格的な楽観ロックは実装せず、last-write-wins（後勝ち）を許容する方針とした。複数ユーザーが同時に同じ製品の工程を編集する頻度は低く、実装・テストコストに見合わないと判断。将来必要になった場合は `updated_at` 比較による楽観ロックを追加する。
+
+### Backend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `app/models/master/process_routings.py` | `RoutingBulkItem` スキーマを追加（`id: int \| None` で新規/既存を判別、`is_confirmed` 系フィールドは含まない） |
+| `app/repositories/supa_infra/master/product_repo.py` | `replace_routings_for_product()` を追加。items に含まれない既存工程IDを削除、id ありは更新、id なしは新規作成し、最終状態を返す。`is_confirmed` / `confirmed_by` / `confirmed_at` はここでは変更しない |
+| `app/routers/master/process_routings.py` | `PUT /process-routings?product_id={id}` を追加（リクエストボディは `RoutingBulkItem` の配列） |
+
+### Frontend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `types/process-routing.ts` | `ProcessRoutingBulkItem` 型を追加 |
+| `hooks/use-process-routings.ts` | `useBulkSaveProcessRoutings()` フックを追加（PUTを呼び、成功時に工程一覧・製品一覧キャッシュを invalidate） |
+| `components/product-routings-dialog.tsx` | ローカル下書き状態 (`DraftRouting[]`) を導入。追加・編集・削除・並べ替えは下書きのみを更新し、「変更を保存」ボタン押下時に一括保存。並べ替えは行ごとの上下矢印ボタンに変更し、`sequence_order` の数値入力欄は廃止（保存時に配列順から再採番）。確定トグルは従来通り即時反映とし、成功時に下書き・基準状態の両方へ反映する。ダイアログを閉じる操作（×・背景クリック・Esc）は、未保存の変更があれば確認ダイアログを挟む |
+
+### E2E テストの変更
+
+`frontend/e2e/product-routing-status.spec.ts` の `addProcess()` は工程を下書きに追加するのみになったため、`saveChanges()` ヘルパーを追加し、工程追加後に明示的に「変更を保存」を押してからサーバー状態を検証するよう更新した（未保存の新規工程は確定操作もできないため）。
