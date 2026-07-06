@@ -18,8 +18,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     const [tenantId, setTenantIdState] = useState<string | null>(null)
 
     // マウント時に localStorage から復元
+    // localStorage はSSR時に存在しないため、レンダー中ではなくエフェクトでの読み込みが必須
+    // (サーバーは常に null を返す必要があり、ハイドレーション後にのみ復元できる)
     useEffect(() => {
         const stored = localStorage.getItem('currentTenantId')
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR非対応のlocalStorage同期のため意図的
         if (stored) setTenantIdState(stored)
     }, [])
 

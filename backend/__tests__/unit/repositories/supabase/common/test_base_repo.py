@@ -44,9 +44,10 @@ class TestBaseRepository:
         expected = {"id": 2, "name": "New Item"}
 
         # --- モックのセットアップ ---
+        # insertはSupabaseの仕様上、配列を返す
         (
             mock_client.table.return_value.insert.return_value.execute.return_value.data
-        ) = expected
+        ) = [expected]
 
         # --- 実行 ---
         result = base_repo.create(input_data)
@@ -60,9 +61,10 @@ class TestBaseRepository:
         update_data = {"name": "Updated"}
 
         # --- モックのセットアップ ---
+        # updateはSupabaseの仕様上、配列を返す (実装は .update().eq().execute() のみで select/single は呼ばない)
         (
-            mock_client.table.return_value.update.return_value.eq.return_value.select.return_value.single.return_value.execute.return_value.data
-        ) = {"id": 1, "name": "Updated"}
+            mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value.data
+        ) = [{"id": 1, "name": "Updated"}]
 
         # --- 実行 ---
         base_repo.update(1, update_data)

@@ -351,6 +351,7 @@ export default function SchedulePage() {
 
       {/* スケジュール編集モーダル */}
       <ScheduleEditDialog
+        key={selectedSchedule?.id ?? "none"}
         schedule={selectedSchedule}
         open={isModalOpen}
         onOpenChange={setIsModalOpen}
