@@ -28,8 +28,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      # リポジトリルートから --config を明示して実行する。
+      # (cwd=backend で `ruff check .` を実行すると isort の first-party 判定が
+      # 変わり、pre-commit (ルートから --config=backend/pyproject.toml で実行) と
+      # 結果が食い違うことを確認したため、pre-commit と同じ実行方法に合わせている)
       - name: Lint (ruff)
-        run: ruff check .
+        working-directory: .
+        run: ruff check --config=backend/pyproject.toml backend/
 
       - name: Type check (mypy)
         run: mypy .
