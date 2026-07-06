@@ -67,6 +67,101 @@ class TestParsePendingOrderPdfs:
         insert_calls = mock_db.table().insert.call_args_list
         assert any(c.args[0]["notif_type"] == "failed_encrypted" for c in insert_calls)
 
+    def test_pdf_with_no_order_lines_falls_back_to_body_extraction(self):
+        """PDFの内容が注文と無関係で明細が0件の場合、メール本文から抽出した
+        情報を使ってorderが作成されること（Issue #278）。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[self._staging_row()]
+        )
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 42}])
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(
+                    text="無関係な文書です", failure_reason=None
+                ),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value=[],
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_fields",
+                return_value={
+                    "product_name": "製品A",
+                    "quantity": 5,
+                    "deadline_date": "2026-08-01",
+                    "order_number": "PO-1",
+                },
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+                return_value={"product_id": 100, "candidates": []},
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+
+        insert_calls = [c for c in mock_db.table().insert.call_args_list if c.args]
+        order_insert = next(c.args[0] for c in insert_calls if "status" in c.args[0])
+        assert order_insert["product_id"] == 100
+        assert order_insert["quantity"] == 5
+        assert order_insert["customer_id"] == 7
+        assert order_insert["source_type"] == "email"
+
+        attachment_insert = next(
+            c.args[0] for c in insert_calls if c.args[0].get("order_id") == 42
+        )
+        assert attachment_insert["storage_path"] == "tenant-1/inbox/msg-1/order.pdf"
+
+    def test_pdf_and_body_both_yield_no_order_notifies_non_order_email(self):
+        """PDFに明細がなく、メール本文からも注文情報が抽出できない場合、
+        orderは作成せず non_order_email として通知のみ記録すること。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[self._staging_row()]
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(
+                    text="無関係な文書です", failure_reason=None
+                ),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value=[],
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_fields",
+                return_value={
+                    "product_name": "<UNKNOWN>",
+                    "quantity": None,
+                    "deadline_date": None,
+                    "order_number": None,
+                },
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+
+        insert_calls = mock_db.table().insert.call_args_list
+        assert not any(c.args[0].get("status") == "draft" for c in insert_calls)
+        assert any(c.args[0]["notif_type"] == "non_order_email" for c in insert_calls)
+
     def test_exception_during_processing_counts_as_error(self):
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().execute.return_value = MagicMock(

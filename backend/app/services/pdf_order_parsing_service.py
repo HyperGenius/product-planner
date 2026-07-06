@@ -3,6 +3,7 @@ from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import download_attachment
+from app.services.email_extraction_service import extract_email_fields
 from app.services.notification_service import create_notification
 from app.services.pdf_order_extraction_service import extract_order_lines
 from app.services.pdf_text_service import extract_text
@@ -96,12 +97,94 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         f"extracted {len(line_items)} line items"
     )
 
-    created_count = sum(1 for line in line_items if _process_line_item(db, row, line))
+    if line_items:
+        created_count = sum(
+            1 for line in line_items if _process_line_item(db, row, line)
+        )
+    else:
+        # PDFの内容が注文と無関係で明細が1件も抽出できなかった場合、
+        # メール本文（source_raw）からの抽出にフォールバックする（Issue #278）
+        created_count = _fallback_to_body_extraction(db, row)
 
     db.table(table).update({"parse_status": "success"}).eq(
         "id", attachment_id
     ).execute()
     return created_count
+
+
+def _fallback_to_body_extraction(db: Client, row: dict[str, Any]) -> int:
+    """
+    PDFから明細が1件も抽出できなかった場合に、メール本文（source_raw）から
+    注文情報の抽出を試みるフォールバック。
+
+    抽出できた場合は order を1件作成して1を返す。本文からも注文情報が
+    抽出できなかった場合は non_order_email として通知のみ記録し0を返す。
+    """
+    tenant_id = row["tenant_id"]
+    attachment_id = row["id"]
+    body = cast(str, row.get("source_raw") or "")
+
+    raw_fields = extract_email_fields(body)
+    fields = {k: (None if v == "<UNKNOWN>" else v) for k, v in raw_fields.items()}
+
+    if all(
+        fields.get(k) is None
+        for k in ("product_name", "quantity", "deadline_date", "order_number")
+    ):
+        create_notification(
+            db,
+            tenant_id,
+            "non_order_email",
+            SupabaseTableName.ORDER_ATTACHMENTS.value,
+            attachment_id,
+            {"body_snippet": body[:200]},
+        )
+        logger.info(
+            f"pdf_order_parsing: attachment {attachment_id} "
+            "PDF had no order lines and body extraction also failed"
+        )
+        return 0
+
+    product_id: int | None = None
+    candidates: list[dict[str, Any]] = []
+    product_name = cast(str | None, fields.get("product_name"))
+    if product_name:
+        match = match_products(db, tenant_id, product_name)
+        product_id = match["product_id"]
+        candidates = match["candidates"]
+
+    order_row: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "source_type": "email",
+        "source_raw": body,
+        "status": "draft",
+        "product_id": product_id,
+        "quantity": fields.get("quantity"),
+        "deadline_date": fields.get("deadline_date"),
+        "order_number": fields.get("order_number"),
+        "extracted_product_name": product_name,
+        "product_candidates": candidates if candidates else None,
+        "customer_id": row.get("customer_id"),
+    }
+    insert_result = db.table(SupabaseTableName.ORDERS.value).insert(order_row).execute()
+    order_id = cast(list[dict[str, Any]], insert_result.data)[0]["id"]
+
+    db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+        {
+            "order_id": order_id,
+            "tenant_id": tenant_id,
+            "storage_path": row["storage_path"],
+            "original_filename": row.get("original_filename", ""),
+            "content_type": row.get("content_type"),
+            "size_bytes": row.get("size_bytes"),
+            "parse_status": "success",
+        }
+    ).execute()
+    logger.info(
+        f"pdf_order_parsing: order {order_id} created from body fallback "
+        f"for attachment {attachment_id} (PDF had no order lines)"
+    )
+    return 1
 
 
 def _process_line_item(
