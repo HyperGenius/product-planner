@@ -92,14 +92,14 @@ class TestOrderRouter:
         """GET /{id}: 1件取得のテスト"""
         order_id = 1
         db_data = {"id": order_id, "order_number": "ORD-001"}
-        mock_repo.get_by_id.return_value = db_data
+        mock_repo.get_by_id_with_routing_status.return_value = db_data
 
         response = client.get(f"/orders/{order_id}")
 
         assert response.status_code == 200
         result = response.json()
         assert result["order_no"] == "ORD-001"
-        mock_repo.get_by_id.assert_called_with(order_id)
+        mock_repo.get_by_id_with_routing_status.assert_called_with(order_id)
 
     def test_create_order(self, headers, mock_repo):
         """POST /: 新規作成のテスト"""

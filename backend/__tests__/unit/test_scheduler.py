@@ -209,13 +209,13 @@ class TestScheduleOrder:
         assert result[0]["order_id"] == 3
 
     def test_schedule_with_no_routings(self) -> None:
-        """工程が存在しない場合、ValueErrorを投げる"""
+        """工程が存在しない場合、RoutingUnconfirmedErrorを投げる"""
         mock_product_repo = MagicMock()
         mock_schedule_repo = MagicMock()
 
         mock_product_repo.get_routings_by_product.return_value = []
 
-        with pytest.raises(ValueError, match="工程が見つかりません"):
+        with pytest.raises(RoutingUnconfirmedError, match="工程が未確定です"):
             schedule_order(
                 order_id=4,
                 product_id=4,

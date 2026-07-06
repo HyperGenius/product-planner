@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import {
   useSchedulingSettings,
@@ -24,14 +24,16 @@ export default function SchedulingSettingsPage() {
   const [guardTime, setGuardTime] = useState("")
   const [minSlot, setMinSlot] = useState("")
   const [maxFragments, setMaxFragments] = useState("")
+  const [isFormInitialized, setIsFormInitialized] = useState(false)
 
-  useEffect(() => {
-    if (settings) {
-      setGuardTime(String(settings.guard_time_minutes))
-      setMinSlot(String(settings.min_slot_minutes))
-      setMaxFragments(String(settings.max_fragments))
-    }
-  }, [settings])
+  // 設定の取得が完了した最初のレンダーでフォームの初期値を反映する
+  // (エフェクトではなくレンダー中の同期更新にすることで、初期化後のユーザー入力を上書きしない)
+  if (settings && !isFormInitialized) {
+    setIsFormInitialized(true)
+    setGuardTime(String(settings.guard_time_minutes))
+    setMinSlot(String(settings.min_slot_minutes))
+    setMaxFragments(String(settings.max_fragments))
+  }
 
   const handleSave = () => {
     const guard = parseInt(guardTime, 10)

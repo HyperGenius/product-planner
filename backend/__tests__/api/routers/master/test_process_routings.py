@@ -2,7 +2,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from app.dependencies import get_product_repo
+from app.dependencies import get_current_user_id, get_product_repo, get_supabase_client
 
 # テスト対象のAPIインスタンス
 from app.main import app
@@ -25,9 +25,13 @@ class TestProcessRoutingRouter:
     @pytest.fixture(autouse=True)
     def override_dependency(self, mock_repo):
         """
-        テスト実行中だけ get_product_repo を mock_repo に差し替える。
+        テスト実行中だけ get_product_repo / get_current_user_id を差し替える。
+        PATCH は is_confirmed 更新時にロールチェックのため get_current_user_id
+        (実体はSupabase認証) を要求するため、テストでは固定IDに差し替える。
         """
         app.dependency_overrides[get_product_repo] = lambda: mock_repo
+        app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
+        app.dependency_overrides[get_supabase_client] = lambda: MagicMock()
         yield
         app.dependency_overrides = {}
 

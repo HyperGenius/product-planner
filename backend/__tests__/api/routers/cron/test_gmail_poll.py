@@ -26,9 +26,12 @@ class TestGmailPollRouter:
 
     def test_valid_secret_returns_processed_count(self, monkeypatch):
         monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
-        with patch(
-            "app.routers.cron.gmail_poll.poll_unread_emails",
-            return_value={"processed": 3},
+        with (
+            patch("app.routers.cron.gmail_poll.get_supabase_admin_client"),
+            patch(
+                "app.routers.cron.gmail_poll.poll_unread_emails",
+                return_value={"processed": 3},
+            ),
         ):
             response = client.get(
                 "/api/cron/gmail-poll",
@@ -47,9 +50,12 @@ class TestGmailPollRouter:
 
     def test_gmail_service_value_error_returns_500(self, monkeypatch):
         monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
-        with patch(
-            "app.routers.cron.gmail_poll.poll_unread_emails",
-            side_effect=ValueError("Missing env vars"),
+        with (
+            patch("app.routers.cron.gmail_poll.get_supabase_admin_client"),
+            patch(
+                "app.routers.cron.gmail_poll.poll_unread_emails",
+                side_effect=ValueError("Missing env vars"),
+            ),
         ):
             response = client.get(
                 "/api/cron/gmail-poll",
@@ -59,9 +65,12 @@ class TestGmailPollRouter:
 
     def test_gmail_api_error_returns_502(self, monkeypatch):
         monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
-        with patch(
-            "app.routers.cron.gmail_poll.poll_unread_emails",
-            side_effect=Exception("Gmail rate limit"),
+        with (
+            patch("app.routers.cron.gmail_poll.get_supabase_admin_client"),
+            patch(
+                "app.routers.cron.gmail_poll.poll_unread_emails",
+                side_effect=Exception("Gmail rate limit"),
+            ),
         ):
             response = client.get(
                 "/api/cron/gmail-poll",

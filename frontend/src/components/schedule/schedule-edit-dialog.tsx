@@ -1,7 +1,7 @@
 /* frontend/src/components/schedule/schedule-edit-dialog.tsx */
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { format } from 'date-fns'
 import {
   Dialog,
@@ -50,22 +50,20 @@ export function ScheduleEditDialog({
   onSave,
   isSaving = false,
 }: ScheduleEditDialogProps) {
-  const [startValue, setStartValue] = useState('')
-  const [endValue, setEndValue] = useState('')
-  const [initialStart, setInitialStart] = useState('')
-  const [initialEnd, setInitialEnd] = useState('')
-
-  // 選択タスクが変わったらフォームの初期値をリセット
-  useEffect(() => {
-    if (schedule) {
-      const s = toLocalDatetimeValue(schedule.start_datetime)
-      const e = toLocalDatetimeValue(schedule.end_datetime)
-      setStartValue(s)
-      setEndValue(e)
-      setInitialStart(s)
-      setInitialEnd(e)
-    }
-  }, [schedule])
+  // 選択タスクが変わるたびに key 経由でコンポーネントごと再マウントされるため、
+  // 初期値は useState の初期化関数でそのまま計算できる (エフェクト不要)
+  const [startValue, setStartValue] = useState(() =>
+    schedule ? toLocalDatetimeValue(schedule.start_datetime) : ''
+  )
+  const [endValue, setEndValue] = useState(() =>
+    schedule ? toLocalDatetimeValue(schedule.end_datetime) : ''
+  )
+  const [initialStart] = useState(() =>
+    schedule ? toLocalDatetimeValue(schedule.start_datetime) : ''
+  )
+  const [initialEnd] = useState(() =>
+    schedule ? toLocalDatetimeValue(schedule.end_datetime) : ''
+  )
 
   const handleSave = () => {
     if (!schedule) return

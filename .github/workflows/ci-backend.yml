@@ -1,0 +1,45 @@
+name: CI Backend
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/ci-backend.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # リポジトリルートから --config を明示して実行する。
+      # (cwd=backend で `ruff check .` を実行すると isort の first-party 判定が
+      # 変わり、pre-commit (ルートから --config=backend/pyproject.toml で実行) と
+      # 結果が食い違うことを確認したため、pre-commit と同じ実行方法に合わせている)
+      - name: Lint (ruff)
+        working-directory: .
+        run: ruff check --config=backend/pyproject.toml backend/
+
+      - name: Type check (mypy)
+        run: mypy .
+
+      # integration/e2e は conftest.py の仕様上 --run-integration / --run-e2e を
+      # 渡さない限り自動でスキップされるため、素の pytest で unit/api のみ実行される
+      - name: Unit & API tests
+        run: pytest __tests__/unit __tests__/api

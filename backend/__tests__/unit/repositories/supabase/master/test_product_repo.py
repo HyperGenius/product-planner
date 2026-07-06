@@ -104,9 +104,10 @@ class TestProductRepository:
     def test_create_routing(self, product_repo, mock_client, data, expected):
         """工程作成テスト (独自メソッド)"""
 
+        # insertはSupabaseの仕様上、配列を返す
         (
             mock_client.table.return_value.insert.return_value.execute.return_value.data
-        ) = expected
+        ) = [expected]
 
         result = product_repo.create_routing(data)
 

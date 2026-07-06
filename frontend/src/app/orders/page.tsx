@@ -192,6 +192,7 @@ export default function OrdersPage() {
 
         {selectedOrder && (
           <EditOrderDialog
+            key={selectedOrder.id}
             order={selectedOrder}
             open={isEditDialogOpen}
             onOpenChange={setIsEditDialogOpen}
@@ -226,7 +227,9 @@ export default function OrdersPage() {
 
         <BulkSimulateConfirmDialog
           open={isBulkSimulateConfirmOpen}
-          orders={selectedOrderIds.map((id) => orders?.find((o) => o.id === id)!).filter(Boolean)}
+          orders={selectedOrderIds
+            .map((id) => orders?.find((o) => o.id === id))
+            .filter((o): o is NonNullable<typeof o> => o != null)}
           products={products}
           onConfirm={handleBulkSimulateConfirm}
           onCancel={handleBulkSimulateCancel}

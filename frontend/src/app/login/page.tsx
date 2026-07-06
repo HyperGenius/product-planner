@@ -53,10 +53,10 @@ export default function LoginPage() {
 
             window.location.href = '/'
 
-        } catch (error: any) {
+        } catch (error) {
             console.error(error)
             toast.error('ログイン失敗', {
-                description: error.message || '認証に失敗しました',
+                description: error instanceof Error ? error.message : '認証に失敗しました',
             })
         } finally {
             setLoading(false)

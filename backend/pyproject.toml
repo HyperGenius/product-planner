@@ -64,6 +64,7 @@ testpaths = [
 ]
 markers = [
     "unit: DB不要のユニットテスト",
+    "api: DB不要のAPI(ルーター)テスト",
     "integration: Supabase接続が必要なインテグレーションテスト (--run-integration で実行)",
     "e2e: Gmail と Supabase の実接続が必要な E2E テスト (--run-e2e で実行)",
 ]

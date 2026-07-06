@@ -26,9 +26,12 @@ class TestParseOrderPdfsRouter:
 
     def test_valid_secret_returns_result(self, monkeypatch):
         monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
-        with patch(
-            "app.routers.cron.parse_order_pdfs.parse_pending_order_pdfs",
-            return_value={"processed": 2, "orders_created": 3, "errors": 0},
+        with (
+            patch("app.routers.cron.parse_order_pdfs.get_supabase_admin_client"),
+            patch(
+                "app.routers.cron.parse_order_pdfs.parse_pending_order_pdfs",
+                return_value={"processed": 2, "orders_created": 3, "errors": 0},
+            ),
         ):
             response = client.get(
                 "/api/cron/parse-order-pdfs",
@@ -47,9 +50,12 @@ class TestParseOrderPdfsRouter:
 
     def test_parsing_error_returns_502(self, monkeypatch):
         monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
-        with patch(
-            "app.routers.cron.parse_order_pdfs.parse_pending_order_pdfs",
-            side_effect=Exception("storage unavailable"),
+        with (
+            patch("app.routers.cron.parse_order_pdfs.get_supabase_admin_client"),
+            patch(
+                "app.routers.cron.parse_order_pdfs.parse_pending_order_pdfs",
+                side_effect=Exception("storage unavailable"),
+            ),
         ):
             response = client.get(
                 "/api/cron/parse-order-pdfs",
