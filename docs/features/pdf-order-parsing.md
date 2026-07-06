@@ -74,6 +74,27 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
    個々の失敗理由は order_parse_log 側で追跡する)
 ```
 
+### PDFが注文と無関係な内容だった場合のフォールバック（Issue #278）
+
+添付PDFが署名画像・会社案内・注文と無関係な資料等で、`extract_order_lines` が
+明細を1件も抽出できなかった場合（`line_items == []`）、そのままでは受注下書きが
+一切起票されず、本文に書かれた注文情報が失われていた。
+
+`pdf_order_parsing_service._parse_one` は `line_items` が空のとき、ステージング行の
+`source_raw`（メール本文）に対して `email_extraction_service.extract_email_fields()`
+（[email-order-intake.md](email-order-intake.md) の添付なしメールと同じ抽出ロジック）
+によるフォールバック抽出を行う（`_fallback_to_body_extraction`）。
+
+- 本文から `product_name`/`quantity`/`deadline_date`/`order_number` のいずれかが
+  抽出できた場合: 製品照合の上、`orders` に1件 `status='draft'` で直接INSERTし、
+  ステージング行の添付ファイルを紐付ける `order_attachments` 行を追加する
+- 本文からも何も抽出できなかった場合: order は作成せず、`non_order_email` として
+  `create_notification` のみ行う（添付なしメールの「対象外メール」通知と同じ扱い）
+
+このフォールバックは `upsert_order_by_dedupe_key` によるdedupe処理を経由しない
+直接INSERTのため、既存のPDF明細処理（複数品番・確度別のupsert）とは独立した
+単発の下書き起票として扱われる。
+
 ### なぜ postgrest-py の `on_conflict` を使わないか
 
 supabase-py（postgrest-py）の `.insert(..., on_conflict=...)` は単純なマージ用であり、
