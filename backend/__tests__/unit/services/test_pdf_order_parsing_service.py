@@ -438,6 +438,30 @@ class TestProcessLineItem:
         notif_insert = insert_calls[1].args[0]
         assert notif_insert["notif_type"] == "draft_conflict_skipped"
 
+    def test_invalid_quantity_type_skips_without_calling_rpc(self):
+        """quantityがint/None以外の想定外の型（スキーマ崩れ等）の場合、
+        不整合なorderを作らないよう明細をスキップし、ログのみ記録すること。"""
+        mock_db = MagicMock()
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": "約100個",
+            "delivery_date": "2026-08-01",
+            "certainty": "confirmed",
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), line)
+
+        assert created is False
+        mock_db.rpc.assert_not_called()
+        log_insert = mock_db.table("order_parse_log").insert.call_args.args[0]
+        assert log_insert["reason"] == "invalid_quantity"
+        assert log_insert["detail"]["quantity"] == "約100個"
+
     def test_no_change_skips_without_logging(self):
         mock_db = MagicMock()
         mock_db.rpc().execute.return_value = MagicMock(

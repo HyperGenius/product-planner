@@ -203,6 +203,31 @@ def _check_multi_order_suspected(
     )
 
 
+def _resolve_product_id(
+    db: Client,
+    tenant_id: str,
+    product_number_raw: str | None,
+    product_name_raw: str | None,
+) -> int | None:
+    """
+    1. products.code の完全一致
+    2. products.name に対する品番文字列でのpg_trgm検索
+       （code列が未整備で、name列に品番文字列が入っているテナントに対応するため）
+    3. products.name に対する品名文字列でのpg_trgm検索
+    の順にフォールバックして product_id を解決する。
+    """
+    product_id: int | None = None
+    if product_number_raw:
+        product_id = match_product_by_code(db, tenant_id, product_number_raw)
+    if product_id is None and product_number_raw:
+        match = match_products(db, tenant_id, product_number_raw)
+        product_id = match["product_id"]
+    if product_id is None and product_name_raw:
+        match = match_products(db, tenant_id, product_name_raw)
+        product_id = match["product_id"]
+    return product_id
+
+
 def _process_line_item(
     db: Client, staging_row: dict[str, Any], line: dict[str, Any]
 ) -> bool:
@@ -215,19 +240,9 @@ def _process_line_item(
     product_number_raw = line.get("product_number_raw")
     product_name_raw = line.get("product_name_raw")
 
-    # 1. products.code の完全一致
-    # 2. products.name に対する品番文字列でのpg_trgm検索
-    #    （code列が未整備で、name列に品番文字列が入っているテナントに対応するため）
-    # 3. products.name に対する品名文字列でのpg_trgm検索
-    product_id: int | None = None
-    if product_number_raw:
-        product_id = match_product_by_code(db, tenant_id, product_number_raw)
-    if product_id is None and product_number_raw:
-        match = match_products(db, tenant_id, product_number_raw)
-        product_id = match["product_id"]
-    if product_id is None and product_name_raw:
-        match = match_products(db, tenant_id, product_name_raw)
-        product_id = match["product_id"]
+    product_id = _resolve_product_id(
+        db, tenant_id, product_number_raw, product_name_raw
+    )
 
     if product_id is None:
         detail = {
@@ -257,6 +272,19 @@ def _process_line_item(
     )
     deadline_date = line.get("delivery_date")
 
+    # 抽出結果の揺れ・想定外の型（本来はツールスキーマで int|null に制約されるが、
+    # スキーマ変更等で崩れた場合の防御）。不正な値のまま RPC に渡すと不整合な
+    # order が作成されてしまうため、明細ごとスキップしてログのみ残す。
+    quantity = line.get("quantity")
+    if quantity is not None and not isinstance(quantity, int):
+        detail = {
+            "product_number_raw": product_number_raw,
+            "product_name_raw": product_name_raw,
+            "quantity": quantity,
+        }
+        _log_parse_event(db, tenant_id, attachment_id, "invalid_quantity", detail)
+        return False
+
     _check_multi_order_suspected(db, tenant_id, attachment_id, line)
 
     rpc_result = db.rpc(
@@ -265,7 +293,7 @@ def _process_line_item(
             "p_tenant_id": tenant_id,
             "p_customer_id": staging_row.get("customer_id"),
             "p_product_id": product_id,
-            "p_quantity": line.get("quantity"),
+            "p_quantity": quantity,
             "p_deadline_date": deadline_date,
             "p_customer_certainty": certainty,
             "p_source_type": "email",

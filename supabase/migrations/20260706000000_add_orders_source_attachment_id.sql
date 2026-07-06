@@ -19,6 +19,8 @@ CREATE INDEX idx_orders_source_attachment_id ON orders (source_attachment_id);
 -- ==========================================
 -- PDF由来: order_id IS NULL のステージング行と、そこから生成された各 orders に
 -- 紐づく order_attachments 行（storage_path を複製したもの）を対応付けて設定する。
+-- 手動作成の受注（source_type != 'email'）は、たまたま同一storage_pathの添付を
+-- 持っていたとしても対象外とする（コメント通り手動作成はNULLのままにするため）。
 UPDATE orders o
 SET source_attachment_id = staging.id
 FROM order_attachments staging
@@ -27,15 +29,18 @@ JOIN order_attachments real_att
  AND real_att.tenant_id = staging.tenant_id
 WHERE staging.order_id IS NULL
   AND real_att.order_id = o.id
-  AND o.source_attachment_id IS NULL;
+  AND o.source_attachment_id IS NULL
+  AND o.source_type = 'email';
 
 -- 非PDF添付・添付なしメール由来: 専用のステージング行が存在しないため、
 -- その orders に紐づく order_attachments 行自身を自己参照的な「ソース」として設定する。
+-- 手動作成の受注（source_type != 'email'）は対象外とする。
 UPDATE orders o
 SET source_attachment_id = oa.id
 FROM order_attachments oa
 WHERE oa.order_id = o.id
-  AND o.source_attachment_id IS NULL;
+  AND o.source_attachment_id IS NULL
+  AND o.source_type = 'email';
 
 -- ==========================================
 -- upsert_order_by_dedupe_key: p_source_attachment_id を追加

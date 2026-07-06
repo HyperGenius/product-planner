@@ -147,6 +147,11 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
 - あくまで情報提供目的の通知であり、order自体の作成はブロックしない
 - 閾値・条件は本番データの精度を見ながら調整する前提（Issue #280 未解決の論点）
 
+また、`quantity` が本来のツールスキーマ（`int | null`）から外れた想定外の型で
+返ってきた場合（スキーマ変更・抽出結果の崩れ等への防御）は、不整合な `orders`
+行を作らないよう `reason='invalid_quantity'` で `order_parse_log` に記録した上で
+その明細をスキップする（PRレビュー指摘対応）。
+
 ### なぜ postgrest-py の `on_conflict` を使わないか
 
 supabase-py（postgrest-py）の `.insert(..., on_conflict=...)` は単純なマージ用であり、
