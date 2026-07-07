@@ -20,6 +20,7 @@ from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.services.scheduling_settings_service import get_effective_params
 from app.utils.calendar import (
+    JST,
     CalendarConfig,
     get_next_available_start_time,
     split_work_across_days,
@@ -95,7 +96,7 @@ def schedule_order(
         raise RoutingUnconfirmedError(desired_deadline=desired_deadline)
 
     created_schedules = []
-    current_process_start = start_time if start_time else datetime.now().astimezone()
+    current_process_start = start_time if start_time else datetime.now(JST)
 
     for routing in routings:
         equipment_group_id = routing["equipment_group_id"]

@@ -7,6 +7,11 @@
 """
 
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+# 稼働時間(9:00-17:00)はJST基準。実行ホストのタイムゾーンに関わらず
+# 常にJSTで判定するため、稼働時間判定を行う全関数の入口でこのTZへ変換する。
+JST = ZoneInfo("Asia/Tokyo")
 
 # 定数定義
 WORK_START_HOUR = 9
@@ -21,6 +26,18 @@ BREAK_DURATION_MINUTES = 60  # 1時間
 MAX_DAILY_WORK_HOURS = (WORK_END_HOUR - WORK_START_HOUR) - (
     BREAK_DURATION_MINUTES / 60
 )  # 7時間
+
+
+def _to_business_tz(dt: datetime) -> datetime:
+    """
+    稼働時間判定用にJSTの壁時計時刻へ変換する。
+
+    tz-awareな場合はJSTへ変換する（実行ホストのタイムゾーンに依存しないようにするため）。
+    naive(tzinfoなし)な場合は、既にJSTの壁時計時刻を表しているものとみなしてそのまま返す。
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(JST)
 
 
 class CalendarConfig:
@@ -55,6 +72,7 @@ class CalendarConfig:
         Returns:
             bool: 休日の場合True、稼働日の場合False
         """
+        dt = _to_business_tz(dt)
         target_date = dt.date()
 
         # 明示的に稼働日として設定されている場合（土日出勤など）
@@ -83,6 +101,7 @@ def is_during_break(dt: datetime) -> bool:
     Returns:
         bool: 休憩時間中の場合True、それ以外の場合False
     """
+    dt = _to_business_tz(dt)
     break_start = time(BREAK_START_HOUR, BREAK_START_MINUTE)
     break_end = time(BREAK_END_HOUR, BREAK_END_MINUTE)
     return break_start <= dt.time() < break_end
@@ -98,6 +117,7 @@ def adjust_start_time_for_break(dt: datetime) -> datetime:
     Returns:
         datetime: 調整後の日時（休憩時間中でない場合はそのまま返す）
     """
+    dt = _to_business_tz(dt)
     if is_during_break(dt):
         return dt.replace(
             hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
@@ -133,6 +153,8 @@ def get_next_work_start(
     Returns:
         datetime: 次の稼働開始日時（9:00）
     """
+    dt = _to_business_tz(dt)
+
     # 既に今日の始業前なら、今日の9:00
     if is_workday(dt, calendar_config) and dt.time() < time(WORK_START_HOUR, 0):
         return dt.replace(hour=WORK_START_HOUR, minute=0, second=0, microsecond=0)
@@ -166,6 +188,8 @@ def get_next_available_start_time(
     Returns:
         datetime: 作業を開始可能な日時
     """
+    current_dt = _to_business_tz(current_dt)
+
     # 1. まず基本的な稼働時間帯に乗せる
     if not is_workday(current_dt, calendar_config) or current_dt.time() >= time(
         WORK_END_HOUR, 0
@@ -207,6 +231,8 @@ def calculate_end_time(
     Raises:
         ValueError: 開始時刻が稼働時間外の場合、または終了時刻が17:00を超える場合
     """
+    start_dt = _to_business_tz(start_dt)
+
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt, calendar_config):
         raise ValueError(f"開始日時が稼働日ではありません: {start_dt}")
@@ -225,9 +251,6 @@ def calculate_end_time(
     # 休憩時間をまたぐかチェック
     break_start = start_dt.replace(
         hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
-    )
-    start_dt.replace(
-        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
     )
 
     # 作業が休憩時間をまたぐ場合、終了時刻に休憩時間分を加算
@@ -265,6 +288,8 @@ def calculate_remaining_work_minutes(
     Raises:
         ValueError: 開始時刻が稼働時間外の場合
     """
+    start_dt = _to_business_tz(start_dt)
+
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt, calendar_config):
         raise ValueError(f"開始日時が稼働日ではありません: {start_dt}")
@@ -286,9 +311,6 @@ def calculate_remaining_work_minutes(
     # 休憩時間が残り時間に含まれているかチェック
     break_start = start_dt.replace(
         hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
-    )
-    start_dt.replace(
-        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
     )
 
     # 開始時刻が休憩開始前で、休憩時間が含まれる場合、休憩時間分を差し引く
@@ -321,6 +343,8 @@ def split_work_across_days(
     # 所要時間の検証
     if duration_minutes <= 0:
         raise ValueError(f"所要時間は正の値である必要があります: {duration_minutes}分")
+
+    start_dt = _to_business_tz(start_dt)
 
     # 開始時刻が稼働日かつ稼働時間内であることを確認
     if not is_workday(start_dt, calendar_config):
@@ -422,9 +446,10 @@ def split_work_in_window(
     if duration_minutes <= 0:
         return [], 0.0
 
+    current_start = _to_business_tz(start_dt)
+    window_end = _to_business_tz(window_end)
     segments: list[tuple[datetime, datetime]] = []
     remaining_duration = duration_minutes
-    current_start = start_dt
     epsilon = 0.01
 
     while remaining_duration > epsilon:
