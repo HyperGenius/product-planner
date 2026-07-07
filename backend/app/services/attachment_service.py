@@ -17,28 +17,6 @@ def _safe_filename(filename: str) -> str:
     return uuid.uuid4().hex + ext
 
 
-def upload_attachment(
-    admin_client: Client,
-    tenant_id: str,
-    order_id: int,
-    filename: str,
-    content: bytes,
-    content_type: str,
-) -> str:
-    """
-    添付ファイルを Supabase Storage にアップロードし、storage_path を返す。
-    パス形式: {tenant_id}/orders/{order_id}/{safe_filename}
-    元のファイル名は呼び出し元が original_filename カラムに保存する。
-    """
-    storage_path = f"{tenant_id}/orders/{order_id}/{_safe_filename(filename)}"
-    admin_client.storage.from_(_BUCKET).upload(
-        path=storage_path,
-        file=content,
-        file_options={"content-type": content_type, "upsert": "true"},
-    )
-    return storage_path
-
-
 def upload_staged_attachment(
     admin_client: Client,
     tenant_id: str,

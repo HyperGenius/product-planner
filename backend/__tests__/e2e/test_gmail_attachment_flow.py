@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 from app.services.gmail_service import poll_unread_emails
+from app.services.pdf_order_parsing_service import parse_pending_order_pdfs
 
 
 @pytest.mark.e2e
@@ -103,9 +104,12 @@ class TestGmailAttachmentFlow:
         admin_db,
     ) -> None:
         """
-        添付なしメールを受信したとき:
-        - orders レコードが作成される（処理は継続する）
-        - order_attachments レコードが parse_status='failed_no_attachment' で作成される
+        添付なしメールを受信したとき (Issue #280 で非同期パース経路に統一):
+        - Gmail ポーリング直後は order は作成されず、order_attachments に
+          order_id=NULL のステージング行（storage_path=""）が作成される
+        - parse_pending_order_pdfs (cron) がメール本文から注文情報を抽出し、
+          orders レコードと parse_status='failed_no_attachment' の
+          order_attachments レコードを作成する
         """
         run_id = inject_email_without_attachment["run_id"]
 
@@ -115,6 +119,28 @@ class TestGmailAttachmentFlow:
         assert result["processed"] >= 1
 
         time.sleep(1)
+
+        # --- ステージング行の検証 ---
+        staging_result = (
+            admin_db.table("order_attachments")
+            .select("*")
+            .is_("order_id", "null")
+            .like("source_raw", f"%run_id={run_id}%")
+            .execute()
+        )
+        staging_rows = staging_result.data or []
+        assert len(staging_rows) == 1, (
+            f"Expected 1 staged order_attachment, got {len(staging_rows)}. "
+            f"run_id={run_id}"
+        )
+        assert staging_rows[0]["storage_path"] == ""
+        assert staging_rows[0]["parse_status"] == "pending"
+
+        # --- 非同期パースを実行 ---
+        parse_result = parse_pending_order_pdfs(admin_db)
+        assert parse_result["errors"] == 0, (
+            f"parse_pending_order_pdfs returned errors: {parse_result}"
+        )
 
         # --- orders レコードの検証 ---
         order_result = (

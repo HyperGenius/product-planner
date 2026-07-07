@@ -2,23 +2,6 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "pip install (functions)",
-            "type": "shell",
-            "osx": {
-                "command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
-            },
-            "windows": {
-                "command": "${config:azureFunctions.pythonVenv}\\Scripts\\python -m pip install -r requirements.txt"
-            },
-            "linux": {
-                "command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
-            },
-            "problemMatcher": [],
-            "options": {
-                "cwd": "${workspaceFolder}/backend"
-            }
-        },
-        {
             "label": "Backend (Uvicorn)",
             "type": "shell",
             // 仮想環境を起動してから uvicorn を実行
@@ -80,6 +63,15 @@
             "label": "Pre-commit run all files",
             "type": "shell",
             "command": "source backend/.venv/bin/activate && pre-commit run --all-files",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "test-runners"
+            }
+        },
+        {
+            "label": "Run Integration Tests",
+            "type": "shell",
+            "command": "source backend/.venv/bin/activate && pytest backend/__tests__/integration --run-integration",
             "problemMatcher": [],
             "presentation": {
                 "group": "test-runners"

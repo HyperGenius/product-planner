@@ -74,26 +74,83 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
    個々の失敗理由は order_parse_log 側で追跡する)
 ```
 
-### PDFが注文と無関係な内容だった場合のフォールバック（Issue #278）
+### メール本文からの複数明細抽出への統一（Issue #280）
 
-添付PDFが署名画像・会社案内・注文と無関係な資料等で、`extract_order_lines` が
-明細を1件も抽出できなかった場合（`line_items == []`）、そのままでは受注下書きが
-一切起票されず、本文に書かれた注文情報が失われていた。
+「1メール = 1受注」前提が崩れているケース（1通に部品番号ごとの複数月分の内示数量が
+表形式で含まれる等）が報告され（Issue #280）、メール本文からの抽出も PDF と同じ
+`line_items` 配列形式に統一した。
 
-`pdf_order_parsing_service._parse_one` は `line_items` が空のとき、ステージング行の
-`source_raw`（メール本文）に対して `email_extraction_service.extract_email_fields()`
-（[email-order-intake.md](email-order-intake.md) の添付なしメールと同じ抽出ロジック）
-によるフォールバック抽出を行う（`_fallback_to_body_extraction`）。
+- `email_extraction_service.extract_email_order_lines(body)` が
+  `product_name_raw`/`product_number_raw`/`quantity`/`delivery_date`/`certainty` を
+  持つ明細の配列を返す（`pdf_order_extraction_service.extract_order_lines()` と
+  同じスキーマ・`EMAIL_EXTRACTION_MODEL` を使用）。単一スカラー値のみ返す旧
+  `extract_email_fields()` は廃止した
+- `pdf_order_parsing_service._process_email_body()`（旧 `_fallback_to_body_extraction`）が
+  この配列を明細ごとに既存の `_process_line_item()` に渡すため、1通のメールから
+  複数の `orders` 行を正しく生成できる。製品照合・`upsert_order_by_dedupe_key` による
+  dedupe・`order_attachments` 紐付けは PDF由来の明細処理と完全に同じ経路を通る
+- 明細が1件も抽出できなかった場合は、従来通り order を作成せず `non_order_email` として
+  `create_notification` のみ行う
 
-- 本文から `product_name`/`quantity`/`deadline_date`/`order_number` のいずれかが
-  抽出できた場合: 製品照合の上、`orders` に1件 `status='draft'` で直接INSERTし、
-  ステージング行の添付ファイルを紐付ける `order_attachments` 行を追加する
-- 本文からも何も抽出できなかった場合: order は作成せず、`non_order_email` として
-  `create_notification` のみ行う（添付なしメールの「対象外メール」通知と同じ扱い）
+`_process_email_body()` は以下の2つのケースで呼ばれる共通経路になっている:
 
-このフォールバックは `upsert_order_by_dedupe_key` によるdedupe処理を経由しない
-直接INSERTのため、既存のPDF明細処理（複数品番・確度別のupsert）とは独立した
-単発の下書き起票として扱われる。
+1. PDFに明細が1件も無かった場合のフォールバック（Issue #278）
+2. 非PDF添付・添付なしメールの本処理（Issue #280、後述）
+
+### 非PDF添付・添付なしメールの本処理への統一（Issue #280）
+
+従来、非PDF添付・添付なしメールは `gmail_service.py` 内で単一フィールド抽出→即座に
+`orders` を1件直接INSERTする独立した経路を持っていた（PDF添付メールのみ
+`order_attachments` へのステージング保存＋非同期パースだった）。この経路は
+「1メール1受注」前提のままで Issue #280 の対象外だったため、PDF添付メールと同じ
+ステージング＋非同期パース経路に統一した。
+
+- `gmail_service._process_message()` は PDF・非PDF添付・添付なしのいずれであっても、
+  顧客解決後に `order_attachments` へ `order_id=NULL` のステージング行を1件INSERTする
+  だけになった（添付が無い場合は `storage_path=""`）。`orders` への直接INSERTは行わない
+- `pdf_order_parsing_service._parse_one()` はステージング行の `content_type` が
+  `application/pdf` かつ `storage_path` がある場合のみPDFテキスト抽出を行い、それ以外
+  （非PDF添付・添付なし）は `_process_email_body()` へ直接ルーティングする
+- 添付ファイル本体が無いソースから生成された `orders` の `order_attachments` 行は、
+  フロントエンドの表示分岐（`parse_status === 'failed_no_attachment'`）と合わせるため
+  `parse_status='failed_no_attachment'` で作成する（`storage_path` が空か否かで判定）
+- これにより添付ファイルは常に「1ソースにつき1回」だけ Storage に保存される
+  （非PDF添付を複数明細に分割してもファイル本体は複製しない）
+
+### 受注ソースの「1ソース:N受注」モデル（Issue #280）
+
+`orders.source_attachment_id`（`order_attachments.id` への nullable FK）を追加し、
+1つの `order_attachments` ステージング行（1ソース）に対してN件の `orders` を
+紐づけられるようにした。
+
+- `upsert_order_by_dedupe_key` RPC に `p_source_attachment_id` パラメータを追加し、
+  新規INSERT時にのみ設定する（既存行のUPDATE時は最初に作成したソースを保ったまま
+  変更しない）
+- 既存データは以下の方針でバックフィル済み（`20260706000000_add_orders_source_attachment_id.sql`）:
+  - PDF由来: ステージング行（`order_id IS NULL`）と、そこから生成された各 `orders` に
+    紐づく `order_attachments` 行（`storage_path` を複製したもの）を対応付けて設定
+  - 非PDF添付・添付なしメール由来: 専用のステージング行が存在しないため、その
+    `orders` に紐づく `order_attachments` 行自身を自己参照的な「ソース」として設定
+- 手動分割UI（誤って1件にマージされた下書きから同じ `source_attachment_id` を
+  参照するN件の下書きを生成する機能）は本Issueのスコープ外とし、後続Issueで対応する
+
+### 複数受注の疑いの検知（Issue #280）
+
+`line_items` 配列形式への統一により「1通のメールに複数月分の数量が含まれる」
+ケースの多くは正しく複数明細として抽出されるようになったが、それでも1明細に
+複数月分がマージされてしまうケースに備え、粗いヒューリスティックによる検知を
+`_process_line_item()` に追加した。
+
+- 1明細の `quantity` が `MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD`（デフォルト
+  100,000）を超える場合、`order_parse_log` に `reason='multi_order_suspected'` で
+  記録し、`notifications` に `notif_type='multi_order_suspected'` で通知する
+- あくまで情報提供目的の通知であり、order自体の作成はブロックしない
+- 閾値・条件は本番データの精度を見ながら調整する前提（Issue #280 未解決の論点）
+
+また、`quantity` が本来のツールスキーマ（`int | null`）から外れた想定外の型で
+返ってきた場合（スキーマ変更・抽出結果の崩れ等への防御）は、不整合な `orders`
+行を作らないよう `reason='invalid_quantity'` で `order_parse_log` に記録した上で
+その明細をスキップする（PRレビュー指摘対応）。
 
 ### なぜ postgrest-py の `on_conflict` を使わないか
 
@@ -245,6 +302,27 @@ Issue #267 での変更（顧客側の確度とProductPlannerステータスの�
 - `frontend/src/components/orders/order-table-row.tsx` /
   `frontend/src/app/orders/[id]/page.tsx`: 顧客側の確度バッジを追加表示
 
+Issue #280 での変更（1ソース:N受注モデル・メール本文/非PDF添付の複数明細対応）:
+
+- `supabase/migrations/20260706000000_add_orders_source_attachment_id.sql`:
+  `orders.source_attachment_id` 追加・既存データバックフィル・
+  `upsert_order_by_dedupe_key` に `p_source_attachment_id` 追加・
+  `notifications.notif_type` に `multi_order_suspected` 追加
+- `backend/app/services/email_extraction_service.py`: `extract_email_fields()` を
+  廃止し、`extract_email_order_lines()`（line_items配列形式）に置き換え
+- `backend/app/services/pdf_order_parsing_service.py`: `_fallback_to_body_extraction`
+  を `_process_email_body`（PDFフォールバックと非PDF添付・添付なしメールの共通経路）に
+  一般化。`_parse_one` にPDF/非PDF分岐を追加。`_check_multi_order_suspected` を追加
+- `backend/app/services/gmail_service.py`: 非PDF添付・添付なしメールの即時order作成
+  経路を削除し、PDF添付と同じステージング保存のみに統一
+- `backend/app/services/attachment_service.py`: 呼び出し元が無くなった
+  `upload_attachment()` を削除
+- `backend/app/routers/transaction/notifications.py`: `_PARSE_LOG_NOTIF_TYPES` に
+  `multi_order_suspected` を追加
+- `frontend/src/types/notification.ts` / `notification-bell.tsx`:
+  `multi_order_suspected`（および従前抜けていた `customer_draft_created`）の
+  型・表示ラベルを追加
+
 ---
 
 ## 環境変数
@@ -256,6 +334,9 @@ PDF_EXTRACTION_MODEL=claude-sonnet-5  # デフォルト。EMAIL_EXTRACTION_MODEL
 # 製品マッチング (pg_trgm) の自動確定しきい値
 PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD=0.75  # 最上位候補スコアの下限
 PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の下限
+
+# 複数受注疑いの検知（Issue #280、粗いヒューリスティック）
+MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを超えると通知
 ```
 
 ---
@@ -287,6 +368,14 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 - [x] PDF文面上で確定納期・PO番号が明記された明細（certainty='confirmed'）でも、
       ユーザーが `/orders/{id}/confirm` を実行するまで `status` は `confirmed` に
       ならない（Issue #267）
+- [x] `orders.source_attachment_id` により1ソース(order_attachments)につきN件の
+      `orders` を紐づけられる。既存データはバックフィル済み（Issue #280）
+- [x] メール本文フォールバック抽出・非PDF添付メール処理が `line_items` 配列形式で
+      1メールから複数受注を抽出できる（Issue #280）
+- [x] 自動抽出時に1明細の数量が閾値を超える場合、`multi_order_suspected` として
+      通知される（Issue #280、粗いヒューリスティック）
+- [x] 添付ファイルは1ソースにつき1回のみStorageに保存される（非PDF添付・添付なし
+      メールもPDF添付と同じステージング経路に統一、Issue #280）
 
 ---
 
@@ -300,6 +389,10 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 - `deadline_date` 変更を「同一注文の引き継ぎ」として明示的にUI上で提示する機能（Issue #252スコープ外）
 - `order_history`（変更履歴・監査ログ）テーブルの新設（Issue #252スコープ外）
 - ステータスの手動格下げ操作、`superseded_at` レコードの物理削除・アーカイブ処理（Issue #252スコープ外）
+- 手動分割UI（誤って1件にマージされた下書きから、同じ `source_attachment_id` を参照する
+  N件の下書きを生成する機能）は後続Issueで対応（Issue #280スコープ外）
+- 複数受注疑い検知の閾値・ヒューリスティックの精緻化（数量異常値以外の条件追加等）は
+  本番データの精度を見ながら別途調整（Issue #280スコープ外）
 
 ---
 

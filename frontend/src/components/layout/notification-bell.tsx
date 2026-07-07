@@ -19,6 +19,8 @@ const NOTIF_TYPE_LABELS: Record<NotificationType, string> = {
   failed_encrypted: "読み取り不可（暗号化PDF）",
   failed_image: "読み取り不可（画像PDF）",
   non_order_email: "対象外メール",
+  customer_draft_created: "顧客の下書き作成",
+  multi_order_suspected: "複数受注の疑い",
 }
 
 function groupByType(notifications: Notification[]): [NotificationType, Notification[]][] {

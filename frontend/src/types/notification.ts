@@ -5,6 +5,8 @@ export type NotificationType =
   | "failed_encrypted"
   | "failed_image"
   | "non_order_email"
+  | "customer_draft_created"
+  | "multi_order_suspected"
 
 export interface Notification {
   id: string

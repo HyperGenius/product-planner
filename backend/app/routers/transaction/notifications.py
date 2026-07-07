@@ -21,11 +21,12 @@ notifications_router = APIRouter(
 
 logger = get_logger(__name__)
 
-# order_parse_log 経由の通知（PDF照合失敗・格下げ/重複スキップ）
+# order_parse_log 経由の通知（PDF照合失敗・格下げ/重複スキップ・複数受注疑い）
 _PARSE_LOG_NOTIF_TYPES = {
     "no_product_match",
     "downgrade_skipped",
     "draft_conflict_skipped",
+    "multi_order_suspected",
 }
 
 
