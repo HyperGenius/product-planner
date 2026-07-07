@@ -389,8 +389,8 @@ class CalendarConfig:
 
 - **設備選択は最小負荷方式**: グループ内で「最も早く空く設備」を選択。設備の均等配分は保証しない
 - **既存スケジュールは再計算されない**: confirm 実行時に他の受注の確定済みスケジュールは変更されない。設備の空き時間は `production_schedules` の最終 `end_datetime` を基準とするため、手動でキャンセルした受注のスケジュールが残っている場合は空き時間の判定に影響する
-- **start_time デフォルト**: `schedule_order()` の `start_time=None` の場合、現在時刻（`datetime.now()`）が基準になる。テストや過去日付での計算が必要な場合は明示的に渡す
-- **タイムゾーン**: 全 datetime は UTC（`timestamptz`）で保存。フロントエンドの表示は日本語ロケールに変換
+- **start_time デフォルト**: `schedule_order()` の `start_time=None` の場合、JST基準の現在時刻（`datetime.now(JST)`、`app.utils.calendar.JST`）が基準になる。テストや過去日付での計算が必要な場合は明示的に渡す
+- **タイムゾーン**: 全 datetime は UTC（`timestamptz`）で保存。フロントエンドの表示は日本語ロケールに変換。稼働時間判定（9:00-17:00・休憩12:00-13:00）は `app/utils/calendar.py` の `_to_business_tz()` により実行ホストのタイムゾーンに関わらず常に JST(`Asia/Tokyo`) へ正規化してから行われる（Issue #282: 以前はホストのローカルタイムゾーンをそのままJSTとみなしていたため、UTCで動作するホストでは実際の稼働時間が JST 18:00-翌2:00 相当にずれる不具合があった）
 - **複数日分割**: 1 工程が 7 時間を超える場合、翌稼働日の 9:00 に続きが割り当てられる。分割された各セグメントが個別の `production_schedules` レコードとなる
 - **工程確定ガード**: `is_confirmed=false` の工程が 1 件でもある場合、`dry_run=False`（ガント登録）はブロックされる。`dry_run=True`（シミュレーション）はブロックされない。詳細は「工程確定ガード」セクション参照
 - **`is_confirmed` フィールド不在の扱い**: `routings_are_confirmed()` は `r.get("is_confirmed", False)` で評価するため、マイグレーション前のレコード（フィールドなし）も未確定として扱われる
