@@ -252,9 +252,6 @@ def calculate_end_time(
     break_start = start_dt.replace(
         hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
     )
-    start_dt.replace(
-        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
-    )
 
     # 作業が休憩時間をまたぐ場合、終了時刻に休憩時間分を加算
     if start_dt < break_start and end_dt > break_start:
@@ -314,9 +311,6 @@ def calculate_remaining_work_minutes(
     # 休憩時間が残り時間に含まれているかチェック
     break_start = start_dt.replace(
         hour=BREAK_START_HOUR, minute=BREAK_START_MINUTE, second=0, microsecond=0
-    )
-    start_dt.replace(
-        hour=BREAK_END_HOUR, minute=BREAK_END_MINUTE, second=0, microsecond=0
     )
 
     # 開始時刻が休憩開始前で、休憩時間が含まれる場合、休憩時間分を差し引く

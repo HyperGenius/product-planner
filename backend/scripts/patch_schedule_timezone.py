@@ -8,8 +8,11 @@ production_schedules のタイムゾーン不具合(Issue #282)を修正する�
     9時間遅い時刻がUTCとしてそのまま保存されてしまっていた。
     (例: 本来 JST 9:00 = UTC 00:00 であるべきところ、UTC 09:00 として保存された)
 
-このスクリプトは、影響を受けた production_schedules の start_datetime / end_datetime から
-9時間を差し引くことで、正しいUTC値(JST基準)に補正する。
+このスクリプトは、不具合のパターンに一致するレコード（UTC時刻の time-of-day が
+稼働時間帯 9:00-17:00 に収まっているもの）のみを対象に、start_datetime / end_datetime
+から9時間を差し引くことで正しいUTC値(JST基準)に補正する。既に正しく補正済みの
+レコード（UTC time-of-day が 9:00-17:00 の範囲外になったもの）は対象外となるため、
+複数回実行しても安全（冪等）。
 
 Usage:
     # 対象レコードの確認のみ（DBは変更しない）
@@ -22,13 +25,24 @@ Usage:
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from dotenv import load_dotenv
 
 from supabase import create_client
 
 SHIFT = timedelta(hours=9)
+# 不具合の兆候: UTC time-of-day がこの範囲に収まっている（本来はJSTの9:00-17:00のはずが
+# ホストTZ依存によりUTCとしてそのまま保存された値）
+SUSPECT_RANGE = (time(9, 0), time(17, 0))
+
+
+def _parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _is_suspect(dt: datetime) -> bool:
+    return SUSPECT_RANGE[0] <= dt.time() <= SUSPECT_RANGE[1]
 
 
 def _get_admin_client(env_file: str):
@@ -72,11 +86,17 @@ def main() -> None:
         .execute()
     )
     rows = res.data or []
-    print(f"対象レコード数: {len(rows)}")
+    print(f"取得レコード数: {len(rows)}")
 
+    target_count = 0
     for row in rows:
-        old_start = datetime.fromisoformat(row["start_datetime"])
-        old_end = datetime.fromisoformat(row["end_datetime"])
+        old_start = _parse_iso(row["start_datetime"])
+        old_end = _parse_iso(row["end_datetime"])
+
+        if not (_is_suspect(old_start) and _is_suspect(old_end)):
+            continue
+
+        target_count += 1
         new_start = old_start - SHIFT
         new_end = old_end - SHIFT
 
@@ -94,6 +114,7 @@ def main() -> None:
                 }
             ).eq("id", row["id"]).execute()
 
+    print(f"補正対象レコード数: {target_count}")
     if args.apply:
         print("補正を適用しました。")
     else:
