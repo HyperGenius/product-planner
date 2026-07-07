@@ -2,7 +2,7 @@
 スケジューリングロジックの単体テスト
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,6 +11,7 @@ from app.scheduler_logic import (
     routings_are_confirmed,
     schedule_order,
 )
+from app.utils.calendar import JST
 
 
 @pytest.mark.unit
@@ -47,14 +48,14 @@ class TestScheduleOrder:
             if equipment_id == 1:
                 return None  # 空き
             elif equipment_id == 2:
-                return datetime(2025, 1, 6, 14, 0, tzinfo=UTC)  # 月曜日 14:00に終了予定
+                return datetime(2025, 1, 6, 14, 0, tzinfo=JST)  # 月曜日 14:00に終了予定
 
         mock_schedule_repo.get_last_end_time.side_effect = get_last_end_time_side_effect
         mock_schedule_repo.create.return_value = None
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（開始時刻を固定して時刻依存を排除）
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)  # 月曜日 9:00
         result = schedule_order(
             order_id=1,
             product_id=1,
@@ -122,7 +123,7 @@ class TestScheduleOrder:
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（開始時刻を9:00に固定して、日またぎが発生しないようにする）
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)  # 月曜日 9:00
         result = schedule_order(
             order_id=2,
             product_id=2,
@@ -176,7 +177,7 @@ class TestScheduleOrder:
 
         # 設備1は遠い未来まで使用中、設備2は近い未来まで使用中
         # 設備2の方が早く開始できるべき
-        now = datetime.now(tz=UTC)
+        now = datetime.now(tz=JST)
 
         def get_last_end_time_side_effect(equipment_id: int):
             if equipment_id == 1:
@@ -279,9 +280,9 @@ class TestScheduleOrder:
             {"equipment_id": 1}
         ]
 
-        # 設備の最終終了時刻を今日の 16:00 に設定
+        # 設備の最終終了時刻を今日の 16:00 (JST) に設定
         # 2時間の作業を開始すると18:00になるため、2つのスケジュールに分割されるべき
-        now = datetime.now(tz=UTC)
+        now = datetime.now(tz=JST)
         mock_schedule_repo.get_last_end_time.return_value = now.replace(
             hour=16, minute=0, second=0, microsecond=0
         )
@@ -340,7 +341,7 @@ class TestScheduleOrder:
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（dry_run=True、開始時刻を固定）
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
         result = schedule_order(
             order_id=1,
             product_id=1,
@@ -389,7 +390,7 @@ class TestScheduleOrder:
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（dry_run=False、開始時刻を固定）
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
         result = schedule_order(
             order_id=1,
             product_id=1,
@@ -438,9 +439,7 @@ class TestScheduleOrder:
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（月曜日9:00から開始）
-        from datetime import UTC
-
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)  # 月曜日 9:00
         result = schedule_order(
             order_id=7,
             product_id=7,
@@ -512,9 +511,7 @@ class TestScheduleOrder:
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行（金曜日14:00から開始）
-        from datetime import UTC
-
-        start_time = datetime(2025, 1, 10, 14, 0, tzinfo=UTC)  # 金曜日 14:00
+        start_time = datetime(2025, 1, 10, 14, 0, tzinfo=JST)  # 金曜日 14:00
         result = schedule_order(
             order_id=8,
             product_id=8,
@@ -563,7 +560,7 @@ class TestScheduleOrder:
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
         # テスト実行
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)  # 月曜日 9:00
         result = schedule_order(
             order_id=10,
             product_id=10,
@@ -617,7 +614,7 @@ class TestScheduleOrder:
         mock_schedule_repo.create.return_value = None
         mock_schedule_repo.get_schedules_by_equipment.return_value = []
 
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)  # 月曜日 9:00
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)  # 月曜日 9:00
         result = schedule_order(
             order_id=11,
             product_id=11,
@@ -673,13 +670,13 @@ class TestGapFillScheduling:
             }
         ]
         # 月曜 9:00 開始、30分の作業 → 9:30 終了
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
         # 既存スケジュール: 10:00-17:00 (gap = 9:00-10:00 = 60分)
         existing = [
             {
                 "id": 99,
-                "start_datetime": "2025-01-06T10:00:00+00:00",
-                "end_datetime": "2025-01-06T17:00:00+00:00",
+                "start_datetime": "2025-01-06T10:00:00+09:00",
+                "end_datetime": "2025-01-06T17:00:00+09:00",
             }
         ]
         mock_product_repo, mock_schedule_repo = self._make_repos(
@@ -703,25 +700,25 @@ class TestGapFillScheduling:
         # ギャップ内 (9:00-10:00) に収まっていること
         assert start_dt.hour == 9
         assert start_dt.minute == 0
-        assert end_dt <= datetime(2025, 1, 6, 10, 0, tzinfo=UTC)
+        assert end_dt <= datetime(2025, 1, 6, 10, 0, tzinfo=JST)
 
     def test_gap_fill_falls_back_on_max_fragments_exceeded(self) -> None:
         """断片数が最大断片数(1)を超えたとき _try_gap_fill が None を返すこと"""
         from app.models.common.scheduling_settings import SchedulingParams
         from app.scheduler_logic import _try_gap_fill
 
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
         # 30分ギャップが2つ → 20分ずつ2セグメント必要 → max_fragments=1 で超過
         existing = [
             {
                 "id": 1,
-                "start_datetime": "2025-01-06T09:30:00+00:00",
-                "end_datetime": "2025-01-06T10:00:00+00:00",
+                "start_datetime": "2025-01-06T09:30:00+09:00",
+                "end_datetime": "2025-01-06T10:00:00+09:00",
             },
             {
                 "id": 2,
-                "start_datetime": "2025-01-06T10:30:00+00:00",
-                "end_datetime": "2025-01-06T17:00:00+00:00",
+                "start_datetime": "2025-01-06T10:30:00+09:00",
+                "end_datetime": "2025-01-06T17:00:00+09:00",
             },
         ]
         _, mock_schedule_repo = self._make_repos([], [1], existing)
@@ -747,12 +744,12 @@ class TestGapFillScheduling:
         from app.scheduler_logic import _try_gap_fill
 
         # 9:00-9:30 のギャップ (30分) だが guard_time=25分なので有効スロット=5分 → 20分入らない
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
         existing = [
             {
                 "id": 99,
-                "start_datetime": "2025-01-06T09:30:00+00:00",
-                "end_datetime": "2025-01-06T17:00:00+00:00",
+                "start_datetime": "2025-01-06T09:30:00+09:00",
+                "end_datetime": "2025-01-06T17:00:00+09:00",
             }
         ]
         _, mock_schedule_repo = self._make_repos([], [1], existing)
@@ -825,7 +822,7 @@ class TestScheduleOrderRoutingGuard:
             }
         ]
         mock_product_repo, mock_schedule_repo = self._make_repos(routings)
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
 
         # 例外なく実行できることを確認
         result = schedule_order(
@@ -853,7 +850,7 @@ class TestScheduleOrderRoutingGuard:
             }
         ]
         mock_product_repo, mock_schedule_repo = self._make_repos(routings)
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
 
         with pytest.raises(RoutingUnconfirmedError):
             schedule_order(
@@ -882,7 +879,7 @@ class TestScheduleOrderRoutingGuard:
         ]
         mock_product_repo, mock_schedule_repo = self._make_repos(routings)
         mock_schedule_repo.create.return_value = None
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
 
         result = schedule_order(
             order_id=1,
@@ -909,7 +906,7 @@ class TestScheduleOrderRoutingGuard:
             }
         ]
         mock_product_repo, mock_schedule_repo = self._make_repos(routings)
-        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=UTC)
+        start_time = datetime(2025, 1, 6, 9, 0, tzinfo=JST)
 
         with pytest.raises(RoutingUnconfirmedError) as exc_info:
             schedule_order(
