@@ -303,3 +303,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | Claude API によるメール本文解析 (`email_extraction_service.py`) | ✅ 実装済み |
 | pg_trgm 製品名マッチング (`product_matching_service.py`) | ✅ 実装済み |
 | 顧客自動解決・作成 (`customer_matching_service.py`) | ✅ 実装済み |
+| `seed_scenario.py` の `order_number` 部分ユニークインデックス対応 | ✅ #286 |

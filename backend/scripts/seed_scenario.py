@@ -14,7 +14,9 @@ Note:
     - equipment_group_members: (equipment_group_id, equipment_id)
     - products: (tenant_id, code)
     - process_routings: (product_id, sequence_order)
-    - orders: (tenant_id, order_number)
+    - orders: order_number は nullable のため部分ユニークインデックス
+      (tenant_id, order_number) WHERE order_number IS NOT NULL のみが存在する。
+      ON CONFLICT では対応できないため、select→insert/update で冪等性を担保する。
 """
 
 import argparse
@@ -282,22 +284,38 @@ def import_orders(
             continue
 
         product_id = product_map[product_code]
+        order_number = order_data.get("order_number")
 
-        # 注文を登録（upsert）
-        client.table("orders").upsert(
-            {
-                "order_number": order_data["order_number"],
-                "product_id": product_id,
-                "quantity": order_data["quantity"],
-                "deadline_date": order_data.get("deadline_date"),
-                "tenant_id": tenant_id,
-            },
-            on_conflict="tenant_id, order_number",
-        ).execute()
+        payload = {
+            "order_number": order_number,
+            "product_id": product_id,
+            "quantity": order_data["quantity"],
+            "deadline_date": order_data.get("deadline_date"),
+            "tenant_id": tenant_id,
+        }
+
+        # order_number は nullable かつ部分ユニークインデックスのため、
+        # ON CONFLICT ではなく select して存在すれば update、なければ insert する
+        if order_number:
+            existing = (
+                client.table("orders")
+                .select("id")
+                .eq("tenant_id", tenant_id)
+                .eq("order_number", order_number)
+                .execute()
+            )
+            if existing.data:
+                order_id = existing.data[0]["id"]
+                client.table("orders").update(payload).eq("id", order_id).execute()
+            else:
+                client.table("orders").insert(payload).execute()
+        else:
+            client.table("orders").insert(payload).execute()
 
         order_count += 1
+        order_label = order_number or "(no order_number)"
         print(
-            f"  ✓ Created order: {order_data['order_number']} "
+            f"  ✓ Created order: {order_label} "
             f"({product_code} x {order_data['quantity']})"
         )
 
