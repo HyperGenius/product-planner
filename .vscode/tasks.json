@@ -80,11 +80,14 @@
         {
             "label": "Supabase db reset",
             "type": "shell",
-            "command": "supabase db reset",
+            "command": "source ${workspaceFolder}/backend/.venv/bin/activate && python reset_dev_db.py",
             "problemMatcher": [],
             "presentation": {
                 "group": "supabase",
             },
+            "options": {
+                "cwd": "${workspaceFolder}/backend/scripts"
+            }
         }
     ]
 }

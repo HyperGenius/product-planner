@@ -36,8 +36,49 @@ supabase start
 
 | スクリプト | 用途 | 実行コマンド |
 |-----------|------|-------------|
+| `reset_dev_db.py` | ローカルSupabaseのリセット・起動・デモデータ投入を一括実行 | `python scripts/reset_dev_db.py [シナリオ名]` |
 | `seed_scenario.py` | シナリオ単位のデモデータ一括投入 | `python scripts/seed_scenario.py <シナリオ名>` |
 | `seed_gmail_drafts.py` | Gmail受注下書きサンプルデータ投入 | `python scripts/seed_gmail_drafts.py` |
+
+---
+
+## reset_dev_db.py — 開発用ローカルDBのリセット＆デモデータ投入
+
+ローカル開発環境をクリーンな状態にしてデモデータ投入まで一括で行うラッパースクリプトです。以下を順に実行します。
+
+1. `supabase db reset` — ローカルDBをマイグレーション済みのクリーンな状態にリセット
+2. `supabase start` — ローカルSupabaseスタックを起動（起動済みの場合はそのまま）
+3. `seed_scenario.py <シナリオ名>` — シナリオデータを投入（省略時は `standard_demo`）
+
+### 使い方
+
+```bash
+# standard_demo を投入する場合
+python scripts/reset_dev_db.py
+
+# 任意のシナリオを指定する場合
+python scripts/reset_dev_db.py <シナリオ名>
+```
+
+### 前提条件
+
+- ローカルに `supabase` CLI がインストールされ、PATH が通っていること
+- 上記「共通前提条件」の環境変数（`.env`）が設定されていること
+
+### 安全チェック
+
+`supabase db reset` を実行する前に `.env` の `SUPABASE_URL` を出力し、ホスト名が
+`localhost` / `127.0.0.1` 以外の場合はエラーで中断します。誤って本番/ステージング
+向けの設定のまま実行してしまう事故を早期に検知するためのものです。
+
+> ただし `supabase db reset`（`--linked` 等を付けない実行）は元々ローカルの
+> Docker上のPostgresしか対象にしないため、このチェックが直接「本番を壊す」のを
+> 防ぐわけではありません。あくまで `.env` の設定ミスに早期に気付くための保険です。
+
+### 注意事項
+
+- `supabase db reset` はローカルDBの全データを消去します。本番/開発共有環境では絶対に使用しないでください（あくまでローカル開発専用）
+- 内部的に `seed_scenario.py` の `seed_scenario()` 関数を直接呼び出しているため、投入処理自体の仕様は `seed_scenario.py` セクションを参照してください
 
 ---
 
