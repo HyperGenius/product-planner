@@ -162,10 +162,9 @@ export function useOrdersPage() {
   const handleConfirmDelete = () => {
     if (!deleteTargetOrder) return
     const targetId = deleteTargetOrder.id
-    const targetNo = deleteTargetOrder.order_no
     deleteOrder.mutate(targetId, {
       onSuccess: () => {
-        toast.success(`注文「${targetNo}」を削除しました`)
+        toast.success("注文を削除しました")
         setDeleteTargetOrder(null)
         if (expandedOrderId === targetId) {
           setExpandedOrderId(null)
