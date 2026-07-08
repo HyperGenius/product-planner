@@ -26,7 +26,7 @@
 ### Backend
 
 * **Runtime**: Python 3.11
-* **Framework**: [Azure Functions](https://learn.microsoft.com/azure/azure-functions/) (v4 Programming Model), [FastAPI](https://fastapi.tiangolo.com/)
+* **Framework**: [FastAPI](https://fastapi.tiangolo.com/)（[Cloud Run](https://cloud.google.com/run) 上で uvicorn により稼働）
 * **Architecture**: Clean Architecture / Repository Pattern
 
 ### Database & Auth
@@ -41,7 +41,7 @@
 
 ```text
 .
-├── backend/            # Python Azure Functions (API)
+├── backend/            # Python FastAPI (API)
 │   ├── app/            # アプリケーションコード (Routers, Models, Logic)
 │   ├── tests/          # Pytest (Unit, Integration)
 │   └── scripts/        # データ投入用スクリプト
@@ -61,7 +61,6 @@
 * Python 3.11
 * Docker Desktop
 * [Supabase CLI](https://supabase.com/docs/guides/cli)
-* [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local)
 
 ### 1. データベース (Supabase) の起動
 
@@ -91,11 +90,11 @@ cp .env.example .env
 # .env 内の SUPABASE_URL, SUPABASE_ANON_KEY などを手順1の値に設定
 
 # サーバー起動
-func host start
+uvicorn app.main:app --reload --port 8000
 
 ```
 
-APIは `http://localhost:7071/api` で起動します。
+APIは `http://localhost:8000` で起動します。
 
 ### 3. フロントエンド (Frontend) のセットアップ
 

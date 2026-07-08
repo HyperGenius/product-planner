@@ -91,9 +91,9 @@ Gmail連携機能（GMAIL_ORDER_INTAKE）で生成される下書き受注（`so
 
 ### 追加の前提条件
 
-- バックエンドが起動していること（`func host start`）
+- バックエンドが起動していること（`uvicorn app.main:app --reload --port 8000`）
 - `SUPABASE_API_KEY`（`get_token.py` が参照するキー）
-- `BACKEND_URL`（省略時: `http://localhost:7071`）
+- `BACKEND_URL`（省略時: `http://localhost:8000`）
 
 > **注意:** 先に `seed_scenario.py standard_demo` を実行して製品データを用意してください。`orders.json` 内の製品コードが見つからない場合はその注文はスキップされます。
 

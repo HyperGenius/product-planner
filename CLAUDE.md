@@ -8,7 +8,7 @@
 
 中小製造業向けの生産計画 SaaS。受注入力 → シミュレーション → 確定 のワークフローで、設備ごとのガントチャート表示・手動調整まで対応するマルチテナントシステム。(詳細は[product_planner_knowledge.md](docs/product_planner_knowledge.md) 参照)
 
-- **Backend**: FastAPI (Python) + Supabase (PostgreSQL) + Azure Functions
+- **Backend**: FastAPI (Python) + Supabase (PostgreSQL)、Cloud Run 上で uvicorn により稼働
 - **Frontend**: Next.js 14+ (App Router) + TanStack Query + shadcn/ui
 - **Multi-tenancy**: Supabase Auth + Row Level Security (RLS)
 
@@ -45,7 +45,7 @@ docs/features/          # 機能別ドキュメント (PR 完了後に更新)
 
 ```bash
 # Backend 起動
-cd backend && func host start
+cd backend && uvicorn app.main:app --reload --port 8000
 
 # Frontend 起動
 cd frontend && npm run dev
