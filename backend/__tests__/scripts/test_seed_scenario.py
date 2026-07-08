@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.seed_scenario import (
     import_groups,
+    import_orders,
     import_products,
     import_routings,
     load_json,
@@ -107,3 +108,62 @@ class TestImporters:
             )
 
         assert not mock_db["table"].upsert.called
+
+
+class TestImportOrders:
+    """orders インポート処理のテスト（部分ユニークインデックス対応）"""
+
+    def test_import_orders_inserts_new_order(self, mock_db):
+        table = mock_db["table"]
+        # order_number で検索したが既存レコードなし
+        table.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+        test_data = [
+            {"order_number": "ORD-1", "product_code": "PROD-A", "quantity": 10}
+        ]
+
+        with patch("scripts.seed_scenario.load_json", return_value=test_data):
+            import_orders(mock_db["client"], "tenant-1", "/path", {"PROD-A": 10})
+
+        assert table.insert.called
+        assert not table.update.called
+        assert not table.upsert.called
+
+    def test_import_orders_updates_existing_order(self, mock_db):
+        table = mock_db["table"]
+        # order_number で検索したら既存レコードあり
+        table.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
+            {"id": 99}
+        ]
+        test_data = [
+            {"order_number": "ORD-1", "product_code": "PROD-A", "quantity": 10}
+        ]
+
+        with patch("scripts.seed_scenario.load_json", return_value=test_data):
+            import_orders(mock_db["client"], "tenant-1", "/path", {"PROD-A": 10})
+
+        assert table.update.called
+        table.update.return_value.eq.assert_called_with("id", 99)
+
+    def test_import_orders_without_order_number_inserts_directly(self, mock_db):
+        table = mock_db["table"]
+        test_data = [{"product_code": "PROD-A", "quantity": 10}]
+
+        with patch("scripts.seed_scenario.load_json", return_value=test_data):
+            import_orders(mock_db["client"], "tenant-1", "/path", {"PROD-A": 10})
+
+        assert table.insert.called
+        assert not table.select.called
+        assert not table.upsert.called
+
+    def test_import_orders_skips_missing_product(self, mock_db):
+        table = mock_db["table"]
+        test_data = [
+            {"order_number": "ORD-1", "product_code": "MISSING", "quantity": 10}
+        ]
+
+        with patch("scripts.seed_scenario.load_json", return_value=test_data):
+            import_orders(mock_db["client"], "tenant-1", "/path", {"PROD-A": 10})
+
+        assert not table.insert.called
+        assert not table.update.called
+        assert not table.select.called
