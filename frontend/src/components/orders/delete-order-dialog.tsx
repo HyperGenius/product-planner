@@ -1,5 +1,7 @@
 "use client"
 
+import { format } from "date-fns"
+import { ja } from "date-fns/locale"
 import { buttonVariants } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -11,16 +13,28 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { getProductName, getCustomerName } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
+import type { Product } from "@/types/product"
+import type { Customer } from "@/types/customer"
 
 interface DeleteOrderDialogProps {
   order: Order | null
+  products?: Product[]
+  customers?: Customer[]
   isPending: boolean
   onConfirm: () => void
   onOpenChange: (open: boolean) => void
 }
 
-export function DeleteOrderDialog({ order, isPending, onConfirm, onOpenChange }: DeleteOrderDialogProps) {
+export function DeleteOrderDialog({
+  order,
+  products,
+  customers,
+  isPending,
+  onConfirm,
+  onOpenChange,
+}: DeleteOrderDialogProps) {
   return (
     <AlertDialog
       open={order !== null}
@@ -29,8 +43,46 @@ export function DeleteOrderDialog({ order, isPending, onConfirm, onOpenChange }:
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>注文の削除</AlertDialogTitle>
-          <AlertDialogDescription>
-            注文「{order?.order_no}」を削除しますか？この操作は取り消せません。
+          <AlertDialogDescription asChild>
+            <div className="space-y-3">
+              <p>この注文を削除しますか？この操作は取り消せません。</p>
+              {order && (
+                <div className="rounded-md border p-3 text-sm text-foreground space-y-1">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">注文番号</span>
+                    <span>{order.order_no ?? "未設定"}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">製品</span>
+                    <span>{getProductName(order.product_id, products)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">顧客</span>
+                    <span>{getCustomerName(order.customer_id, customers)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">数量</span>
+                    <span>{order.quantity}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">希望納期</span>
+                    <span>
+                      {order.desired_deadline
+                        ? format(new Date(order.desired_deadline), "yyyy/MM/dd HH:mm", { locale: ja })
+                        : "未設定"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">確定納期</span>
+                    <span>
+                      {order.confirmed_deadline
+                        ? format(new Date(order.confirmed_deadline), "yyyy/MM/dd", { locale: ja })
+                        : "-"}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

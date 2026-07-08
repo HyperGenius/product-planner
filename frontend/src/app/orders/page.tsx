@@ -201,6 +201,8 @@ export default function OrdersPage() {
 
         <DeleteOrderDialog
           order={deleteTargetOrder}
+          products={products}
+          customers={customers}
           isPending={deleteOrder.isPending}
           onConfirm={handleConfirmDelete}
           onOpenChange={(open) => { if (!open) setDeleteTargetOrder(null) }}

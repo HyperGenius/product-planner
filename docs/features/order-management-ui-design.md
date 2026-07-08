@@ -326,7 +326,7 @@ frontend/src/
     page.tsx                              # エントリーポイント（~160行）
   components/orders/
     edit-order-dialog.tsx                 # 注文編集ダイアログ
-    delete-order-dialog.tsx               # 削除確認 AlertDialog
+    delete-order-dialog.tsx               # 削除確認 AlertDialog（注文番号/製品/顧客/数量/希望納期/確定納期のサマリー表示、#284）
     order-notification-cards.tsx          # 下書き/情報不足サマリーカード
     orders-filter-bar.tsx                 # ステータスタブ + ソートセレクト
     order-table-row.tsx                   # テーブル行
@@ -411,3 +411,4 @@ frontend/src/
 | 工程未確定注文の希望納期フォールバック表示 | 中 | ❌ 未実装 (#201) |
 | シミュレーション結果での設備衝突警告 | 中 | ❌ 未実装 (#202) |
 | フィルタータブを orders.status のみに限定（情報不足・工程未確認タブ削除） | 中 | ❌ 未実装 (#215) |
+| 削除確認ダイアログの注文サマリー表示・削除トーストの簡略化 | 中 | ✅ 実装済 (#284) |
