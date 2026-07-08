@@ -33,14 +33,14 @@
 * **Pydantic V2**: データモデルはPydantic V2構文 (`model_dump`, `field_validator` 等) を使用する。
 * **Docstrings**: クラスおよび関数にはGoogle StyleのDocstringを記述する。
 
-### 2.2 FastAPI / Azure Functions 実装
+### 2.2 FastAPI 実装
 
 * **Dependency Injection**: リポジトリや共通処理は `dependencies.py` に定義し、`Depends()` を使用して注入する。
 * OK: `def get_orders(repo: OrderRepository = Depends(get_order_repo))`
 * NG: 関数内で `repo = OrderRepository()` を直接インスタンス化。
 
 
-* **Router構成**: `master` (マスタデータ) と `transaction` (業務データ) でディレクトリを分け、`__init__.py` で集約して `function_app.py` に登録する。
+* **Router構成**: `master` (マスタデータ) と `transaction` (業務データ) でディレクトリを分け、`__init__.py` で集約して `main.py` の FastAPI アプリに登録する。
 
 ### 2.3 Phase 1 ビジネスロジック要件 (Scheduling)
 
@@ -142,7 +142,7 @@
 
 * **仮想環境**: `.venv` を使用。
 * **起動コマンド**:
-* Backend: `func host start`
+* Backend: `uvicorn app.main:app --reload --port 8000`
 * DB: `supabase start`
 
 

@@ -45,9 +45,8 @@ def create_product():
         "type": "standard",
     }
 
-    response = requests.post(
-        "http://localhost:7071/api/products/", headers=headers, json=data
-    )
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+    response = requests.post(f"{backend_url}/products/", headers=headers, json=data)
     if response.status_code != 200:
         # APIリクエストが失敗した場合は、エラーを投げて終了
         raise Exception(f"Failed to create product: {response.text}")

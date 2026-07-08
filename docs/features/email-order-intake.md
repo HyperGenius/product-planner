@@ -157,7 +157,7 @@ interface OrderCreate {
 
 ## メール解析パイプライン（実装済み）
 
-`backend/app/services/` 配下に以下のサービスが実装済み。Vercel Cron または Azure Functions タイマートリガーから `poll_unread_emails()` を呼び出すことで動作する。
+`backend/app/services/` 配下に以下のサービスが実装済み。Vercel Cron（将来的には Cloud Run + Cloud Scheduler へ移行検討中、詳細は [docs/infra/env-setup-gmail-cron.md](../infra/env-setup-gmail-cron.md) 参照）から `/api/cron/gmail-poll` を叩き `poll_unread_emails()` を呼び出すことで動作する。
 
 ### 処理フロー（Issue #280 でPDF添付・非PDF添付・添付なしを統一）
 
