@@ -13,16 +13,46 @@ Usage:
 Note:
     ローカルの `supabase` CLI が PATH 上にインストールされている必要があります。
     `supabase db reset` はローカルDBの全データを消去します。
+    誤って本番/ステージング向けの設定で実行しないよう、`SUPABASE_URL` が
+    localhost/127.0.0.1 を指している場合のみ実行する安全チェックを行います。
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
-from seed_scenario import seed_scenario
+# `scripts.reset_dev_db` としてパッケージ経由でインポートされた場合でも
+# 兄弟モジュール `seed_scenario` をフラットインポートできるようにする
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from seed_scenario import seed_scenario  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+LOCAL_HOSTNAMES = {"localhost", "127.0.0.1"}
+
+
+def assert_local_supabase_url() -> None:
+    """SUPABASE_URL がローカル（localhost/127.0.0.1）を指していることを確認する.
+
+    `supabase db reset` はローカルDBの全データを消去する破壊的操作のため、
+    `.env` の設定ミスに早期に気付けるよう実行前に必ず確認する。
+    """
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    hostname = urlparse(supabase_url).hostname
+
+    print(f"🔎 SUPABASE_URL = {supabase_url or '(未設定)'}")
+
+    if hostname not in LOCAL_HOSTNAMES:
+        raise ValueError(
+            f"SUPABASE_URL がローカル（localhost/127.0.0.1）を指していません: "
+            f"{supabase_url!r}\n"
+            "このスクリプトはローカル開発専用です。本番/ステージング環境に対して "
+            "実行しないよう、backend/.env の SUPABASE_URL を確認してください。"
+        )
 
 
 def run_supabase_command(args: list[str], description: str) -> None:
@@ -38,6 +68,8 @@ def run_supabase_command(args: list[str], description: str) -> None:
 
 
 def reset_dev_db(scenario_name: str) -> None:
+    assert_local_supabase_url()
+
     run_supabase_command(
         ["db", "reset"], "Resetting local Supabase DB (supabase db reset)"
     )
