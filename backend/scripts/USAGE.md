@@ -39,6 +39,7 @@ supabase start
 | `reset_dev_db.py` | ローカルSupabaseのリセット・起動・デモデータ投入を一括実行 | `python scripts/reset_dev_db.py [シナリオ名]` |
 | `seed_scenario.py` | シナリオ単位のデモデータ一括投入 | `python scripts/seed_scenario.py <シナリオ名>` |
 | `seed_gmail_drafts.py` | Gmail受注下書きサンプルデータ投入 | `python scripts/seed_gmail_drafts.py` |
+| `seed_split_demo.py` | 手動分割機能（Issue #280）確認用の下書き注文投入 | `python scripts/seed_split_demo.py` |
 
 ---
 
@@ -121,6 +122,35 @@ python scripts/seed_scenario.py standard_demo
 - 環境変数不足 → エラーメッセージを表示して終了
 - シナリオディレクトリ不在 → エラー終了
 - 参照先コードが見つからない場合 → 該当行をスキップして警告表示
+
+---
+
+## seed_split_demo.py — 手動分割機能（Issue #280）確認用データ投入
+
+`POST /orders/{order_id}/split`（1件の下書き注文を複数の下書き注文に手動分割する機能）を
+手元のブラウザで確認するためのデモデータを投入します。実際のメール受信・抽出パイプラインは
+通さず、「1通のメールに複数月分の内示数量が誤って1件にマージされてしまった」想定の
+draft注文と、その起票元となる `order_attachments` のステージング行を直接投入します。
+
+### 追加の前提条件
+
+- `order_attachments` のRLSポリシーが `auth.jwt()->>'tenant_id'` クレームを直接参照するため
+  （`is_tenant_member()` を使う他テーブルとは異なる）、通常の認証済みクライアントでは
+  INSERTがRLS違反になる。そのため本スクリプトは `SUPABASE_SERVICE_ROLE_KEY` が必要
+  （`seed_scenario.py` の `seed_admin_profile` と同じ bypass パターン。ローカル専用スクリプト
+  内での使用に限るため、アプリコード本体の「Service Role Key 禁止」ルールとは別枠）
+- `.env` に共通の環境変数（`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `TEST_USER_EMAIL`,
+  `TEST_USER_PASS`, `TEST_TENANT_ID`）に加えて `SUPABASE_SERVICE_ROLE_KEY` を設定すること
+
+### 使い方
+
+```bash
+python scripts/seed_split_demo.py
+```
+
+冪等性: 固定の `gmail_message_id`（`seed-split-demo-b115105`）で検索するため、複数回実行しても
+重複しない。実行後に表示される `orders.id` を使い、フロントエンドで `/orders/{id}` を開くと
+「分割」ボタンが表示される。
 
 ---
 
