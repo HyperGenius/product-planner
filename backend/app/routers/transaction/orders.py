@@ -17,6 +17,7 @@ from app.models.transaction.order_schema import (
     OrderAttachmentResponse,
     OrderCreate,
     OrderSimulateRequest,
+    OrderSplitRequest,
     OrderUpdate,
 )
 from app.repositories.supa_infra.common.scheduling_settings_repo import (
@@ -199,6 +200,97 @@ def delete_order(order_id: int, repo: OrderRepository = Depends(get_order_repo))
     if not success:
         raise HTTPException(status_code=404, detail="Not found")
     return {"status": "deleted"}
+
+
+@orders_router.post("/{order_id}/split")
+def split_order(
+    order_id: int,
+    split_data: OrderSplitRequest,
+    tenant_id: str = Depends(get_current_tenant_id),
+    repo: OrderRepository = Depends(get_order_repo),
+    client: Client = Depends(get_supabase_client),
+):
+    """
+    誤って1件にマージされた下書き注文を、同じ source_attachment_id を参照する
+    N件の下書き注文に手動分割する（Issue #280）。
+    """
+    logger.info(f"Splitting order {order_id} into {len(split_data.line_items)} items")
+    order = repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="下書き状態の注文のみ分割できます")
+    source_attachment_id = order.get("source_attachment_id")
+    if not source_attachment_id:
+        raise HTTPException(
+            status_code=400,
+            detail="分割元の受注ソース（メール／添付ファイル）が不明なため分割できません",
+        )
+
+    source_row = cast(
+        "dict[str, Any] | None",
+        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+        .select("*")
+        .eq("id", source_attachment_id)
+        .single()
+        .execute()
+        .data,
+    )
+
+    created_orders: list[dict] = []
+    try:
+        for item in split_data.line_items:
+            new_order = repo.create(
+                {
+                    "tenant_id": tenant_id,
+                    "product_id": item.product_id,
+                    "quantity": item.quantity,
+                    "deadline_date": item.deadline_date,
+                    "customer_id": item.customer_id
+                    if item.customer_id is not None
+                    else order.get("customer_id"),
+                    "customer_certainty": item.customer_certainty
+                    or order.get("customer_certainty"),
+                    "status": "draft",
+                    "source_type": order.get("source_type"),
+                    "source_raw": order.get("source_raw"),
+                    "extracted_product_name": item.extracted_product_name,
+                    "source_attachment_id": source_attachment_id,
+                }
+            )
+            created_orders.append(new_order)
+
+            client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+                {
+                    "order_id": new_order["id"],
+                    "tenant_id": tenant_id,
+                    "storage_path": source_row.get("storage_path", "")
+                    if source_row
+                    else "",
+                    "original_filename": source_row.get("original_filename", "")
+                    if source_row
+                    else "",
+                    "content_type": source_row.get("content_type")
+                    if source_row
+                    else None,
+                    "size_bytes": source_row.get("size_bytes") if source_row else None,
+                    "parse_status": "success"
+                    if source_row and source_row.get("storage_path")
+                    else "failed_no_attachment",
+                }
+            ).execute()
+    except ValueError as e:
+        for created in created_orders:
+            repo.delete(created["id"])
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    repo.delete(order_id)
+
+    return {
+        "original_order_id": order_id,
+        "created_orders": [_map_order_response(o) for o in created_orders],
+    }
 
 
 def get_settings_repo(

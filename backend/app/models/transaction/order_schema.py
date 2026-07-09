@@ -1,5 +1,7 @@
 # models/transaction/order_schema.py
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.common.base_schema import BaseSchema
@@ -42,6 +44,29 @@ class OrderUpdate(BaseSchema):
     quantity: int | None = None
     deadline_date: str | None = Field(None, alias="desired_deadline")
     customer_id: int | None = None
+
+
+class OrderSplitLineItem(BaseSchema):
+    """分割後の1受注を表すスキーマ"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    product_id: int
+    quantity: int
+    deadline_date: str = Field(alias="desired_deadline")
+    customer_id: int | None = None
+    customer_certainty: (
+        Literal["confirmed", "forecast", "forecast_tentative"] | None
+    ) = None
+    extracted_product_name: str | None = None
+
+
+class OrderSplitRequest(BaseSchema):
+    """1件の下書き注文をN件に手動分割するためのリクエストスキーマ"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    line_items: list[OrderSplitLineItem] = Field(min_length=2)
 
 
 class OrderAttachmentResponse(BaseModel):

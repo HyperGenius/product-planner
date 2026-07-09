@@ -16,6 +16,7 @@ export interface Order {
   has_unconfirmed_routings?: boolean
   source_type: 'manual' | 'email'
   source_raw?: string
+  source_attachment_id?: string | null
   tenant_id: string
   created_at: string | null
   updated_at: string | null
@@ -71,6 +72,33 @@ export interface BulkSimulateResult {
   orderNo: string
   desiredDeadline?: string // ユーザー希望納期 (ISO 8601形式)
   result: OrderSimulateResponse | null // null = シミュレーション失敗
+}
+
+/**
+ * 注文分割時の1明細分のデータ型
+ */
+export interface OrderSplitLineItem {
+  product_id: number
+  quantity: number
+  desired_deadline: string
+  customer_id?: number
+  customer_certainty?: 'confirmed' | 'forecast' | 'forecast_tentative'
+  extracted_product_name?: string
+}
+
+/**
+ * 注文分割リクエストのデータ型
+ */
+export interface OrderSplitRequest {
+  line_items: OrderSplitLineItem[]
+}
+
+/**
+ * 注文分割結果のデータ型
+ */
+export interface OrderSplitResponse {
+  original_order_id: number
+  created_orders: Order[]
 }
 
 /**

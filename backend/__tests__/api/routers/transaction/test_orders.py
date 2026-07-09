@@ -7,6 +7,7 @@ from app.dependencies import (
     get_order_repo,
     get_product_repo,
     get_schedule_repo,
+    get_supabase_client,
 )
 
 # テスト対象のAPIインスタンス
@@ -52,6 +53,11 @@ class TestOrderRouter:
         mock.get.return_value = None
         return mock
 
+    @pytest.fixture
+    def mock_supabase_client(self):
+        """order_attachments への直接クエリ用クライアントのモック"""
+        return MagicMock()
+
     @pytest.fixture(autouse=True)
     def override_dependency(
         self,
@@ -60,6 +66,7 @@ class TestOrderRouter:
         mock_equipment_repo,
         mock_schedule_repo,
         mock_settings_repo,
+        mock_supabase_client,
     ):
         """
         テスト実行中だけ依存関係を mock に差し替える。
@@ -69,6 +76,7 @@ class TestOrderRouter:
         app.dependency_overrides[get_equipment_repo] = lambda: mock_equipment_repo
         app.dependency_overrides[get_schedule_repo] = lambda: mock_schedule_repo
         app.dependency_overrides[get_settings_repo] = lambda: mock_settings_repo
+        app.dependency_overrides[get_supabase_client] = lambda: mock_supabase_client
         yield
         app.dependency_overrides = {}
 
@@ -353,3 +361,163 @@ class TestOrderRouter:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Order not found"
+
+    def test_split_order_not_found(self, headers, mock_repo):
+        """POST /{order_id}/split: 注文が存在しない場合の404エラーテスト"""
+        mock_repo.get_by_id.return_value = None
+
+        response = client.post(
+            "/orders/999/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Order not found"
+
+    def test_split_order_not_draft(self, headers, mock_repo):
+        """POST /{order_id}/split: draft以外の注文は分割できない"""
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "status": "confirmed",
+            "source_attachment_id": "att-1",
+        }
+
+        response = client.post(
+            "/orders/1/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        assert "下書き" in response.json()["detail"]
+        mock_repo.create.assert_not_called()
+
+    def test_split_order_no_source_attachment(self, headers, mock_repo):
+        """POST /{order_id}/split: source_attachment_id が無い注文は分割できない"""
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "status": "draft",
+            "source_attachment_id": None,
+        }
+
+        response = client.post(
+            "/orders/1/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        assert "分割できません" in response.json()["detail"]
+        mock_repo.create.assert_not_called()
+
+    def test_split_order_success(self, headers, mock_repo, mock_supabase_client):
+        """POST /{order_id}/split: 正常に2件へ分割できるテスト"""
+        order_id = 1
+        original_order = {
+            "id": order_id,
+            "status": "draft",
+            "source_attachment_id": "att-1",
+            "customer_id": 10,
+            "customer_certainty": "forecast",
+            "source_type": "email",
+            "source_raw": "mail body",
+        }
+        mock_repo.get_by_id.return_value = original_order
+
+        source_row = {
+            "id": "att-1",
+            "storage_path": "tenant/inbox/msg-1/file.pdf",
+            "original_filename": "file.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 1234,
+        }
+        (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data
+        ) = source_row
+
+        created = [
+            {"id": 101, "product_id": 1, "quantity": 10, "deadline_date": "2026-08-01"},
+            {"id": 102, "product_id": 2, "quantity": 20, "deadline_date": "2026-09-01"},
+        ]
+        mock_repo.create.side_effect = created
+        mock_repo.delete.return_value = True
+
+        response = client.post(
+            f"/orders/{order_id}/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["original_order_id"] == order_id
+        assert len(result["created_orders"]) == 2
+
+        assert mock_repo.create.call_count == 2
+        first_call_data = mock_repo.create.call_args_list[0][0][0]
+        assert first_call_data["tenant_id"] == headers["x-tenant-id"]
+        assert first_call_data["source_attachment_id"] == "att-1"
+        assert first_call_data["customer_id"] == 10
+        assert first_call_data["customer_certainty"] == "forecast"
+
+        mock_repo.delete.assert_called_once_with(order_id)
+        assert mock_supabase_client.table.return_value.insert.call_count == 2
+
+    def test_split_order_rolls_back_on_conflict(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/split: 2件目の作成が重複エラーの場合、既作成分をロールバックする"""
+        order_id = 1
+        original_order = {
+            "id": order_id,
+            "status": "draft",
+            "source_attachment_id": "att-1",
+            "customer_id": 10,
+            "customer_certainty": "forecast",
+            "source_type": "email",
+            "source_raw": "mail body",
+        }
+        mock_repo.get_by_id.return_value = original_order
+        (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data
+        ) = {"storage_path": "p", "original_filename": "f"}
+
+        mock_repo.create.side_effect = [
+            {"id": 101, "product_id": 1, "quantity": 10, "deadline_date": "2026-08-01"},
+            ValueError("重複データ: orders_dedupe_key"),
+        ]
+
+        response = client.post(
+            f"/orders/{order_id}/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        mock_repo.delete.assert_called_once_with(101)

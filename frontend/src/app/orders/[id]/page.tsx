@@ -13,6 +13,7 @@ import {
   Download,
   Paperclip,
   Pencil,
+  Split,
   Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { SimulationResult } from "@/components/simulation-result"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
+import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import {
   useOrder,
   useOrderAttachments,
@@ -57,6 +59,7 @@ export default function OrderDetailPage() {
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
 
   const handleSimulate = async () => {
     try {
@@ -302,6 +305,15 @@ export default function OrderDetailPage() {
                 編集
               </Button>
             )}
+            {isDraft && order.source_type === "email" && order.source_attachment_id && (
+              <Button
+                variant="outline"
+                onClick={() => setIsSplitDialogOpen(true)}
+              >
+                <Split className="mr-2 h-4 w-4" />
+                分割
+              </Button>
+            )}
             {canDelete && (
               <Button
                 variant="destructive"
@@ -335,6 +347,13 @@ export default function OrderDetailPage() {
         isPending={deleteMutation.isPending}
         onConfirm={handleDelete}
         onOpenChange={(open) => { if (!open) setIsDeleteDialogOpen(false) }}
+      />
+
+      <SplitOrderDialog
+        order={isSplitDialogOpen ? order : null}
+        open={isSplitDialogOpen}
+        onOpenChange={setIsSplitDialogOpen}
+        onSplit={() => router.push("/orders")}
       />
     </div>
   )
