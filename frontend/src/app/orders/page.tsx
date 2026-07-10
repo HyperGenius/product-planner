@@ -42,6 +42,7 @@ export default function OrdersPage() {
     isEditDialogOpen,
     setIsEditDialogOpen,
     selectedOrder,
+    editDialogGeneration,
     deleteTargetOrder,
     setDeleteTargetOrder,
     expandedOrderId,
@@ -192,7 +193,7 @@ export default function OrdersPage() {
 
         {selectedOrder && (
           <EditOrderDialog
-            key={selectedOrder.id}
+            key={`${selectedOrder.id}-${editDialogGeneration}`}
             order={selectedOrder}
             open={isEditDialogOpen}
             onOpenChange={setIsEditDialogOpen}

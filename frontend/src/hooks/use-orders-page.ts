@@ -36,6 +36,7 @@ export function useOrdersPage() {
 
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [editDialogGeneration, setEditDialogGeneration] = useState(0)
   const [deleteTargetOrder, setDeleteTargetOrder] = useState<Order | null>(null)
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
   const [expandedSimResult, setExpandedSimResult] = useState<OrderSimulateResponse | null>(null)
@@ -157,6 +158,7 @@ export function useOrdersPage() {
   const handleOpenEditDialog = (order: Order) => {
     setSelectedOrder(order)
     setIsEditDialogOpen(true)
+    setEditDialogGeneration((prev) => prev + 1)
   }
 
   const handleConfirmDelete = () => {
@@ -317,6 +319,7 @@ export function useOrdersPage() {
     isEditDialogOpen,
     setIsEditDialogOpen,
     selectedOrder,
+    editDialogGeneration,
     deleteTargetOrder,
     setDeleteTargetOrder,
     expandedOrderId,
