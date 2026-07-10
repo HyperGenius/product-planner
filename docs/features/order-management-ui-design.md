@@ -205,7 +205,7 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 一覧ページ (`orders/page.tsx`) は `key={`${selectedOrder.id}-${editDialogGeneration}`}`、注文詳細ページ (`orders/[id]/page.tsx`) は `key={editDialogGeneration}` を使用。
 
 **希望納期・確定納期の日付/時刻の扱い (#293)**
-`desired_deadline`（DB上は `deadline_date`）・`confirmed_deadline` はいずれも「日付のみ」(`YYYY-MM-DD`) で、時刻情報を持たない。`new Date(dateStr)` でパースして `format` すると環境のタイムゾーンによって存在しない時刻が表示されてしまうため、`lib/order-utils.ts` の `formatDeadlineDate`（表示用、文字列の先頭10文字をそのまま整形）・`toDateInputValue`（`<input type="date">` バインド用）に処理を統一した。`EditOrderDialog` と新規注文作成ページの希望納期入力欄も `type="datetime-local"` から `type="date"` に変更している。なお、シミュレーション結果の `calculated_deadline` はスケジューラが計算した実際の日時（時刻を持つ）のため対象外。
+`desired_deadline`（DB上は `deadline_date`）・`confirmed_deadline` はいずれも「日付のみ」(`YYYY-MM-DD`) で、時刻情報を持たない。`new Date(dateStr)` でパースして `format` すると環境のタイムゾーンによって存在しない時刻が表示されてしまうため、`lib/order-utils.ts` の `formatDeadlineDate`（表示用、文字列の先頭10文字をそのまま整形）・`toDateInputValue`（`<input type="date">` バインド用）に処理を統一した。`EditOrderDialog` と新規注文作成ページの希望納期入力欄も `type="datetime-local"` から `type="date"` に変更している。`BulkSimulateSummaryDialog` の希望納期表示も同様に対応済み。なお、シミュレーション結果の `calculated_deadline` はスケジューラが計算した実際の日時（時刻を持つ）のため対象外。
 
 ---
 
