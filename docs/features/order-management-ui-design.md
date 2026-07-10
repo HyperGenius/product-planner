@@ -201,7 +201,8 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 エンドポイント: `PATCH /orders/{order_id}`（実装済み）
 
 **内部状態のリセット**
-`EditOrderDialog` は開くたびに `key={`${selectedOrder.id}-${editDialogGeneration}`}` で再マウントされる（`editDialogGeneration` はダイアログを開く操作のたびにインクリメント）。同一注文を「未保存でキャンセル→再オープン」した場合でも、DB上の値で初期化し直される (#277)。
+`EditOrderDialog` は開くたびに `key` に `editDialogGeneration`（ダイアログを開く操作のたびにインクリメントするカウンタ）を含めて再マウントされる。同一注文を「未保存でキャンセル→再オープン」した場合でも、DB上の値で初期化し直される (#277)。
+一覧ページ (`orders/page.tsx`) は `key={`${selectedOrder.id}-${editDialogGeneration}`}`、注文詳細ページ (`orders/[id]/page.tsx`) は `key={editDialogGeneration}` を使用。
 
 ---
 
