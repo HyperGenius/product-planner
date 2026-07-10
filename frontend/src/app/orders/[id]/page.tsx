@@ -58,8 +58,14 @@ export default function OrderDetailPage() {
 
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [editDialogGeneration, setEditDialogGeneration] = useState(0)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
+
+  const handleOpenEditDialog = () => {
+    setIsEditDialogOpen(true)
+    setEditDialogGeneration((prev) => prev + 1)
+  }
 
   const handleSimulate = async () => {
     try {
@@ -299,7 +305,7 @@ export default function OrderDetailPage() {
             {isDraft && (
               <Button
                 variant="outline"
-                onClick={() => setIsEditDialogOpen(true)}
+                onClick={handleOpenEditDialog}
               >
                 <Pencil className="mr-2 h-4 w-4" />
                 編集
@@ -337,6 +343,7 @@ export default function OrderDetailPage() {
       </div>
 
       <EditOrderDialog
+        key={editDialogGeneration}
         order={isEditDialogOpen ? order : null}
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
