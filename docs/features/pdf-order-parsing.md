@@ -399,15 +399,26 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
     行）から `storage_path`/`original_filename`/`content_type`/`size_bytes` を
     取得し、新しい注文それぞれに対して `order_attachments` 行を1件ずつ複製する
     （`_process_line_item` と同じパターン。添付ファイル本体は複製しない）
-  - 元の注文は分割完了後に削除する（`order_attachments` は `ON DELETE CASCADE`
-    のため元の注文分の添付レコードも同時に削除される）
-  - `orders_dedupe_key` の一意制約違反等で作成が一部失敗した場合、その分割リクエスト
-    内で既に作成済みの注文をロールバック（削除）してから400エラーを返す
+  - **元の注文は新規INSERTより先に削除する**。分割後の明細が元の注文と同じ
+    `(customer_id, product_id, deadline_date)` を指定するケース（内容はそのまま
+    に品番だけ変えたい等）では、元の注文が残ったまま新規INSERTすると
+    `orders_dedupe_key` が自分自身と衝突してしまうため。作成が一部失敗した場合は
+    ロールバック（作成済み注文の削除 + 元の注文を同一内容で復元）した上で400を返す
+  - `order_attachments` のRLSポリシーは元々 `auth.jwt()->>'tenant_id'` クレームを
+    直接参照しており、`is_tenant_member(tenant_id)` を使う他の全テーブルと方式が
+    異なっていたため、通常のユーザーJWTクライアントでは常にRLS違反になっていた
+    （`GET /orders/{id}/attachments` は元々この問題を service role キーで回避して
+    いた）。`supabase/migrations/20260710000000_fix_order_attachments_rls_tenant_member.sql`
+    でポリシーを他テーブルと同じ `is_tenant_member(tenant_id)` に統一し、
+    通常のユーザークライアントで読み書きできるようにした（service role キーは
+    アプリコードで使わないという方針を維持するため、根本原因のポリシー自体を修正）
 - フロントエンド: 注文詳細ページ (`/orders/[id]`) に「分割」ボタンを追加
   （`status='draft'` かつ `source_type='email'` かつ `source_attachment_id` あり
   の場合のみ表示）。`SplitOrderDialog`
-  (`frontend/src/components/orders/split-order-dialog.tsx`) で明細を2件以上
-  入力し、送信すると分割後の一覧ページに遷移する
+  (`frontend/src/components/orders/split-order-dialog.tsx`) は左ペインに参照元
+  メール（件名・顧客・本文・添付ファイル一覧）、右ペインに明細フォーム（2件以上）
+  を表示する2ペインレイアウトで、分割単位を判断するのに必要な情報を見ながら
+  入力できる。送信すると分割後の一覧ページに遷移する
 - `useSplitOrder`（`frontend/src/hooks/use-orders.ts`）が上記APIを呼び出し、
   成功時に注文一覧のキャッシュを無効化する
 

@@ -140,12 +140,13 @@ def get_order(order_id: int, repo: OrderRepository = Depends(get_order_repo)):
 )
 def get_order_attachments(
     order_id: int,
+    client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
     """注文に紐づく添付ファイル一覧を署名付きURLと共に返す"""
     logger.info(f"Fetching attachments for order {order_id}")
     result = (
-        admin_client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
         .select("*")
         .eq("order_id", order_id)
         .order("created_at")
@@ -238,6 +239,12 @@ def split_order(
         .data,
     )
 
+    # 分割後の明細が元の注文と同じ (customer_id, product_id, deadline_date) を
+    # 指定した場合、元の注文自身と orders_dedupe_key が衝突してしまうため、
+    # 新規INSERTより先に元の注文を削除する。途中で失敗した場合は元の内容で
+    # 復元する。
+    repo.delete(order_id)
+
     created_orders: list[dict] = []
     try:
         for item in split_data.line_items:
@@ -283,9 +290,9 @@ def split_order(
     except ValueError as e:
         for created in created_orders:
             repo.delete(created["id"])
+        # 元の注文を復元する（分割前の状態に戻す）
+        repo.create({k: v for k, v in order.items() if k != "id"})
         raise HTTPException(status_code=400, detail=str(e)) from None
-
-    repo.delete(order_id)
 
     return {
         "original_order_id": order_id,

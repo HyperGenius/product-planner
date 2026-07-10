@@ -506,6 +506,7 @@ class TestOrderRouter:
         mock_repo.create.side_effect = [
             {"id": 101, "product_id": 1, "quantity": 10, "deadline_date": "2026-08-01"},
             ValueError("重複データ: orders_dedupe_key"),
+            {**original_order, "id": order_id},  # ロールバック時の復元
         ]
 
         response = client.post(
@@ -520,4 +521,12 @@ class TestOrderRouter:
         )
 
         assert response.status_code == 400
-        mock_repo.delete.assert_called_once_with(101)
+        # 元の注文の削除（分割開始時）と、失敗した明細の削除（ロールバック）の2回
+        assert mock_repo.delete.call_count == 2
+        mock_repo.delete.assert_any_call(order_id)
+        mock_repo.delete.assert_any_call(101)
+        # ロールバック時に元の注文が復元される（id を除いた内容で再作成）
+        assert mock_repo.create.call_count == 3
+        restore_call_data = mock_repo.create.call_args_list[2][0][0]
+        assert "id" not in restore_call_data
+        assert restore_call_data["customer_id"] == 10
