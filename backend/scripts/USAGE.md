@@ -134,13 +134,11 @@ draft注文と、その起票元となる `order_attachments` のステージン
 
 ### 追加の前提条件
 
-- `order_attachments` のRLSポリシーが `auth.jwt()->>'tenant_id'` クレームを直接参照するため
-  （`is_tenant_member()` を使う他テーブルとは異なる）、通常の認証済みクライアントでは
-  INSERTがRLS違反になる。そのため本スクリプトは `SUPABASE_SERVICE_ROLE_KEY` が必要
-  （`seed_scenario.py` の `seed_admin_profile` と同じ bypass パターン。ローカル専用スクリプト
-  内での使用に限るため、アプリコード本体の「Service Role Key 禁止」ルールとは別枠）
 - `.env` に共通の環境変数（`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `TEST_USER_EMAIL`,
-  `TEST_USER_PASS`, `TEST_TENANT_ID`）に加えて `SUPABASE_SERVICE_ROLE_KEY` を設定すること
+  `TEST_USER_PASS`, `TEST_TENANT_ID`）が設定されていること（`seed_scenario.py` と共通）
+- `order_attachments` のRLSポリシーは他テーブルと同じ `is_tenant_member(tenant_id)` に
+  統一済み（Issue #280 Phase3、`20260710000000_fix_order_attachments_rls_tenant_member.sql`）
+  のため、通常の認証済みクライアントのみで投入できる（service role key は不要）
 
 ### 使い方
 

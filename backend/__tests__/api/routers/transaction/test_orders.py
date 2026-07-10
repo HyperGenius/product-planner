@@ -437,6 +437,7 @@ class TestOrderRouter:
             "customer_certainty": "forecast",
             "source_type": "email",
             "source_raw": "mail body",
+            "deadline_date": "2026-07-01",
         }
         mock_repo.get_by_id.return_value = original_order
 
@@ -481,13 +482,16 @@ class TestOrderRouter:
         assert first_call_data["customer_id"] == 10
         assert first_call_data["customer_certainty"] == "forecast"
 
+        # 新規INSERTの前に、元の注文の deadline_date を退避（NULL化）している
+        mock_repo.update.assert_any_call(order_id, {"deadline_date": None})
+        # 全明細の作成に成功した後、元の注文を実際に削除する
         mock_repo.delete.assert_called_once_with(order_id)
         assert mock_supabase_client.table.return_value.insert.call_count == 2
 
     def test_split_order_rolls_back_on_conflict(
         self, headers, mock_repo, mock_supabase_client
     ):
-        """POST /{order_id}/split: 2件目の作成が重複エラーの場合、既作成分をロールバックする"""
+        """POST /{order_id}/split: 2件目の作成が重複エラーの場合、既作成分をロールバックし元注文を復元する"""
         order_id = 1
         original_order = {
             "id": order_id,
@@ -497,6 +501,7 @@ class TestOrderRouter:
             "customer_certainty": "forecast",
             "source_type": "email",
             "source_raw": "mail body",
+            "deadline_date": "2026-07-01",
         }
         mock_repo.get_by_id.return_value = original_order
         (
@@ -506,7 +511,6 @@ class TestOrderRouter:
         mock_repo.create.side_effect = [
             {"id": 101, "product_id": 1, "quantity": 10, "deadline_date": "2026-08-01"},
             ValueError("重複データ: orders_dedupe_key"),
-            {**original_order, "id": order_id},  # ロールバック時の復元
         ]
 
         response = client.post(
@@ -521,12 +525,41 @@ class TestOrderRouter:
         )
 
         assert response.status_code == 400
-        # 元の注文の削除（分割開始時）と、失敗した明細の削除（ロールバック）の2回
-        assert mock_repo.delete.call_count == 2
-        mock_repo.delete.assert_any_call(order_id)
-        mock_repo.delete.assert_any_call(101)
-        # ロールバック時に元の注文が復元される（id を除いた内容で再作成）
-        assert mock_repo.create.call_count == 3
-        restore_call_data = mock_repo.create.call_args_list[2][0][0]
-        assert "id" not in restore_call_data
-        assert restore_call_data["customer_id"] == 10
+        # 失敗した明細（101）のみ削除する。元の注文は削除しない（deadline_date退避のみ）
+        mock_repo.delete.assert_called_once_with(101)
+        # 元の注文は退避 → 復元の2回 update される（削除・再作成は発生しない）
+        assert mock_repo.update.call_count == 2
+        mock_repo.update.assert_any_call(order_id, {"deadline_date": None})
+        mock_repo.update.assert_any_call(
+            order_id, {"deadline_date": original_order["deadline_date"]}
+        )
+        assert mock_repo.create.call_count == 2
+
+    def test_split_order_source_attachment_missing(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/split: source_attachment_id先のレコードが見つからない場合400"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "status": "draft",
+            "source_attachment_id": "att-missing",
+        }
+        (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data
+        ) = None
+
+        response = client.post(
+            f"/orders/{order_id}/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        mock_repo.create.assert_not_called()
+        mock_repo.update.assert_not_called()

@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
+from postgrest.exceptions import APIError
 
 from app.dependencies import (
     get_current_tenant_id,
@@ -229,21 +230,36 @@ def split_order(
             detail="分割元の受注ソース（メール／添付ファイル）が不明なため分割できません",
         )
 
-    source_row = cast(
-        "dict[str, Any] | None",
-        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
-        .select("*")
-        .eq("id", source_attachment_id)
-        .single()
-        .execute()
-        .data,
-    )
+    try:
+        source_row = cast(
+            "dict[str, Any] | None",
+            client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+            .select("*")
+            .eq("id", source_attachment_id)
+            .single()
+            .execute()
+            .data,
+        )
+    except APIError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="分割元の受注ソース（メール／添付ファイル）が見つかりませんでした",
+        ) from e
+    if not source_row:
+        raise HTTPException(
+            status_code=400,
+            detail="分割元の受注ソース（メール／添付ファイル）が見つかりませんでした",
+        )
 
     # 分割後の明細が元の注文と同じ (customer_id, product_id, deadline_date) を
-    # 指定した場合、元の注文自身と orders_dedupe_key が衝突してしまうため、
-    # 新規INSERTより先に元の注文を削除する。途中で失敗した場合は元の内容で
-    # 復元する。
-    repo.delete(order_id)
+    # 指定した場合、元の注文自身と orders_dedupe_key が衝突してしまう。これを
+    # 避けるため、元の注文は削除せず deadline_date を一時的にNULLへ退避する
+    # （UNIQUE制約はNULL同士を等価とみなさないため衝突しなくなる）。全明細の
+    # 作成に成功した時点で初めて元の注文を実際に削除し、失敗時は
+    # deadline_date を元に戻すだけで良い（idや紐づく order_attachments は
+    # 一切触れないため、削除→再作成のようなデータ消失が起きない）。
+    original_deadline_date = order.get("deadline_date")
+    repo.update(order_id, {"deadline_date": None})
 
     created_orders: list[dict] = []
     try:
@@ -272,27 +288,32 @@ def split_order(
                 {
                     "order_id": new_order["id"],
                     "tenant_id": tenant_id,
-                    "storage_path": source_row.get("storage_path", "")
-                    if source_row
-                    else "",
-                    "original_filename": source_row.get("original_filename", "")
-                    if source_row
-                    else "",
-                    "content_type": source_row.get("content_type")
-                    if source_row
-                    else None,
-                    "size_bytes": source_row.get("size_bytes") if source_row else None,
+                    "storage_path": source_row.get("storage_path", ""),
+                    "original_filename": source_row.get("original_filename", ""),
+                    "content_type": source_row.get("content_type"),
+                    "size_bytes": source_row.get("size_bytes"),
                     "parse_status": "success"
-                    if source_row and source_row.get("storage_path")
+                    if source_row.get("storage_path")
                     else "failed_no_attachment",
                 }
             ).execute()
-    except ValueError as e:
+    except (ValueError, APIError) as e:
         for created in created_orders:
             repo.delete(created["id"])
-        # 元の注文を復元する（分割前の状態に戻す）
-        repo.create({k: v for k, v in order.items() if k != "id"})
-        raise HTTPException(status_code=400, detail=str(e)) from None
+        # 元の注文のdeadline_dateを退避前の値に戻す（分割前の状態に復元）
+        repo.update(order_id, {"deadline_date": original_deadline_date})
+        detail = e.message if isinstance(e, APIError) else str(e)
+        raise HTTPException(status_code=400, detail=detail) from None
+
+    if not repo.delete(order_id):
+        logger.error(
+            f"split_order: created {len(created_orders)} orders but failed to "
+            f"delete original order {order_id}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="分割後の注文は作成されましたが、元の注文の削除に失敗しました。管理者に確認してください。",
+        )
 
     return {
         "original_order_id": order_id,

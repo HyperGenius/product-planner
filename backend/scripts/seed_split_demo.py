@@ -17,11 +17,6 @@ Usage:
 Required environment variables (.env): seed_scenario.py と共通
     SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TEST_USER_EMAIL, TEST_USER_PASS,
     TEST_TENANT_ID
-    SUPABASE_SERVICE_ROLE_KEY — order_attachments のRLSポリシーが
-    auth.jwt()->>'tenant_id' クレーム（is_tenant_member() ではなく）を直接参照する
-    ため、通常の認証済みクライアントではINSERTがRLS違反になる。ローカル専用の
-    シードスクリプトのため service role で bypass する（アプリコード本体では
-    SUPABASE_SERVICE_ROLE_KEY 使用禁止、CLAUDE.md 参照）。
 """
 
 import os
@@ -30,8 +25,6 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 from seed_scenario import init_client  # noqa: E402 (認証済みクライアント取得を再利用)
-
-from supabase import create_client  # noqa: E402
 
 DEMO_GMAIL_MESSAGE_ID = "seed-split-demo-b115105"
 DEMO_PRODUCT_CODE = "B115105"
@@ -137,7 +130,6 @@ def ensure_staging_attachment(client, tenant_id: str, customer_id: int) -> str:
 
 def ensure_merged_order(
     client,
-    admin_client,
     tenant_id: str,
     product_id: int,
     customer_id: int,
@@ -185,13 +177,13 @@ def ensure_merged_order(
     # 実運用の _process_line_item と同じパターンで、注文自身に紐づく
     # order_attachments 行も複製しておく（添付ファイルパネルの表示確認用）
     real_attachment = (
-        admin_client.table("order_attachments")
+        client.table("order_attachments")
         .select("id")
         .eq("order_id", order_id)
         .execute()
     )
     if not real_attachment.data:
-        admin_client.table("order_attachments").insert(
+        client.table("order_attachments").insert(
             {
                 "tenant_id": tenant_id,
                 "order_id": order_id,
@@ -214,25 +206,17 @@ def main() -> None:
 
     client, tenant_id = init_client()
 
-    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-    if not service_role_key:
-        raise ValueError(
-            "SUPABASE_SERVICE_ROLE_KEY is required to seed order_attachments "
-            "(そのRLSポリシーは auth.jwt()->>'tenant_id' クレームを直接参照するため)"
-        )
-    admin_client = create_client(os.environ["SUPABASE_URL"], service_role_key)
-
     customer_id = ensure_customer(client, tenant_id)
     print(f"✓ Customer ready: {DEMO_CUSTOMER_NAME} (ID: {customer_id})")
 
     product_id = ensure_product(client, tenant_id)
     print(f"✓ Product ready: {DEMO_PRODUCT_CODE} (ID: {product_id})")
 
-    staging_id = ensure_staging_attachment(admin_client, tenant_id, customer_id)
+    staging_id = ensure_staging_attachment(client, tenant_id, customer_id)
     print(f"✓ Source staging row ready (order_attachments.id: {staging_id})")
 
     order_id = ensure_merged_order(
-        client, admin_client, tenant_id, product_id, customer_id, staging_id
+        client, tenant_id, product_id, customer_id, staging_id
     )
     print(f"✓ Merged draft order ready (orders.id: {order_id})")
 

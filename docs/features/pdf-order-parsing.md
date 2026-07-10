@@ -398,12 +398,19 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
   - 元の注文が参照していたソース（`order_attachments` の `source_attachment_id`
     行）から `storage_path`/`original_filename`/`content_type`/`size_bytes` を
     取得し、新しい注文それぞれに対して `order_attachments` 行を1件ずつ複製する
-    （`_process_line_item` と同じパターン。添付ファイル本体は複製しない）
-  - **元の注文は新規INSERTより先に削除する**。分割後の明細が元の注文と同じ
-    `(customer_id, product_id, deadline_date)` を指定するケース（内容はそのまま
-    に品番だけ変えたい等）では、元の注文が残ったまま新規INSERTすると
-    `orders_dedupe_key` が自分自身と衝突してしまうため。作成が一部失敗した場合は
-    ロールバック（作成済み注文の削除 + 元の注文を同一内容で復元）した上で400を返す
+    （`_process_line_item` と同じパターン。添付ファイル本体は複製しない）。
+    このソース行が見つからない場合（レコード不整合等）は400を返す
+  - 分割後の明細が元の注文と同じ `(customer_id, product_id, deadline_date)` を
+    指定するケース（内容はそのままに品番だけ変えたい等）では、元の注文が
+    残ったまま新規INSERTすると `orders_dedupe_key` が自分自身と衝突してしまう。
+    これを避けるため、新規INSERTの前に元の注文の `deadline_date` を一時的に
+    `NULL` へ退避する（UNIQUE制約はNULL同士を等価とみなさないため衝突しなくなる）。
+    全明細の作成に成功した時点で初めて元の注文を実際に削除し、失敗時は
+    `deadline_date` を元に戻すだけで復元が完了する（`id` や紐づく
+    `order_attachments` 行を一度も削除しないため、削除→再作成のような
+    データ消失は起きない）
+  - `orders_dedupe_key` の一意制約違反等で作成が一部失敗した場合、その分割
+    リクエスト内で既に作成済みの注文をロールバック（削除）した上で400を返す
   - `order_attachments` のRLSポリシーは元々 `auth.jwt()->>'tenant_id'` クレームを
     直接参照しており、`is_tenant_member(tenant_id)` を使う他の全テーブルと方式が
     異なっていたため、通常のユーザーJWTクライアントでは常にRLS違反になっていた
