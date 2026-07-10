@@ -1,7 +1,5 @@
 "use client"
 
-import { format } from "date-fns"
-import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -18,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getProductName } from "@/lib/order-utils"
+import { getProductName, formatDeadlineDate } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -64,9 +62,7 @@ export function BulkSimulateConfirmDialog({
                   <TableCell className="font-medium">{order.order_no}</TableCell>
                   <TableCell className="text-sm">{getProductName(order.product_id, products)}</TableCell>
                   <TableCell className="text-sm">
-                    {order.desired_deadline
-                      ? format(new Date(order.desired_deadline), "yyyy/MM/dd HH:mm", { locale: ja })
-                      : "未設定"}
+                    {formatDeadlineDate(order.desired_deadline) ?? "未設定"}
                   </TableCell>
                 </TableRow>
               ))}

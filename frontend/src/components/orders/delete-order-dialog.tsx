@@ -1,7 +1,5 @@
 "use client"
 
-import { format } from "date-fns"
-import { ja } from "date-fns/locale"
 import { buttonVariants } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -13,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { getProductName, getCustomerName } from "@/lib/order-utils"
+import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
@@ -66,19 +64,11 @@ export function DeleteOrderDialog({
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">希望納期</span>
-                    <span>
-                      {order.desired_deadline
-                        ? format(new Date(order.desired_deadline), "yyyy/MM/dd HH:mm", { locale: ja })
-                        : "未設定"}
-                    </span>
+                    <span>{formatDeadlineDate(order.desired_deadline) ?? "未設定"}</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">確定納期</span>
-                    <span>
-                      {order.confirmed_deadline
-                        ? format(new Date(order.confirmed_deadline), "yyyy/MM/dd", { locale: ja })
-                        : "-"}
-                    </span>
+                    <span>{formatDeadlineDate(order.confirmed_deadline) ?? "-"}</span>
                   </div>
                 </div>
               )}

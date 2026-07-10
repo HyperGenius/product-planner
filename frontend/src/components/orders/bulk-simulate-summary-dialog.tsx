@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { formatDeadlineDate } from "@/lib/order-utils"
 import type { BulkSimulateResult } from "@/types/order"
 
 const PAGE_SIZE = 5
@@ -23,6 +24,7 @@ interface BulkSimulateSummaryDialogProps {
   onBulkConfirm?: (orderIds: number[]) => void
 }
 
+// 回答納期(calculated_deadline)はスケジューラが計算した実際の日時のため時刻付きで表示する
 function formatDate(iso: string) {
   return format(new Date(iso), "yyyy/MM/dd HH:mm", { locale: ja })
 }
@@ -107,7 +109,7 @@ export function BulkSimulateSummaryDialog({ results, onClose, onBulkConfirm }: B
                     <>
                       <p>
                         <span className="text-xs text-muted-foreground/70">希望　</span>
-                        {r.desiredDeadline ? formatDate(r.desiredDeadline) : "未設定"}
+                        {formatDeadlineDate(r.desiredDeadline) ?? "未設定"}
                       </p>
                       <p>
                         <span className="text-xs text-muted-foreground/70">回答　</span>

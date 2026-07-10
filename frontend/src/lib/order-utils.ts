@@ -26,6 +26,24 @@ export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   return true
 }
 
+/**
+ * 日付のみを表す文字列 (例: "2026-10-01" や "2026-10-01T00:00:00")
+ * をタイムゾーンの影響を受けずに "yyyy/MM/dd" 表示へ整形する。
+ * `new Date()` でパースすると環境のタイムゾーンによって日付がずれるため使用しない。
+ */
+export function formatDeadlineDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null
+  return dateStr.slice(0, 10).replace(/-/g, "/")
+}
+
+/**
+ * 日付のみを表す文字列を `<input type="date">` が要求する "YYYY-MM-DD" 形式に整形する。
+ */
+export function toDateInputValue(dateStr: string | null | undefined): string {
+  if (!dateStr) return ""
+  return dateStr.slice(0, 10)
+}
+
 export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
   if (sortKey === "created_at_desc" || sortKey === "created_at_asc") {
     if (!a.created_at && !b.created_at) return 0

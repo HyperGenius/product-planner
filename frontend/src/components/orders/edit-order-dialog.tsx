@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { useUpdateOrder } from "@/hooks/use-orders"
+import { toDateInputValue } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 
 interface EditOrderDialogProps {
@@ -31,9 +32,7 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   const [productId, setProductId] = useState(order?.product_id?.toString() ?? "")
   const [customerId, setCustomerId] = useState(order?.customer_id?.toString() ?? "")
   const [quantity, setQuantity] = useState(order?.quantity?.toString() ?? "")
-  const [desiredDeadline, setDesiredDeadline] = useState(
-    order?.desired_deadline ? order.desired_deadline.slice(0, 16) : ""
-  )
+  const [desiredDeadline, setDesiredDeadline] = useState(toDateInputValue(order?.desired_deadline))
   const [duplicateError, setDuplicateError] = useState("")
 
   if (!order) return null
@@ -129,7 +128,7 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
             <Label htmlFor="desired-deadline">希望納期</Label>
             <Input
               id="desired-deadline"
-              type="datetime-local"
+              type="date"
               value={desiredDeadline}
               onChange={(e) => setDesiredDeadline(e.target.value)}
             />

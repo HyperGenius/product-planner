@@ -2,8 +2,6 @@
 
 import { AlertCircle, Loader2, Mail, MoreHorizontal } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { format } from "date-fns"
-import { ja } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -26,6 +24,7 @@ import {
   getStatusBadgeClass,
   getCertaintyLabel,
   getCertaintyBadgeClass,
+  formatDeadlineDate,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -125,7 +124,7 @@ export function OrderTableRow({
         <TableCell className="text-right">{order.quantity}</TableCell>
         <TableCell>
           {order.desired_deadline ? (
-            format(new Date(order.desired_deadline), "yyyy/MM/dd HH:mm", { locale: ja })
+            formatDeadlineDate(order.desired_deadline)
           ) : (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -139,9 +138,7 @@ export function OrderTableRow({
           )}
         </TableCell>
         <TableCell>
-          {order.confirmed_deadline
-            ? format(new Date(order.confirmed_deadline), "yyyy/MM/dd", { locale: ja })
-            : "-"}
+          {formatDeadlineDate(order.confirmed_deadline) ?? "-"}
         </TableCell>
         <TableCell>
           <div className="flex flex-col items-start gap-1">
