@@ -81,6 +81,15 @@ create policy "tenant isolation" on order_attachments
 ステージング行は `order_id=NULL` で作成され、後続Issue（PDFパース）が実際の `orders` 行を
 生成した時点で `order_id` を持つ行が別途 INSERT される想定。
 
+**RLSポリシー修正（Issue #280 Phase3）**: 上記の `auth.jwt() ->> 'tenant_id'` は
+実際には発行されないクレームであり、他の全テーブルが使う `is_tenant_member(tenant_id)`
+とは異なる方式だったため、通常のユーザーJWTクライアントでは SELECT/INSERT が常に
+RLS違反になっていた（`GET /orders/{id}/attachments` はこれを service role キーで
+回避していた）。`supabase/migrations/20260710000000_fix_order_attachments_rls_tenant_member.sql`
+でポリシーを `is_tenant_member(tenant_id)` に統一し、通常のユーザークライアントで
+扱えるように修正した。詳細は [pdf-order-parsing.md](pdf-order-parsing.md) の
+「手動分割UI（Issue #280 Phase3）」を参照。
+
 ### `parse_status` の定義
 
 | 値                       | 意味                            |

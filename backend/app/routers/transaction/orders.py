@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException
+from postgrest.exceptions import APIError
 
 from app.dependencies import (
     get_current_tenant_id,
@@ -17,6 +18,7 @@ from app.models.transaction.order_schema import (
     OrderAttachmentResponse,
     OrderCreate,
     OrderSimulateRequest,
+    OrderSplitRequest,
     OrderUpdate,
 )
 from app.repositories.supa_infra.common.scheduling_settings_repo import (
@@ -139,12 +141,13 @@ def get_order(order_id: int, repo: OrderRepository = Depends(get_order_repo)):
 )
 def get_order_attachments(
     order_id: int,
+    client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
     """注文に紐づく添付ファイル一覧を署名付きURLと共に返す"""
     logger.info(f"Fetching attachments for order {order_id}")
     result = (
-        admin_client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
         .select("*")
         .eq("order_id", order_id)
         .order("created_at")
@@ -199,6 +202,123 @@ def delete_order(order_id: int, repo: OrderRepository = Depends(get_order_repo))
     if not success:
         raise HTTPException(status_code=404, detail="Not found")
     return {"status": "deleted"}
+
+
+@orders_router.post("/{order_id}/split")
+def split_order(
+    order_id: int,
+    split_data: OrderSplitRequest,
+    tenant_id: str = Depends(get_current_tenant_id),
+    repo: OrderRepository = Depends(get_order_repo),
+    client: Client = Depends(get_supabase_client),
+):
+    """
+    誤って1件にマージされた下書き注文を、同じ source_attachment_id を参照する
+    N件の下書き注文に手動分割する（Issue #280）。
+    """
+    logger.info(f"Splitting order {order_id} into {len(split_data.line_items)} items")
+    order = repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="下書き状態の注文のみ分割できます")
+    source_attachment_id = order.get("source_attachment_id")
+    if not source_attachment_id:
+        raise HTTPException(
+            status_code=400,
+            detail="分割元の受注ソース（メール／添付ファイル）が不明なため分割できません",
+        )
+
+    try:
+        source_row = cast(
+            "dict[str, Any] | None",
+            client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+            .select("*")
+            .eq("id", source_attachment_id)
+            .single()
+            .execute()
+            .data,
+        )
+    except APIError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="分割元の受注ソース（メール／添付ファイル）が見つかりませんでした",
+        ) from e
+    if not source_row:
+        raise HTTPException(
+            status_code=400,
+            detail="分割元の受注ソース（メール／添付ファイル）が見つかりませんでした",
+        )
+
+    # 分割後の明細が元の注文と同じ (customer_id, product_id, deadline_date) を
+    # 指定した場合、元の注文自身と orders_dedupe_key が衝突してしまう。これを
+    # 避けるため、元の注文は削除せず deadline_date を一時的にNULLへ退避する
+    # （UNIQUE制約はNULL同士を等価とみなさないため衝突しなくなる）。全明細の
+    # 作成に成功した時点で初めて元の注文を実際に削除し、失敗時は
+    # deadline_date を元に戻すだけで良い（idや紐づく order_attachments は
+    # 一切触れないため、削除→再作成のようなデータ消失が起きない）。
+    original_deadline_date = order.get("deadline_date")
+    repo.update(order_id, {"deadline_date": None})
+
+    created_orders: list[dict] = []
+    try:
+        for item in split_data.line_items:
+            new_order = repo.create(
+                {
+                    "tenant_id": tenant_id,
+                    "product_id": item.product_id,
+                    "quantity": item.quantity,
+                    "deadline_date": item.deadline_date,
+                    "customer_id": item.customer_id
+                    if item.customer_id is not None
+                    else order.get("customer_id"),
+                    "customer_certainty": item.customer_certainty
+                    or order.get("customer_certainty"),
+                    "status": "draft",
+                    "source_type": order.get("source_type"),
+                    "source_raw": order.get("source_raw"),
+                    "extracted_product_name": item.extracted_product_name,
+                    "source_attachment_id": source_attachment_id,
+                }
+            )
+            created_orders.append(new_order)
+
+            client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+                {
+                    "order_id": new_order["id"],
+                    "tenant_id": tenant_id,
+                    "storage_path": source_row.get("storage_path", ""),
+                    "original_filename": source_row.get("original_filename", ""),
+                    "content_type": source_row.get("content_type"),
+                    "size_bytes": source_row.get("size_bytes"),
+                    "parse_status": "success"
+                    if source_row.get("storage_path")
+                    else "failed_no_attachment",
+                }
+            ).execute()
+    except (ValueError, APIError) as e:
+        for created in created_orders:
+            repo.delete(created["id"])
+        # 元の注文のdeadline_dateを退避前の値に戻す（分割前の状態に復元）
+        repo.update(order_id, {"deadline_date": original_deadline_date})
+        detail = e.message if isinstance(e, APIError) else str(e)
+        raise HTTPException(status_code=400, detail=detail) from None
+
+    if not repo.delete(order_id):
+        logger.error(
+            f"split_order: created {len(created_orders)} orders but failed to "
+            f"delete original order {order_id}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="分割後の注文は作成されましたが、元の注文の削除に失敗しました。管理者に確認してください。",
+        )
+
+    return {
+        "original_order_id": order_id,
+        "created_orders": [_map_order_response(o) for o in created_orders],
+    }
 
 
 def get_settings_repo(

@@ -132,7 +132,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
   - 非PDF添付・添付なしメール由来: 専用のステージング行が存在しないため、その
     `orders` に紐づく `order_attachments` 行自身を自己参照的な「ソース」として設定
 - 手動分割UI（誤って1件にマージされた下書きから同じ `source_attachment_id` を
-  参照するN件の下書きを生成する機能）は本Issueのスコープ外とし、後続Issueで対応する
+  参照するN件の下書きを生成する機能）は `POST /orders/{order_id}/split` として実装済み。
+  詳細は本ファイル末尾の「手動分割UI（Issue #280 Phase3）」を参照
 
 ### 複数受注の疑いの検知（Issue #280）
 
@@ -376,6 +377,57 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
       通知される（Issue #280、粗いヒューリスティック）
 - [x] 添付ファイルは1ソースにつき1回のみStorageに保存される（非PDF添付・添付なし
       メールもPDF添付と同じステージング経路に統一、Issue #280）
+- [x] 手動分割UIにより、誤って1件にマージされた下書きから、同じ `source_attachment_id`
+      を参照するN件の下書きを生成できる（Issue #280 Phase3）
+
+### 手動分割UI（Issue #280 Phase3）
+
+自動抽出でも1明細に複数受注がマージされてしまうケース（`multi_order_suspected` の
+粗いヒューリスティックで検知しきれない場合を含む）に備え、ユーザーが手動で
+下書き注文をN件に分割できるUIを実装した。
+
+- `POST /orders/{order_id}/split`（`backend/app/routers/transaction/orders.py`）
+  - リクエスト: `{"line_items": [{"product_id", "quantity", "desired_deadline",
+    "customer_id"?, "customer_certainty"?, "extracted_product_name"?}, ...]}`
+    （`line_items` は2件以上必須）
+  - 分割対象の注文が `status='draft'` かつ `source_attachment_id` を持つ場合のみ許可
+    （手動作成 (`source_type='manual'`) の注文や確定済み注文は分割不可、400）
+  - 各明細ごとに新しい `orders` 行を作成し、`source_attachment_id` は元の注文と
+    同じ値を設定する。`customer_id`/`customer_certainty` は明細で指定が無ければ
+    元の注文の値を引き継ぐ
+  - 元の注文が参照していたソース（`order_attachments` の `source_attachment_id`
+    行）から `storage_path`/`original_filename`/`content_type`/`size_bytes` を
+    取得し、新しい注文それぞれに対して `order_attachments` 行を1件ずつ複製する
+    （`_process_line_item` と同じパターン。添付ファイル本体は複製しない）。
+    このソース行が見つからない場合（レコード不整合等）は400を返す
+  - 分割後の明細が元の注文と同じ `(customer_id, product_id, deadline_date)` を
+    指定するケース（内容はそのままに品番だけ変えたい等）では、元の注文が
+    残ったまま新規INSERTすると `orders_dedupe_key` が自分自身と衝突してしまう。
+    これを避けるため、新規INSERTの前に元の注文の `deadline_date` を一時的に
+    `NULL` へ退避する（UNIQUE制約はNULL同士を等価とみなさないため衝突しなくなる）。
+    全明細の作成に成功した時点で初めて元の注文を実際に削除し、失敗時は
+    `deadline_date` を元に戻すだけで復元が完了する（`id` や紐づく
+    `order_attachments` 行を一度も削除しないため、削除→再作成のような
+    データ消失は起きない）
+  - `orders_dedupe_key` の一意制約違反等で作成が一部失敗した場合、その分割
+    リクエスト内で既に作成済みの注文をロールバック（削除）した上で400を返す
+  - `order_attachments` のRLSポリシーは元々 `auth.jwt()->>'tenant_id'` クレームを
+    直接参照しており、`is_tenant_member(tenant_id)` を使う他の全テーブルと方式が
+    異なっていたため、通常のユーザーJWTクライアントでは常にRLS違反になっていた
+    （`GET /orders/{id}/attachments` は元々この問題を service role キーで回避して
+    いた）。`supabase/migrations/20260710000000_fix_order_attachments_rls_tenant_member.sql`
+    でポリシーを他テーブルと同じ `is_tenant_member(tenant_id)` に統一し、
+    通常のユーザークライアントで読み書きできるようにした（service role キーは
+    アプリコードで使わないという方針を維持するため、根本原因のポリシー自体を修正）
+- フロントエンド: 注文詳細ページ (`/orders/[id]`) に「分割」ボタンを追加
+  （`status='draft'` かつ `source_type='email'` かつ `source_attachment_id` あり
+  の場合のみ表示）。`SplitOrderDialog`
+  (`frontend/src/components/orders/split-order-dialog.tsx`) は左ペインに参照元
+  メール（件名・顧客・本文・添付ファイル一覧）、右ペインに明細フォーム（2件以上）
+  を表示する2ペインレイアウトで、分割単位を判断するのに必要な情報を見ながら
+  入力できる。送信すると分割後の一覧ページに遷移する
+- `useSplitOrder`（`frontend/src/hooks/use-orders.ts`）が上記APIを呼び出し、
+  成功時に注文一覧のキャッシュを無効化する
 
 ---
 

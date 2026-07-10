@@ -304,3 +304,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | pg_trgm 製品名マッチング (`product_matching_service.py`) | ✅ 実装済み |
 | 顧客自動解決・作成 (`customer_matching_service.py`) | ✅ 実装済み |
 | `seed_scenario.py` の `order_number` 部分ユニークインデックス対応 | ✅ #286 |
+| 手動分割UI（`POST /orders/{id}/split`、詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #280 |

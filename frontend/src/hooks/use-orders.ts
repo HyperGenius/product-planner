@@ -8,6 +8,8 @@ import type {
   OrderCreate,
   OrderSimulateRequest,
   OrderSimulateResponse,
+  OrderSplitRequest,
+  OrderSplitResponse,
 } from "@/types/order"
 
 // クエリキーを定数化
@@ -128,6 +130,24 @@ export function useOrderAttachments(orderId: number) {
     queryKey: ["orders", orderId, "attachments"],
     queryFn: () => apiClient<OrderAttachment[]>(`/orders/${orderId}/attachments`),
     enabled: !!orderId,
+  })
+}
+
+/**
+ * 誤って1件にマージされた下書き注文を、同じソースを参照するN件の下書きに分割するフック
+ */
+export function useSplitOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: OrderSplitRequest }) =>
+      apiClient<OrderSplitResponse>(`/orders/${id}/split`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
   })
 }
 
