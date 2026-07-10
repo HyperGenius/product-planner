@@ -25,7 +25,7 @@ import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 import { useSimulateOrder, useCreateOrder, useConfirmOrder } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
-import { getProductName, getCustomerName } from "@/lib/order-utils"
+import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -296,7 +296,7 @@ export default function NewOrderPage() {
                 <Label htmlFor="desired-deadline">希望納期（任意）</Label>
                 <Input
                   id="desired-deadline"
-                  type="datetime-local"
+                  type="date"
                   value={desiredDeadline}
                   onChange={(e) => setDesiredDeadline(e.target.value)}
                 />
@@ -362,9 +362,8 @@ export default function NewOrderPage() {
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">希望納期</dt>
                     <dd>
-                      {desiredDeadline
-                        ? format(new Date(desiredDeadline), "yyyy/MM/dd HH:mm", { locale: ja })
-                        : <span className="text-muted-foreground">未設定</span>}
+                      {formatDeadlineDate(desiredDeadline)
+                        ?? <span className="text-muted-foreground">未設定</span>}
                     </dd>
                   </div>
                   <div className="flex justify-between">

@@ -7,8 +7,8 @@ export interface Order {
   product_id: number
   customer_id?: number
   quantity: number
-  desired_deadline?: string // ISO 8601形式
-  confirmed_deadline?: string // ISO 8601形式
+  desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
+  confirmed_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   status: 'draft' | 'confirmed' | 'completed' | 'canceled'
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean

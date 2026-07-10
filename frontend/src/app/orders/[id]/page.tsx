@@ -3,8 +3,6 @@
 import { useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { format } from "date-fns"
-import { ja } from "date-fns/locale"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -38,6 +36,7 @@ import {
   getStatusBadgeClass,
   getCertaintyLabel,
   getCertaintyBadgeClass,
+  formatDeadlineDate,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import { ApiError } from "@/lib/api-client"
@@ -108,8 +107,7 @@ export default function OrderDetailPage() {
   }
 
   const formatDate = (dateStr?: string | null) => {
-    if (!dateStr) return <span className="text-muted-foreground">未設定</span>
-    return format(new Date(dateStr), "yyyy/MM/dd HH:mm", { locale: ja })
+    return formatDeadlineDate(dateStr) ?? <span className="text-muted-foreground">未設定</span>
   }
 
   if (isLoading) {
