@@ -200,17 +200,18 @@ Vercel ダッシュボード → プロジェクト選択 → **Settings → Env
 
 Vercel ダッシュボード → プロジェクト → **Cron Jobs** タブから手動実行できる（Pro プラン以上）。
 
-### 既知のギャップ: parse-order-pdfs が未登録 (#259)
+### parse-order-pdfs のスケジューリング (#259 / #261)
 
-現在 `frontend/vercel.json` には `gmail-poll` のみ登録されており、PDF添付メールの受注確定を行う
-`GET /api/cron/parse-order-pdfs` はどのスケジューラにも登録されていない。そのためPDF添付メールは
-Storageへのステージング保存までしか自動化されておらず、受注として起票するには手動で
-`parse-order-pdfs` を実行する必要がある（詳細な設計判断は [email-order-intake.md](../features/email-order-intake.md) の
+`frontend/vercel.json` には `gmail-poll` のみ登録されており、PDF添付メールの受注確定を行う
+`GET /api/cron/parse-order-pdfs` は Vercel Cron には登録していない。Vercel Cronは無料（Hobby）
+プランでは実行回数制限（1日2回まで）があり、取りこぼしを避けるために必要な5〜15分間隔程度の
+高頻度実行という要件を満たせないため。
+
+代わりに Supabase Edge Function + pg_cron/pg_net（Pro プランで追加コストなし）で高頻度スケジューリングを
+構築した。構築手順・Terraform管理可否の調査結果は
+[supabase-pgcron-parse-order-pdfs.md](supabase-pgcron-parse-order-pdfs.md) を参照
+（詳細な2段階Cronの設計判断は [email-order-intake.md](../features/email-order-intake.md) の
 「2段階Cronのスケジューリング設計」を参照）。
-
-`parse-order-pdfs` は取りこぼしを避けるため5〜15分間隔程度の高頻度実行が望ましいが、
-Vercel Cronは無料（Hobby）プランでは実行回数制限（1日2回まで）があり要件を満たせない。
-そのため Cloud Run + Cloud Scheduler 等、Vercel Cron以外のスケジューラへの移行を検討中。
 
 ---
 
@@ -265,3 +266,4 @@ curl -s http://localhost:8000/api/cron/gmail-poll \
 - #171: Gmail OAuth2 認証情報セットアップ（[gmail-oauth-setup.md](gmail-oauth-setup.md)）
 - #165 / #166 / #167: Gmail メール → 注文下書き自動作成パイプライン実装
 - #259: 2段階Cronの実行頻度に関する仕様整理・スケジューラ移行検討
+- #261: Supabase Edge Function + pg_cronでparse-order-pdfsを高頻度スケジューリング（[supabase-pgcron-parse-order-pdfs.md](supabase-pgcron-parse-order-pdfs.md)）

@@ -362,6 +362,15 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# parse-order-pdfs を高頻度実行する pg_cron 用トリガー関数 (Issue #261)
+# verify_jwt はデフォルト(true)のまま。pg_cron 側から net.http_post で
+# anon/publishable key を apikey ヘッダに載せて呼び出す想定
+# (docs/infra/supabase-pgcron-parse-order-pdfs.md 参照)。
+[functions.parse-order-pdfs-trigger]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/parse-order-pdfs-trigger/index.ts"
+
 [analytics]
 enabled = true
 port = 54327
