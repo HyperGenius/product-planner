@@ -31,7 +31,7 @@ Gmail ポーリング Cron ジョブの動作に必要な環境変数を、GCP S
 
 ### Vercel（フロントエンド）
 
-`gmail-poll` / `parse-order-pdfs` の自動実行は Supabase pg_cron に一本化しており（#261）、Vercel Cron は使用していない。以下は `frontend/src/app/api/cron/gmail-poll/route.ts` を手動デバッグ目的で叩く場合のみ必要（任意）。
+`gmail-poll` / `parse-order-pdfs` の自動実行は Supabase pg_cron + Edge Function に一本化しており（#261）、Vercel Cron は使用していない。以下は `frontend/src/app/api/cron/gmail-poll/route.ts` を手動デバッグ目的で叩く場合のみ必要（任意）。
 
 | 変数名 | 取得元 | 備考 |
 |---|---|---|
@@ -187,7 +187,7 @@ curl -s -X GET https://<render-service>.onrender.com/api/cron/gmail-poll \
 
 ## Step 7: Vercel に環境変数を設定する（任意・手動デバッグ用）
 
-`gmail-poll` / `parse-order-pdfs` の自動実行スケジューリングは Supabase pg_cron が担っており（後述）、
+`gmail-poll` / `parse-order-pdfs` の自動実行スケジューリングは Supabase pg_cron + Edge Function が担っており（後述）、
 `frontend/vercel.json` の `crons` 登録は撤去済み。以下は `frontend/src/app/api/cron/gmail-poll/route.ts`
 （Render への薄いプロキシ）を手動で叩いてデバッグしたい場合のみ設定する。
 
@@ -208,9 +208,10 @@ Vercel ダッシュボード → プロジェクト選択 → **Settings → Env
 は取りこぼしを避けるために5〜15分間隔程度の高頻度実行が必要な一方、Vercel Cronは無料（Hobby）
 プランでは実行回数制限（1日2回まで）がありこれを満たせなかった（#259）。
 
-そこで両エンドポイントとも Supabase pg_cron/pg_net（Pro プランで追加コストなし）に一本化し、
-`frontend/vercel.json` の `crons` 登録は撤去した。構築手順・Terraform管理可否の調査結果は
-[supabase-pgcron-scheduling.md](supabase-pgcron-scheduling.md) を参照
+そこで単一の Supabase Edge Function（`parse-order-pdfs-trigger`）が pg_cron/pg_net（Pro プランで追加コスト
+なし）から5〜15分間隔で呼び出され、その1回の実行の中で `gmail-poll` → `parse-order-pdfs` を順に呼び出す
+構成に一本化し、`frontend/vercel.json` の `crons` 登録は撤去した。構築手順は
+[supabase-pgcron-parse-order-pdfs.md](supabase-pgcron-parse-order-pdfs.md) を参照
 （詳細な2段階Cronの設計判断は [email-order-intake.md](../features/email-order-intake.md) の
 「2段階Cronのスケジューリング設計」を参照）。
 
@@ -258,7 +259,7 @@ curl -s http://localhost:8000/api/cron/gmail-poll \
 - `CRON_SECRET` は Render と Vercel で**必ず同じ値**を設定すること
 - `ANTHROPIC_API_KEY` と `SUPABASE_SERVICE_ROLE_KEY` は Secret Manager 管理必須。`.env` ファイルをリポジトリにコミットしないこと
 - `GMAIL_REFRESH_TOKEN` が無効化された場合は `scripts/get_gmail_refresh_token.py` を再実行して Secret Manager を更新し、Render の環境変数も差し替える（[gmail-oauth-setup.md](gmail-oauth-setup.md) 参照）
-- `gmail-poll` / `parse-order-pdfs` の自動実行は Supabase pg_cron が担う（Vercel Cron は未使用。[supabase-pgcron-scheduling.md](supabase-pgcron-scheduling.md) 参照）
+- `gmail-poll` / `parse-order-pdfs` の自動実行は Supabase pg_cron + Edge Function が担う（Vercel Cron は未使用。[supabase-pgcron-parse-order-pdfs.md](supabase-pgcron-parse-order-pdfs.md) 参照）
 
 ## 関連
 
@@ -267,4 +268,4 @@ curl -s http://localhost:8000/api/cron/gmail-poll \
 - #171: Gmail OAuth2 認証情報セットアップ（[gmail-oauth-setup.md](gmail-oauth-setup.md)）
 - #165 / #166 / #167: Gmail メール → 注文下書き自動作成パイプライン実装
 - #259: 2段階Cronの実行頻度に関する仕様整理・スケジューラ移行検討
-- #261: Supabase pg_cronでgmail-poll / parse-order-pdfsをスケジューリング（[supabase-pgcron-scheduling.md](supabase-pgcron-scheduling.md)）
+- #261: Supabase Edge Function + pg_cronでgmail-poll / parse-order-pdfsを高頻度スケジューリング（[supabase-pgcron-parse-order-pdfs.md](supabase-pgcron-parse-order-pdfs.md)）
