@@ -157,7 +157,7 @@ interface OrderCreate {
 
 ## メール解析パイプライン（実装済み）
 
-`backend/app/services/` 配下に以下のサービスが実装済み。Vercel Cron（詳細は [docs/infra/env-setup-gmail-cron.md](../infra/env-setup-gmail-cron.md) 参照）から `/api/cron/gmail-poll` を叩き `poll_unread_emails()` を呼び出すことで動作する。2段目の `/api/cron/parse-order-pdfs` は Supabase Edge Function + pg_cron で高頻度スケジューリングしている（下記「2段階Cronのスケジューリング設計」参照）。
+`backend/app/services/` 配下に以下のサービスが実装済み。Supabase pg_cron（詳細は [docs/infra/env-setup-gmail-cron.md](../infra/env-setup-gmail-cron.md) 参照）から `/api/cron/gmail-poll` を叩き `poll_unread_emails()` を呼び出すことで動作する。2段目の `/api/cron/parse-order-pdfs` も同じくSupabase pg_cron（Edge Function経由）で高頻度スケジューリングしている（下記「2段階Cronのスケジューリング設計」参照）。
 
 ### 処理フロー（Issue #280 でPDF添付・非PDF添付・添付なしを統一）
 
@@ -227,11 +227,12 @@ interface OrderCreate {
 
 **スケジューリング方式（#261で解消）**
 
-`frontend/vercel.json` には `gmail-poll` のみ登録しており、`parse-order-pdfs` はVercel Cronには登録していない
-（Vercel Cronは無料プランで実行回数制限があり、上記の高頻度実行（5〜15分間隔）を満たせないため）。
-代わりに Supabase Edge Function + pg_cron/pg_net（Pro プランで追加コストなし）で `parse-order-pdfs` を
-高頻度に自動実行する構成にした。構築手順は
-[docs/infra/supabase-pgcron-parse-order-pdfs.md](../infra/supabase-pgcron-parse-order-pdfs.md) を参照。
+以前は `frontend/vercel.json` に `gmail-poll` のみ登録しており、`parse-order-pdfs` はVercel Cronには登録
+していなかった（Vercel Cronは無料プランで実行回数制限があり、上記の高頻度実行（5〜15分間隔）を満たせない
+ため）。現在は両エンドポイントとも Supabase pg_cron/pg_net（Pro プランで追加コストなし）に一本化し、
+`vercel.json` の `crons` 登録は撤去した。`gmail-poll` はRenderへ直接、`parse-order-pdfs` はSupabase Edge
+Function経由でそれぞれ10分間隔で自動実行する。構築手順・アーキテクチャの詳細は
+[docs/infra/supabase-pgcron-scheduling.md](../infra/supabase-pgcron-scheduling.md) を参照。
 
 ### テナント登録（`gmail_label_tenants`）
 
@@ -308,4 +309,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 顧客自動解決・作成 (`customer_matching_service.py`) | ✅ 実装済み |
 | `seed_scenario.py` の `order_number` 部分ユニークインデックス対応 | ✅ #286 |
 | 手動分割UI（`POST /orders/{id}/split`、詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #280 |
-| `parse-order-pdfs` の高頻度スケジューリング（Supabase Edge Function + pg_cron、詳細は[supabase-pgcron-parse-order-pdfs.md](../infra/supabase-pgcron-parse-order-pdfs.md)） | ✅ #261 |
+| gmail-poll / parse-order-pdfs の高頻度スケジューリング（Supabase pg_cron、詳細は[supabase-pgcron-scheduling.md](../infra/supabase-pgcron-scheduling.md)） | ✅ #261 |

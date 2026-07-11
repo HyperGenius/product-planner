@@ -32,6 +32,6 @@ secrets = {
   }
 }
 
-# Supabase ダッシュボード → Settings → General の Reference ID
+# Supabase ダッシュボード → Project Settings → General の Project ID (Reference used in APIs and URLs)
 # 認証は SUPABASE_ACCESS_TOKEN 環境変数（tfvars には書かない）
 supabase_project_ref = "your-supabase-project-ref"
