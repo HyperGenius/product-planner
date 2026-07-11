@@ -19,12 +19,16 @@ async function callCronEndpoint(
   cronSecret: string,
   path: string
 ): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(`${backendUrl}${path}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${cronSecret}` },
-  })
-  const body = await res.json().catch(() => ({ error: "invalid JSON response" }))
-  return { status: res.status, body }
+  try {
+    const res = await fetch(`${backendUrl}${path}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${cronSecret}` },
+    })
+    const body = await res.json().catch(() => ({ error: "invalid JSON response" }))
+    return { status: res.status, body }
+  } catch (err) {
+    return { status: 0, body: { error: `fetch failed: ${err instanceof Error ? err.message : String(err)}` } }
+  }
 }
 
 Deno.serve(async (_req: Request) => {
@@ -41,7 +45,8 @@ Deno.serve(async (_req: Request) => {
   const gmailPoll = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/gmail-poll")
   const parseOrderPdfs = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/parse-order-pdfs")
 
-  const overallStatus = gmailPoll.status >= 500 || parseOrderPdfs.status >= 500 ? 502 : 200
+  const isSuccess = (status: number) => status >= 200 && status < 300
+  const overallStatus = isSuccess(gmailPoll.status) && isSuccess(parseOrderPdfs.status) ? 200 : 502
 
   return new Response(
     JSON.stringify({ gmailPoll, parseOrderPdfs }),

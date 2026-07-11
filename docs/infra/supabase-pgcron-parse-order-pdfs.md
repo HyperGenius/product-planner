@@ -120,14 +120,16 @@ select cron.schedule(
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'apikey', (select decrypted_secret from vault.decrypted_secrets
-                 where name = 'parse_order_pdfs_trigger_apikey')
+                 where name = 'parse_order_pdfs_trigger_apikey'),
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets
+                                      where name = 'parse_order_pdfs_trigger_apikey')
     )
   ) as request_id;
   $$
 );
 ```
 
-`apikey` ヘッダには Edge Function 自体のゲートウェイ認証（`verify_jwt`。`supabase/config.toml` の `[functions.parse-order-pdfs-trigger]` で `true` に設定済み）を通すための anon key（または publishable key）を使う。これは Render 側の `CRON_SECRET` 認証（Step 3で設定）とは別レイヤーの認証であることに注意。
+`apikey` / `Authorization: Bearer <anon key>` の両方のヘッダには Edge Function 自体のゲートウェイ認証（`verify_jwt`。`supabase/config.toml` の `[functions.parse-order-pdfs-trigger]` で `true` に設定済み）を通すための anon key（または publishable key）を使う。`apikey` だけでは `verify_jwt=true` のゲートウェイ認証を通過できないため、`Authorization` ヘッダも必須（下記の動作確認用 `curl` 例を参照）。これは Render 側の `CRON_SECRET` 認証（Step 3で設定）とは別レイヤーの認証であることに注意。
 
 ### ジョブの確認・変更・削除
 
