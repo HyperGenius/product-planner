@@ -233,7 +233,9 @@ def _process_line_item(
 ) -> bool:
     """
     抽出された1明細から order を生成する。
-    生成できた場合 True、品番照合失敗・重複スキップの場合 False を返す。
+    生成できた場合 True、数量不正・重複スキップの場合 False を返す。
+    品番照合に失敗した場合も product_id=NULL の下書きとして生成するため True を返す
+    （Issue #296）。
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
@@ -244,7 +246,17 @@ def _process_line_item(
         db, tenant_id, product_number_raw, product_name_raw
     )
 
+    # 表記ゆれ対策はTRIM()のみ行い、全角/半角統一等の高度な正規化は
+    # 実運用データを見てから要否を判断する（Issue #296 インクリメンタル方針）。
+    extracted_product_name_raw = product_name_raw or product_number_raw
+    extracted_product_name = (
+        extracted_product_name_raw.strip() if extracted_product_name_raw else None
+    )
+
     if product_id is None:
+        # 製品を自動識別できなかった明細も、情報を失わずproduct_id=NULLで
+        # 下書きを起票する（Issue #296）。ログ・通知は従来どおり記録した上で
+        # 処理を継続する（以前はここでFalseを返し明細を丸ごと破棄していた）。
         detail = {
             "product_number_raw": product_number_raw,
             "product_name_raw": product_name_raw,
@@ -260,7 +272,6 @@ def _process_line_item(
             log_id,
             detail,
         )
-        return False
 
     certainty_raw = cast(str | None, line.get("certainty"))
     # Claude抽出結果の揺れ・想定外値でも orders.customer_certainty のCHECK制約に
@@ -298,7 +309,7 @@ def _process_line_item(
             "p_customer_certainty": certainty,
             "p_source_type": "email",
             "p_source_raw": staging_row.get("source_raw"),
-            "p_extracted_product_name": product_name_raw,
+            "p_extracted_product_name": extracted_product_name,
             "p_source_attachment_id": attachment_id,
         },
     ).execute()
@@ -366,7 +377,9 @@ def _process_line_item(
         f"pdf_order_parsing: order {order_id} {action} from attachment {attachment_id}"
     )
 
-    if action == "inserted":
+    if action == "inserted" and product_id is not None:
+        # product_id が未確定の明細は、どの製品の内示を無効化すべきか判断できない
+        # ため対象外とする（超過分の後始末は人力での紐付け後に委ねる）。
         _mark_superseded_orders(db, tenant_id, staging_row, product_id, deadline_date)
 
     return True

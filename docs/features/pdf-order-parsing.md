@@ -53,7 +53,9 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
         品番は1文字違いで別製品を指すことがあり（例: `25760-63C-...` と
         実在する `22760-63C-...` は pg_trgm 上高い類似度になる）、
         「候補1件のみ」は自動確定の根拠として弱いため
-   b. すべて失敗した場合: order を生成せず order_parse_log に reason='no_product_match' で記録
+   b. すべて失敗した場合: `order_parse_log` に `reason='no_product_match'` で記録した上で、
+      明細をドロップせず `product_id=NULL`・`extracted_product_name=<抽出生テキスト>` で
+      下書きを起票する（Issue #296、詳細後述）
    c. certainty はそのまま orders.customer_certainty に保存する（confirmed/forecast/
       forecast_tentative）。orders.status には反映しない（Issue #267）
    d. customer_id はステージング行のものをそのまま使用（再照合しない）
@@ -204,6 +206,45 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 ユーザーが確定済み（`status='confirmed'`）の注文はこのフィルタ対象外のため supersede
 されない。
 
+### 製品未マッチ明細のNULL product_id下書き起票（Issue #296）
+
+以前は品番・品名のいずれの照合にも失敗した明細は `order_parse_log` に
+`reason='no_product_match'` で記録するのみで、明細自体（`orders`行）を生成せず
+ドロップしていた。1通のメールに複数明細が含まれる場合、一部の製品名がマッチしな
+かっただけで当該明細の情報が失われる問題があったため、`product_id=NULL` の状態で
+下書きを起票するよう変更した。
+
+- `_process_line_item` は `product_id` が解決できなかった場合も `order_parse_log`/
+  `notifications` への記録は従来どおり行った上で、処理を継続して
+  `upsert_order_by_dedupe_key` RPCを呼ぶ（以前はここで処理を打ち切っていた）
+- `extracted_product_name`（`orders.product_id` が NULL のときのフォールバック表示・
+  重複判定に使う抽出済み生テキスト）は `TRIM()` のみ正規化する。全角/半角統一や
+  記号除去等の高度な正規化は行わない（表記ゆれによる取りこぼし＝重複下書きの
+  増加は許容し、情報が失われるわけではないため実運用データを見てから要否を
+  判断する、というインクリメンタルな方針を採る）
+- 同一メール内の他の明細がマッチ成功している場合、それらは通常どおり処理され、
+  未マッチの明細の存在によってブロックされない（1明細=1order行の設計のため
+  明細間の依存が元々ない）
+- `product_id=NULL` の明細に対して `_mark_superseded_orders`（旧内示レコードの
+  無効化）は呼ばない。どの製品の内示を無効化すべきか判断できないため
+
+#### 重複起票防止（dedupe）のNULL product_id対応
+
+`orders_dedupe_key`（`product_id` を含む）はNULLの非等価性により機能しないため、
+`product_id IS NULL` の行専用の部分UNIQUE制約 `orders_dedupe_key_unmatched_product`
+を追加し、`upsert_order_by_dedupe_key` に対応する分岐を追加した
+（`supabase/migrations/20260712000000_add_orders_dedupe_key_unmatched_product.sql`）。
+
+- 部分UNIQUE制約: `(tenant_id, customer_id, deadline_date, extracted_product_name)
+  WHERE product_id IS NULL AND deadline_date IS NOT NULL AND extracted_product_name IS NOT NULL`
+- `p_product_id IS NULL` の場合、既存行の特定方法を「`product_id` 一致」から
+  「`product_id IS NULL AND extracted_product_name` 一致」に切り替えるのみで、
+  その後の certainty priority hierarchy（confirmed/completed/canceled保護 →
+  manual draft保護 → certainty優先度判定）は既存ロジックをそのまま再利用する
+  （新規の分岐ロジックではない）
+- `extracted_product_name` または `deadline_date` が NULL で重複判定に使える
+  情報が無い場合は、常に新規行として挿入する（重複を許容する）
+
 ---
 
 ## DB スキーマ変更
@@ -214,8 +255,8 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   （text CHECK制約のため `ALTER TYPE ADD VALUE` は使えない）
 - 新規 UNIQUE 制約 `orders_dedupe_key`: `(tenant_id, customer_id, product_id, deadline_date)`
   - 既知の制約: `product_id` または `customer_id` が `NULL` の行は NULL の非等価性により
-    デデュープキーとして機能しない。パース処理側は `product_id` が確定した場合のみ
-    このUNIQUE制約に依拠したINSERTを行うことで運用上回避している
+    デデュープキーとして機能しない。`product_id` が NULL の行の重複排除は
+    `orders_dedupe_key_unmatched_product`（Issue #296、後述）で別途対応した
 - 新規テーブル `order_parse_log`: `id, tenant_id, order_attachment_id (FK), reason, detail (jsonb), created_at`
   - `reason`: `no_product_match` / `downgrade_skipped` / `draft_conflict_skipped`
     （Issue #249時点の `duplicate_skipped` は Issue #252 で上記2種に置き換え）
@@ -245,6 +286,13 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 | `confirmed`  | 確定/スケジュール済（`/orders/{id}/confirm` でのみ遷移） |
 | `completed`  | 完了                 |
 | `canceled`   | キャンセル           |
+
+`supabase/migrations/20260712000000_add_orders_dedupe_key_unmatched_product.sql`（Issue #296）:
+
+- 部分UNIQUE制約 `orders_dedupe_key_unmatched_product`（`product_id IS NULL` の行専用）を追加
+- `upsert_order_by_dedupe_key` に `p_product_id IS NULL` の分岐を追加
+  （既存の `orders.product_id`/`orders.extracted_product_name` カラムは
+  `20260618000000_gmail_intake_v2.sql` で追加済みのため変更なし）
 
 ### `orders.customer_certainty` の全定義（顧客側の確度、参考情報）
 
@@ -324,6 +372,28 @@ Issue #280 での変更（1ソース:N受注モデル・メール本文/非PDF�
   `multi_order_suspected`（および従前抜けていた `customer_draft_created`）の
   型・表示ラベルを追加
 
+Issue #296 での変更（製品未マッチ明細のNULL product_id下書き起票）:
+
+- `supabase/migrations/20260712000000_add_orders_dedupe_key_unmatched_product.sql`:
+  部分UNIQUE制約 `orders_dedupe_key_unmatched_product` の追加、
+  `upsert_order_by_dedupe_key` への `p_product_id IS NULL` 分岐追加
+- `backend/app/services/pdf_order_parsing_service.py`: `_process_line_item` の
+  no-match時early returnを撤廃し、`product_id=NULL`・`extracted_product_name`
+  （TRIM済み）でorder作成処理に合流させる。`_mark_superseded_orders` は
+  `product_id is not None` の場合のみ呼ぶよう変更
+- `backend/app/routers/transaction/orders.py`: `/orders/{order_id}/simulate`・
+  `/orders/{order_id}/confirm` に `product_id IS NULL` のNoneガードを追加し
+  `422 {"error": "product_unmatched"}` を返す
+- `frontend/src/types/order.ts`: `Order.product_id` を `number | null` に、
+  `extracted_product_name` フィールドを追加
+- `frontend/src/lib/order-utils.ts`: `getProductName` に
+  `extracted_product_name` フォールバック引数を追加
+- `frontend/src/app/orders/[id]/page.tsx`: `blocksSimulation` に
+  `product_id === null` の判定を追加。製品未識別時の警告メッセージ＋
+  編集ダイアログへの導線、`product_unmatched` エラーコードのtoast表示を追加
+- 注文一覧・削除確認・一括シミュレーション確認ダイアログの `getProductName`
+  呼び出しに `extracted_product_name` を渡すよう更新
+
 ---
 
 ## 環境変数
@@ -349,7 +419,8 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
       実Supabaseを用いたe2e検証を実施）
 - [x] `certainty` に応じて `orders.customer_certainty` が `confirmed`/`forecast`/`forecast_tentative`
       に正しくセットされる。`orders.status` は常に `draft` で作成される（Issue #267）
-- [x] 品番・品名の照合失敗時はorderを生成せず、`order_parse_log` に記録される
+- [x] 品番・品名の照合失敗時も `order_parse_log` に記録した上で
+      `product_id=NULL` の下書きが起票され、明細がドロップされない（Issue #296）
 - [x] 暗号化PDF・画像PDF（テキスト抽出不可）でもクラッシュせず `parse_status` が適切に更新される
 - [x] 重複明細（UNIQUE制約抵触）はスキップされ `order_parse_log` に記録される
 - [x] 生成された各orderから、対応する添付PDFが注文詳細画面からダウンロードできる
@@ -379,6 +450,15 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
       メールもPDF添付と同じステージング経路に統一、Issue #280）
 - [x] 手動分割UIにより、誤って1件にマージされた下書きから、同じ `source_attachment_id`
       を参照するN件の下書きを生成できる（Issue #280 Phase3）
+- [x] 製品マッチングが失敗した明細について、`product_id=NULL`・
+      `extracted_product_name`付きで下書きが起票される（Issue #296）
+- [x] `product_id=NULL` の明細を含む注文詳細画面・注文一覧がエラーにならず表示され、
+      製品名部分は `extracted_product_name` をフォールバック表示する（Issue #296）
+- [x] `product_id=NULL` の明細に対してシミュレーション実行ボタンが無効化される
+      （UXレイヤー、既存の `has_no_routings` ロジックを活用。Issue #296）
+- [x] `product_id=NULL` の明細について、同一
+      `(tenant_id, customer_id, deadline_date, extracted_product_name)` の内容が
+      再度パースされても重複下書きが増殖しない（Issue #296）
 
 ### 手動分割UI（Issue #280 Phase3）
 
@@ -445,6 +525,14 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
   N件の下書きを生成する機能）は後続Issueで対応（Issue #280スコープ外）
 - 複数受注疑い検知の閾値・ヒューリスティックの精緻化（数量異常値以外の条件追加等）は
   本番データの精度を見ながら別途調整（Issue #280スコープ外）
+- 製品候補のサジェスト表示・専用レビューUIの新規作成、未マッチ製品名から
+  productsマスタへの新規自動登録、複数候補が僅差で並ぶ「曖昧マッチ」の扱い
+  （`product_candidates`カラムの活用含む）は別Issue（Issue #296スコープ外）
+- `extracted_product_name` の高度な正規化（全角/半角統一・NFKC正規化・記号除去等）。
+  `TRIM()` のみ実施し、それ以外の表記ゆれによる取りこぼしは許容する（Issue #296スコープ外）
+- 重複下書きが発生してしまった場合の手動マージUI（Issue #296スコープ外）
+- `edit-order-dialog.tsx` への抽出済み生テキストのヒント表示強化。現状のUIでも
+  `ProductSelector` による製品の選び直し自体は可能（Issue #296スコープ外）
 
 ---
 
@@ -463,6 +551,12 @@ integration tier で検証する
 直接呼び出して `action`（inserted/updated/skipped_downgrade/skipped_draft_conflict/
 skipped_no_change）と実DB上の状態を検証したのち、テナントごと削除してteardownする。
 
+`TestUpsertOrderByDedupeKeyUnmatchedProduct`（Issue #296）は `product_id=NULL` の
+明細に対する `orders_dedupe_key_unmatched_product` 経由の重複判定
+（同一`extracted_product_name`+`deadline_date`でのdedupe、TRIM()による表記ゆれ吸収、
+`extracted_product_name`がNULLの場合は重複判定せず常に挿入、certainty優先度判定の
+再利用）を検証する。
+
 ---
 
 ## E2Eテスト
@@ -477,8 +571,9 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 - 配線・データフロー: ステージング行 → テキスト抽出 → Claude抽出 → 製品照合 → order生成 →
   order_attachments紐付け、という一連の処理が完走し `parse_status` が `success` になること
 - 抽出精度: 実在する製品については正しい数量・妥当な納期でorderが生成され、実在しない製品
-  （1文字違いの類似製品が製品マスタに存在するケース）は誤って別製品にマッチせず
-  `no_product_match` としてスキップされること
+  （1文字違いの類似製品が製品マスタに存在するケース）は誤って別製品にマッチせず、
+  `no_product_match` としてログ記録された上で `product_id=NULL` の下書きが
+  生成されること（Issue #296）
 
 テスト対象のPDF実体はfixtureとして使い回すため削除しない。生成された `orders` /
 ステージング行 / `order_parse_log` はテストごとに `run_id` で識別してteardownで削除する。

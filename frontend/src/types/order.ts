@@ -4,7 +4,8 @@
 export interface Order {
   id: number
   order_no: string | null
-  product_id: number
+  product_id: number | null
+  extracted_product_name?: string | null
   customer_id?: number
   quantity: number
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない

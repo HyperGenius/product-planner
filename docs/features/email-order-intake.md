@@ -283,7 +283,12 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
   [pdf-order-parsing.md](pdf-order-parsing.md)（Issue #267）を参照
 - 注文番号は解析できた場合のみ設定し、不明な場合は NULL のまま起票する
 - `source_raw` にはメール本文全体を保存するため、個人情報の取り扱いに注意すること
-- 製品マッチングで候補が複数ある場合、`product_candidates` に候補リストが保存され、`product_id` は NULL になる
+- 製品マッチングが失敗した場合（候補ゼロ、またはしきい値未満）、明細はドロップされず
+  `product_id=NULL`・`extracted_product_name`（抽出済み生テキスト、`TRIM()`のみ正規化）
+  付きで下書きが起票される（Issue #296）。詳細は [pdf-order-parsing.md](pdf-order-parsing.md)
+  を参照。なお `orders.product_candidates`（複数候補のjsonb保存）カラム自体は存在するが、
+  実際の自動起票パイプラインからは未使用（デモ用シードスクリプトのみが書き込む）で
+  あり、候補提示UIは本Issueのスコープ外として別Issueに切り出されている
 - 顧客が特定できない場合でも `customer_id` は必ず設定される（下書き顧客の自動作成）。
   詳細は [customer-draft-auto-create.md](customer-draft-auto-create.md) を参照
 - PDF添付メール経由で起票された注文は、PDF文面から抽出した顧客側の確度（確定/内示/内々示）
@@ -311,3 +316,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | `seed_scenario.py` の `order_number` 部分ユニークインデックス対応 | ✅ #286 |
 | 手動分割UI（`POST /orders/{id}/split`、詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #280 |
 | `gmail-poll` / `parse-order-pdfs` の高頻度スケジューリング（Supabase Edge Function + pg_cron、詳細は[supabase-pgcron-parse-order-pdfs.md](../infra/supabase-pgcron-parse-order-pdfs.md)） | ✅ #261 |
+| 製品未マッチ明細のNULL product_id下書き起票（詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #296 |

@@ -201,7 +201,7 @@ export default function Home() {
                     </span>
                   </div>
                   <p className="text-sm text-muted-foreground truncate">
-                    {getProductName(order.product_id, products)} × {order.quantity}
+                    {getProductName(order.product_id, products, order.extracted_product_name)} × {order.quantity}
                   </p>
                 </div>
                 <div className="text-right text-sm text-muted-foreground ml-4 shrink-0">

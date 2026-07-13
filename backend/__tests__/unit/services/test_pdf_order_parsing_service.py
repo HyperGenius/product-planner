@@ -313,10 +313,15 @@ class TestProcessLineItem:
         row.update(overrides)
         return row
 
-    def test_no_product_match_logs_and_skips(self):
+    def test_no_product_match_logs_and_creates_null_product_draft(self):
+        """製品マッチング失敗時も明細をドロップせず、product_id=NULLで下書きを
+        作成する（Issue #296）。ログ・通知は従来どおり記録した上で処理を継続する。"""
         mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 999, "action": "inserted"}]
+        )
         line = {
-            "product_name_raw": "謎の製品",
+            "product_name_raw": "  謎の製品  ",
             "product_number_raw": None,
             "quantity": 10,
             "delivery_date": "2026-08-01",
@@ -335,7 +340,7 @@ class TestProcessLineItem:
         ):
             created = _process_line_item(mock_db, self._staging_row(), line)
 
-        assert created is False
+        assert created is True
         insert_calls = mock_db.table().insert.call_args_list
         log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "no_product_match"
@@ -343,6 +348,11 @@ class TestProcessLineItem:
         notif_insert = insert_calls[1].args[0]
         assert notif_insert["notif_type"] == "no_product_match"
         assert notif_insert["source_table"] == "order_parse_log"
+
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] is None
+        # extracted_product_name は TRIM() のみ行い、それ以外の正規化はしない
+        assert rpc_params["p_extracted_product_name"] == "謎の製品"
 
     def test_falls_back_to_name_search_using_product_number_raw(self):
         """

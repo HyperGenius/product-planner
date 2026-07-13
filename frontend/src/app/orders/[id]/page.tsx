@@ -80,6 +80,14 @@ export default function OrderDetailPage() {
             onClick: () => router.push("/master/products"),
           },
         })
+      } else if (
+        error instanceof ApiError &&
+        error.status === 422 &&
+        error.errorCode === "product_unmatched"
+      ) {
+        toast.error("製品が未確定のため、シミュレーションを実行できません。", {
+          description: "編集から正しい製品を選択してください。",
+        })
       } else {
         toast.error("シミュレーションに失敗しました")
       }
@@ -130,10 +138,18 @@ export default function OrderDetailPage() {
 
   const isDraft = order.status === "draft"
   const canDelete = order.status === "draft" || order.status === "canceled"
-  const hasNoRouting = order.has_no_routings === true && !order.is_scheduled
+  // 自動起票で製品を識別できなかった明細（product_id === null）は、
+  // has_no_routings も併せて true になるため、工程未登録の警告と二重表示
+  // されないよう hasNoRouting/hasUnconfirmedRouting からは除外する
+  const hasUnmatchedProduct = order.product_id === null
+  const hasNoRouting =
+    order.has_no_routings === true && !order.is_scheduled && !hasUnmatchedProduct
   const hasUnconfirmedRouting =
-    order.has_unconfirmed_routings === true && !hasNoRouting && !order.is_scheduled
-  const blocksSimulation = hasNoRouting || hasUnconfirmedRouting
+    order.has_unconfirmed_routings === true &&
+    !hasNoRouting &&
+    !order.is_scheduled &&
+    !hasUnmatchedProduct
+  const blocksSimulation = hasUnmatchedProduct || hasNoRouting || hasUnconfirmedRouting
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -160,7 +176,7 @@ export default function OrderDetailPage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">製品</dt>
-                <dd>{getProductName(order.product_id, products)}</dd>
+                <dd>{getProductName(order.product_id, products, order.extracted_product_name)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">顧客</dt>
@@ -265,6 +281,22 @@ export default function OrderDetailPage() {
                   <Calculator className="mr-2 h-4 w-4" />
                   {simulateMutation.isPending ? "計算中..." : "シミュレーション実行"}
                 </Button>
+                {hasUnmatchedProduct && (
+                  <p className="text-xs text-muted-foreground">
+                    製品を自動識別できませんでした
+                    {order.extracted_product_name && (
+                      <>（抽出テキスト: 「{order.extracted_product_name}」）</>
+                    )}
+                    。{" "}
+                    <button
+                      type="button"
+                      onClick={handleOpenEditDialog}
+                      className="underline text-primary"
+                    >
+                      編集から正しい製品を選択してください。
+                    </button>
+                  </p>
+                )}
                 {hasNoRouting && (
                   <p className="text-xs text-muted-foreground">
                     工程が設定されていません。{" "}

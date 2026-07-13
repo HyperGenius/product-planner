@@ -8,8 +8,9 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
   - 配線・データフロー: ステージング行 → テキスト抽出 → Claude抽出 → 製品照合 →
     order生成 → order_attachments紐付け、という一連の処理が実際に完走すること
   - 抽出精度: 実在する製品については正しい数量・納期でorderが生成されること、
-    実在しない製品については誤って別製品にマッチせず no_product_match として
-    スキップされること（品番が1文字違いの類似製品が製品マスタに存在するケース）
+    実在しない製品については誤って別製品にマッチせず、no_product_match として
+    ログ記録した上で product_id=NULL の下書きとして order が生成されること
+    （品番が1文字違いの類似製品が製品マスタに存在するケース。Issue #296）
 
 事前準備:
   1. conftest.py の pdf_order_parsing_staging_row フィクスチャのドキュメント参照
@@ -156,6 +157,18 @@ class TestPdfOrderParsingFlow:
         ), (
             f"'{_MISSING_PRODUCT_NUMBER}' が no_product_match として "
             f"order_parse_log に記録されていません: {logs}"
+        )
+
+        # --- Issue #296: マッチ失敗した明細もドロップされず、
+        #     product_id=NULL・extracted_product_name付きの下書きが作成されること ---
+        unmatched_orders = [order for order in orders if order["product_id"] is None]
+        assert len(unmatched_orders) >= 1, (
+            f"'{_MISSING_PRODUCT_NUMBER}' に対応する product_id=NULL のorderが"
+            f"生成されていません（ドロップされてしまっています）: {orders}"
+        )
+        assert any(order.get("extracted_product_name") for order in unmatched_orders), (
+            f"product_id=NULL のorderに抽出済み製品名が保存されていません: "
+            f"{unmatched_orders}"
         )
 
         # --- 生成された order の添付ファイルが既存エンドポイント経由で
