@@ -388,6 +388,8 @@ def simulate_schedule(
     order = order_repo.get_by_id(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("product_id") is None:
+        raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
 
     try:
         result = schedule_order(
@@ -431,6 +433,8 @@ def confirm_order(
     order = order_repo.get_by_id(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("product_id") is None:
+        raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
 
     try:
         # 1. 実際に保存 (dry_run=False)

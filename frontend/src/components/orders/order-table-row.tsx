@@ -105,7 +105,7 @@ export function OrderTableRow({
             )}
           </div>
         </TableCell>
-        <TableCell>{getProductName(order.product_id, products)}</TableCell>
+        <TableCell>{getProductName(order.product_id, products, order.extracted_product_name)}</TableCell>
         <TableCell>
           {order.customer_id == null ? (
             <Tooltip>

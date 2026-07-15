@@ -52,7 +52,7 @@ export function DeleteOrderDialog({
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">製品</span>
-                    <span>{getProductName(order.product_id, products)}</span>
+                    <span>{getProductName(order.product_id, products, order.extracted_product_name)}</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">顧客</span>

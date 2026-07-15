@@ -60,9 +60,17 @@ export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
 }
 
 /**
- * 製品IDから製品名を取得
+ * 製品IDから製品名を取得。productIdがnull（自動起票時に製品未マッチ）の場合は、
+ * 抽出済みの生テキスト（extractedProductName）があればそれをフォールバック表示する。
  */
-export function getProductName(productId: number, products?: Product[]): string {
+export function getProductName(
+  productId: number | null,
+  products?: Product[],
+  extractedProductName?: string | null
+): string {
+  if (productId == null) {
+    return extractedProductName ? `${extractedProductName}（製品未確定）` : "不明"
+  }
   const product = products?.find((p) => p.id === productId)
   if (!product) return "不明"
   return product.code ? `${product.code} - ${product.name}` : product.name

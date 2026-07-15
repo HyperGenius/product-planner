@@ -457,6 +457,183 @@ class TestUpsertOrderByDedupeKey:
         assert second["order_id"] != first["order_id"]
 
 
+def _upsert_unmatched(
+    admin_db,
+    tenant_id: str,
+    customer_id: int,
+    quantity: int,
+    deadline_date: str | None,
+    extracted_product_name: str | None,
+    certainty: str = "forecast",
+) -> dict[str, Any]:
+    """product_id=NULL（製品未マッチ）の明細を upsert する（Issue #296）。"""
+    result = admin_db.rpc(
+        "upsert_order_by_dedupe_key",
+        {
+            "p_tenant_id": tenant_id,
+            "p_customer_id": customer_id,
+            "p_product_id": None,
+            "p_quantity": quantity,
+            "p_deadline_date": deadline_date,
+            "p_customer_certainty": certainty,
+            "p_source_type": "email",
+            "p_source_raw": "integration-test upsert_order_by_dedupe_key (unmatched)",
+            "p_extracted_product_name": extracted_product_name,
+        },
+    ).execute()
+    rows = cast(list[dict[str, Any]], result.data or [])
+    assert len(rows) == 1
+    return rows[0]
+
+
+@pytest.mark.integration
+class TestUpsertOrderByDedupeKeyUnmatchedProduct:
+    """
+    product_id=NULL（製品未マッチ）の明細に対する重複排除 (Issue #296)。
+    extracted_product_name を鍵にした部分UNIQUE制約
+    (orders_dedupe_key_unmatched_product) 経由の重複判定を検証する。
+    """
+
+    def test_same_extracted_name_and_deadline_is_deduped(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品X",
+            certainty="forecast",
+        )
+        second = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品X",
+            certainty="forecast",
+        )
+
+        assert first["action"] == "inserted"
+        assert second["action"] == "skipped_no_change"
+        assert second["order_id"] == first["order_id"]
+
+    def test_leading_trailing_whitespace_is_trimmed_before_dedupe(
+        self, admin_db, dedupe_fixture
+    ):
+        """extracted_product_name はTRIM()のみ正規化する（全角/半角統一等は対象外）。"""
+        first = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品Y",
+            certainty="forecast",
+        )
+        second = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="  謎の製品Y  ",
+            certainty="forecast",
+        )
+
+        assert second["action"] == "skipped_no_change"
+        assert second["order_id"] == first["order_id"]
+
+    def test_different_extracted_name_creates_separate_order(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品A",
+        )
+        second = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品B",
+        )
+
+        assert second["action"] == "inserted"
+        assert second["order_id"] != first["order_id"]
+
+    def test_missing_extracted_name_always_inserts_without_dedupe(
+        self, admin_db, dedupe_fixture
+    ):
+        """extracted_product_nameがNULLの場合は重複判定できないため、
+        常に新規行として挿入される（取りこぼしを許容する）。"""
+        first = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name=None,
+        )
+        second = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name=None,
+        )
+
+        assert first["action"] == "inserted"
+        assert second["action"] == "inserted"
+        assert second["order_id"] != first["order_id"]
+
+    def test_certainty_upgrade_reuses_existing_priority_hierarchy(
+        self, admin_db, dedupe_fixture
+    ):
+        """product_id=NULLでも、certainty優先度による格上げ（forecast_tentative→
+        confirmed）が既存の判定ロジックと同様に働くこと。"""
+        first = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品Z",
+            certainty="forecast_tentative",
+        )
+        second = _upsert_unmatched(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            quantity=20,
+            deadline_date=_FUTURE_DEADLINE,
+            extracted_product_name="謎の製品Z",
+            certainty="confirmed",
+        )
+
+        assert second["action"] == "updated"
+        assert second["order_id"] == first["order_id"]
+
+        order = (
+            admin_db.table("orders")
+            .select("customer_certainty, quantity")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["customer_certainty"] == "confirmed"
+        assert order["quantity"] == 20
+
+
 @pytest.mark.integration
 class TestMarkSupersededOrders:
     """
