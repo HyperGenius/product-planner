@@ -83,6 +83,18 @@ export default function OrderDetailPage() {
       } else if (
         error instanceof ApiError &&
         error.status === 422 &&
+        error.errorCode === "routing_unconfirmed"
+      ) {
+        toast.error("未確定の工程があるため、シミュレーションを実行できません。", {
+          description: "製品マスタから工程を確定してください。",
+          action: {
+            label: "工程を確定する",
+            onClick: () => router.push("/master/products"),
+          },
+        })
+      } else if (
+        error instanceof ApiError &&
+        error.status === 422 &&
         error.errorCode === "product_unmatched"
       ) {
         toast.error("製品が未確定のため、シミュレーションを実行できません。", {

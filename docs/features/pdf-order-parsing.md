@@ -383,7 +383,9 @@ Issue #296 での変更（製品未マッチ明細のNULL product_id下書き起
   `product_id is not None` の場合のみ呼ぶよう変更
 - `backend/app/routers/transaction/orders.py`: `/orders/{order_id}/simulate`・
   `/orders/{order_id}/confirm` に `product_id IS NULL` のNoneガードを追加し
-  `422 {"error": "product_unmatched"}` を返す
+  `422`（FastAPIの`HTTPException`によりレスポンスボディは
+  `{"detail": {"error": "product_unmatched"}}`。フロントの`ApiError.errorCode`は
+  `detail.error`を参照する）を返す
 - `frontend/src/types/order.ts`: `Order.product_id` を `number | null` に、
   `extracted_product_name` フィールドを追加
 - `frontend/src/lib/order-utils.ts`: `getProductName` に
