@@ -206,7 +206,7 @@ class TestProcessMessagePdfStaging:
                 ],
             ),
             patch(
-                "app.services.gmail_service.extract_sender_email",
+                "app.services.gmail_service.extract_effective_sender_email",
                 return_value="customer@example.com",
             ),
             patch(
@@ -262,7 +262,10 @@ class TestProcessMessagePdfStaging:
                     }
                 ],
             ),
-            patch("app.services.gmail_service.extract_sender_email", return_value=None),
+            patch(
+                "app.services.gmail_service.extract_effective_sender_email",
+                return_value=None,
+            ),
             patch(
                 "app.services.gmail_service.resolve_or_create_customer",
                 return_value=(7, True),
@@ -317,7 +320,7 @@ class TestProcessMessagePdfStaging:
                 return_value=[],
             ),
             patch(
-                "app.services.gmail_service.extract_sender_email",
+                "app.services.gmail_service.extract_effective_sender_email",
                 return_value="spam@example.com",
             ),
             patch(

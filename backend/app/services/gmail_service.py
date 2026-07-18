@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import upload_staged_attachment
 from app.services.customer_matching_service import (
-    extract_sender_email,
+    extract_effective_sender_email,
     resolve_or_create_customer,
 )
 from app.services.notification_service import create_notification
@@ -206,7 +206,7 @@ def _process_message(
         staged_attachment = pdf_attachment or (attachments[0] if attachments else None)
 
         # 5. 顧客マッチング（メールの受注可否に関わらず、ソース単位で1回解決する）
-        sender_email = extract_sender_email(body)
+        sender_email = extract_effective_sender_email(body)
         customer_id, created_draft = resolve_or_create_customer(
             db, tenant_id, body, msg.get("internalDate")
         )

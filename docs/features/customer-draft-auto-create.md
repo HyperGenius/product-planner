@@ -164,6 +164,53 @@ def resolve_or_create_customer(
 
 ---
 
+## ヘッダー行が本文化されない「直接転送」への対応（Issue #298）
+
+Issue #265 の前提「ユーザが intake 用 Gmail アドレスへ**転送する**」は、メーラーの転送機能
+（`Forward`）を使うことを想定しており、その場合 `From:`/`差出人:` ヘッダー行がテキストとして
+本文に残る。運用調整により、宛先を差し替えて直接転送する「直接転送」形式に変更したところ、
+このヘッダー行自体が本文に含まれなくなり、`extract_sender_email_candidates` が常に空集合を
+返すようになった。結果、署名ブロックからの会社名抽出（`extract_customer_name`）も一切起動
+されず、`不明な顧客 (YYYY-MM-DD HH:MM)` の下書きになってしまっていた。
+
+### 修正内容 (`customer_matching_service.py`)
+
+- `extract_body_email_candidates(body)` を追加。ヘッダー行の有無に関わらず、本文全体から
+  メールアドレス（`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`）を出現順・重複排除で
+  抽出する
+- `resolve_or_create_customer` は `extract_sender_email_candidates(body)`（ヘッダー行ベース）
+  が空集合の場合のみ、`extract_body_email_candidates(body)` にフォールバックする。以降の
+  積集合判定・`extract_customer_name` による署名ブロック抽出ロジックは変更なし（抽出元の
+  候補集合が変わるだけ）
+- `extract_effective_sender_email(body)` を追加し、`resolve_or_create_customer` と同じ優先順位
+  （ヘッダー行 → 本文全体）で解決したメールアドレスを返す。`gmail_service.py` の
+  `customer_draft_created` 通知payload用の `sender_email` はこちらに置き換えた
+  （従来の `extract_sender_email` はヘッダー行のみを見るため、直接転送メールでは常に `None`
+  になり通知内容が不正確だった）
+
+### 前提の更新
+
+- ヘッダー行（`From:`/`差出人:`）は「あれば優先して使う」候補源の一つに格下げし、
+  必須の前提ではなくなった。本文中に署名ブロック（罫線区切り＋会社名キーワード＋
+  メールアドレス）が含まれていれば、転送方式に関わらず顧客特定できる
+- 本文中に複数の署名ブロックが存在する場合（例: 転送元の担当者の署名＋実際の顧客の署名）は、
+  従来のヘッダー候補と同様「最後に出現したメールアドレス」を採用する。これは実例
+  （社内担当者宛の文面が先頭、顧客の署名ブロックが末尾）で正しく動作することを確認済みだが、
+  本文の構成によっては先頭のブロックが実際の顧客になるケースもありうるため、
+  誤マッチ時に手動修正できる下書き運用（本ドキュメント本体の仕組み）に引き続き依存する
+
+### 受け入れ条件
+
+- [x] `From:`/`差出人:` ヘッダー行が本文中に存在しない「直接転送」形式のメールでも、
+      署名ブロックから顧客名（会社名）を抽出できること
+- [x] 既存のヘッダーあり転送メールの挙動（Issue #265）が変わらないこと
+- [x] 既存のテストをパスし、新規ロジックのユニットテストを追加すること
+      (`__tests__/unit/services/test_customer_matching_service.py`,
+      `__tests__/unit/services/test_gmail_service.py`)
+- [x] 型・Lint エラーが出ていないこと
+
+---
+
 ## フロントエンド設計
 
 - `frontend/src/types/customer.ts`: `Customer.status: "active" | "draft"` を追加
@@ -222,3 +269,4 @@ def resolve_or_create_customer(
 - Issue #262: `customer_id=NULL` によるbigint型エラー（本Issueで新規発生分はほぼ解消見込み）
 - Issue #259, #168: 関連Issue
 - Issue #265: 転送メールの顧客メールアドレス/顧客名抽出が正しく行われない不具合の修正
+- Issue #298: 直接転送メールでヘッダー行が本文化されず顧客特定に失敗する不具合の修正

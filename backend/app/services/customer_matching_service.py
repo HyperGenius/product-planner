@@ -15,6 +15,13 @@ _FORWARDED_EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# メールアドレス全般にマッチする正規表現（ヘッダー行に依存しないフォールバック抽出用）。
+# 「直接転送」形式などヘッダー行自体が本文に残らない場合、署名欄のメールアドレスを
+# 直接検出する。
+_ANY_EMAIL_RE = re.compile(
+    r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
+)
+
 # 日本のビジネスメール署名でよく使われる罫線区切り（"---" 等）
 _SIGNATURE_SEPARATOR_RE = re.compile(r"^[-=_ー―−‐]{5,}$")
 _COMPANY_KEYWORDS_RE = re.compile(r"(株式会社|有限会社|合同会社|合資会社|㈱|㈲)")
@@ -42,6 +49,35 @@ def extract_sender_email(body: str) -> str | None:
     # 候補が複数ある場合、一番奥（最初にメールを書いた本人）が実際の顧客であることが
     # 多いため、最後に出現したものを採用する。
     candidates = extract_sender_email_candidates(body)
+    return candidates[-1] if candidates else None
+
+
+def extract_body_email_candidates(body: str) -> list[str]:
+    """本文全体に出現するメールアドレスを出現順・重複排除で返す。
+
+    メーラーの「転送」機能を介さず直接転送された場合など、"From:"/"差出人:" と
+    いったヘッダー行自体が本文にテキスト化されないケースがある。その場合の
+    フォールバックとして、署名欄などに書かれたメールアドレスを直接検出する。
+    """
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for m in _ANY_EMAIL_RE.finditer(body):
+        email = m.group(0)
+        if email not in seen:
+            seen.add(email)
+            candidates.append(email)
+    return candidates
+
+
+def extract_effective_sender_email(body: str) -> str | None:
+    """ヘッダー行から抽出を試み、見つからなければ本文全体から抽出する。
+
+    `resolve_or_create_customer` が実際に顧客特定に使う候補と同じ優先順位
+    （ヘッダー行 → 本文全体）で解決した結果を、通知payload等の表示用に返す。
+    """
+    candidates = extract_sender_email_candidates(body) or extract_body_email_candidates(
+        body
+    )
     return candidates[-1] if candidates else None
 
 
@@ -167,11 +203,15 @@ def resolve_or_create_customer(
       候補集合のうち「最後に出現したもの」1件に絞り込み、メールアドレス単体の
       検索/下書き作成にフォールバックする（0件の場合のみ署名ブロックから
       customer_name を抽出し、下書きのnameに使う）
+    - "From:"/"差出人:" ヘッダー行が本文に存在しない場合（直接転送等）は、
+      本文全体からメールアドレスを検出するフォールバックを使う
 
     Returns: (customer_id, 新規に下書き作成したかどうか)
     """
     table = SupabaseTableName.CUSTOMERS.value
     candidates = extract_sender_email_candidates(body)
+    if not candidates:
+        candidates = extract_body_email_candidates(body)
 
     if candidates:
         result = (

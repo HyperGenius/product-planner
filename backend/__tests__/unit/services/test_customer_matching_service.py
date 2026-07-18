@@ -2,7 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from app.services.customer_matching_service import (
+    extract_body_email_candidates,
     extract_customer_name,
+    extract_effective_sender_email,
     extract_sender_email,
     extract_sender_email_candidates,
     resolve_or_create_customer,
@@ -58,6 +60,56 @@ class TestExtractSenderEmail:
             "Sent: ...\n"
         )
         assert extract_sender_email(body) == "original_sender@customer.example.com"
+
+
+@pytest.mark.unit
+class TestExtractBodyEmailCandidates:
+    # メーラーの転送機能を介さず直接転送された場合の本文例（Issue #298）。
+    # "From:"/"差出人:" ヘッダー行が存在しないため、署名欄のメールアドレスの
+    # みが手がかりになる。
+    _DIRECT_FORWARD_BODY = """\
+カブトギ工業
+兜木社長
+
+いつもお世話になっております。
+
+
+8月度(8/3分)の63Cの注文書を送付致します。
+ご対応の程お願い致します。
+
+---------------------------------------------------
+株式会社 飯野製作所
+購買課　　岡部宏美
+
+〒329-1574
+栃木県矢板市乙畑1855番地
+TEL：0287-48-2221
+FAX：0287-48-2223
+e-mail: hiromi_okabe@iinoseisakusho.co.jp<mailto:hiromi_okabe@iinoseisakusho.co.jp>
+---------------------------------------------------
+"""
+
+    def test_extracts_email_without_header_line(self):
+        assert extract_body_email_candidates(self._DIRECT_FORWARD_BODY) == [
+            "hiromi_okabe@iinoseisakusho.co.jp"
+        ]
+
+    def test_returns_empty_list_when_no_email_present(self):
+        assert extract_body_email_candidates("こんにちは、注文をお願いします。") == []
+
+
+@pytest.mark.unit
+class TestExtractEffectiveSenderEmail:
+    def test_prefers_header_email_when_present(self):
+        body = "From: taro@example.com\n本文\ncontact@signature.example.com\n"
+        assert extract_effective_sender_email(body) == "taro@example.com"
+
+    def test_falls_back_to_body_email_when_no_header(self):
+        body = "本文中に署名 contact@signature.example.com があるのみ"
+        assert extract_effective_sender_email(body) == "contact@signature.example.com"
+
+    def test_returns_none_when_no_email_anywhere(self):
+        assert extract_effective_sender_email("メールアドレスなし") is None
 
 
 @pytest.mark.unit
@@ -170,6 +222,47 @@ class TestResolveOrCreateCustomer:
         assert customer_id == 6
         assert created_draft is True
         inserted_row = mock_db.table().insert.call_args.args[0]
+        assert inserted_row["name"] == "株式会社 飯野製作所 岡部宏美"
+
+    def test_direct_forward_without_header_uses_body_signature_name_hint(self):
+        # Issue #298: 直接転送形式ではヘッダー行が本文化されないため、本文全体
+        # からのフォールバック抽出で署名ブロックの会社名を使えることを確認する。
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(data=[])
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 7}])
+        body = (
+            "カブトギ工業\n"
+            "兜木社長\n"
+            "\n"
+            "いつもお世話になっております。\n"
+            "\n"
+            "8月度(8/3分)の63Cの注文書を送付致します。\n"
+            "ご対応の程お願い致します。\n"
+            "\n"
+            "---------------------------------------------------\n"
+            "株式会社 飯野製作所\n"
+            "購買課　　岡部宏美\n"
+            "\n"
+            "〒329-1574\n"
+            "栃木県矢板市乙畑1855番地\n"
+            "TEL：0287-48-2221\n"
+            "FAX：0287-48-2223\n"
+            "e-mail: hiromi_okabe@iinoseisakusho.co.jp"
+            "<mailto:hiromi_okabe@iinoseisakusho.co.jp>\n"
+            "---------------------------------------------------\n"
+        )
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db, "tenant-1", body
+        )
+
+        assert customer_id == 7
+        assert created_draft is True
+        inserted_row = mock_db.table().insert.call_args.args[0]
+        assert inserted_row["email"] == "hiromi_okabe@iinoseisakusho.co.jp"
         assert inserted_row["name"] == "株式会社 飯野製作所 岡部宏美"
 
     def test_ambiguous_candidate_intersection_falls_back_to_last_candidate(self):
