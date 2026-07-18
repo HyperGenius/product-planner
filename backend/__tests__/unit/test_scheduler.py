@@ -280,10 +280,22 @@ class TestScheduleOrder:
             {"equipment_id": 1}
         ]
 
-        # 設備の最終終了時刻を今日の 16:00 (JST) に設定
-        # 2時間の作業を開始すると18:00になるため、2つのスケジュールに分割されるべき
-        now = datetime.now(tz=JST)
-        mock_schedule_repo.get_last_end_time.return_value = now.replace(
+        # 設備の最終終了時刻を「平日の16:00 (JST)」に設定する。
+        # 2時間の作業を開始すると18:00になるため、2つのスケジュールに分割されるべき。
+        #
+        # 実行時刻の datetime.now(tz=JST) は使わず、固定の平日日付
+        # （2099-01-05は月曜日）を基準にする。理由は2つ:
+        # 1. schedule_order は start_time 省略時に datetime.now(JST)
+        #    （テスト実行時刻そのもの）にフォールバックする。get_last_end_time
+        #    （今日16:00固定）より後ろの時刻に実行されると
+        #    max(last_end, current_process_start) が current_process_start 側を
+        #    採用してしまい、実行タイミング次第で結果が変わっていた
+        # 2. デフォルトのカレンダー設定は土日を休日扱いするため、
+        #    「今日」が土日にあたるテスト実行日には last_end 自体が休日となり、
+        #    分割されずに翌営業日1件だけの結果になっていた
+        # 固定の平日日付・時刻を使うことで、いつテストを実行しても結果が変わらない。
+        base_date = datetime(2099, 1, 5, tzinfo=JST)  # 月曜日
+        mock_schedule_repo.get_last_end_time.return_value = base_date.replace(
             hour=16, minute=0, second=0, microsecond=0
         )
         mock_schedule_repo.create.return_value = None
@@ -296,6 +308,7 @@ class TestScheduleOrder:
             product_repo=mock_product_repo,
             schedule_repo=mock_schedule_repo,
             tenant_id="test-tenant-id",
+            start_time=base_date.replace(hour=8, minute=0, second=0, microsecond=0),
         )
 
         # 検証：2つのスケジュールに分割される
