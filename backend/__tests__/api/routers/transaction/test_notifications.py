@@ -31,8 +31,11 @@ class TestNotificationsRouter:
 
     @pytest.fixture(autouse=True)
     def override_dependency(self):
-        yield
         app.dependency_overrides = {}
+        try:
+            yield
+        finally:
+            app.dependency_overrides = {}
 
     def test_get_notifications_resolves_link_urls_without_n_plus_one(self):
         notification_rows = [
