@@ -87,6 +87,32 @@ class TestParsePendingOrderPdfs:
             c.args[0].get("notif_type") == "failed_encrypted" for c in insert_calls
         )
 
+    def test_missing_customer_id_is_treated_as_error_not_silent_null(self):
+        """resolve_or_create_customer は常に customer_id を解決するはずなので、
+        ステージング行に customer_id が無いのは不整合。customer_id=NULL の
+        受注を静かに作らず、エラーとしてカウントされること（PRレビュー指摘対応）。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[self._staging_row(customer_id=None)]
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(
+                    text=None, failure_reason="failed_encrypted"
+                ),
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 0, "orders_created": 0, "errors": 1}
+        mock_db.rpc.assert_not_called()
+
     def test_pdf_with_no_order_lines_falls_back_to_body_extraction(self):
         """PDFの内容が注文と無関係で明細が0件の場合、メール本文から抽出した
         line_itemsを使ってorderが作成されること（Issue #278/#280）。"""

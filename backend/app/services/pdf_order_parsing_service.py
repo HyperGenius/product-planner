@@ -161,6 +161,22 @@ def _process_email_body(db: Client, row: dict[str, Any]) -> int:
     return created_count
 
 
+def _require_customer_id(staging_row: dict[str, Any], attachment_id: str) -> int:
+    """
+    staging_row.customer_id を取得する。resolve_or_create_customer は必ず
+    customer_id を解決する（顧客未特定時も"不明な顧客"下書きを作成する）ため、
+    ここで欠落している場合はステージング行自体の不整合（想定外の経路での
+    直接INSERT等）であり、customer_id=NULL の受注を静かに作らず早期に検知する。
+    """
+    customer_id = staging_row.get("customer_id")
+    if customer_id is None:
+        raise ValueError(
+            f"staging row {attachment_id} has no customer_id; "
+            "resolve_or_create_customer should have set it"
+        )
+    return cast(int, customer_id)
+
+
 def _process_unreadable_pdf(
     db: Client, staging_row: dict[str, Any], failure_reason: str
 ) -> int:
@@ -174,12 +190,13 @@ def _process_unreadable_pdf(
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
+    customer_id = _require_customer_id(staging_row, attachment_id)
 
     rpc_result = db.rpc(
         "upsert_order_by_dedupe_key",
         {
             "p_tenant_id": tenant_id,
-            "p_customer_id": staging_row.get("customer_id"),
+            "p_customer_id": customer_id,
             "p_product_id": None,
             "p_quantity": None,
             "p_deadline_date": None,
@@ -300,6 +317,7 @@ def _process_line_item(
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
+    customer_id = _require_customer_id(staging_row, attachment_id)
     product_number_raw = line.get("product_number_raw")
     product_name_raw = line.get("product_name_raw")
 
@@ -363,7 +381,7 @@ def _process_line_item(
         "upsert_order_by_dedupe_key",
         {
             "p_tenant_id": tenant_id,
-            "p_customer_id": staging_row.get("customer_id"),
+            "p_customer_id": customer_id,
             "p_product_id": product_id,
             "p_quantity": quantity,
             "p_deadline_date": deadline_date,
