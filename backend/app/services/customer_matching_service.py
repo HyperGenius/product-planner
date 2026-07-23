@@ -1,8 +1,9 @@
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
+from app.utils.calendar import JST
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -128,11 +129,15 @@ def extract_customer_name(body: str, email: str) -> str | None:
 
 
 def _placeholder_customer_name(received_at: str | int | None) -> str:
-    """メールの受信日時（Gmail internalDate、epoch millis）から仮の顧客名を組み立てる。"""
-    dt = datetime.now()
+    """メールの受信日時（Gmail internalDate、epoch millis）から仮の顧客名を組み立てる。
+
+    実行ホストのタイムゾーンに関わらず、表示はJST（日本のユーザー向け）で
+    統一するため、UTCとして解釈した上でJSTへ変換する。
+    """
+    dt = datetime.now(JST)
     if received_at is not None:
         try:
-            dt = datetime.fromtimestamp(int(received_at) / 1000)
+            dt = datetime.fromtimestamp(int(received_at) / 1000, tz=UTC).astimezone(JST)
         except (ValueError, TypeError, OSError):
             pass
     return f"不明な顧客 ({dt.strftime('%Y-%m-%d %H:%M')})"

@@ -37,8 +37,11 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
 ```
 1. order_attachments WHERE parse_status='pending' AND order_id IS NULL をポーリング
 2. Storage から PDF をダウンロードし、pdfplumber でテキスト抽出 (pdf_text_service.py)
-   - パスワード保護 (PPAP等) で開けない → parse_status='failed_encrypted'、orderは生成しない
-   - テキストが1文字も取れない (画像PDF等) → parse_status='failed_image'、orderは生成しない
+   - パスワード保護 (PPAP等) で開けない → `product_id`/`quantity`/`deadline_date` が
+     すべて `NULL` の下書き order を1件起票し、対応する `order_attachments` 行の
+     `parse_status='failed_encrypted'` とする（Issue #304、詳細後述）
+   - テキストが1文字も取れない (画像PDF等) → 同様に下書き order を1件起票し
+     `parse_status='failed_image'` とする（Issue #304）
 3. 抽出成功時、Claude tool-use (pdf_order_extraction_service.py) で明細行の配列を取得
    { product_name_raw, product_number_raw, quantity, delivery_date, certainty }
 4. 明細ごとに (pdf_order_parsing_service._process_line_item):
@@ -228,6 +231,32 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 - `product_id=NULL` の明細に対して `_mark_superseded_orders`（旧内示レコードの
   無効化）は呼ばない。どの製品の内示を無効化すべきか判断できないため
 
+### PDF自体が読めない場合の下書き起票（Issue #304）
+
+暗号化PDF・画像PDF等でテキスト抽出自体に失敗した場合、以前は `order_attachments` の
+`parse_status` を更新し通知するだけで `orders` 行を一切作成せず処理を打ち切っていた。
+ユーザーが内容を確認・手動修正する起点が無くなってしまうため、Issue #296（製品未マッチ
+時の `product_id=NULL` 下書き起票）と同じ設計方針をテキスト抽出失敗ケースにも適用した。
+
+- `pdf_order_parsing_service._process_unreadable_pdf()` が、`product_id`・`quantity`・
+  `deadline_date` をすべて `NULL`、`customer_certainty='forecast_tentative'` として
+  `upsert_order_by_dedupe_key` RPCを呼び、下書き order を1件起票する
+- `customer_id` はステージング行作成時（`gmail_service.py` → `resolve_or_create_customer`）
+  に既に解決済みの値をそのまま使う。送信元メールアドレスから顧客を特定できない場合も
+  「不明な顧客 (YYYY-MM-DD HH:MM)」のプレースホルダー顧客が自動作成されているため、
+  `customer_id` が `NULL` になることはない（[customer-draft-auto-create.md](customer-draft-auto-create.md)）
+- `product_id` と `deadline_date` が共に `NULL` の場合、`upsert_order_by_dedupe_key` は
+  重複判定に使える情報が無いため常に新規行としてINSERTする（Issue #296で追加された分岐、
+  `20260712000000_add_orders_dedupe_key_unmatched_product.sql`）。そのため複数の
+  解析失敗PDFが同一顧客から届いても、既存の下書きと誤って統合されることはない
+- 生成した order に対応する `order_attachments` 行（`order_id` 設定済み）を追加INSERTし、
+  `parse_status` にはテキスト抽出失敗理由（`failed_encrypted`/`failed_image`）をそのまま
+  引き継ぐ。ステージング行自体（`order_id IS NULL` の元の行）は処理完了として
+  `parse_status='success'` に更新する（Claude抽出まで到達したかどうかに関わらず、
+  パース処理自体は正常完了とみなす既存方針を踏襲）
+- `order_parse_log`・`notifications` への記録は従来どおり行う（`reason`/`notif_type` に
+  `failed_encrypted`/`failed_image` を使用。新しい値の追加やCHECK制約変更は不要）
+
 #### 重複起票防止（dedupe）のNULL product_id対応
 
 `orders_dedupe_key`（`product_id` を含む）はNULLの非等価性により機能しないため、
@@ -396,6 +425,13 @@ Issue #296 での変更（製品未マッチ明細のNULL product_id下書き起
 - 注文一覧・削除確認・一括シミュレーション確認ダイアログの `getProductName`
   呼び出しに `extracted_product_name` を渡すよう更新
 
+Issue #304 での変更（PDF解析失敗時の下書き起票）:
+
+- `backend/app/services/pdf_order_parsing_service.py`: テキスト抽出失敗時に
+  `order_attachments.parse_status` 更新・通知のみで打ち切っていた分岐を、
+  `_process_unreadable_pdf()` による下書き order 起票に変更。
+  `_parse_one()` は失敗時も最終的にステージング行を `parse_status='success'` に更新する
+
 ---
 
 ## 環境変数
@@ -423,7 +459,9 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
       に正しくセットされる。`orders.status` は常に `draft` で作成される（Issue #267）
 - [x] 品番・品名の照合失敗時も `order_parse_log` に記録した上で
       `product_id=NULL` の下書きが起票され、明細がドロップされない（Issue #296）
-- [x] 暗号化PDF・画像PDF（テキスト抽出不可）でもクラッシュせず `parse_status` が適切に更新される
+- [x] 暗号化PDF・画像PDF（テキスト抽出不可）でもクラッシュせず、判明している情報
+      （顧客等）だけで下書き order が1件起票され、対応する `order_attachments` 行の
+      `parse_status` に失敗理由が引き継がれる（Issue #304）
 - [x] 重複明細（UNIQUE制約抵触）はスキップされ `order_parse_log` に記録される
 - [x] 生成された各orderから、対応する添付PDFが注文詳細画面からダウンロードできる
       （既存の `/orders/{order_id}/attachments` エンドポイントを変更なしで再利用）
@@ -461,6 +499,9 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
 - [x] `product_id=NULL` の明細について、同一
       `(tenant_id, customer_id, deadline_date, extracted_product_name)` の内容が
       再度パースされても重複下書きが増殖しない（Issue #296）
+- [x] 暗号化PDF・画像PDFで解析自体に失敗した場合も、顧客IDのみで
+      `product_id`/`quantity`/`deadline_date` が `NULL` の下書き order が起票される
+      （Issue #304）
 
 ### 手動分割UI（Issue #280 Phase3）
 

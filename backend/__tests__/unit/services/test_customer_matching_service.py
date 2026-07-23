@@ -301,6 +301,20 @@ class TestResolveOrCreateCustomer:
         assert "email" not in inserted_row
         assert inserted_row["name"].startswith("不明な顧客 (")
 
+    def test_placeholder_name_uses_jst_not_utc(self):
+        """Gmail internalDate（UTC epoch millis）はJSTに変換した上で
+        プレースホルダー顧客名に埋め込むこと（表示がJSTのユーザー向けのため）。"""
+        mock_db = MagicMock()
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 6}])
+
+        # 1751511600000ms = 2025-07-03 03:00 UTC = 2025-07-03 12:00 JST
+        resolve_or_create_customer(
+            mock_db, "tenant-1", "こんにちは、注文をお願いします。", "1751511600000"
+        )
+
+        inserted_row = mock_db.table().insert.call_args.args[0]
+        assert inserted_row["name"] == "不明な顧客 (2025-07-03 12:00)"
+
     def test_no_candidates_and_no_received_at_falls_back_to_now(self):
         mock_db = MagicMock()
         mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 4}])
