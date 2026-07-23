@@ -16,7 +16,7 @@ from typing import Any, cast
 
 import pytest
 from app.main import app
-from app.routers.transaction.notifications import _resolve_link_url
+from app.routers.transaction.notifications import _resolve_link_urls
 from fastapi.testclient import TestClient
 from postgrest.exceptions import APIError
 
@@ -248,10 +248,23 @@ class TestNotificationsRls:
         assert row["read_at"] is None
 
 
+def _resolve_single(admin_db, tenant_id, notif_type, source_table, source_id):
+    """_resolve_link_urls（バッチ版）を単一通知向けに呼び出すテスト用ヘルパー"""
+    notif_id = "test-notif-id"
+    row = {
+        "id": notif_id,
+        "notif_type": notif_type,
+        "source_table": source_table,
+        "source_id": source_id,
+    }
+    return _resolve_link_urls(admin_db, tenant_id, [row]).get(notif_id)
+
+
 @pytest.mark.integration
 class TestResolveLinkUrlIdorFix:
     """
-    GET /notifications の `_resolve_link_url` (commit 868a45f) の回帰テスト。
+    GET /notifications の `_resolve_link_urls`（バッチ化前は `_resolve_link_url`、
+    commit 868a45f でIDOR修正）の回帰テスト。
     admin_client(Service Role Key, RLSバイパス) を使うため、notifications 行
     自身の tenant_id を必ず条件に含めないと、source_id 経由で他テナントの
     order_parse_log / order_attachments を参照できてしまう。
@@ -260,7 +273,7 @@ class TestResolveLinkUrlIdorFix:
     def test_order_attachments_source_in_other_tenant_resolves_to_none(
         self, admin_db, notif_tenants
     ):
-        link_url = _resolve_link_url(
+        link_url = _resolve_single(
             admin_db,
             notif_tenants["own_id"],
             "no_product_match",
@@ -272,7 +285,7 @@ class TestResolveLinkUrlIdorFix:
     def test_order_parse_log_source_in_other_tenant_resolves_to_none(
         self, admin_db, notif_tenants
     ):
-        link_url = _resolve_link_url(
+        link_url = _resolve_single(
             admin_db,
             notif_tenants["own_id"],
             "no_product_match",
@@ -287,16 +300,16 @@ class TestResolveLinkUrlIdorFix:
         """
         自テナントの場合は正しく storage_path が見つかり、署名付きURL生成まで
         到達すること。実際の署名付きURL生成（Storage側の可用性）はこのIDOR修正
-        とは無関係なので create_signed_url はスタブ化し、DBクエリ側の挙動
-        （tenant_id条件つきの照合が正しくヒットすること）だけを検証する。
+        とは無関係なので create_signed_urls（バッチ版）はスタブ化し、DBクエリ側の
+        挙動（tenant_id条件つきの照合が正しくヒットすること）だけを検証する。
         """
         monkeypatch.setattr(
-            "app.routers.transaction.notifications.create_signed_url",
-            lambda _client,
-            storage_path,
-            **_kwargs: f"https://signed.example/{storage_path}",
+            "app.routers.transaction.notifications.create_signed_urls",
+            lambda _client, storage_paths, **_kwargs: {
+                path: f"https://signed.example/{path}" for path in storage_paths
+            },
         )
-        link_url = _resolve_link_url(
+        link_url = _resolve_single(
             admin_db,
             notif_tenants["own_id"],
             "no_product_match",
@@ -308,7 +321,7 @@ class TestResolveLinkUrlIdorFix:
 
     def test_non_order_email_builds_gmail_link_without_query(self, admin_db):
         """non_order_email はDBを引かずsource_idからGmailリンクを直接組み立てる"""
-        link_url = _resolve_link_url(
+        link_url = _resolve_single(
             admin_db,
             "irrelevant-tenant-id",
             "non_order_email",
