@@ -34,10 +34,16 @@ class TestParsePendingOrderPdfs:
 
         assert result == {"processed": 0, "orders_created": 0, "errors": 0}
 
-    def test_encrypted_pdf_marks_failed_and_creates_no_order(self):
+    def test_encrypted_pdf_creates_draft_order_with_known_info_only(self):
+        """PDFが暗号化等で解析不能な場合でも、既知の情報（顧客等）だけで
+        product_id・quantity・deadline_dateがNULLの下書きorderを起票し、
+        ユーザーによる手動修正の起点とすること（Issue #304）。"""
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().execute.return_value = MagicMock(
             data=[self._staging_row()]
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 99, "action": "inserted"}]
         )
 
         with (
@@ -58,15 +64,28 @@ class TestParsePendingOrderPdfs:
             result = parse_pending_order_pdfs(mock_db)
 
         mock_extract_lines.assert_not_called()
-        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
 
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] is None
+        assert rpc_params["p_quantity"] is None
+        assert rpc_params["p_deadline_date"] is None
+        assert rpc_params["p_customer_id"] == 7
+        assert rpc_params["p_source_attachment_id"] == "att-1"
+
+        # ステージング行自体はorder紐付け済みとして "success" にする
         update_calls = mock_db.table().update.call_args_list
-        assert any(
-            c.args[0] == {"parse_status": "failed_encrypted"} for c in update_calls
-        )
+        assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
+        # 新規order紐付け用のorder_attachments行には解析失敗理由を引き継ぐ
+        attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert attachment_insert["order_id"] == 99
+        assert attachment_insert["parse_status"] == "failed_encrypted"
 
         insert_calls = mock_db.table().insert.call_args_list
-        assert any(c.args[0]["notif_type"] == "failed_encrypted" for c in insert_calls)
+        assert any(
+            c.args[0].get("notif_type") == "failed_encrypted" for c in insert_calls
+        )
 
     def test_pdf_with_no_order_lines_falls_back_to_body_extraction(self):
         """PDFの内容が注文と無関係で明細が0件の場合、メール本文から抽出した

@@ -60,8 +60,11 @@ def resolve_or_create_customer(
 - `email` があり新規作成する場合: `status='draft'` で作成する
 - `email` が無い場合: 常に新規の下書き顧客を作成する。`name` は
   `不明な顧客 (YYYY-MM-DD HH:MM)` 形式のプレースホルダーとし、`received_at`
-  （Gmailメッセージの `internalDate`、epoch millis）から算出する。取得できない・不正な値の場合は
-  処理実行時刻にフォールバックする
+  （Gmailメッセージの `internalDate`、epoch millis、UTC）から算出する。取得できない・不正な値の場合は
+  処理実行時刻にフォールバックする。実行ホストのタイムゾーンに関わらず表示はJSTで統一するため、
+  `received_at` はUTCとして解釈した上で `app.utils.calendar.JST` へ変換する
+  （変換前はUTCのままフォーマットしてしまい、日本のユーザーから見て9時間ずれて表示される
+  不具合があった）
 
 ### 呼び出し元 `gmail_service.py` の修正
 

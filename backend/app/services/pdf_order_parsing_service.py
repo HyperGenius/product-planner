@@ -86,22 +86,11 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         text_result = extract_text(content)
 
         if text_result.failure_reason is not None:
-            db.table(table).update({"parse_status": text_result.failure_reason}).eq(
+            created_count = _process_unreadable_pdf(db, row, text_result.failure_reason)
+            db.table(table).update({"parse_status": "success"}).eq(
                 "id", attachment_id
             ).execute()
-            create_notification(
-                db,
-                row["tenant_id"],
-                text_result.failure_reason,
-                SupabaseTableName.ORDER_ATTACHMENTS.value,
-                attachment_id,
-                {},
-            )
-            logger.info(
-                f"pdf_order_parsing: attachment {attachment_id} "
-                f"marked {text_result.failure_reason}"
-            )
-            return 0
+            return created_count
 
         line_items = extract_order_lines(cast(str, text_result.text))
         logger.info(
@@ -170,6 +159,78 @@ def _process_email_body(db: Client, row: dict[str, Any]) -> int:
         f"created {created_count} orders"
     )
     return created_count
+
+
+def _process_unreadable_pdf(
+    db: Client, staging_row: dict[str, Any], failure_reason: str
+) -> int:
+    """
+    PDFのテキストが抽出できず明細抽出自体を行えない場合でも、判明している情報
+    （顧客等。顧客未特定時は"不明な顧客"下書きに解決済み）だけで product_id・
+    quantity・deadline_date が NULL の下書き order を1件起票し、ユーザーが手動で
+    内容を補完する起点とする。product_id・deadline_date が共に NULL の行は
+    upsert_order_by_dedupe_key が常に新規行としてINSERTするため、他の解析失敗
+    ケースと誤って統合されることはない。
+    """
+    tenant_id = staging_row["tenant_id"]
+    attachment_id = staging_row["id"]
+
+    rpc_result = db.rpc(
+        "upsert_order_by_dedupe_key",
+        {
+            "p_tenant_id": tenant_id,
+            "p_customer_id": staging_row.get("customer_id"),
+            "p_product_id": None,
+            "p_quantity": None,
+            "p_deadline_date": None,
+            "p_customer_certainty": "forecast_tentative",
+            "p_source_type": "email",
+            "p_source_raw": staging_row.get("source_raw"),
+            "p_extracted_product_name": None,
+            "p_source_attachment_id": attachment_id,
+        },
+    ).execute()
+    rpc_rows = cast(list[dict[str, Any]], rpc_result.data or [])
+    action = rpc_rows[0]["action"] if rpc_rows else None
+
+    if action not in _KNOWN_UPSERT_ACTIONS:
+        raise RuntimeError(
+            f"upsert_order_by_dedupe_key returned unexpected result "
+            f"for attachment {attachment_id}: rows={rpc_rows}"
+        )
+
+    log_id = _log_parse_event(db, tenant_id, attachment_id, failure_reason, {})
+    create_notification(
+        db,
+        tenant_id,
+        failure_reason,
+        SupabaseTableName.ORDER_PARSE_LOG.value,
+        log_id,
+        {},
+    )
+
+    if action != "inserted":
+        # NULL/NULLの下書きは常に新規挿入される想定だが、念のため他アクションが
+        # 返った場合は order を紐付けずログ・通知のみで終える。
+        return 0
+
+    order_id = rpc_rows[0]["order_id"]
+    db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+        {
+            "order_id": order_id,
+            "tenant_id": tenant_id,
+            "storage_path": staging_row.get("storage_path", ""),
+            "original_filename": staging_row.get("original_filename", ""),
+            "content_type": staging_row.get("content_type"),
+            "size_bytes": staging_row.get("size_bytes"),
+            "parse_status": failure_reason,
+        }
+    ).execute()
+    logger.info(
+        f"pdf_order_parsing: order {order_id} inserted as draft from "
+        f"unreadable attachment {attachment_id} ({failure_reason})"
+    )
+    return 1
 
 
 def _check_multi_order_suspected(

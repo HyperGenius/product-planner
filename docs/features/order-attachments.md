@@ -105,6 +105,11 @@ RLS違反になっていた（`GET /orders/{id}/attachments` はこれを servic
 `notifications` は横断的な「担当者への通知」専用の薄いテーブルとして別途書き込まれる
 （詳細は [notifications.md](notifications.md) 参照）。
 
+`failed_encrypted` / `failed_image` は Issue #304 より、判明している情報だけの下書き
+`orders` 行にも紐づけられるようになった（`order_id` が設定された `order_attachments` 行が
+追加作成される）。詳細は [pdf-order-parsing.md](pdf-order-parsing.md) の
+「PDF自体が読めない場合の下書き起票（Issue #304）」を参照。
+
 ---
 
 ## バックエンド処理フロー
