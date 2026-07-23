@@ -105,6 +105,23 @@ RLSの `is_tenant_member(tenant_id)` は所属する全テナントの行を許�
 `x-tenant-id` ヘッダーの tenant_id で明示的に絞り込む（`PATCH /notifications/read`
 と同じ絞り込みに揃えている）。
 
+#### `link_url` 解決のバッチ化（Issue #302）
+
+当初の実装は `link_url` を通知1件ごとに解決しており、`order_parse_log` /
+`order_attachments` への問い合わせと署名付きURL生成APIを通知件数分だけ同期的に
+呼び出すN+1になっていた（通知が多いテナントで `GET /notifications` が15〜30秒かかり、
+単一ワーカー構成のRenderインスタンスがヘルスチェック不応答で再起動する事象につながった）。
+
+`_resolve_link_urls()`（`notifications.py`）で以下のようにバッチ化した。
+
+1. `order_parse_log` を参照すべき通知の `source_id` を集約し `.in_()` で1回だけ取得
+2. `order_attachments` を参照すべき `attachment_id` を集約し `.in_()` で1回だけ取得
+3. 署名付きURLは `attachment_service.create_signed_urls()`（storage3の
+   `create_signed_urls` バッチAPI）で `storage_path` をまとめて1回だけ生成
+
+テナント絞り込み（IDOR対策）は個別解決版と同様、各バッチクエリに
+`.eq("tenant_id", tenant_id)` を必ず含めている。
+
 ---
 
 ## フロントエンド設計

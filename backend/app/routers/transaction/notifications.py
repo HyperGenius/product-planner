@@ -11,7 +11,7 @@ from app.dependencies import (
 )
 from app.models.transaction.notification_schema import NotificationResponse
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
-from app.services.attachment_service import create_signed_url
+from app.services.attachment_service import create_signed_urls
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -30,15 +30,103 @@ _PARSE_LOG_NOTIF_TYPES = {
 }
 
 
-def _resolve_link_url(
+def _fetch_parse_log_attachment_ids(
+    admin_client: Client, tenant_id: str, parse_log_ids: set[str]
+) -> dict[str, str]:
+    """order_parse_log.id -> order_attachment_id の対応をまとめて取得する。"""
+    if not parse_log_ids:
+        return {}
+    log_result = (
+        admin_client.table(SupabaseTableName.ORDER_PARSE_LOG.value)
+        .select("id, order_attachment_id")
+        .in_("id", list(parse_log_ids))
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    return {
+        log_row["id"]: log_row["order_attachment_id"]
+        for log_row in cast(list[dict[str, Any]], log_result.data or [])
+        if log_row.get("order_attachment_id")
+    }
+
+
+def _fetch_attachment_storage_paths(
+    admin_client: Client, tenant_id: str, attachment_ids: set[str]
+) -> dict[str, str]:
+    """order_attachments.id -> storage_path の対応をまとめて取得する。"""
+    if not attachment_ids:
+        return {}
+    attachment_result = (
+        admin_client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+        .select("id, storage_path")
+        .in_("id", list(attachment_ids))
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    return {
+        att_row["id"]: att_row["storage_path"]
+        for att_row in cast(list[dict[str, Any]], attachment_result.data or [])
+        if att_row.get("storage_path")
+    }
+
+
+def _collect_parse_log_ids(
+    rows: list[dict[str, Any]], link_urls: dict[str, str | None]
+) -> set[str]:
+    """order_parse_log 経由で attachment_id を解決すべき通知の source_id を集める。
+    non_order_email はこの場でリンクを確定させ link_urls に書き込む。"""
+    parse_log_ids: set[str] = set()
+    for row in rows:
+        source_id = row.get("source_id")
+        if source_id is None:
+            continue
+        if row["notif_type"] == "non_order_email":
+            link_urls[row["id"]] = f"https://mail.google.com/mail/u/0/#all/{source_id}"
+        elif (
+            row["source_table"] == "order_parse_log"
+            and row["notif_type"] in _PARSE_LOG_NOTIF_TYPES
+        ):
+            parse_log_ids.add(source_id)
+    return parse_log_ids
+
+
+def _collect_row_attachment_ids(
+    rows: list[dict[str, Any]],
+    link_urls: dict[str, str | None],
+    parse_log_to_attachment: dict[str, str],
+) -> dict[str, str]:
+    """通知id -> attachment_id の対応を組み立てる（既にリンク確定済みの行は除外）。"""
+    row_attachment_id: dict[str, str] = {}
+    for row in rows:
+        if row["id"] in link_urls:
+            continue
+        source_id = row.get("source_id")
+        if source_id is None:
+            continue
+        attachment_id: str | None = None
+        if row["source_table"] == "order_attachments":
+            attachment_id = source_id
+        elif (
+            row["source_table"] == "order_parse_log"
+            and row["notif_type"] in _PARSE_LOG_NOTIF_TYPES
+        ):
+            attachment_id = parse_log_to_attachment.get(source_id)
+        if attachment_id is not None:
+            row_attachment_id[row["id"]] = attachment_id
+    return row_attachment_id
+
+
+def _resolve_link_urls(
     admin_client: Client,
     tenant_id: str,
-    notif_type: str,
-    source_table: str,
-    source_id: str | None,
-) -> str | None:
+    rows: list[dict[str, Any]],
+) -> dict[str, str | None]:
     """
-    通知の遷移先URLを解決する。取得できない場合は None。
+    通知一覧の遷移先URLをまとめて解決する。notification id をキーとした辞書を返す。
+
+    以前は通知1件ごとに order_parse_log / order_attachments への問い合わせと
+    署名付きURL生成APIを呼び出しており、通知件数に比例してレスポンスが遅延していた
+    （N+1）。ここではまとめて .in_() で取得し、署名付きURLもバッチ生成する。
 
     admin_client（Service Role Key、RLSバイパス）を使うため、参照先クエリには
     必ず notifications 行自身の tenant_id を条件に含める。source_id は notifications
@@ -46,48 +134,35 @@ def _resolve_link_url(
     order_attachments 行を参照でき、他テナントの添付ファイルの署名付きURLが
     生成できてしまう（IDOR）。
     """
-    if source_id is None:
-        return None
+    link_urls: dict[str, str | None] = {}
 
-    if notif_type == "non_order_email":
-        return f"https://mail.google.com/mail/u/0/#all/{source_id}"
-
-    attachment_id: str | None = None
-    if source_table == "order_attachments":
-        attachment_id = source_id
-    elif source_table == "order_parse_log" and notif_type in _PARSE_LOG_NOTIF_TYPES:
-        log_result = (
-            admin_client.table(SupabaseTableName.ORDER_PARSE_LOG.value)
-            .select("order_attachment_id")
-            .eq("id", source_id)
-            .eq("tenant_id", tenant_id)
-            .limit(1)
-            .execute()
-        )
-        log_rows = cast(list[dict[str, Any]], log_result.data or [])
-        attachment_id = log_rows[0]["order_attachment_id"] if log_rows else None
-
-    if attachment_id is None:
-        return None
-
-    attachment_result = (
-        admin_client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
-        .select("storage_path")
-        .eq("id", attachment_id)
-        .eq("tenant_id", tenant_id)
-        .limit(1)
-        .execute()
+    parse_log_ids = _collect_parse_log_ids(rows, link_urls)
+    parse_log_to_attachment = _fetch_parse_log_attachment_ids(
+        admin_client, tenant_id, parse_log_ids
     )
-    attachment_rows = cast(list[dict[str, Any]], attachment_result.data or [])
-    storage_path = attachment_rows[0].get("storage_path") if attachment_rows else None
-    if not storage_path:
-        return None
 
-    try:
-        return create_signed_url(admin_client, storage_path)
-    except Exception:
-        logger.warning(f"Failed to generate signed URL for {storage_path}")
-        return None
+    row_attachment_id = _collect_row_attachment_ids(
+        rows, link_urls, parse_log_to_attachment
+    )
+    attachment_to_storage_path = _fetch_attachment_storage_paths(
+        admin_client, tenant_id, set(row_attachment_id.values())
+    )
+
+    signed_url_map: dict[str, str] = {}
+    storage_paths = sorted(set(attachment_to_storage_path.values()))
+    if storage_paths:
+        try:
+            signed_url_map = create_signed_urls(admin_client, storage_paths)
+        except Exception:
+            logger.warning(
+                f"Failed to generate signed URLs for {len(storage_paths)} paths"
+            )
+
+    for notif_id, attachment_id in row_attachment_id.items():
+        storage_path = attachment_to_storage_path.get(attachment_id)
+        link_urls[notif_id] = signed_url_map.get(storage_path) if storage_path else None
+
+    return link_urls
 
 
 @notifications_router.get("", response_model=list[NotificationResponse])
@@ -112,6 +187,7 @@ def get_notifications(
         .execute()
     )
     rows = cast(list[dict[str, Any]], result.data or [])
+    link_urls = _resolve_link_urls(admin_client, tenant_id, rows)
     return [
         NotificationResponse(
             id=str(row["id"]),
@@ -121,13 +197,7 @@ def get_notifications(
             detail=row.get("detail"),
             read_at=row.get("read_at"),
             created_at=str(row["created_at"]),
-            link_url=_resolve_link_url(
-                admin_client,
-                row["tenant_id"],
-                row["notif_type"],
-                row["source_table"],
-                row.get("source_id"),
-            ),
+            link_url=link_urls.get(row["id"]),
         )
         for row in rows
     ]

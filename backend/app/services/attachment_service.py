@@ -55,3 +55,23 @@ def create_signed_url(
         expires_in=expires_in,
     )
     return str(response["signedURL"])
+
+
+def create_signed_urls(
+    admin_client: Client,
+    storage_paths: list[str],
+    expires_in: int = 3600,
+) -> dict[str, str]:
+    """複数ファイルの署名付きURLをまとめて生成する（N+1回避用）。
+    storage_path をキーとした辞書を返す。生成に失敗したパスは含まれない。"""
+    if not storage_paths:
+        return {}
+    responses = admin_client.storage.from_(_BUCKET).create_signed_urls(
+        paths=storage_paths,
+        expires_in=expires_in,
+    )
+    return {
+        response["path"]: response["signedURL"]
+        for response in responses
+        if response.get("path") and not response.get("error")
+    }
