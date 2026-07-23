@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { AlertTriangle, Circle, MoreHorizontal, Plus, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -119,6 +119,20 @@ export default function ProductsPage() {
     const offset = (page - 1) * PAGE_SIZE
     return filteredProducts.slice(offset, offset + PAGE_SIZE)
   }, [filteredProducts, page])
+
+  // 検索語・状態フィルタが変わったら1ページ目に戻す（初回マウント時は除く）
+  const isFirstFilterRender = useRef(true)
+  useEffect(() => {
+    if (isFirstFilterRender.current) {
+      isFirstFilterRender.current = false
+      return
+    }
+    if (page === 1) return
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", "1")
+    router.replace(`/master/products?${params.toString()}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, statusFilter])
 
   // highlight パラメータが指すページへ自動移動
   useEffect(() => {
