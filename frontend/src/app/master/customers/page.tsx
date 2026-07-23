@@ -185,16 +185,16 @@ export default function CustomersPage() {
         <div className="text-center py-10">読み込み中...</div>
       ) : (
         <div className="rounded-md border">
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[100px]">ID</TableHead>
-                <TableHead>顧客名</TableHead>
-                <TableHead>通称</TableHead>
-                <TableHead>代表者名</TableHead>
-                <TableHead>電話番号</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead className="w-[120px] text-right">操作</TableHead>
+                <TableHead className="w-[70px] whitespace-nowrap">ID</TableHead>
+                <TableHead className="w-[220px]">顧客名</TableHead>
+                <TableHead className="w-[140px] whitespace-nowrap">通称</TableHead>
+                <TableHead className="w-[140px] whitespace-nowrap">代表者名</TableHead>
+                <TableHead className="w-[140px] whitespace-nowrap">電話番号</TableHead>
+                <TableHead className="w-[220px]">Email</TableHead>
+                <TableHead className="w-[100px] whitespace-nowrap text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -204,16 +204,18 @@ export default function CustomersPage() {
                     <TableCell className="font-medium">{customer.id}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {customer.name}
+                        <span className="truncate">{customer.name}</span>
                         {customer.status === "draft" && (
-                          <Badge variant="secondary">下書き</Badge>
+                          <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+                            下書き
+                          </Badge>
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>{customer.alias || "-"}</TableCell>
-                    <TableCell>{customer.representative_name || "-"}</TableCell>
-                    <TableCell>{customer.phone_number || "-"}</TableCell>
-                    <TableCell>{customer.email || "-"}</TableCell>
+                    <TableCell className="truncate">{customer.alias || "-"}</TableCell>
+                    <TableCell className="truncate">{customer.representative_name || "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{customer.phone_number || "-"}</TableCell>
+                    <TableCell className="truncate">{customer.email || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
                         <Button
