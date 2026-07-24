@@ -16,8 +16,8 @@ interface SourceEmailPanelProps {
  * EditOrderDialog / SplitOrderDialog から共通利用する。
  */
 export function SourceEmailPanel({ order, className }: SourceEmailPanelProps) {
-  const { data: attachments } = useOrderAttachments(order.id)
-  const { data: customers } = useCustomers()
+  const { data: attachments, isLoading: attachmentsLoading } = useOrderAttachments(order.id)
+  const { data: customers, isLoading: customersLoading } = useCustomers()
   const { subject, body } = splitSubjectAndBody(order.source_raw)
 
   return (
@@ -37,7 +37,9 @@ export function SourceEmailPanel({ order, className }: SourceEmailPanelProps) {
       <div className="space-y-1">
         <p className="text-xs text-muted-foreground">顧客</p>
         <p className="text-sm font-medium">
-          {order.customer_id ? (
+          {customersLoading ? (
+            <span className="text-muted-foreground">読み込み中...</span>
+          ) : order.customer_id ? (
             getCustomerName(order.customer_id, customers)
           ) : (
             <span className="text-muted-foreground">未設定</span>
@@ -58,7 +60,9 @@ export function SourceEmailPanel({ order, className }: SourceEmailPanelProps) {
           <Paperclip className="h-3.5 w-3.5" />
           添付ファイル
         </p>
-        {attachments && attachments.length > 0 ? (
+        {attachmentsLoading ? (
+          <p className="text-xs text-muted-foreground">読み込み中...</p>
+        ) : attachments && attachments.length > 0 ? (
           <ul className="space-y-1.5">
             {attachments.map((att) => (
               <li key={att.id} className="text-xs">

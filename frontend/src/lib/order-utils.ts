@@ -139,8 +139,9 @@ export function getCertaintyBadgeClass(
 }
 
 /**
- * source_raw の先頭に含まれる「件名: ...」行を件名として切り出し、
- * 残りを本文として返す。件名行が見つからない場合は全体を本文として扱う。
+ * source_raw 中の最初に見つかった「件名: ...」行(先頭とは限らない)を件名として
+ * 切り出し、その行より後ろを本文として返す。件名行が見つからない場合は全体を
+ * 本文として扱う。
  */
 export function splitSubjectAndBody(sourceRaw?: string | null): {
   subject?: string
