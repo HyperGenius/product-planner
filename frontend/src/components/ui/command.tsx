@@ -6,6 +6,7 @@ import { Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { useWheelScrollFallback } from "@/hooks/use-wheel-scroll-fallback"
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -55,13 +56,22 @@ CommandInput.displayName = CommandPrimitive.Input.displayName
 const CommandList = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.List>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>
->(({ className, ...props }, ref) => (
-  <CommandPrimitive.List
-    ref={ref}
-    className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
-    {...props}
-  />
-))
+>(({ className, ...props }, ref) => {
+  const listRef = React.useRef<HTMLDivElement>(null)
+  useWheelScrollFallback(listRef)
+
+  return (
+    <CommandPrimitive.List
+      ref={(node) => {
+        listRef.current = node
+        if (typeof ref === "function") ref(node)
+        else if (ref) ref.current = node
+      }}
+      className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
+      {...props}
+    />
+  )
+})
 CommandList.displayName = CommandPrimitive.List.displayName
 
 const CommandEmpty = React.forwardRef<
