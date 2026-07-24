@@ -186,7 +186,13 @@ def update_order(
     order_data: OrderUpdate,
     repo: OrderRepository = Depends(get_order_repo),
 ):
-    """注文を更新"""
+    """注文を更新
+
+    customer_id 変更時の order_attachments.customer_id 同期（実添付行・
+    メール/PDF起票のステージング行の双方）は、orders.customer_id の UPDATE と
+    同一トランザクションで実行される DB トリガー
+    (sync_order_attachments_customer_id, Issue #315) が担う。
+    """
     logger.info(f"Updating order {order_id}")
     result = repo.update(order_id, order_data.model_dump(exclude_unset=True))
     if not result:
