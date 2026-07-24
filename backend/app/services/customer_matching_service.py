@@ -224,8 +224,11 @@ def resolve_or_create_customer(
         （name抽出は行わない。status/nameも変更しない）
       - 積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）の場合は、
         メールアドレス単体の検索/下書き作成にフォールバックする。フォールバック先の
-        メールアドレスは、転送ヘッダーが本文に無く `real_from_email` がある場合は
-        それを優先し、それ以外は候補集合のうち「最後に出現したもの」を使う
+        メールアドレスは候補集合のうち「最後に出現したもの」を優先し、候補が
+        1件も無い場合のみ `real_from_email` を使う。候補集合を優先するのは、
+        Issue #298 の「直接転送」（社内担当者が転送機能を介さずに送信し直したため
+        ヘッダー行が本文化されないケース）では実際の Gmail `From` ヘッダーが
+        社内担当者のアドレスになり、本文の署名欄の方が信頼できるため
         （0件の場合のみ署名ブロックから customer_name を抽出し、下書きのnameに使う）
 
     Returns: (customer_id, 新規に下書き作成したかどうか)
@@ -271,10 +274,10 @@ def resolve_or_create_customer(
             return customer_id, False
 
     email: str | None
-    if not header_candidates and real_from_email:
-        email = real_from_email
+    if candidates:
+        email = candidates[-1]
     else:
-        email = candidates[-1] if candidates else None
+        email = real_from_email
     name_hint = extract_customer_name(body, email) if email else None
     return _resolve_or_create_by_single_email(
         db, tenant_id, email, received_at, name_hint

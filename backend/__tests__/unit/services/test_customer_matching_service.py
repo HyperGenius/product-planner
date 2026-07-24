@@ -463,3 +463,27 @@ class TestResolveOrCreateCustomerRealFromPriority:
         inserted_row = mock_db.table().insert.call_args.args[0]
         assert inserted_row["email"] == "new-customer@example.com"
         assert inserted_row["name"] == "new-customer@example.com"
+
+    def test_body_candidate_preferred_over_real_from_email_for_draft_creation(self):
+        # 直接転送（Issue #298）では実Fromヘッダーが社内担当者のアドレスになるため、
+        # 本文から候補が取れている場合はそちらを優先し、実Fromヘッダーで下書きを
+        # 作成してしまわないこと（レビュー指摘の回帰テスト）
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(data=[])
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 9}])
+        body = "ご注文をお願いします。\n署名: signature@customer.example.com\n"
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            body,
+            real_from_email="internal-forwarder@company.example.com",
+        )
+
+        assert customer_id == 9
+        assert created_draft is True
+        inserted_row = mock_db.table().insert.call_args.args[0]
+        assert inserted_row["email"] == "signature@customer.example.com"
