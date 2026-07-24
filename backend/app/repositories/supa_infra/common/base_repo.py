@@ -79,13 +79,22 @@ class BaseRepository(Generic[T]):
     def delete(self, id: int) -> bool:
         """削除 (Delete)"""
         logger.info(f"Deleting record {id} from {self.table_name}")
-        # count="exact" で削除された行数を確認できる
-        # postgrest-pyの型定義ではCountMethod enumが要求されるが、文字列でも動作するためignoreする
-        res = (
-            self.client.table(self.table_name)
-            .delete(count="exact")  # type: ignore
-            .eq("id", id)
-            .execute()
-        )
+        try:
+            # count="exact" で削除された行数を確認できる
+            # postgrest-pyの型定義ではCountMethod enumが要求されるが、文字列でも動作するためignoreする
+            res = (
+                self.client.table(self.table_name)
+                .delete(count="exact")  # type: ignore
+                .eq("id", id)
+                .execute()
+            )
+        except APIError as e:
+            # 外部キー制約違反の場合は分かりやすいエラーメッセージを投げる
+            if e.code == "23503":  # foreign_key_violation
+                raise ValueError(
+                    "他のデータから参照されているため削除できません"
+                ) from e
+            # その他のAPIエラーはそのまま再送出
+            raise
         # countが1以上なら削除成功とみなす
         return res.count is not None and res.count > 0

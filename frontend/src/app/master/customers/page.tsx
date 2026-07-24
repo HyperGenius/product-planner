@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Plus, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { ApiError } from "@/lib/api-client"
 import {
   useCustomers,
   useCreateCustomer,
@@ -151,7 +152,11 @@ export default function CustomersPage() {
       setIsDeleteDialogOpen(false)
       setSelectedCustomer(null)
     } catch (error) {
-      toast.error("顧客の削除に失敗しました")
+      const message =
+        error instanceof ApiError && typeof error.data.detail === "string"
+          ? error.data.detail
+          : "顧客の削除に失敗しました"
+      toast.error(message)
       console.error(error)
     }
   }

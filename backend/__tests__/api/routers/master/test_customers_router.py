@@ -148,3 +148,18 @@ class TestCustomerRouter:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Not found"
+
+    def test_delete_customer_conflict(self, mock_repo):
+        """DELETE /{id}: 他のデータから参照されている場合の409エラーテスト"""
+        customer_id = 1
+        mock_repo.delete.side_effect = ValueError(
+            "他のデータから参照されているため削除できません"
+        )
+
+        response = client.delete(f"/customers/{customer_id}")
+
+        assert response.status_code == 409
+        assert (
+            response.json()["detail"]
+            == "他のデータから参照されているため削除できません"
+        )
