@@ -5,6 +5,7 @@ import pytest
 from app.services.gmail_service import (
     _b64url_decode,
     _get_message_body,
+    _get_real_from_email,
     _process_message,
     poll_unread_emails,
 )
@@ -171,6 +172,34 @@ class TestGetMessageBody:
 
 
 @pytest.mark.unit
+class TestGetRealFromEmail:
+    """実際のGmail `From` ヘッダーからメールアドレスを抽出する関数のテスト
+    （Issue #311: 転送ヘッダーが本文に無いメールの顧客マッチング精度向上）。"""
+
+    def test_extracts_email_from_from_header(self):
+        msg = {
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "顧客太郎 <customer@example.com>"},
+                    {"name": "Subject", "value": "発注のご相談"},
+                ]
+            }
+        }
+        assert _get_real_from_email(msg) == "customer@example.com"
+
+    def test_header_name_matching_is_case_insensitive(self):
+        msg = {"payload": {"headers": [{"name": "from", "value": "a@example.com"}]}}
+        assert _get_real_from_email(msg) == "a@example.com"
+
+    def test_returns_none_when_no_from_header(self):
+        msg = {"payload": {"headers": [{"name": "Subject", "value": "件名のみ"}]}}
+        assert _get_real_from_email(msg) is None
+
+    def test_returns_none_when_no_headers(self):
+        assert _get_real_from_email({"payload": {}}) is None
+
+
+@pytest.mark.unit
 class TestProcessMessagePdfStaging:
     """メール受信時のステージング保存分岐 (Issue #248, #280) の単体テスト。
 
@@ -230,7 +259,7 @@ class TestProcessMessagePdfStaging:
             mock_db, "tenant-1", "msg-1", "order.pdf", b"%PDF-1.4", "application/pdf"
         )
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000"
+            mock_db, "tenant-1", "", "1751500000000", None
         )
 
         inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
@@ -283,7 +312,7 @@ class TestProcessMessagePdfStaging:
 
         # メールアドレスが取れない場合も customer_id は必ず設定され、下書き作成の通知が記録される
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000"
+            mock_db, "tenant-1", "", "1751500000000", None
         )
         notif_inserts = [
             call.args[0]
@@ -345,3 +374,39 @@ class TestProcessMessagePdfStaging:
         assert inserted_row["original_filename"] == ""
         assert inserted_row["content_type"] is None
         assert inserted_row["parse_status"] == "pending"
+
+    def test_real_from_header_is_passed_to_customer_matching(self):
+        """実際のGmail `From` ヘッダーが resolve_or_create_customer に渡されること
+        （Issue #311: 転送ヘッダーが本文に無いメールの顧客マッチング精度向上）。"""
+        mock_service = MagicMock()
+        mock_service.users().messages().get().execute.return_value = {
+            "payload": {
+                "parts": [],
+                "headers": [
+                    {"name": "From", "value": "顧客太郎 <customer@example.com>"},
+                ],
+            },
+            "internalDate": "1751500000000",
+        }
+        mock_db = MagicMock()
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[],
+            ),
+            patch(
+                "app.services.gmail_service.resolve_or_create_customer",
+                return_value=(1, False),
+            ) as mock_resolve_customer,
+            patch("app.services.gmail_service.upload_staged_attachment"),
+        ):
+            _process_message(mock_service, mock_db, "msg-4", "tenantA", {})
+
+        mock_resolve_customer.assert_called_once_with(
+            mock_db, "tenant-1", "", "1751500000000", "customer@example.com"
+        )

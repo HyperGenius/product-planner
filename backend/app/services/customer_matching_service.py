@@ -70,15 +70,26 @@ def extract_body_email_candidates(body: str) -> list[str]:
     return candidates
 
 
-def extract_effective_sender_email(body: str) -> str | None:
-    """ヘッダー行から抽出を試み、見つからなければ本文全体から抽出する。
+def extract_email_address(text: str) -> str | None:
+    """任意の文字列（メールヘッダーの値など）から最初のメールアドレスを抽出する。"""
+    match = _ANY_EMAIL_RE.search(text)
+    return match.group(0) if match else None
 
-    `resolve_or_create_customer` が実際に顧客特定に使う候補と同じ優先順位
-    （ヘッダー行 → 本文全体）で解決した結果を、通知payload等の表示用に返す。
+
+def extract_effective_sender_email(
+    body: str, real_from_email: str | None = None
+) -> str | None:
+    """`resolve_or_create_customer` と同じ優先順位で解決した送信者アドレスを返す
+    （通知payload等の表示用）。
+
+    優先順位: 本文中の転送ヘッダー行 → 実際のGmail Fromヘッダー → 本文全体
     """
-    candidates = extract_sender_email_candidates(body) or extract_body_email_candidates(
-        body
-    )
+    header_candidates = extract_sender_email_candidates(body)
+    if header_candidates:
+        return header_candidates[-1]
+    if real_from_email:
+        return real_from_email
+    candidates = extract_body_email_candidates(body)
     return candidates[-1] if candidates else None
 
 
@@ -197,26 +208,50 @@ def resolve_or_create_customer(
     tenant_id: str,
     body: str,
     received_at: str | int | None = None,
+    real_from_email: str | None = None,
 ) -> tuple[int, bool]:
     """
     本文から抽出した候補メールアドレス群と既存顧客（customers.email）を突合し、
     customer_id を解決する。
 
-    - 候補集合と既存顧客の積集合が1件 → その顧客にマッチ確定
-      （name抽出は行わない。status/nameも変更しない）
-    - 積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）の場合は、
-      候補集合のうち「最後に出現したもの」1件に絞り込み、メールアドレス単体の
-      検索/下書き作成にフォールバックする（0件の場合のみ署名ブロックから
-      customer_name を抽出し、下書きのnameに使う）
-    - "From:"/"差出人:" ヘッダー行が本文に存在しない場合（直接転送等）は、
-      本文全体からメールアドレスを検出するフォールバックを使う
+    - "From:"/"差出人:" ヘッダー行が本文に存在しない場合（転送を介さず顧客から直接
+      届いたメール等）は、実際のGmailメッセージの `From` ヘッダー（`real_from_email`）
+      と `customers.email` の突合を最優先で試みる。一致すればそのまま確定する
+      （本文解析は行わない）
+    - 上記で一致しない場合、候補メールアドレス群（ヘッダー行が本文にあればそれを、
+      なければ本文全体から検出したものを）と既存顧客の積集合を取る
+      - 積集合が1件 → その顧客にマッチ確定
+        （name抽出は行わない。status/nameも変更しない）
+      - 積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）の場合は、
+        メールアドレス単体の検索/下書き作成にフォールバックする。フォールバック先の
+        メールアドレスは、転送ヘッダーが本文に無く `real_from_email` がある場合は
+        それを優先し、それ以外は候補集合のうち「最後に出現したもの」を使う
+        （0件の場合のみ署名ブロックから customer_name を抽出し、下書きのnameに使う）
 
     Returns: (customer_id, 新規に下書き作成したかどうか)
     """
     table = SupabaseTableName.CUSTOMERS.value
-    candidates = extract_sender_email_candidates(body)
-    if not candidates:
-        candidates = extract_body_email_candidates(body)
+    header_candidates = extract_sender_email_candidates(body)
+
+    if not header_candidates and real_from_email:
+        result = (
+            db.table(table)
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("email", real_from_email)
+            .limit(1)
+            .execute()
+        )
+        rows = cast(list[dict[str, Any]], result.data or [])
+        if rows:
+            customer_id = int(rows[0]["id"])
+            logger.info(
+                f"customer found via real From header match: id={customer_id} "
+                f"email={real_from_email}"
+            )
+            return customer_id, False
+
+    candidates = header_candidates or extract_body_email_candidates(body)
 
     if candidates:
         result = (
@@ -235,7 +270,11 @@ def resolve_or_create_customer(
             )
             return customer_id, False
 
-    email = candidates[-1] if candidates else None
+    email: str | None
+    if not header_candidates and real_from_email:
+        email = real_from_email
+    else:
+        email = candidates[-1] if candidates else None
     name_hint = extract_customer_name(body, email) if email else None
     return _resolve_or_create_by_single_email(
         db, tenant_id, email, received_at, name_hint

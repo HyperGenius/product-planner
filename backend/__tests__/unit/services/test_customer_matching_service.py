@@ -5,6 +5,7 @@ from app.services.customer_matching_service import (
     extract_body_email_candidates,
     extract_customer_name,
     extract_effective_sender_email,
+    extract_email_address,
     extract_sender_email,
     extract_sender_email_candidates,
     resolve_or_create_customer,
@@ -99,6 +100,21 @@ e-mail: hiromi_okabe@iinoseisakusho.co.jp<mailto:hiromi_okabe@iinoseisakusho.co.
 
 
 @pytest.mark.unit
+class TestExtractEmailAddress:
+    def test_extracts_email_from_header_value_with_display_name(self):
+        assert (
+            extract_email_address("顧客太郎 <customer@example.com>")
+            == "customer@example.com"
+        )
+
+    def test_extracts_bare_email_address(self):
+        assert extract_email_address("customer@example.com") == "customer@example.com"
+
+    def test_returns_none_when_no_email_present(self):
+        assert extract_email_address("表示名のみ") is None
+
+
+@pytest.mark.unit
 class TestExtractEffectiveSenderEmail:
     def test_prefers_header_email_when_present(self):
         body = "From: taro@example.com\n本文\ncontact@signature.example.com\n"
@@ -110,6 +126,22 @@ class TestExtractEffectiveSenderEmail:
 
     def test_returns_none_when_no_email_anywhere(self):
         assert extract_effective_sender_email("メールアドレスなし") is None
+
+    def test_prefers_real_from_email_over_body_when_no_header(self):
+        # Issue #311: 転送ヘッダーが本文に無い場合、実際のGmail Fromヘッダーの方が
+        # 本文中の署名メールアドレスより信頼できるため優先する。
+        body = "本文中に署名 contact@signature.example.com があるのみ"
+        assert (
+            extract_effective_sender_email(body, "real-sender@example.com")
+            == "real-sender@example.com"
+        )
+
+    def test_header_email_still_wins_over_real_from_email(self):
+        body = "From: taro@example.com\n本文\n"
+        assert (
+            extract_effective_sender_email(body, "real-sender@example.com")
+            == "taro@example.com"
+        )
 
 
 @pytest.mark.unit
@@ -340,3 +372,94 @@ class TestResolveOrCreateCustomer:
         assert created_draft is True
         inserted_row = mock_db.table().insert.call_args.args[0]
         assert inserted_row["name"].startswith("不明な顧客 (")
+
+
+@pytest.mark.unit
+class TestResolveOrCreateCustomerRealFromPriority:
+    """Issue #311: 転送ヘッダーが本文に無いメールは、実際のGmail Fromヘッダーと
+    顧客マスタのメールアドレスとの突合を最優先で行うことを確認する。"""
+
+    def test_real_from_email_matches_existing_customer_without_body_parsing(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[{"id": 99}]
+        )
+        body = "こんにちは、注文をお願いします。"  # 転送ヘッダー無し・本文中にメールアドレスも無い
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db, "tenant-1", body, real_from_email="customer@example.com"
+        )
+
+        assert customer_id == 99
+        assert created_draft is False
+        # 実Fromヘッダーで一致確定した場合、本文全体からの積集合突合は行われない
+        mock_db.table().select().eq().in_().execute.assert_not_called()
+        mock_db.table().insert.assert_not_called()
+
+    def test_forwarded_header_present_ignores_real_from_email(self):
+        # 本文に転送ヘッダーがある場合は、実Fromヘッダーより従来の本文解析を優先する
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(
+            data=[{"id": 1}]
+        )
+        body = "From: known@example.com\n"
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            body,
+            real_from_email="someone-else@example.com",
+        )
+
+        assert customer_id == 1
+        assert created_draft is False
+        # 実Fromヘッダーでの単独突合は行われない（転送ヘッダーがあるため）
+        mock_db.table().select().eq().eq().limit().execute.assert_not_called()
+
+    def test_real_from_email_no_match_falls_back_to_body_wide_candidate_match(self):
+        # Issue #298 の直接転送フォールバック（本文全体からのメールアドレス抽出）は、
+        # 実Fromヘッダーが顧客マスタと一致しなかった場合も引き続き機能すること
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(
+            data=[{"id": 50}]
+        )
+        body = (
+            "いつもお世話になっております。\n"
+            "---------------------------------------------------\n"
+            "株式会社 飯野製作所\n"
+            "購買課　　岡部宏美\n"
+            "e-mail: hiromi_okabe@iinoseisakusho.co.jp\n"
+            "---------------------------------------------------\n"
+        )
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            body,
+            real_from_email="internal-forwarder@company.example.com",
+        )
+
+        assert customer_id == 50
+        assert created_draft is False
+        mock_db.table().insert.assert_not_called()
+
+    def test_real_from_email_used_as_creation_email_when_nothing_matches(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 8}])
+        body = "こんにちは、注文をお願いします。"  # 転送ヘッダー無し・本文中にメールアドレスも無い
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db, "tenant-1", body, real_from_email="new-customer@example.com"
+        )
+
+        assert customer_id == 8
+        assert created_draft is True
+        inserted_row = mock_db.table().insert.call_args.args[0]
+        assert inserted_row["email"] == "new-customer@example.com"
+        assert inserted_row["name"] == "new-customer@example.com"
