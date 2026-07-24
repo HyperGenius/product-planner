@@ -3,8 +3,10 @@
 -- 実行前に order_attachments_customer_id_check.sql で対象件数を確認しておくこと
 --
 -- 注文詳細画面で顧客を変更しても order_attachments.customer_id が追従しなかった
--- （PR で修正済み、Issue #315）ため、既存データを orders.customer_id に合わせて補正する。
--- order_id が NULL のステージング行（PDF解析待ちの添付）は同期先の注文がないため対象外。
+-- （DBトリガー sync_order_attachments_customer_id で修正済み、Issue #315）ため、
+-- 過去に発生した既存データを orders.customer_id に合わせて補正する。
+-- 1. order_id が設定済みの実添付行、2. order_id が NULL のステージング行
+-- （メール/PDF起票の1ソース、orders.source_attachment_id 経由）の両方を対象にする。
 --
 -- 対象は現在の customer_id が draft 顧客（メール取込で自動生成された「不明な顧客」）
 -- である行のみに限定する。実在の active 顧客（例: id=3 ヱトー株式会社）が
@@ -42,5 +44,8 @@ where oa.id = sc.source_attachment_id
   and c.status = 'draft'
   and oa.customer_id is distinct from sc.customer_id;
 
--- 更新件数を確認してから commit / rollback を判断すること
+-- このスクリプトはそのまま実行すると commit まで完了する。更新件数を見てから
+-- 判断したい場合は、実行前に commit; を一時的にコメントアウトし（トランザクション
+-- は開いたまま残る）、別クエリで対象行を確認したうえで、手動で commit; または
+-- rollback; を発行すること。
 commit;

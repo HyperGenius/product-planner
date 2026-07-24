@@ -185,45 +185,18 @@ def update_order(
     order_id: int,
     order_data: OrderUpdate,
     repo: OrderRepository = Depends(get_order_repo),
-    client: Client = Depends(get_supabase_client),
 ):
-    """注文を更新"""
+    """注文を更新
+
+    customer_id 変更時の order_attachments.customer_id 同期（実添付行・
+    メール/PDF起票のステージング行の双方）は、orders.customer_id の UPDATE と
+    同一トランザクションで実行される DB トリガー
+    (sync_order_attachments_customer_id, Issue #315) が担う。
+    """
     logger.info(f"Updating order {order_id}")
-    update_fields = order_data.model_dump(exclude_unset=True)
-    result = repo.update(order_id, update_fields)
+    result = repo.update(order_id, order_data.model_dump(exclude_unset=True))
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
-
-    if "customer_id" in update_fields:
-        new_customer_id = update_fields["customer_id"]
-        # order_attachments.customer_id はメール取込時に一度だけ設定され、以後
-        # 追従更新されないため、注文の顧客を変更しても添付側は古い顧客(不明な顧客等)
-        # を参照し続けてしまう（Issue #315）。注文の顧客変更に合わせて同期する。
-        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).update(
-            {"customer_id": new_customer_id}
-        ).eq("order_id", order_id).execute()
-
-        # メール/PDF起票の注文は order_id を持たないステージング行
-        # （source_attachment_id が指す「1ソース」、order_id は常にNULL）にも
-        # 自動作成時の顧客が残ったままになる。同じソースから生成された全ての
-        # 注文の顧客が揃った場合に限り、ステージング行の customer_id も同期する
-        # （1ソース:N受注で顧客がまだ割れている場合は、どちらに合わせるべきか
-        # 判断できないため更新しない）。
-        source_attachment_id = result.get("source_attachment_id")
-        if source_attachment_id:
-            sibling_orders = (
-                client.table(SupabaseTableName.ORDERS.value)
-                .select("customer_id")
-                .eq("source_attachment_id", source_attachment_id)
-                .execute()
-            )
-            sibling_rows = cast(list[dict[str, Any]], sibling_orders.data or [])
-            sibling_customer_ids = {row["customer_id"] for row in sibling_rows}
-            if sibling_customer_ids == {new_customer_id}:
-                client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).update(
-                    {"customer_id": new_customer_id}
-                ).eq("id", source_attachment_id).execute()
-
     return _map_order_response(result)
 
 

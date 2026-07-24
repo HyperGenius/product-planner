@@ -23,9 +23,16 @@
 
 ## 修正内容
 
-- `update_order`（`backend/app/routers/transaction/orders.py`）で、リクエストに
-  `customer_id` が含まれる場合、`orders` の更新に加えて同じ `order_id` を持つ
-  `order_attachments.customer_id` も同じ値に更新する
+`orders.customer_id` の UPDATE と同一トランザクションで実行される DB トリガー
+`sync_order_attachments_customer_id`（`supabase/migrations/20260724000000_sync_order_attachments_customer_id_trigger.sql`）
+で同期する。
+
+- 当初はアプリ層（`update_order`, `backend/app/routers/transaction/orders.py`）で
+  `orders` 更新後に別クエリで `order_attachments` を更新する実装にしていたが、
+  レビューで「後続の更新が失敗した場合に `orders` と `order_attachments` の
+  `customer_id` が不整合のまま残る」指摘を受け、DBトリガーに変更した。
+  アプリ層は `repo.update` を呼ぶだけのシンプルな実装に戻している
+- 同じ `order_id` を持つ `order_attachments.customer_id` を同じ値に更新する
 - メール/PDF起票の注文は、実際に添付ファイルを保持する行（`order_id` 設定済み）とは別に、
   パース元となった「ステージング行」（`order_attachments.order_id IS NULL`、
   `orders.source_attachment_id` が指す1ソース）を持つ。1ソース:N受注（Issue #280）に
@@ -50,7 +57,8 @@
 - [x] 同じソースから生成された全注文の顧客が揃った場合、ステージング行の
       `customer_id` も同期される
 - [x] 顧客がまだ揃っていない場合、ステージング行は更新されない
-- [x] 既存のテストをパスすること
+- [x] 既存のテストをパスすること（`__tests__/integration/test_sync_order_attachments_customer_id_trigger.py`
+      でトリガーの分岐を実DBに対して検証）
 - [x] 型・Lint エラーが出ていないこと
 
 ## 関連
