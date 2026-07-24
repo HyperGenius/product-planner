@@ -10,6 +10,7 @@ from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import upload_staged_attachment
 from app.services.customer_matching_service import (
     extract_effective_sender_email,
+    extract_email_address,
     resolve_or_create_customer,
 )
 from app.services.notification_service import create_notification
@@ -103,6 +104,21 @@ def _get_message_body(msg: dict) -> str:
 
     body_data = payload.get("body", {}).get("data", "")
     return _decode(body_data) if body_data else ""
+
+
+def _get_real_from_email(msg: dict) -> str | None:
+    """Gmail APIメッセージの実際の `From` ヘッダーからメールアドレスを抽出する。
+
+    転送ヘッダー（"From:"/"差出人:"）が本文中に存在しない「顧客からの直接メール」の
+    場合、このヘッダーこそが顧客のメールアドレスそのものであるため、顧客マッチングの
+    最優先シグナルとして使う（`customer_matching_service.resolve_or_create_customer`
+    参照）。転送メールの場合はこの値が社内の転送者アドレスになるため使用しない。
+    """
+    headers = msg.get("payload", {}).get("headers", [])
+    for h in headers:
+        if h.get("name", "").lower() == "from":
+            return extract_email_address(h.get("value", ""))
+    return None
 
 
 def _lookup_tenant_id(db: Client, tenant_name: str) -> str | None:
@@ -206,9 +222,11 @@ def _process_message(
         staged_attachment = pdf_attachment or (attachments[0] if attachments else None)
 
         # 5. 顧客マッチング（メールの受注可否に関わらず、ソース単位で1回解決する）
-        sender_email = extract_effective_sender_email(body)
+        #    転送ヘッダーが本文に無い場合、実際のGmail Fromヘッダーを最優先シグナルとして使う
+        real_from_email = _get_real_from_email(msg)
+        sender_email = extract_effective_sender_email(body, real_from_email)
         customer_id, created_draft = resolve_or_create_customer(
-            db, tenant_id, body, msg.get("internalDate")
+            db, tenant_id, body, msg.get("internalDate"), real_from_email
         )
         if created_draft:
             create_notification(
