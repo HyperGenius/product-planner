@@ -207,6 +207,14 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 **希望納期・確定納期の日付/時刻の扱い (#293)**
 `desired_deadline`（DB上は `deadline_date`）・`confirmed_deadline` はいずれも「日付のみ」(`YYYY-MM-DD`) で、時刻情報を持たない。`new Date(dateStr)` でパースして `format` すると環境のタイムゾーンによって存在しない時刻が表示されてしまうため、`lib/order-utils.ts` の `formatDeadlineDate`（表示用、文字列の先頭10文字をそのまま整形）・`toDateInputValue`（`<input type="date">` バインド用）に処理を統一した。`EditOrderDialog` と新規注文作成ページの希望納期入力欄も `type="datetime-local"` から `type="date"` に変更している。`BulkSimulateSummaryDialog` の希望納期表示も同様に対応済み。なお、シミュレーション結果の `calculated_deadline` はスケジューラが計算した実際の日時（時刻を持つ）のため対象外。
 
+**Dialog 内プルダウンのマウスホイールスクロール不具合 (#319)**
+`Dialog`（`@radix-ui/react-dialog`）が modal 表示中に行うボディスクロールロック（`react-remove-scroll`）は、`Portal` 経由で `document.body` 直下に描画される要素へのホイールイベントもブロックしてしまう。このため `ProductSelector`（`Popover` + `Command`）・`CustomerSelector`（`Select`）を `Dialog` 内（`EditOrderDialog`・`SplitOrderDialog`）で使うと、一覧をマウスホイールでスクロールできない不具合があった（矢印キーでの操作は影響を受けないため気づきにくい）。
+対応として、共通コンポーネント側でスクロール対象要素に対しネイティブ（非 passive）の `wheel` イベントリスナーを登録し、`scrollTop` を直接更新することでロックを迂回している。
+- `frontend/src/components/ui/command.tsx` の `CommandList`
+- `frontend/src/components/ui/select.tsx` の `SelectContent`（内部の `SelectPrimitive.Viewport`）
+
+いずれも共通 UI コンポーネント側の対応のため、`Dialog` 内外を問わず両セレクタを使う画面すべてに適用される。
+
 ---
 
 ## バックエンド追加事項
