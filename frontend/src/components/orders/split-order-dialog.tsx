@@ -1,14 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import {
-  AlertTriangle,
-  Download,
-  Mail,
-  Paperclip,
-  Plus,
-  Trash2,
-} from "lucide-react"
+import { Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,26 +16,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
-import { useSplitOrder, useOrderAttachments } from "@/hooks/use-orders"
-import { useCustomers } from "@/hooks/use-customers"
-import { getCustomerName } from "@/lib/order-utils"
+import { SourceEmailPanel } from "@/components/orders/source-email-panel"
+import { useSplitOrder } from "@/hooks/use-orders"
 import type { Order } from "@/types/order"
-
-/**
- * source_raw の先頭に含まれる「件名: ...」行を件名として切り出し、
- * 残りを本文として返す。件名行が見つからない場合は全体を本文として扱う。
- */
-function splitSubjectAndBody(sourceRaw?: string | null): {
-  subject?: string
-  body?: string
-} {
-  if (!sourceRaw) return {}
-  const match = sourceRaw.match(/^件名[:：]\s*(.*)$/m)
-  if (!match || match.index == null) return { body: sourceRaw }
-  const subject = match[1].trim()
-  const body = sourceRaw.slice(match.index + match[0].length).replace(/^\s+/, "")
-  return { subject: subject || undefined, body: body || undefined }
-}
 
 interface SplitOrderDialogProps {
   order: Order | null
@@ -76,10 +52,6 @@ export function SplitOrderDialog({
   const splitOrder = useSplitOrder()
   const [items, setItems] = useState<SplitLineItemForm[]>([])
   const [error, setError] = useState("")
-
-  const { data: attachments } = useOrderAttachments(order?.id ?? 0)
-  const { data: customers } = useCustomers()
-  const { subject, body } = splitSubjectAndBody(order?.source_raw)
 
   // ダイアログを開いた時点の注文内容を初期値として2行を用意する
   useEffect(() => {
@@ -170,84 +142,10 @@ export function SplitOrderDialog({
 
         <div className="flex min-h-0 flex-1 border-t">
           {/* 左: 参照元メール（分割単位を判断するための情報） */}
-          <div className="w-[300px] shrink-0 space-y-4 overflow-y-auto border-r bg-muted/30 p-5">
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <Mail className="h-4 w-4" />
-              参照元メール
-            </div>
-
-            {subject && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">件名</p>
-                <p className="text-sm font-medium break-words">{subject}</p>
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">顧客</p>
-              <p className="text-sm font-medium">
-                {order.customer_id ? (
-                  getCustomerName(order.customer_id, customers)
-                ) : (
-                  <span className="text-muted-foreground">未設定</span>
-                )}
-              </p>
-            </div>
-
-            {body && (
-              <div className="rounded-md border bg-background p-3">
-                <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                  {body}
-                </pre>
-              </div>
-            )}
-
-            <div className="space-y-1.5 border-t pt-3">
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Paperclip className="h-3.5 w-3.5" />
-                添付ファイル
-              </p>
-              {attachments && attachments.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {attachments.map((att) => (
-                    <li key={att.id} className="text-xs">
-                      {att.parse_status === "failed_no_attachment" ? (
-                        <span className="text-muted-foreground">添付ファイルなし</span>
-                      ) : att.parse_status === "failed_encrypted" ||
-                        att.parse_status === "failed_image" ? (
-                        <span className="flex items-center gap-1 text-amber-600">
-                          <AlertTriangle className="h-3 w-3 shrink-0" />
-                          自動読み取り不可
-                          {att.signed_url && (
-                            <a
-                              href={att.signed_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="ml-1 underline text-primary"
-                            >
-                              {att.original_filename}
-                            </a>
-                          )}
-                        </span>
-                      ) : (
-                        <a
-                          href={att.signed_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-primary underline"
-                        >
-                          <Download className="h-3 w-3 shrink-0" />
-                          {att.original_filename}
-                        </a>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">添付ファイルなし</p>
-              )}
-            </div>
-          </div>
+          <SourceEmailPanel
+            order={order}
+            className="w-[300px] shrink-0 space-y-4 overflow-y-auto border-r bg-muted/30 p-5"
+          />
 
           {/* 右: 分割フォーム */}
           <div className="flex-1 space-y-4 overflow-y-auto p-5">

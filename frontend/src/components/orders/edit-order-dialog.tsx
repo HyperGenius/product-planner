@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
+import { SourceEmailPanel } from "@/components/orders/source-email-panel"
 import { useUpdateOrder } from "@/hooks/use-orders"
 import { toDateInputValue } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
@@ -37,6 +38,7 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
 
   if (!order) return null
 
+  const hasSourceEmail = order.source_type === "email" && !!order.source_raw
   const productChanged = productId !== (order.product_id?.toString() ?? "")
   const quantityChanged = quantity !== (order.quantity?.toString() ?? "")
   const showScheduleWarning = order.is_scheduled && (productChanged || quantityChanged)
@@ -79,63 +81,84 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
+      <DialogContent
+        className={
+          hasSourceEmail
+            ? "flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-[820px]"
+            : "sm:max-w-[480px]"
+        }
+      >
+        <DialogHeader className={hasSourceEmail ? "px-6 pb-4 pt-6" : undefined}>
           <DialogTitle>注文の編集</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          {showScheduleWarning && (
-            <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                スケジュールが無効になります。保存後に再シミュレーションが必要です。
-              </span>
-            </div>
+        <div className={hasSourceEmail ? "flex min-h-0 flex-1 border-t" : undefined}>
+          {hasSourceEmail && (
+            <SourceEmailPanel
+              order={order}
+              className="w-[300px] shrink-0 space-y-4 overflow-y-auto border-r bg-muted/30 p-5"
+            />
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="order-no">注文番号（任意）</Label>
-            <Input
-              id="order-no"
-              value={orderNo}
-              onChange={(e) => {
-                setOrderNo(e.target.value)
-                setDuplicateError("")
-              }}
-            />
-            {duplicateError && (
-              <p className="text-sm text-destructive">{duplicateError}</p>
+          <div
+            className={
+              hasSourceEmail
+                ? "flex-1 space-y-4 overflow-y-auto p-5"
+                : "space-y-4 py-2"
+            }
+          >
+            {showScheduleWarning && (
+              <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  スケジュールが無効になります。保存後に再シミュレーションが必要です。
+                </span>
+              </div>
             )}
-          </div>
 
-          <ProductSelector value={productId} onValueChange={setProductId} />
+            <div className="space-y-2">
+              <Label htmlFor="order-no">注文番号（任意）</Label>
+              <Input
+                id="order-no"
+                value={orderNo}
+                onChange={(e) => {
+                  setOrderNo(e.target.value)
+                  setDuplicateError("")
+                }}
+              />
+              {duplicateError && (
+                <p className="text-sm text-destructive">{duplicateError}</p>
+              )}
+            </div>
 
-          <CustomerSelector value={customerId} onValueChange={setCustomerId} />
+            <ProductSelector value={productId} onValueChange={setProductId} />
 
-          <div className="space-y-2">
-            <Label htmlFor="quantity">数量 *</Label>
-            <Input
-              id="quantity"
-              type="number"
-              min={1}
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
-          </div>
+            <CustomerSelector value={customerId} onValueChange={setCustomerId} />
 
-          <div className="space-y-2">
-            <Label htmlFor="desired-deadline">希望納期</Label>
-            <Input
-              id="desired-deadline"
-              type="date"
-              value={desiredDeadline}
-              onChange={(e) => setDesiredDeadline(e.target.value)}
-            />
+            <div className="space-y-2">
+              <Label htmlFor="quantity">数量 *</Label>
+              <Input
+                id="quantity"
+                type="number"
+                min={1}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="desired-deadline">希望納期</Label>
+              <Input
+                id="desired-deadline"
+                type="date"
+                value={desiredDeadline}
+                onChange={(e) => setDesiredDeadline(e.target.value)}
+              />
+            </div>
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className={hasSourceEmail ? "border-t px-6 py-4" : undefined}>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             キャンセル
           </Button>
