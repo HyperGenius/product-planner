@@ -58,7 +58,10 @@ def delete_customer(
 ):
     """顧客を削除"""
     logger.info(f"Deleting customer {customer_id}")
-    success = repo.delete(customer_id)
+    try:
+        success = repo.delete(customer_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
     if not success:
         raise HTTPException(status_code=404, detail="Not found")
     return {"status": "deleted"}

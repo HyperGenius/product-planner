@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from app.repositories.supa_infra.common import BaseRepository
+from postgrest.exceptions import APIError
 
 
 @pytest.mark.unit
@@ -97,3 +98,29 @@ class TestBaseRepository:
 
         # --- 実行, 検証 ---
         assert base_repo.delete(999) is False
+
+    def test_delete_foreign_key_violation(self, base_repo, mock_client):
+        """外部キー制約違反時、分かりやすいValueErrorに変換されるテスト"""
+
+        # --- モックのセットアップ ---
+        (
+            mock_client.table.return_value.delete.return_value.eq.return_value.execute
+        ).side_effect = APIError({"code": "23503", "message": "foreign key violation"})
+
+        # --- 実行, 検証 ---
+        with pytest.raises(
+            ValueError, match="他のデータから参照されているため削除できません"
+        ):
+            base_repo.delete(1)
+
+    def test_delete_other_api_error_reraised(self, base_repo, mock_client):
+        """外部キー制約違反以外のAPIErrorはそのまま再送出されるテスト"""
+
+        # --- モックのセットアップ ---
+        (
+            mock_client.table.return_value.delete.return_value.eq.return_value.execute
+        ).side_effect = APIError({"code": "99999", "message": "unexpected error"})
+
+        # --- 実行, 検証 ---
+        with pytest.raises(APIError):
+            base_repo.delete(1)
