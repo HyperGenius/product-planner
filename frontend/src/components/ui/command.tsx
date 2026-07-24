@@ -6,6 +6,7 @@ import { Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { useWheelScrollFallback } from "@/hooks/use-wheel-scroll-fallback"
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -57,22 +58,7 @@ const CommandList = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>
 >(({ className, ...props }, ref) => {
   const listRef = React.useRef<HTMLDivElement>(null)
-
-  // Dialog内(react-remove-scrollのスクロールロック)にPortalで描画されると
-  // マウスホイールでのスクロールが無効化されるため、ネイティブのnon-passive
-  // wheelリスナーで手動スクロールして迂回する
-  React.useEffect(() => {
-    const node = listRef.current
-    if (!node) return
-
-    const handleWheel = (event: WheelEvent) => {
-      node.scrollTop += event.deltaY
-      event.preventDefault()
-    }
-
-    node.addEventListener("wheel", handleWheel, { passive: false })
-    return () => node.removeEventListener("wheel", handleWheel)
-  }, [])
+  useWheelScrollFallback(listRef)
 
   return (
     <CommandPrimitive.List

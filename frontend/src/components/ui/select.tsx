@@ -5,6 +5,7 @@ import * as SelectPrimitive from "@radix-ui/react-select"
 import { Check, ChevronDown } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useWheelScrollFallback } from "@/hooks/use-wheel-scroll-fallback"
 
 const Select = SelectPrimitive.Root
 
@@ -37,22 +38,7 @@ const SelectContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
 >(({ className, children, position = "popper", ...props }, ref) => {
   const viewportRef = React.useRef<HTMLDivElement>(null)
-
-  // Dialog内(react-remove-scrollのスクロールロック)にPortalで描画されると
-  // マウスホイールでのスクロールが無効化されるため、ネイティブのnon-passive
-  // wheelリスナーで手動スクロールして迂回する
-  React.useEffect(() => {
-    const node = viewportRef.current
-    if (!node) return
-
-    const handleWheel = (event: WheelEvent) => {
-      node.scrollTop += event.deltaY
-      event.preventDefault()
-    }
-
-    node.addEventListener("wheel", handleWheel, { passive: false })
-    return () => node.removeEventListener("wheel", handleWheel)
-  }, [])
+  useWheelScrollFallback(viewportRef)
 
   return (
     <SelectPrimitive.Portal>
