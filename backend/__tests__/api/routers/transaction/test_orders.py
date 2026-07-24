@@ -1,5 +1,5 @@
 # __tests__/api/routers/transaction/test_orders.py
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 from app.dependencies import (
@@ -187,6 +187,80 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         mock_supabase_client.table.assert_not_called()
+
+    def test_update_order_syncs_staging_row_when_siblings_agree(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """PATCH /{id}: source_attachment_id を持つ注文の顧客変更時、同じソースから
+        生成された全ての注文の顧客が揃っていればステージング行も同期されること"""
+        order_id = 1
+        payload = {"customer_id": 42}
+        updated_data = {
+            "id": order_id,
+            "customer_id": 42,
+            "order_number": "ORD-001",
+            "source_attachment_id": "attach-1",
+        }
+        mock_repo.update.return_value = updated_data
+
+        attachments_table = MagicMock()
+        orders_table = MagicMock()
+        mock_supabase_client.table.side_effect = lambda name: {
+            "order_attachments": attachments_table,
+            "orders": orders_table,
+        }[name]
+        orders_table.select.return_value.eq.return_value.execute.return_value.data = [
+            {"customer_id": 42},
+            {"customer_id": 42},
+        ]
+
+        response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        orders_table.select.return_value.eq.assert_called_once_with(
+            "source_attachment_id", "attach-1"
+        )
+        assert attachments_table.update.call_count == 2
+        assert attachments_table.update.call_args_list == [
+            call({"customer_id": 42}),
+            call({"customer_id": 42}),
+        ]
+        eq_calls = attachments_table.update.return_value.eq.call_args_list
+        assert call("order_id", order_id) in eq_calls
+        assert call("id", "attach-1") in eq_calls
+
+    def test_update_order_does_not_sync_staging_row_when_siblings_disagree(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """PATCH /{id}: 同じソースの他の注文がまだ違う顧客の場合、ステージング行は
+        更新しないこと（どちらに合わせるべきか判断できないため）"""
+        order_id = 1
+        payload = {"customer_id": 42}
+        updated_data = {
+            "id": order_id,
+            "customer_id": 42,
+            "order_number": "ORD-001",
+            "source_attachment_id": "attach-1",
+        }
+        mock_repo.update.return_value = updated_data
+
+        attachments_table = MagicMock()
+        orders_table = MagicMock()
+        mock_supabase_client.table.side_effect = lambda name: {
+            "order_attachments": attachments_table,
+            "orders": orders_table,
+        }[name]
+        orders_table.select.return_value.eq.return_value.execute.return_value.data = [
+            {"customer_id": 42},
+            {"customer_id": 7},
+        ]
+
+        response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        assert attachments_table.update.call_count == 1
+        eq_calls = attachments_table.update.return_value.eq.call_args_list
+        assert eq_calls == [call("order_id", order_id)]
 
     def test_delete_order_success(self, headers, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""
