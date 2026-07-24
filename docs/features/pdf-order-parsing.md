@@ -551,6 +551,16 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
   入力できる。送信すると分割後の一覧ページに遷移する
 - `useSplitOrder`（`frontend/src/hooks/use-orders.ts`）が上記APIを呼び出し、
   成功時に注文一覧のキャッシュを無効化する
+- 参照元メール（件名・顧客・本文・添付ファイル一覧）を表示する左ペインは
+  `SourceEmailPanel`（`frontend/src/components/orders/source-email-panel.tsx`）
+  として共通コンポーネント化されており（Issue #317）、`SplitOrderDialog` に加えて
+  `EditOrderDialog`（`frontend/src/components/orders/edit-order-dialog.tsx`）からも
+  利用される。`EditOrderDialog` は `source_type === 'email'` かつ `source_raw` が
+  存在する注文を編集する場合のみ、モーダルを2ペインレイアウト
+  （`sm:max-w-[820px]`）に切り替えて左に本パネルを表示する。手動作成の注文では
+  従来通り単一カラムのフォームのみが表示される。件名/本文の分離ロジック
+  （`source_raw` 内の「件名: ...」行を正規表現で切り出す）は
+  `splitSubjectAndBody()`（`frontend/src/lib/order-utils.ts`）として共通化されている
 
 ---
 

@@ -137,3 +137,19 @@ export function getCertaintyBadgeClass(
   }
   return classes[certainty] ?? ""
 }
+
+/**
+ * source_raw の先頭に含まれる「件名: ...」行を件名として切り出し、
+ * 残りを本文として返す。件名行が見つからない場合は全体を本文として扱う。
+ */
+export function splitSubjectAndBody(sourceRaw?: string | null): {
+  subject?: string
+  body?: string
+} {
+  if (!sourceRaw) return {}
+  const match = sourceRaw.match(/^件名[:：]\s*(.*)$/m)
+  if (!match || match.index == null) return { body: sourceRaw }
+  const subject = match[1].trim()
+  const body = sourceRaw.slice(match.index + match[0].length).replace(/^\s+/, "")
+  return { subject: subject || undefined, body: body || undefined }
+}
