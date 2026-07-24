@@ -156,6 +156,38 @@ class TestOrderRouter:
         assert called_id == order_id
         assert called_data == payload
 
+    def test_update_order_syncs_customer_id_to_attachments(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """PATCH /{id}: customer_id 変更時に order_attachments.customer_id も同期されること"""
+        order_id = 1
+        payload = {"customer_id": 42}
+        updated_data = {"id": order_id, "customer_id": 42, "order_number": "ORD-001"}
+        mock_repo.update.return_value = updated_data
+
+        response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        mock_supabase_client.table.assert_called_with("order_attachments")
+        table_mock = mock_supabase_client.table.return_value
+        table_mock.update.assert_called_once_with({"customer_id": 42})
+        table_mock.update.return_value.eq.assert_called_once_with("order_id", order_id)
+        table_mock.update.return_value.eq.return_value.execute.assert_called_once()
+
+    def test_update_order_without_customer_id_does_not_touch_attachments(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """PATCH /{id}: customer_id を含まない更新では order_attachments に触れないこと"""
+        order_id = 1
+        payload = {"quantity": 60}
+        updated_data = {"id": order_id, "quantity": 60, "order_number": "ORD-001"}
+        mock_repo.update.return_value = updated_data
+
+        response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        mock_supabase_client.table.assert_not_called()
+
     def test_delete_order_success(self, headers, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""
         order_id = 1

@@ -42,6 +42,8 @@ FastAPI/フロントエンドで握りつぶされ、常に汎用的な「顧客
 - 下書き顧客に紐づく `order_attachments`（ステージング行）がある場合の削除可否自体の仕様変更
   （カスケード削除や `customer_id` の NULL 化など）は本Issueのスコープ外とし、現状通り
   「関連データがある場合は削除をブロックし、理由を表示する」動作とする
+  - → 注文の顧客変更時に `order_attachments.customer_id` が追従しない問題は
+    Issue #315（[order-attachments-customer-sync.md](order-attachments-customer-sync.md)）で対応
 
 ## 受け入れ条件
 

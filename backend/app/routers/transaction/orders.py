@@ -185,12 +185,23 @@ def update_order(
     order_id: int,
     order_data: OrderUpdate,
     repo: OrderRepository = Depends(get_order_repo),
+    client: Client = Depends(get_supabase_client),
 ):
     """注文を更新"""
     logger.info(f"Updating order {order_id}")
-    result = repo.update(order_id, order_data.model_dump(exclude_unset=True))
+    update_fields = order_data.model_dump(exclude_unset=True)
+    result = repo.update(order_id, update_fields)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
+
+    if "customer_id" in update_fields:
+        # order_attachments.customer_id はメール取込時に一度だけ設定され、以後
+        # 追従更新されないため、注文の顧客を変更しても添付側は古い顧客(不明な顧客等)
+        # を参照し続けてしまう（Issue #315）。注文の顧客変更に合わせて同期する。
+        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).update(
+            {"customer_id": update_fields["customer_id"]}
+        ).eq("order_id", order_id).execute()
+
     return _map_order_response(result)
 
 
