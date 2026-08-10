@@ -91,6 +91,7 @@ export function getCustomerName(customerId: number | undefined, customers?: Cust
 export function getStatusLabel(status: Order["status"]): string {
   const statusLabels: Record<Order["status"], string> = {
     draft: "下書き",
+    pending_approval: "承認待ち",
     confirmed: "確定",
     completed: "完了",
     canceled: "キャンセル",
@@ -103,10 +104,11 @@ export function getStatusLabel(status: Order["status"]): string {
  */
 export function getStatusBadgeClass(status: Order["status"]): string {
   const classes: Record<Order["status"], string> = {
-    draft:      "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
-    confirmed:  "bg-green-100 text-green-800 hover:bg-green-100",
-    completed:  "bg-blue-100 text-blue-800 hover:bg-blue-100",
-    canceled:   "bg-gray-100 text-gray-500 hover:bg-gray-100",
+    draft:             "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
+    pending_approval:  "bg-orange-100 text-orange-800 hover:bg-orange-100",
+    confirmed:         "bg-green-100 text-green-800 hover:bg-green-100",
+    completed:         "bg-blue-100 text-blue-800 hover:bg-blue-100",
+    canceled:          "bg-gray-100 text-gray-500 hover:bg-gray-100",
   }
   return classes[status] ?? ""
 }
