@@ -93,6 +93,58 @@ def list_members(
     return members
 
 
+@member_router.get("/me", response_model=MemberResponse)
+def get_my_membership(
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """
+    現在ログイン中のユーザー自身のテナントメンバー情報（自分のロール等）を取得する。
+
+    `GET /tenant/members` (一覧) は president / platform_admin 限定だが、
+    フロントエンドで「自分のロールに応じて操作を出し分ける」用途（承認依頼送信・
+    承認・却下ボタンの表示制御等）では、対象ロール以外のユーザーも自分のロールを
+    取得できる必要があるため、ロール制限なしの自己参照専用エンドポイントとして分離する。
+    """
+    # organization_members と profiles の間にFK関係が定義されていないため、
+    # PostgRESTの埋め込み構文 (`profiles(...)`) は使えない。list_members と同様に
+    # 2クエリに分けて取得する。
+    res = (
+        client.table("organization_members")
+        .select("user_id, role")
+        .eq("user_id", current_user_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="メンバー情報が見つかりません"
+        )
+    row = cast(dict[str, Any], res.data)
+
+    profile_res = (
+        client.table("profiles")
+        .select("full_name, email")
+        .eq("id", current_user_id)
+        .maybe_single()
+        .execute()
+    )
+    profile = (
+        cast(dict[str, Any], profile_res.data)
+        if profile_res and profile_res.data
+        else {}
+    )
+
+    return MemberResponse(
+        user_id=row["user_id"],
+        email=profile.get("email", ""),
+        full_name=profile.get("full_name"),
+        role=row["role"],
+    )
+
+
 @member_router.post(
     "", response_model=MemberResponse, status_code=status.HTTP_201_CREATED
 )
