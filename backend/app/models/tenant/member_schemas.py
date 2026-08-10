@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-MemberRole = Literal["president", "iso_officer", "order_handler"]
+MemberRole = Literal["president", "iso_officer", "order_handler", "platform_admin"]
 
 
 class MemberCreateSchema(BaseModel):

@@ -52,12 +52,14 @@ const ROLE_LABELS: Record<MemberRole, string> = {
   president: "社長",
   iso_officer: "ISO担当",
   order_handler: "受注担当",
+  platform_admin: "プラットフォーム管理者",
 }
 
 const ROLE_BADGE_VARIANTS: Record<MemberRole, "default" | "secondary" | "outline"> = {
   president: "default",
   iso_officer: "outline",
   order_handler: "secondary",
+  platform_admin: "outline",
 }
 
 /**
@@ -355,6 +357,7 @@ export default function MembersPage() {
                     <SelectItem value="order_handler">受注担当</SelectItem>
                     <SelectItem value="iso_officer">ISO担当</SelectItem>
                     <SelectItem value="president">社長</SelectItem>
+                    <SelectItem value="platform_admin">プラットフォーム管理者</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -435,6 +438,7 @@ export default function MembersPage() {
                   <SelectItem value="order_handler">受注担当</SelectItem>
                   <SelectItem value="iso_officer">ISO担当</SelectItem>
                   <SelectItem value="president">社長</SelectItem>
+                  <SelectItem value="platform_admin">プラットフォーム管理者</SelectItem>
                 </SelectContent>
               </Select>
             </div>

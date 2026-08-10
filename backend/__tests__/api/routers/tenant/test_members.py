@@ -91,3 +91,60 @@ class TestMembersRouter:
         response = client.delete("/tenant/members/other-user-id", headers=headers)
 
         assert response.status_code == 403
+
+    def test_list_members_allowed_for_platform_admin(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """GET /: platform_admin もメンバー一覧を取得できる"""
+        _set_role(mock_client, "platform_admin")
+        mock_admin_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+
+        response = client.get("/tenant/members", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_create_member_allowed_for_platform_admin(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /: platform_admin もメンバーを追加できる"""
+        _set_role(mock_client, "platform_admin")
+        mock_admin_client.auth.admin.create_user.return_value.user.id = "new-user-id"
+
+        response = client.post(
+            "/tenant/members",
+            json={
+                "email": "new@example.com",
+                "password": "password123",
+                "full_name": "New User",
+                "role": "order_handler",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+
+    def test_update_member_self_demotion_blocked_for_platform_admin(
+        self, headers, mock_client
+    ):
+        """PATCH /{user_id}: platform_admin が自分自身のロールを変更しようとすると400"""
+        _set_role(mock_client, "platform_admin")
+
+        response = client.patch(
+            "/tenant/members/test-user-id",
+            json={"role": "order_handler"},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+
+    def test_delete_member_forbidden_when_last_platform_admin(
+        self, headers, mock_client
+    ):
+        """DELETE /{user_id}: テナントに platform_admin が1人しかいない場合は削除できない"""
+        _set_role(mock_client, "platform_admin")
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.count = 1
+
+        response = client.delete("/tenant/members/other-user-id", headers=headers)
+
+        assert response.status_code == 400
