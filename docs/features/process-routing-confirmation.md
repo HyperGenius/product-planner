@@ -4,7 +4,10 @@ Issue #197 / #199 / #200 で実装。
 
 ## 概要
 
-工程ルーティング（`process_routings`）に確定フラグを追加し、`admin` ロールのみが確定操作を行えるよう制限する機能。
+工程ルーティング（`process_routings`）に確定フラグを追加し、`president` ロールのみが確定操作を行えるよう制限する機能。
+
+> [!NOTE]
+> Issue #323 でロールを `admin`/`member` の二値から `president`/`iso_officer`/`order_handler`/`platform_admin` の四値に拡張したのに伴い、確定操作の権限判定は `admin` → `president` に読み替えられている（`platform_admin` は承認操作を含まないため対象外。[member-roles.md](member-roles.md) 参照）。
 
 ## DB スキーマ変更
 
@@ -26,7 +29,7 @@ Issue #197 / #199 / #200 で実装。
 
 `PATCH /process-routings/{id}` で `is_confirmed` を含むリクエストの場合:
 - 呼び出し元ユーザーのロールを確認
-- `admin` でなければ HTTP 403 を返す
+- `president` でなければ HTTP 403 を返す
 - `is_confirmed=true` の場合、`confirmed_by` と `confirmed_at` を自動セット
 - `is_confirmed=false`（取消）の場合、両フィールドを NULL にリセット
 
@@ -39,8 +42,8 @@ Issue #197 / #199 / #200 で実装。
 ### UI（`product-routings-dialog.tsx`）
 
 - 工程リストに「確定」列を追加
-  - `admin` ユーザー: チェックボックス形式のトグルボタンを表示。クリックで確定/取消
-  - `member` ユーザー: 鍵アイコン（`Lock`）を表示し操作不可
+  - `president` ユーザー: チェックボックス形式のトグルボタンを表示。クリックで確定/取消
+  - それ以外のロール: 鍵アイコン（`Lock`）を表示し操作不可
 - 確定済み工程の工程名に緑色バッジ（「確定済み」）を表示
 - 確定取消時は AlertDialog で「確定を取り消しますか？」確認ダイアログを表示
 - `useCurrentMember()` フックでロールを判定

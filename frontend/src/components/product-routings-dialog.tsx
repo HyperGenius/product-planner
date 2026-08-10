@@ -120,7 +120,7 @@ export function ProductRoutingsDialog({
   const { data: equipmentGroups, isLoading: isLoadingGroups } = useEquipmentGroups()
   const { data: currentMember } = useCurrentMember()
 
-  const isAdmin = currentMember?.role === "admin"
+  const isAdmin = currentMember?.role === "president"
 
   // ミューテーション
   const updateMutation = useUpdateProcessRouting()

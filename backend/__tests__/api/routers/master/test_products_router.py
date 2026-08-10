@@ -3,7 +3,7 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from app.dependencies import get_product_repo
+from app.dependencies import get_current_user_id, get_product_repo, get_supabase_client
 
 # テスト対象のAPIインスタンス
 from app.main import app
@@ -11,6 +11,13 @@ from fastapi.testclient import TestClient
 
 # テストクライアントの作成
 client = TestClient(app)
+
+
+def _set_role(mock_client: MagicMock, role: str) -> None:
+    """organization_members からのロール取得チェーンのモックを設定する。"""
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+        "role": role
+    }
 
 
 @pytest.mark.api
@@ -23,13 +30,21 @@ class TestProductRouter:
         mock = MagicMock()
         return mock
 
+    @pytest.fixture
+    def mock_client(self):
+        """Supabaseクライアントのモックを作成するフィクスチャ"""
+        return MagicMock()
+
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo):
+    def override_dependency(self, mock_repo, mock_client):
         """
-        テスト実行中だけ get_product_repo を mock_repo に差し替える。
-        autouse=True なので、このクラスの全テストで自動的に適用される。
+        テスト実行中だけ get_product_repo / get_current_user_id / get_supabase_client を差し替える。
+        PATCH は is_active 更新時にロールチェックのため get_current_user_id
+        (実体はSupabase認証) を要求するため、テストでは固定IDに差し替える。
         """
         app.dependency_overrides[get_product_repo] = lambda: mock_repo
+        app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
+        app.dependency_overrides[get_supabase_client] = lambda: mock_client
         yield
         # テスト終了後に元に戻す（重要）
         app.dependency_overrides = {}
@@ -100,7 +115,7 @@ class TestProductRouter:
         call_args = mock_repo.create.call_args[0][0]
         assert call_args["name"] == "New Product"
 
-    def test_update_product(self, mock_repo):
+    def test_update_product(self, headers, mock_repo):
         """PATCH /{id}: 更新のテスト"""
         product_id = 1
         payload = {"name": "Updated Name"}
@@ -112,7 +127,9 @@ class TestProductRouter:
 
         mock_repo.update.return_value = updated_data
 
-        response = client.patch(f"/products/{product_id}", json=payload)
+        response = client.patch(
+            f"/products/{product_id}", json=payload, headers=headers
+        )
 
         assert response.status_code == 200
         assert response.json() == updated_data
@@ -123,8 +140,9 @@ class TestProductRouter:
         assert called_id == product_id
         assert called_data == payload
 
-    def test_toggle_product_is_active(self, mock_repo):
-        """PATCH /{id}: is_active フラグの有効/無効切り替えテスト"""
+    def test_toggle_product_is_active(self, headers, mock_repo, mock_client):
+        """PATCH /{id}: is_active フラグの有効/無効切り替えテスト（president は許可）"""
+        _set_role(mock_client, "president")
         product_id = 1
         # 無効化するケース
         payload = {"is_active": False}
@@ -137,7 +155,9 @@ class TestProductRouter:
 
         mock_repo.update.return_value = updated_data
 
-        response = client.patch(f"/products/{product_id}", json=payload)
+        response = client.patch(
+            f"/products/{product_id}", json=payload, headers=headers
+        )
 
         assert response.status_code == 200
         assert response.json()["is_active"] is False
@@ -146,6 +166,35 @@ class TestProductRouter:
         called_id, called_data = mock_repo.update.call_args[0]
         assert called_id == product_id
         assert called_data == {"is_active": False}
+
+    def test_toggle_product_is_active_allowed_for_platform_admin(
+        self, headers, mock_repo, mock_client
+    ):
+        """PATCH /{id}: is_active の切り替えは platform_admin も許可"""
+        _set_role(mock_client, "platform_admin")
+        product_id = 1
+        updated_data = {"id": product_id, "is_active": False}
+        mock_repo.update.return_value = updated_data
+
+        response = client.patch(
+            f"/products/{product_id}", json={"is_active": False}, headers=headers
+        )
+
+        assert response.status_code == 200
+
+    def test_toggle_product_is_active_forbidden_for_order_handler(
+        self, headers, mock_repo, mock_client
+    ):
+        """PATCH /{id}: is_active の切り替えは president/platform_admin 以外は403"""
+        _set_role(mock_client, "order_handler")
+        product_id = 1
+
+        response = client.patch(
+            f"/products/{product_id}", json={"is_active": False}, headers=headers
+        )
+
+        assert response.status_code == 403
+        mock_repo.update.assert_not_called()
 
     def test_delete_product_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

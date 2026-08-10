@@ -87,14 +87,14 @@ def update_process_routing(
     client: Client = Depends(get_supabase_client),
     repo: ProductRepository = Depends(get_product_repo),
 ):
-    """工程順序を更新。is_confirmed の変更は admin のみ可能"""
+    """工程順序を更新。is_confirmed の変更は president のみ可能"""
     logger.info(f"Updating process routing {routing_id}")
 
     update_dict = routing_data.model_dump(exclude_unset=True)
 
     if "is_confirmed" in update_dict:
         role = get_current_user_role(tenant_id, user_id, client)
-        if role != "admin":
+        if role != "president":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="工程の確定・確定取消は管理者のみ操作できます",

@@ -48,6 +48,20 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
+const ROLE_LABELS: Record<MemberRole, string> = {
+  president: "社長",
+  iso_officer: "ISO担当",
+  order_handler: "受注担当",
+  platform_admin: "プラットフォーム管理者",
+}
+
+const ROLE_BADGE_VARIANTS: Record<MemberRole, "default" | "secondary" | "outline"> = {
+  president: "default",
+  iso_officer: "outline",
+  order_handler: "secondary",
+  platform_admin: "outline",
+}
+
 /**
  * パスワードをセキュアにランダム生成するユーティリティ
  * 英字大小・数字・記号を含む12文字
@@ -93,12 +107,12 @@ export default function MembersPage() {
   // 追加フォームの状態
   const [newEmail, setNewEmail] = useState("")
   const [newFullName, setNewFullName] = useState("")
-  const [newRole, setNewRole] = useState<MemberRole>("member")
+  const [newRole, setNewRole] = useState<MemberRole>("order_handler")
   const [newPassword, setNewPassword] = useState("")
 
   // 編集フォームの状態
   const [editFullName, setEditFullName] = useState("")
-  const [editRole, setEditRole] = useState<MemberRole>("member")
+  const [editRole, setEditRole] = useState<MemberRole>("order_handler")
 
   const { data: members, isLoading, error } = useTenantMembers()
   const createMutation = useCreateTenantMember()
@@ -109,7 +123,7 @@ export default function MembersPage() {
   const handleOpenCreateDialog = () => {
     setNewEmail("")
     setNewFullName("")
-    setNewRole("member")
+    setNewRole("order_handler")
     setNewPassword(generatePassword())
     setCreatedPassword(null)
     setIsCreateDialogOpen(true)
@@ -231,10 +245,8 @@ export default function MembersPage() {
                     <TableCell>{member.full_name ?? "—"}</TableCell>
                     <TableCell>{member.email}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={member.role === "admin" ? "default" : "secondary"}
-                      >
-                        {member.role === "admin" ? "管理者" : "メンバー"}
+                      <Badge variant={ROLE_BADGE_VARIANTS[member.role]}>
+                        {ROLE_LABELS[member.role]}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
@@ -342,8 +354,10 @@ export default function MembersPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="member">メンバー</SelectItem>
-                    <SelectItem value="admin">管理者</SelectItem>
+                    <SelectItem value="order_handler">受注担当</SelectItem>
+                    <SelectItem value="iso_officer">ISO担当</SelectItem>
+                    <SelectItem value="president">社長</SelectItem>
+                    <SelectItem value="platform_admin">プラットフォーム管理者</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -421,8 +435,10 @@ export default function MembersPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="member">メンバー</SelectItem>
-                  <SelectItem value="admin">管理者</SelectItem>
+                  <SelectItem value="order_handler">受注担当</SelectItem>
+                  <SelectItem value="iso_officer">ISO担当</SelectItem>
+                  <SelectItem value="president">社長</SelectItem>
+                  <SelectItem value="platform_admin">プラットフォーム管理者</SelectItem>
                 </SelectContent>
               </Select>
             </div>

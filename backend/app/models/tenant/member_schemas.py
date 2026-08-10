@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+MemberRole = Literal["president", "iso_officer", "order_handler", "platform_admin"]
+
 
 class MemberCreateSchema(BaseModel):
     """メンバー追加リクエストのスキーマ"""
@@ -9,14 +11,14 @@ class MemberCreateSchema(BaseModel):
     email: EmailStr = Field(description="メールアドレス")
     password: str = Field(min_length=8, description="初期パスワード")
     full_name: str = Field(description="氏名")
-    role: Literal["admin", "member"] = Field(default="member", description="権限")
+    role: MemberRole = Field(default="order_handler", description="権限")
 
 
 class MemberUpdateSchema(BaseModel):
     """メンバー更新リクエストのスキーマ"""
 
     full_name: str | None = Field(default=None, description="氏名")
-    role: Literal["admin", "member"] | None = Field(default=None, description="権限")
+    role: MemberRole | None = Field(default=None, description="権限")
 
 
 class MemberResponse(BaseModel):

@@ -1,4 +1,8 @@
-export type MemberRole = "admin" | "member"
+export type MemberRole =
+  | "president"
+  | "iso_officer"
+  | "order_handler"
+  | "platform_admin"
 
 export interface TenantMember {
   user_id: string

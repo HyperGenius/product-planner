@@ -72,6 +72,21 @@ cd backend && ruff check . && mypy .
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること
+- **メンバーロール**: `organization_members.role` は `president`（社長）/ `iso_officer`（ISO担当）/ `order_handler`（受注担当）/ `platform_admin`（プラットフォーム管理者）の四値（Issue #323）。旧 `admin`/`member` は廃止済み。メンバー管理系エンドポイントは `president`/`platform_admin` に開放し、承認操作（工程確定 `is_confirmed` 等）は `platform_admin` を含めず `president` 限定とする方針。詳細は [docs/features/member-roles.md](docs/features/member-roles.md) 参照
+
+## 本番 Supabase への接続（マイグレーション適用・一時的なSQL実行）
+
+- このプロジェクトの本番DBは **direct connection (`db.<ref>.supabase.co`) が名前解決できない**（IPv4アドオン未設定等の理由と推測）。`supabase db push --linked` は Management API 経由で一時ログインロールを作成する際に `permission denied to alter role` で失敗することがある
+- 代わりに **セッションプーラー経由の `--db-url`** を使うこと。リージョンは `ap-northeast-1`（Tokyo）で、`aws-0-...` ではなく `aws-1-ap-northeast-1.pooler.supabase.com` が有効だった（`aws-0` は `tenant/user not found` で失敗）
+  ```bash
+  # プロジェクトref・パスワードは backend/.env の SUPABASE_PROJECT_ID / SUPABASE_DB_PASSWORD を利用
+  # パスワードは percent-encode が必要
+  supabase db push --db-url "postgresql://postgres.<project-ref>:<url-encoded-password>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres"
+
+  # 一時的なSQL実行（本番データの確認・単発の手動UPDATE等）
+  supabase db query --db-url "postgresql://postgres.<project-ref>:<url-encoded-password>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" "SELECT ..."
+  ```
+- 本番への `db push` / 直接SQL実行は不可逆な操作のため、必ず `--dry-run`（push の場合）や `SELECT` での事前確認を行い、ユーザーの明示的な承認を得てから実行すること
 
 ## Git ワークフロー
 

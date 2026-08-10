@@ -22,8 +22,13 @@ class TestProcessRoutingRouter:
         mock = MagicMock()
         return mock
 
+    @pytest.fixture
+    def mock_client(self):
+        """Supabaseクライアントのモックを作成するフィクスチャ"""
+        return MagicMock()
+
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo):
+    def override_dependency(self, mock_repo, mock_client):
         """
         テスト実行中だけ get_product_repo / get_current_user_id を差し替える。
         PATCH は is_confirmed 更新時にロールチェックのため get_current_user_id
@@ -31,7 +36,7 @@ class TestProcessRoutingRouter:
         """
         app.dependency_overrides[get_product_repo] = lambda: mock_repo
         app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
-        app.dependency_overrides[get_supabase_client] = lambda: MagicMock()
+        app.dependency_overrides[get_supabase_client] = lambda: mock_client
         yield
         app.dependency_overrides = {}
 
@@ -102,6 +107,46 @@ class TestProcessRoutingRouter:
         called_id, called_data = mock_repo.update_routing.call_args[0]
         assert called_id == routing_id
         assert called_data == payload
+
+    def test_update_process_routing_is_confirmed_forbidden_for_non_president(
+        self, headers, mock_repo, mock_client
+    ):
+        """PATCH /{id}: is_confirmed 変更は president 以外だと403"""
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+            "role": "order_handler"
+        }
+        routing_id = 1
+        payload = {"is_confirmed": True}
+
+        response = client.patch(
+            f"/process-routings/{routing_id}", json=payload, headers=headers
+        )
+
+        assert response.status_code == 403
+        mock_repo.update_routing.assert_not_called()
+
+    def test_update_process_routing_is_confirmed_allowed_for_president(
+        self, headers, mock_repo, mock_client
+    ):
+        """PATCH /{id}: is_confirmed 変更は president なら成功"""
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+            "role": "president"
+        }
+        routing_id = 1
+        payload = {"is_confirmed": True}
+        updated_data = {"id": routing_id, "is_confirmed": True}
+        mock_repo.update_routing.return_value = updated_data
+
+        response = client.patch(
+            f"/process-routings/{routing_id}", json=payload, headers=headers
+        )
+
+        assert response.status_code == 200
+        mock_repo.update_routing.assert_called_once()
+        called_id, called_data = mock_repo.update_routing.call_args[0]
+        assert called_id == routing_id
+        assert called_data["is_confirmed"] is True
+        assert called_data["confirmed_by"] == "test-user-id"
 
     def test_delete_process_routing_success(self, headers, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

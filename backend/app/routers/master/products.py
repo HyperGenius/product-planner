@@ -1,10 +1,17 @@
 # routers/master/products.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.dependencies import get_current_tenant_id, get_product_repo
+from app.dependencies import (
+    get_current_tenant_id,
+    get_current_user_id,
+    get_current_user_role,
+    get_product_repo,
+    get_supabase_client,
+)
 from app.models.master import ProductCreateSchema, ProductUpdateSchema
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.utils.logger import get_logger
+from supabase import Client  # type: ignore
 
 product_router = APIRouter(prefix="/products", tags=["Master (Products)"])
 
@@ -40,11 +47,25 @@ def get_product(product_id: int, repo: ProductRepository = Depends(get_product_r
 def update_product(
     product_id: int,
     product_data: ProductUpdateSchema,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
     repo: ProductRepository = Depends(get_product_repo),
 ):
-    """製品を更新"""
+    """製品を更新。is_active の変更は president / platform_admin のみ可能"""
     logger.info(f"Updating product {product_id}")
-    return repo.update(product_id, product_data.model_dump(exclude_unset=True))
+
+    update_dict = product_data.model_dump(exclude_unset=True)
+
+    if "is_active" in update_dict:
+        role = get_current_user_role(tenant_id, user_id, client)
+        if role not in ("president", "platform_admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="製品の有効/無効の切り替えは president または platform_admin のみ操作できます",
+            )
+
+    return repo.update(product_id, update_dict)
 
 
 @product_router.delete("/{product_id}")
