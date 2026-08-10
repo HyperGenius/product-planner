@@ -40,7 +40,7 @@ class TestMembersRouter:
         app.dependency_overrides = {}
 
     def test_list_members_forbidden_for_order_handler(self, headers, mock_client):
-        """GET /: president 以外は403"""
+        """GET /: president / platform_admin 以外は403"""
         _set_role(mock_client, "order_handler")
 
         response = client.get("/tenant/members", headers=headers)
@@ -68,7 +68,7 @@ class TestMembersRouter:
         assert response.json() == []
 
     def test_create_member_forbidden_for_order_handler(self, headers, mock_client):
-        """POST /: president 以外は403"""
+        """POST /: president / platform_admin 以外は403"""
         _set_role(mock_client, "order_handler")
 
         response = client.post(
@@ -85,7 +85,7 @@ class TestMembersRouter:
         assert response.status_code == 403
 
     def test_delete_member_forbidden_for_order_handler(self, headers, mock_client):
-        """DELETE /{user_id}: president 以外は403"""
+        """DELETE /{user_id}: president / platform_admin 以外は403"""
         _set_role(mock_client, "order_handler")
 
         response = client.delete("/tenant/members/other-user-id", headers=headers)

@@ -7,7 +7,7 @@ Issue #197 / #199 / #200 で実装。
 工程ルーティング（`process_routings`）に確定フラグを追加し、`president` ロールのみが確定操作を行えるよう制限する機能。
 
 > [!NOTE]
-> Issue #323 でロールを `admin`/`member` の二値から `president`/`iso_officer`/`order_handler` の三値に拡張したのに伴い、確定操作の権限判定は `admin` → `president` に読み替えられている（[member-roles.md](member-roles.md) 参照）。
+> Issue #323 でロールを `admin`/`member` の二値から `president`/`iso_officer`/`order_handler`/`platform_admin` の四値に拡張したのに伴い、確定操作の権限判定は `admin` → `president` に読み替えられている（`platform_admin` は承認操作を含まないため対象外。[member-roles.md](member-roles.md) 参照）。
 
 ## DB スキーマ変更
 
