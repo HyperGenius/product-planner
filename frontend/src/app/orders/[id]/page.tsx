@@ -456,6 +456,8 @@ export default function OrderDetailPage() {
 
       <RejectOrderDialog
         order={isRejectDialogOpen ? order : null}
+        products={products}
+        customers={customers}
         isPending={rejectMutation.isPending}
         onConfirm={handleReject}
         onOpenChange={(open) => { if (!open) setIsRejectDialogOpen(false) }}

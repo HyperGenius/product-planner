@@ -246,6 +246,8 @@ export default function OrdersPage() {
 
         <RejectOrderDialog
           order={rejectTargetOrder}
+          products={products}
+          customers={customers}
           isPending={rejectOrder.isPending}
           onConfirm={handleConfirmReject}
           onOpenChange={(open) => { if (!open) setRejectTargetOrder(null) }}
