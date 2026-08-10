@@ -49,6 +49,7 @@ export default function OrdersPage() {
     expandedOrderId,
     expandedSimResult,
     currentUserRole,
+    isPresident,
     confirmOrder,
     requestApproval,
     rejectOrder,
@@ -147,7 +148,11 @@ export default function OrdersPage() {
                               : false
                           }
                           onCheckedChange={handleToggleSelectAllPendingApproval}
-                          disabled={pendingApprovalPageOrders.length === 0 || isBulkApproving}
+                          disabled={
+                            !isPresident ||
+                            pendingApprovalPageOrders.length === 0 ||
+                            isBulkApproving
+                          }
                           aria-label="全選択"
                         />
                       ) : (
@@ -258,6 +263,7 @@ export default function OrdersPage() {
           order={expandedOrder}
           result={expandedSimResult}
           requestApprovalIsPending={requestApproval.isPending}
+          currentUserRole={currentUserRole}
           onClose={closeSimResult}
           onRequestApproval={handleRequestApprovalFromRow}
         />
@@ -266,6 +272,7 @@ export default function OrdersPage() {
           selectedCount={selectedOrderIds.length}
           selectedScheduledCount={selectedScheduledCount}
           selectedPendingApprovalCount={selectedPendingApprovalCount}
+          currentUserRole={currentUserRole}
           isBulkSimulating={isBulkSimulating}
           isBulkRequestingApproval={isBulkRequestingApproval}
           isBulkApproving={isBulkApproving}

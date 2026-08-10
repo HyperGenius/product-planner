@@ -12,6 +12,7 @@ interface BulkActionBarProps {
   selectedCount: number
   selectedScheduledCount: number
   selectedPendingApprovalCount: number
+  currentUserRole: string | null
   isBulkSimulating: boolean
   isBulkRequestingApproval: boolean
   isBulkApproving: boolean
@@ -25,6 +26,7 @@ export function BulkActionBar({
   selectedCount,
   selectedScheduledCount,
   selectedPendingApprovalCount,
+  currentUserRole,
   isBulkSimulating,
   isBulkRequestingApproval,
   isBulkApproving,
@@ -62,32 +64,34 @@ export function BulkActionBar({
         )}
       </Button>
       {/* disabled な Button は pointer-events: none のため Tooltip が発火しない。span でラップする */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className={!canRequestApproval ? "cursor-not-allowed" : undefined}>
-            <Button
-              size="sm"
-              onClick={onBulkRequestApproval}
-              disabled={isBusy || !canRequestApproval}
-            >
-              {isBulkRequestingApproval ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  送信中...
-                </>
-              ) : (
-                `一括承認依頼（${selectedScheduledCount}件）`
-              )}
-            </Button>
-          </span>
-        </TooltipTrigger>
-        {!canRequestApproval && (
-          <TooltipContent>
-            シミュレーション済みの注文がありません
-          </TooltipContent>
-        )}
-      </Tooltip>
-      {selectedPendingApprovalCount > 0 && (
+      {currentUserRole === "order_handler" && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={!canRequestApproval ? "cursor-not-allowed" : undefined}>
+              <Button
+                size="sm"
+                onClick={onBulkRequestApproval}
+                disabled={isBusy || !canRequestApproval}
+              >
+                {isBulkRequestingApproval ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    送信中...
+                  </>
+                ) : (
+                  `一括承認依頼（${selectedScheduledCount}件）`
+                )}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {!canRequestApproval && (
+            <TooltipContent>
+              シミュレーション済みの注文がありません
+            </TooltipContent>
+          )}
+        </Tooltip>
+      )}
+      {currentUserRole === "president" && selectedPendingApprovalCount > 0 && (
         <Button size="sm" onClick={onBulkApprove} disabled={isBusy}>
           {isBulkApproving ? (
             <>
