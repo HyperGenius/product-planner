@@ -123,7 +123,7 @@ def get_current_user_role(tenant_id: str, user_id: str, client: Client) -> str:
     """organization_members から現在ユーザーのロールを取得する。
 
     Returns:
-        "admin" または "member"
+        "president" / "iso_officer" / "order_handler" のいずれか
 
     Raises:
         HTTPException 403: テナントメンバーでない場合

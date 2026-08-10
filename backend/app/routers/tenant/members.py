@@ -17,12 +17,15 @@ member_router = APIRouter(prefix="/tenant/members", tags=["Tenant (Members)"])
 logger = get_logger(__name__)
 
 
-def _require_admin(
+def _require_president(
     current_user_id: str,
     tenant_id: str,
     client: Client,
 ) -> None:
-    """現在のユーザーが対象テナントの admin であることを検証する。"""
+    """現在のユーザーが対象テナントの president であることを検証する。
+
+    メンバー管理(メンバー一覧の閲覧・追加・変更・削除)は president 限定の操作。
+    """
     res = (
         client.table("organization_members")
         .select("role")
@@ -31,10 +34,10 @@ def _require_admin(
         .single()
         .execute()
     )
-    if not res.data or cast(dict[str, Any], res.data).get("role") != "admin":
+    if not res.data or cast(dict[str, Any], res.data).get("role") != "president":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="この操作には admin 権限が必要です",
+            detail="この操作には president 権限が必要です",
         )
 
 
@@ -45,8 +48,8 @@ def list_members(
     client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """テナントのメンバー一覧を取得する（admin のみ）"""
-    _require_admin(current_user_id, tenant_id, client)
+    """テナントのメンバー一覧を取得する（president のみ）"""
+    _require_president(current_user_id, tenant_id, client)
 
     members_res = (
         admin_client.table("organization_members")
@@ -94,8 +97,8 @@ def create_member(
     client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """新規メンバーをアカウント発行して追加する（admin のみ）"""
-    _require_admin(current_user_id, tenant_id, client)
+    """新規メンバーをアカウント発行して追加する（president のみ）"""
+    _require_president(current_user_id, tenant_id, client)
 
     # Supabase Admin API でユーザーを作成
     try:
@@ -158,11 +161,15 @@ def update_member(
     client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """メンバーの氏名・権限を変更する（admin のみ）"""
-    _require_admin(current_user_id, tenant_id, client)
+    """メンバーの氏名・権限を変更する（president のみ）"""
+    _require_president(current_user_id, tenant_id, client)
 
-    # 自分自身の権限降格を禁止
-    if user_id == current_user_id and data.role == "member":
+    # 自分自身の president 権限降格を禁止
+    if (
+        user_id == current_user_id
+        and data.role is not None
+        and data.role != "president"
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="自分自身の権限を降格させることはできません",
@@ -182,22 +189,23 @@ def update_member(
             status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません"
         )
 
-    # role 変更の場合、admin が0人になることを防ぐ
+    # role 変更の場合、president が0人になることを防ぐ
     if (
-        data.role == "member"
-        and cast(dict[str, Any], member_res.data).get("role") == "admin"
+        data.role is not None
+        and data.role != "president"
+        and cast(dict[str, Any], member_res.data).get("role") == "president"
     ):
-        admin_count_res = (
+        president_count_res = (
             client.table("organization_members")
             .select("user_id", count="exact")  # type: ignore[arg-type]
             .eq("tenant_id", tenant_id)
-            .eq("role", "admin")
+            .eq("role", "president")
             .execute()
         )
-        if (admin_count_res.count or 0) <= 1:
+        if (president_count_res.count or 0) <= 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="テナントに admin が0人になるような変更はできません",
+                detail="テナントに president が0人になるような変更はできません",
             )
 
     updates: dict[str, Any] = {}
@@ -242,8 +250,8 @@ def delete_member(
     client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """メンバーをテナントから削除する（admin のみ、自分自身は削除不可）"""
-    _require_admin(current_user_id, tenant_id, client)
+    """メンバーをテナントから削除する（president のみ、自分自身は削除不可）"""
+    _require_president(current_user_id, tenant_id, client)
 
     if user_id == current_user_id:
         raise HTTPException(
@@ -265,19 +273,19 @@ def delete_member(
             status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません"
         )
 
-    # admin を削除する場合、admin が0人になることを防ぐ
-    if cast(dict[str, Any], member_res.data).get("role") == "admin":
-        admin_count_res = (
+    # president を削除する場合、president が0人になることを防ぐ
+    if cast(dict[str, Any], member_res.data).get("role") == "president":
+        president_count_res = (
             client.table("organization_members")
             .select("user_id", count="exact")  # type: ignore[arg-type]
             .eq("tenant_id", tenant_id)
-            .eq("role", "admin")
+            .eq("role", "president")
             .execute()
         )
-        if (admin_count_res.count or 0) <= 1:
+        if (president_count_res.count or 0) <= 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="テナントに admin が0人になるような削除はできません",
+                detail="テナントに president が0人になるような削除はできません",
             )
 
     # organization_members から削除（テナント紐付けを解除）

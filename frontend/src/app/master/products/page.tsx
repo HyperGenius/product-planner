@@ -83,7 +83,7 @@ export default function ProductsPage() {
 
   const { data: products, isLoading, error } = useProducts()
   const { data: currentMember } = useCurrentMember()
-  const isAdmin = currentMember?.role === "admin"
+  const isAdmin = currentMember?.role === "president"
 
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
