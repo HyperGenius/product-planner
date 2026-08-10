@@ -77,4 +77,6 @@ Issue #323 で実装。受注確認・承認ワークフロー（#322）の権�
 ## スコープ外（今後のIssueで対応）
 
 - `iso_officer` 向けの監査ログ・承認履歴閲覧UI/APIの実装
-- 受注承認・却下ワークフロー本体（#322）
+
+受注承認・却下ワークフロー本体は Issue #325 で実装済み。詳細は
+[approval-workflow.md](approval-workflow.md) を参照。

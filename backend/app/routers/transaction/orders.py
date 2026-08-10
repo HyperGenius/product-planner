@@ -2,11 +2,13 @@
 from datetime import UTC, date, datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from postgrest.exceptions import APIError
 
 from app.dependencies import (
     get_current_tenant_id,
+    get_current_user_id,
+    get_current_user_role,
     get_equipment_repo,
     get_order_repo,
     get_product_repo,
@@ -16,7 +18,9 @@ from app.dependencies import (
 )
 from app.models.transaction.order_schema import (
     OrderAttachmentResponse,
+    OrderBulkApproveRequest,
     OrderCreate,
+    OrderRejectRequest,
     OrderSimulateRequest,
     OrderSplitRequest,
     OrderUpdate,
@@ -427,19 +431,30 @@ def simulate_schedule(
         raise HTTPException(status_code=400, detail=str(e)) from None
 
 
-@orders_router.post("/{order_id}/confirm")
-def confirm_order(
+def _require_role(
+    tenant_id: str, user_id: str, client: Client, allowed_role: str, action: str
+) -> None:
+    """指定ロールのみ実行可能な操作のロールチェック。許可されなければ403を送出する。"""
+    role = get_current_user_role(tenant_id, user_id, client)
+    if role != allowed_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{action}は {allowed_role} のみ操作できます",
+        )
+
+
+def _confirm_single_order(
     order_id: int,
-    tenant_id: str = Depends(get_current_tenant_id),
-    order_repo: OrderRepository = Depends(get_order_repo),
-    product_repo: ProductRepository = Depends(get_product_repo),
-    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
-    settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
-):
+    tenant_id: str,
+    order_repo: OrderRepository,
+    product_repo: ProductRepository,
+    schedule_repo: ScheduleRepository,
+    settings_repo: SchedulingSettingsRepository,
+) -> dict:
     """
     スケジュールを確定・保存し、注文ステータスをconfirmedにする。
+    ロールチェックは呼び出し側（単体/一括の各エンドポイント）で行う。
     """
-    logger.info(f"Confirming order {order_id}")
     order = order_repo.get_by_id(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -451,34 +466,87 @@ def confirm_order(
     except InvalidOrderStatusTransitionError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
+    # 1. 実際に保存 (dry_run=False)
+    result = schedule_order(
+        order_id=order["id"],
+        product_id=order["product_id"],
+        quantity=order["quantity"],
+        product_repo=product_repo,
+        schedule_repo=schedule_repo,
+        tenant_id=tenant_id,
+        dry_run=False,
+        settings_repo=settings_repo,
+        desired_deadline=order.get("deadline_date"),
+    )
+
+    # 2. ステータス更新 & is_scheduled フラグ更新
+    last_end = max(s["end_datetime"] for s in result)
+    confirmed_deadline = datetime.fromisoformat(last_end).date().isoformat()
+    order_repo.update(
+        order_id,
+        {
+            "status": "confirmed",
+            "is_scheduled": True,
+            "confirmed_at": datetime.now(UTC).isoformat(),
+            "confirmed_deadline": confirmed_deadline,
+        },
+    )
+
+    return {"status": "confirmed", "schedules": result}
+
+
+@orders_router.post("/{order_id}/request-approval")
+def request_order_approval(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+):
+    """
+    下書き注文の承認依頼を送信し、注文ステータスをpending_approvalにする（order_handler限定）。
+    """
+    logger.info(f"Requesting approval for order {order_id}")
+    _require_role(tenant_id, user_id, client, "order_handler", "承認依頼の送信")
+
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("product_id") is None:
+        raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
+
     try:
-        # 1. 実際に保存 (dry_run=False)
-        result = schedule_order(
-            order_id=order["id"],
-            product_id=order["product_id"],
-            quantity=order["quantity"],
-            product_repo=product_repo,
-            schedule_repo=schedule_repo,
-            tenant_id=tenant_id,
-            dry_run=False,
-            settings_repo=settings_repo,
-            desired_deadline=order.get("deadline_date"),
-        )
+        validate_order_status_transition(order.get("status"), "pending_approval")
+    except InvalidOrderStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
 
-        # 2. ステータス更新 & is_scheduled フラグ更新
-        last_end = max(s["end_datetime"] for s in result)
-        confirmed_deadline = datetime.fromisoformat(last_end).date().isoformat()
-        order_repo.update(
-            order_id,
-            {
-                "status": "confirmed",
-                "is_scheduled": True,
-                "confirmed_at": datetime.now(UTC).isoformat(),
-                "confirmed_deadline": confirmed_deadline,
-            },
-        )
+    result = order_repo.update(
+        order_id, {"status": "pending_approval", "rejection_reason": None}
+    )
+    return _map_order_response(result)
 
-        return {"status": "confirmed", "schedules": result}
+
+@orders_router.post("/{order_id}/confirm")
+def confirm_order(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+    product_repo: ProductRepository = Depends(get_product_repo),
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
+):
+    """
+    受注を承認する。スケジュールを確定・保存し、注文ステータスをconfirmedにする（president限定）。
+    """
+    logger.info(f"Confirming order {order_id}")
+    _require_role(tenant_id, user_id, client, "president", "受注の承認（確定）")
+
+    try:
+        return _confirm_single_order(
+            order_id, tenant_id, order_repo, product_repo, schedule_repo, settings_repo
+        )
     except RoutingUnconfirmedError as e:
         raise HTTPException(
             status_code=422,
@@ -489,3 +557,89 @@ def confirm_order(
         ) from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+
+
+@orders_router.post("/approve-bulk")
+def approve_orders_bulk(
+    bulk_data: OrderBulkApproveRequest,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+    product_repo: ProductRepository = Depends(get_product_repo),
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
+    settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
+):
+    """
+    複数の承認待ち注文をまとめて承認する（president限定）。1件ごとの成否を返す。
+    """
+    logger.info(f"Bulk approving orders {bulk_data.order_ids}")
+    _require_role(tenant_id, user_id, client, "president", "受注の承認（確定）")
+
+    results: list[dict[str, Any]] = []
+    for order_id in bulk_data.order_ids:
+        try:
+            confirm_result = _confirm_single_order(
+                order_id,
+                tenant_id,
+                order_repo,
+                product_repo,
+                schedule_repo,
+                settings_repo,
+            )
+            results.append(
+                {
+                    "order_id": order_id,
+                    "status": "confirmed",
+                    "schedules": confirm_result["schedules"],
+                }
+            )
+        except HTTPException as e:
+            results.append(
+                {"order_id": order_id, "status": "error", "detail": e.detail}
+            )
+        except RoutingUnconfirmedError as e:
+            results.append(
+                {
+                    "order_id": order_id,
+                    "status": "error",
+                    "detail": {
+                        "error": "routing_unconfirmed",
+                        "desired_deadline": e.desired_deadline,
+                    },
+                }
+            )
+        except ValueError as e:
+            results.append({"order_id": order_id, "status": "error", "detail": str(e)})
+
+    return {"results": results}
+
+
+@orders_router.post("/{order_id}/reject")
+def reject_order(
+    order_id: int,
+    reject_data: OrderRejectRequest,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+):
+    """
+    承認待ちの注文を却下し、下書きに差し戻す（president限定）。却下理由は任意入力。
+    """
+    logger.info(f"Rejecting order {order_id}")
+    _require_role(tenant_id, user_id, client, "president", "受注の却下")
+
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    try:
+        validate_order_status_transition(order.get("status"), "draft")
+    except InvalidOrderStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    result = order_repo.update(
+        order_id, {"status": "draft", "rejection_reason": reject_data.reason}
+    )
+    return _map_order_response(result)

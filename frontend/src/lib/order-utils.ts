@@ -2,12 +2,19 @@ import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
-export type StatusFilter = "" | "draft" | "confirmed" | "completed" | "canceled"
+export type StatusFilter =
+  | ""
+  | "draft"
+  | "pending_approval"
+  | "confirmed"
+  | "completed"
+  | "canceled"
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "すべて", value: "" },
   { label: "下書き", value: "draft" },
+  { label: "承認待ち", value: "pending_approval" },
   { label: "確定済", value: "confirmed" },
   { label: "完了", value: "completed" },
   { label: "キャンセル", value: "canceled" },

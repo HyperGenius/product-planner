@@ -15,18 +15,18 @@ interface SimulationSideSheetProps {
   open: boolean
   order: Order | null
   result: OrderSimulateResponse | null
-  confirmIsPending: boolean
+  requestApprovalIsPending: boolean
   onClose: () => void
-  onConfirm: (orderId: number, orderNo: string) => void
+  onRequestApproval: (orderId: number, orderNo: string) => void
 }
 
 export function SimulationSideSheet({
   open,
   order,
   result,
-  confirmIsPending,
+  requestApprovalIsPending,
   onClose,
-  onConfirm,
+  onRequestApproval,
 }: SimulationSideSheetProps) {
   return (
     <Sheet open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose() }}>
@@ -48,12 +48,12 @@ export function SimulationSideSheet({
             閉じる
           </Button>
           <Button
-            disabled={confirmIsPending || !order}
+            disabled={requestApprovalIsPending || !order}
             onClick={() => {
-              if (order) onConfirm(order.id, order.order_no ?? '')
+              if (order) onRequestApproval(order.id, order.order_no ?? '')
             }}
           >
-            この内容で確定
+            承認依頼を送信
           </Button>
         </SheetFooter>
       </SheetContent>

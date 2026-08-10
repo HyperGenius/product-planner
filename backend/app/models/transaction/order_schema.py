@@ -69,6 +69,22 @@ class OrderSplitRequest(BaseSchema):
     line_items: list[OrderSplitLineItem] = Field(min_length=2)
 
 
+class OrderRejectRequest(BaseSchema):
+    """注文の承認却下リクエストスキーマ（却下理由は任意入力）"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    reason: str | None = None
+
+
+class OrderBulkApproveRequest(BaseSchema):
+    """複数の承認待ち注文を一括承認するためのリクエストスキーマ"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    order_ids: list[int] = Field(min_length=1)
+
+
 class OrderAttachmentResponse(BaseModel):
     """注文添付ファイルのレスポンススキーマ"""
 

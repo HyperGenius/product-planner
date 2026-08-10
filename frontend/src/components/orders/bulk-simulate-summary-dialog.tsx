@@ -21,7 +21,7 @@ const PAGE_SIZE = 5
 interface BulkSimulateSummaryDialogProps {
   results: BulkSimulateResult[] | null
   onClose: () => void
-  onBulkConfirm?: (orderIds: number[]) => void
+  onBulkRequestApproval?: (orderIds: number[]) => void
 }
 
 // 回答納期(calculated_deadline)はスケジューラが計算した実際の日時のため時刻付きで表示する
@@ -29,7 +29,7 @@ function formatDate(iso: string) {
   return format(new Date(iso), "yyyy/MM/dd HH:mm", { locale: ja })
 }
 
-export function BulkSimulateSummaryDialog({ results, onClose, onBulkConfirm }: BulkSimulateSummaryDialogProps) {
+export function BulkSimulateSummaryDialog({ results, onClose, onBulkRequestApproval }: BulkSimulateSummaryDialogProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [showNgOnly, setShowNgOnly] = useState(false)
 
@@ -154,13 +154,13 @@ export function BulkSimulateSummaryDialog({ results, onClose, onBulkConfirm }: B
             >
               次へ →
             </Button>
-            {onBulkConfirm && (
+            {onBulkRequestApproval && (
               <Button
                 size="sm"
-                onClick={() => onBulkConfirm(currentPageOkIds)}
+                onClick={() => onBulkRequestApproval(currentPageOkIds)}
                 disabled={currentPageOkIds.length === 0}
               >
-                OK分だけ一括確定
+                OK分だけ承認依頼を送信
               </Button>
             )}
             <Button onClick={onClose}>閉じる</Button>

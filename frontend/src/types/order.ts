@@ -11,6 +11,7 @@ export interface Order {
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   confirmed_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   status: 'draft' | 'pending_approval' | 'confirmed' | 'completed' | 'canceled'
+  rejection_reason?: string | null
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean
   has_no_routings?: boolean
@@ -100,6 +101,22 @@ export interface OrderSplitRequest {
 export interface OrderSplitResponse {
   original_order_id: number
   created_orders: Order[]
+}
+
+/**
+ * 一括承認結果の1件分
+ */
+export interface OrderBulkApproveResultItem {
+  order_id: number
+  status: 'confirmed' | 'error'
+  detail?: unknown
+}
+
+/**
+ * 一括承認結果のデータ型
+ */
+export interface OrderBulkApproveResponse {
+  results: OrderBulkApproveResultItem[]
 }
 
 /**

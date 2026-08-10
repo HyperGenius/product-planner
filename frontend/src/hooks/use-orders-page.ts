@@ -5,11 +5,15 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
+  useApproveOrdersBulk,
   useConfirmOrder,
   useDeleteOrder,
   useOrders,
+  useRejectOrder,
+  useRequestApproval,
   useSimulateOrderById,
 } from "@/hooks/use-orders"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import {
@@ -44,17 +48,25 @@ export function useOrdersPage() {
   const [simulationErrorOrderId, setSimulationErrorOrderId] = useState<number | null>(null)
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([])
   const [isBulkSimulating, setIsBulkSimulating] = useState(false)
-  const [isBulkConfirming, setIsBulkConfirming] = useState(false)
+  const [isBulkRequestingApproval, setIsBulkRequestingApproval] = useState(false)
+  const [isBulkApproving, setIsBulkApproving] = useState(false)
   const [isBulkSimulateConfirmOpen, setIsBulkSimulateConfirmOpen] = useState(false)
   const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
   const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
+  const [rejectTargetOrder, setRejectTargetOrder] = useState<Order | null>(null)
 
   const queryClient = useQueryClient()
 
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
   const { data: customers, isLoading: customersLoading } = useCustomers()
+  const { data: currentMember } = useCurrentMember()
+  const currentUserRole = currentMember?.role ?? null
+  const isPresident = currentUserRole === "president"
   const confirmOrder = useConfirmOrder()
+  const requestApproval = useRequestApproval()
+  const rejectOrder = useRejectOrder()
+  const approveOrdersBulk = useApproveOrdersBulk()
   const deleteOrder = useDeleteOrder()
   const simulateOrderById = useSimulateOrderById()
 
@@ -101,9 +113,19 @@ export function useOrdersPage() {
     () => pagedOrders.filter((o) => o.status === "draft"),
     [pagedOrders]
   )
+  const pendingApprovalPageOrders = useMemo(
+    () => pagedOrders.filter((o) => o.status === "pending_approval"),
+    [pagedOrders]
+  )
   const selectedScheduledCount = useMemo(
     () => selectedOrderIds.filter(
       (id) => orders?.find((o) => o.id === id)?.is_scheduled
+    ).length,
+    [selectedOrderIds, orders]
+  )
+  const selectedPendingApprovalCount = useMemo(
+    () => selectedOrderIds.filter(
+      (id) => orders?.find((o) => o.id === id)?.status === "pending_approval"
     ).length,
     [selectedOrderIds, orders]
   )
@@ -111,23 +133,62 @@ export function useOrdersPage() {
     draftPageOrders.length > 0 && draftPageOrders.every((o) => selectedOrderIds.includes(o.id))
   const someDraftOnPageSelected =
     draftPageOrders.some((o) => selectedOrderIds.includes(o.id)) && !allDraftOnPageSelected
+  const allPendingApprovalOnPageSelected =
+    pendingApprovalPageOrders.length > 0 &&
+    pendingApprovalPageOrders.every((o) => selectedOrderIds.includes(o.id))
+  const somePendingApprovalOnPageSelected =
+    pendingApprovalPageOrders.some((o) => selectedOrderIds.includes(o.id)) &&
+    !allPendingApprovalOnPageSelected
 
   useEffect(() => {
     setSelectedOrderIds([])
     setBulkSimFailedIds(new Set())
   }, [page, statusFilter])
 
-  const handleConfirmFromRow = (orderId: number, orderNo: string) => {
+  const handleApproveFromRow = (orderId: number, orderNo: string) => {
     confirmOrder.mutate(orderId, {
       onSuccess: () => {
-        toast.success(`注文「${orderNo}」を確定し、スケジュールを作成しました`)
+        toast.success(`注文「${orderNo}」を承認し、スケジュールを作成しました`)
         setExpandedOrderId(null)
         setExpandedSimResult(null)
       },
       onError: (error: Error) => {
-        toast.error(`確定に失敗しました: ${error.message}`)
+        toast.error(`承認に失敗しました: ${error.message}`)
       },
     })
+  }
+
+  const handleRequestApprovalFromRow = (orderId: number, orderNo: string) => {
+    requestApproval.mutate(orderId, {
+      onSuccess: () => {
+        toast.success(`注文「${orderNo}」の承認依頼を送信しました`)
+        setExpandedOrderId(null)
+        setExpandedSimResult(null)
+      },
+      onError: (error: Error) => {
+        toast.error(`承認依頼の送信に失敗しました: ${error.message}`)
+      },
+    })
+  }
+
+  const handleRejectRequest = (order: Order) => setRejectTargetOrder(order)
+
+  const handleConfirmReject = (reason: string) => {
+    if (!rejectTargetOrder) return
+    const targetId = rejectTargetOrder.id
+    const orderNo = rejectTargetOrder.order_no ?? ""
+    rejectOrder.mutate(
+      { id: targetId, reason: reason || undefined },
+      {
+        onSuccess: () => {
+          toast.success(`注文「${orderNo}」を却下しました`)
+          setRejectTargetOrder(null)
+        },
+        onError: (error: Error) => {
+          toast.error(`却下に失敗しました: ${error.message}`)
+        },
+      }
+    )
   }
 
   const handleSimulate = async (order: Order) => {
@@ -202,6 +263,19 @@ export function useOrdersPage() {
     })
   }
 
+  const handleToggleSelectAllPendingApproval = () => {
+    setSelectedOrderIds((prev) => {
+      if (allPendingApprovalOnPageSelected) {
+        return prev.filter((id) => !pendingApprovalPageOrders.some((o) => o.id === id))
+      } else {
+        const newIds = pendingApprovalPageOrders
+          .map((o) => o.id)
+          .filter((id) => !prev.includes(id))
+        return [...prev, ...newIds]
+      }
+    })
+  }
+
   const handleClearSelection = () => setSelectedOrderIds([])
 
   const handleBulkSimulateRequest = () => setIsBulkSimulateConfirmOpen(true)
@@ -236,19 +310,19 @@ export function useOrdersPage() {
 
   const handleCloseBulkSimSummary = () => setBulkSimSummary(null)
 
-  const handleBulkConfirmFromSummary = async (orderIds: number[]) => {
-    setIsBulkConfirming(true)
+  const handleBulkRequestApprovalFromSummary = async (orderIds: number[]) => {
+    setIsBulkRequestingApproval(true)
     let successCount = 0, failCount = 0
     for (const id of orderIds) {
       try {
-        await confirmOrder.mutateAsync(id)
+        await requestApproval.mutateAsync(id)
         successCount++
       } catch {
         failCount++
       }
     }
     await queryClient.invalidateQueries({ queryKey: ["orders"] })
-    setIsBulkConfirming(false)
+    setIsBulkRequestingApproval(false)
     const parts = (
       [
         successCount > 0 ? `成功 ${successCount}件` : null,
@@ -256,29 +330,29 @@ export function useOrdersPage() {
       ] as (string | null)[]
     ).filter((p): p is string => p !== null).join(" / ")
     if (failCount === 0) {
-      toast.success(`一括確定完了: ${parts}`)
+      toast.success(`一括承認依頼完了: ${parts}`)
     } else if (successCount === 0) {
-      toast.error(`一括確定失敗: ${parts}`)
+      toast.error(`一括承認依頼失敗: ${parts}`)
     } else {
-      toast.warning(`一括確定完了: ${parts}`)
+      toast.warning(`一括承認依頼完了: ${parts}`)
     }
   }
 
-  const handleBulkConfirm = async () => {
+  const handleBulkRequestApproval = async () => {
     const ids = selectedOrderIds
     const scheduledIds = ids.filter((id) => orders?.find((o) => o.id === id)?.is_scheduled)
     const skippedCount = ids.length - scheduledIds.length
-    setIsBulkConfirming(true)
+    setIsBulkRequestingApproval(true)
     let successCount = 0, failCount = 0
     for (const id of scheduledIds) {
       try {
-        await confirmOrder.mutateAsync(id)
+        await requestApproval.mutateAsync(id)
         successCount++
       } catch {
         failCount++
       }
     }
-    setIsBulkConfirming(false)
+    setIsBulkRequestingApproval(false)
     setSelectedOrderIds([])
     const parts = (
       [
@@ -288,11 +362,36 @@ export function useOrdersPage() {
       ] as (string | null)[]
     ).filter((p): p is string => p !== null).join(" / ")
     if (failCount === 0 && skippedCount === 0) {
-      toast.success(`一括確定完了: ${parts}`)
+      toast.success(`一括承認依頼完了: ${parts}`)
     } else if (successCount === 0 && failCount > 0) {
-      toast.error(`一括確定失敗: ${parts}`)
+      toast.error(`一括承認依頼失敗: ${parts}`)
     } else {
-      toast.warning(`一括確定完了: ${parts}`)
+      toast.warning(`一括承認依頼完了: ${parts}`)
+    }
+  }
+
+  const handleBulkApprove = async () => {
+    const ids = selectedOrderIds.filter(
+      (id) => orders?.find((o) => o.id === id)?.status === "pending_approval"
+    )
+    if (ids.length === 0) return
+    setIsBulkApproving(true)
+    try {
+      const res = await approveOrdersBulk.mutateAsync(ids)
+      const successCount = res.results.filter((r) => r.status === "confirmed").length
+      const failCount = res.results.length - successCount
+      setSelectedOrderIds([])
+      if (failCount === 0) {
+        toast.success(`一括承認完了: 成功 ${successCount}件`)
+      } else if (successCount === 0) {
+        toast.error(`一括承認失敗: ${failCount}件`)
+      } else {
+        toast.warning(`一括承認完了: 成功 ${successCount}件 / 失敗 ${failCount}件`)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? `一括承認に失敗しました: ${error.message}` : "一括承認に失敗しました")
+    } finally {
+      setIsBulkApproving(false)
     }
   }
 
@@ -324,37 +423,55 @@ export function useOrdersPage() {
     setDeleteTargetOrder,
     expandedOrderId,
     expandedSimResult,
+    // Role
+    currentUserRole,
+    isPresident,
     // Mutation state
     confirmOrder,
+    requestApproval,
+    rejectOrder,
     deleteOrder,
     simulateOrderById,
     simulatingOrderId,
     simulationErrorOrderId,
     // Handlers
-    handleConfirmFromRow,
+    handleApproveFromRow,
+    handleRequestApprovalFromRow,
+    handleRejectRequest,
+    handleConfirmReject,
     handleSimulate,
     handleOpenEditDialog,
     handleConfirmDelete,
     closeSimResult,
+    // Reject dialog state
+    rejectTargetOrder,
+    setRejectTargetOrder,
     // Bulk selection
     selectedOrderIds,
     selectedScheduledCount,
+    selectedPendingApprovalCount,
     draftPageOrders,
+    pendingApprovalPageOrders,
     allDraftOnPageSelected,
     someDraftOnPageSelected,
+    allPendingApprovalOnPageSelected,
+    somePendingApprovalOnPageSelected,
     isBulkSimulating,
-    isBulkConfirming,
+    isBulkRequestingApproval,
+    isBulkApproving,
     isBulkSimulateConfirmOpen,
     handleToggleSelect,
     handleToggleSelectAll,
+    handleToggleSelectAllPendingApproval,
     handleClearSelection,
     handleBulkSimulateRequest,
     handleBulkSimulateConfirm,
     handleBulkSimulateCancel,
-    handleBulkConfirm,
+    handleBulkRequestApproval,
+    handleBulkApprove,
     bulkSimSummary,
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
-    handleBulkConfirmFromSummary,
+    handleBulkRequestApprovalFromSummary,
   }
 }

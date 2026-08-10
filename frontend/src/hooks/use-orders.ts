@@ -5,6 +5,7 @@ import { apiClient } from "@/lib/api-client"
 import type {
   Order,
   OrderAttachment,
+  OrderBulkApproveResponse,
   OrderCreate,
   OrderSimulateRequest,
   OrderSimulateResponse,
@@ -76,7 +77,7 @@ export function useUpdateOrder() {
 }
 
 /**
- * 注文を確定するフック
+ * 注文を承認するフック（president限定）
  * スケジュールを作成し、注文ステータスをconfirmedにする
  */
 export function useConfirmOrder() {
@@ -89,6 +90,62 @@ export function useConfirmOrder() {
       }),
     onSuccess: () => {
       // 注文一覧とスケジュール一覧を再取得
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      queryClient.invalidateQueries({ queryKey: ["schedules"] })
+    },
+  })
+}
+
+/**
+ * 下書き注文の承認依頼を送信するフック（order_handler限定）
+ * 注文ステータスを draft -> pending_approval にする
+ */
+export function useRequestApproval() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient<Order>(`/orders/${orderId}/request-approval`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 承認待ちの注文を却下するフック（president限定）
+ * 注文ステータスを pending_approval -> draft に差し戻す
+ */
+export function useRejectOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
+      apiClient<Order>(`/orders/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason ?? null }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 複数の承認待ち注文をまとめて承認するフック（president限定）
+ */
+export function useApproveOrdersBulk() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderIds: number[]) =>
+      apiClient<OrderBulkApproveResponse>("/orders/approve-bulk", {
+        method: "POST",
+        body: JSON.stringify({ order_ids: orderIds }),
+      }),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
     },
