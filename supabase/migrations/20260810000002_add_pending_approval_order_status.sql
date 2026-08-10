@@ -26,57 +26,116 @@ COMMENT ON COLUMN orders.status IS
 -- ==========================================
 -- upsert_order_by_dedupe_key: pending_approval も自動処理からの保護対象に追加
 --
--- 既存の confirmed/completed/canceled 保護に pending_approval を追加する。
--- 承認待ちの受注をメール/PDF自動処理が誤って上書き・降格させないようにする。
+-- 20260712000000_add_orders_dedupe_key_unmatched_product.sql 時点の最新定義
+-- （p_source_attachment_id 引数・product_id IS NULL 分岐を含む）をベースに、
+-- confirmed/completed/canceled の保護対象へ pending_approval を追加するのみの
+-- 差分を適用する。承認待ちの受注をメール/PDF自動処理が誤って上書き・降格
+-- させないようにする。
 -- ==========================================
 CREATE OR REPLACE FUNCTION upsert_order_by_dedupe_key(
-  p_tenant_id             uuid,
-  p_customer_id           bigint,
-  p_product_id            bigint,
-  p_quantity              int,
-  p_deadline_date         date,
-  p_customer_certainty    text,
-  p_source_type           text,
-  p_source_raw            text,
-  p_extracted_product_name text
+  p_tenant_id              uuid,
+  p_customer_id            bigint,
+  p_product_id             bigint,
+  p_quantity               int,
+  p_deadline_date          date,
+  p_customer_certainty     text,
+  p_source_type            text,
+  p_source_raw             text,
+  p_extracted_product_name text,
+  p_source_attachment_id   uuid DEFAULT NULL
 )
 RETURNS TABLE (order_id bigint, action text)
 LANGUAGE plpgsql
 SECURITY INVOKER
 AS $$
 DECLARE
-  v_existing        orders%ROWTYPE;
-  v_new_id          bigint;
+  v_existing          orders%ROWTYPE;
+  v_new_id            bigint;
   v_existing_priority int;
   v_new_priority      int;
+  v_extracted_name    text := NULLIF(TRIM(p_extracted_product_name), '');
 BEGIN
-  -- 先にINSERTを試み、UNIQUE制約(orders_dedupe_key)の競合でしか
-  -- 「既存あり」を判定しない。SELECTしてから未存在ならINSERTする順序だと、
-  -- 同一dedupeキーへの並行呼び出しが両方SELECTでNOT FOUNDと判定してしまい、
-  -- 片方が23505で例外終了する競合が起こり得るため。
-  INSERT INTO orders (
-    tenant_id, customer_id, product_id, quantity, deadline_date,
-    status, customer_certainty, source_type, source_raw, extracted_product_name
-  )
-  VALUES (
-    p_tenant_id, p_customer_id, p_product_id, p_quantity, p_deadline_date,
-    'draft', p_customer_certainty, p_source_type, p_source_raw, p_extracted_product_name
-  )
-  ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTHING
-  RETURNING orders.id INTO v_new_id;
+  IF p_product_id IS NULL THEN
+    IF v_extracted_name IS NULL OR p_deadline_date IS NULL THEN
+      -- 重複判定に使える情報（品名・納期）が不足しているため、常に新規行として
+      -- 挿入する（取りこぼしを許容する。Issue #296 未解決の問題として明記済み）。
+      INSERT INTO orders (
+        tenant_id, customer_id, product_id, quantity, deadline_date,
+        status, customer_certainty, source_type, source_raw, extracted_product_name,
+        source_attachment_id
+      )
+      VALUES (
+        p_tenant_id, p_customer_id, NULL, p_quantity, p_deadline_date,
+        'draft', p_customer_certainty, p_source_type, p_source_raw, v_extracted_name,
+        p_source_attachment_id
+      )
+      RETURNING orders.id INTO v_new_id;
 
-  IF v_new_id IS NOT NULL THEN
-    RETURN QUERY SELECT v_new_id, 'inserted'::text;
-    RETURN;
+      RETURN QUERY SELECT v_new_id, 'inserted'::text;
+      RETURN;
+    END IF;
+
+    INSERT INTO orders (
+      tenant_id, customer_id, product_id, quantity, deadline_date,
+      status, customer_certainty, source_type, source_raw, extracted_product_name,
+      source_attachment_id
+    )
+    VALUES (
+      p_tenant_id, p_customer_id, NULL, p_quantity, p_deadline_date,
+      'draft', p_customer_certainty, p_source_type, p_source_raw, v_extracted_name,
+      p_source_attachment_id
+    )
+    ON CONFLICT (tenant_id, customer_id, deadline_date, extracted_product_name)
+      WHERE product_id IS NULL
+        AND deadline_date IS NOT NULL
+        AND extracted_product_name IS NOT NULL
+      DO NOTHING
+    RETURNING orders.id INTO v_new_id;
+
+    IF v_new_id IS NOT NULL THEN
+      RETURN QUERY SELECT v_new_id, 'inserted'::text;
+      RETURN;
+    END IF;
+
+    SELECT * INTO v_existing
+    FROM orders
+    WHERE tenant_id = p_tenant_id
+      AND customer_id = p_customer_id
+      AND product_id IS NULL
+      AND deadline_date = p_deadline_date
+      AND extracted_product_name = v_extracted_name
+    FOR UPDATE;
+  ELSE
+    -- 先にINSERTを試み、UNIQUE制約(orders_dedupe_key)の競合でしか
+    -- 「既存あり」を判定しない。SELECTしてから未存在ならINSERTする順序だと、
+    -- 同一dedupeキーへの並行呼び出しが両方SELECTでNOT FOUNDと判定してしまい、
+    -- 片方が23505で例外終了する競合が起こり得るため。
+    INSERT INTO orders (
+      tenant_id, customer_id, product_id, quantity, deadline_date,
+      status, customer_certainty, source_type, source_raw, extracted_product_name,
+      source_attachment_id
+    )
+    VALUES (
+      p_tenant_id, p_customer_id, p_product_id, p_quantity, p_deadline_date,
+      'draft', p_customer_certainty, p_source_type, p_source_raw, v_extracted_name,
+      p_source_attachment_id
+    )
+    ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTHING
+    RETURNING orders.id INTO v_new_id;
+
+    IF v_new_id IS NOT NULL THEN
+      RETURN QUERY SELECT v_new_id, 'inserted'::text;
+      RETURN;
+    END IF;
+
+    SELECT * INTO v_existing
+    FROM orders
+    WHERE tenant_id = p_tenant_id
+      AND customer_id = p_customer_id
+      AND product_id = p_product_id
+      AND deadline_date = p_deadline_date
+    FOR UPDATE;
   END IF;
-
-  SELECT * INTO v_existing
-  FROM orders
-  WHERE tenant_id = p_tenant_id
-    AND customer_id = p_customer_id
-    AND product_id = p_product_id
-    AND deadline_date = p_deadline_date
-  FOR UPDATE;
 
   -- pending_approval/confirmed/completed/canceled (受注担当者が承認申請した、
   -- またはユーザーが確定・完了させた、もしくはキャンセルした注文)
@@ -96,9 +155,6 @@ BEGIN
   -- ここから先は既存行が draft かつ source_type != 'manual'
   -- (メール/PDF起票の確認待ちdraft) のケース。
   -- customer_certainty の優先順位（数値が大きいほど確度が高い）で判定する。
-  -- 既存行の customer_certainty が NULL（本文のみのメール起票等、確度情報を
-  -- 持たないdraft）の場合は最も低い優先度(-1)として扱い、PDF取込による
-  -- 確度付け・更新を妨げないようにする。
   v_existing_priority := CASE v_existing.customer_certainty
     WHEN 'forecast_tentative' THEN 0
     WHEN 'forecast'           THEN 1
@@ -112,8 +168,6 @@ BEGIN
     ELSE NULL
   END;
 
-  -- p_customer_certainty がCHECK制約の許容値以外だった場合
-  -- (呼び出し元での正規化漏れ等) は更新せずコンフリクト扱いにする
   IF v_new_priority IS NULL
      OR v_new_priority < v_existing_priority THEN
     RETURN QUERY SELECT v_existing.id, 'skipped_downgrade'::text;
@@ -130,7 +184,7 @@ BEGIN
       quantity                = p_quantity,
       source_type             = p_source_type,
       source_raw              = p_source_raw,
-      extracted_product_name  = p_extracted_product_name
+      extracted_product_name  = v_extracted_name
   WHERE id = v_existing.id;
 
   RETURN QUERY SELECT v_existing.id, 'updated'::text;
