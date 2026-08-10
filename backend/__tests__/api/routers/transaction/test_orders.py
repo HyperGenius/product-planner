@@ -302,7 +302,7 @@ class TestOrderRouter:
             "product_id": 100,
             "quantity": 10,
             "order_number": "ORD-001",
-            "status": "draft",
+            "status": "pending_approval",
         }
 
         # Mockの設定
@@ -361,6 +361,23 @@ class TestOrderRouter:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Order not found"
+
+    def test_confirm_order_invalid_transition_from_draft(self, headers, mock_repo):
+        """POST /{order_id}/confirm: draftから直接confirmedへの遷移は拒否される (Issue #324)"""
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "draft",
+        }
+        mock_repo.get_by_id.return_value = order_data
+
+        response = client.post(f"/orders/{order_id}/confirm", headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
 
     def test_split_order_not_found(self, headers, mock_repo):
         """POST /{order_id}/split: 注文が存在しない場合の404エラーテスト"""

@@ -31,6 +31,10 @@ from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
 from app.services.attachment_service import create_signed_url
+from app.services.order_status_service import (
+    InvalidOrderStatusTransitionError,
+    validate_order_status_transition,
+)
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
@@ -441,6 +445,11 @@ def confirm_order(
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("product_id") is None:
         raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
+
+    try:
+        validate_order_status_transition(order.get("status"), "confirmed")
+    except InvalidOrderStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
 
     try:
         # 1. 実際に保存 (dry_run=False)
