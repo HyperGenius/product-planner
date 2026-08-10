@@ -177,17 +177,20 @@ class TestScheduleOrder:
 
         # 設備1は遠い未来まで使用中、設備2は近い未来まで使用中
         # 設備2の方が早く開始できるべき
-        now = datetime.now(tz=JST)
+        # 実行時刻の壁時計に依存すると、テスト実行が16:00〜17:00近辺に
+        # 重なった場合に日またぎでセグメントが分割され失敗するため、
+        # 基準時刻は固定の平日午前（火曜9:00）を start_time として明示的に渡す。
+        fixed_now = datetime(2026, 1, 6, 9, 0, 0, tzinfo=JST)  # 火曜日 9:00
 
         def get_last_end_time_side_effect(equipment_id: int):
             if equipment_id == 1:
-                return now.replace(
+                return fixed_now.replace(
                     hour=16, minute=0, second=0, microsecond=0
-                )  # 今日の16:00まで使用中
+                )  # 当日16:00まで使用中
             elif equipment_id == 2:
-                return now.replace(
+                return fixed_now.replace(
                     hour=10, minute=0, second=0, microsecond=0
-                )  # 今日の10:00まで使用中（より早く空く）
+                )  # 当日10:00まで使用中（より早く空く）
 
         mock_schedule_repo.get_last_end_time.side_effect = get_last_end_time_side_effect
         mock_schedule_repo.create.return_value = None
@@ -201,13 +204,14 @@ class TestScheduleOrder:
             product_repo=mock_product_repo,
             schedule_repo=mock_schedule_repo,
             tenant_id="test-tenant-id",
+            start_time=fixed_now,
         )
 
-        # 検証：より早く空く設備2が選ばれるべき
-        # ただし、今日が土日の場合は月曜日になるため、厳密な検証は難しい
-        # ここでは、スケジュールが作成されたことを確認
+        # 検証：より早く空く設備2(10:00開始、11:00終了)が選ばれ、
+        # 稼働時間内に収まるため1セグメントで完了するはず
         assert len(result) == 1
         assert result[0]["order_id"] == 3
+        assert result[0]["equipment_id"] == 2
 
     def test_schedule_with_no_routings(self) -> None:
         """工程が存在しない場合、RoutingUnconfirmedErrorを投げる"""

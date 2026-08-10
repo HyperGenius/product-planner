@@ -10,7 +10,7 @@ export interface Order {
   quantity: number
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   confirmed_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
-  status: 'draft' | 'confirmed' | 'completed' | 'canceled'
+  status: 'draft' | 'pending_approval' | 'confirmed' | 'completed' | 'canceled'
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean
   has_no_routings?: boolean
