@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.repositories.supa_infra import (
     CustomerRepository,
     EquipmentRepository,
+    OrderApprovalLogRepository,
     OrderRepository,
     ProductRepository,
     ScheduleRepository,
@@ -96,6 +97,13 @@ def get_schedule_repo(
 ) -> ScheduleRepository:
     """スケジュールリポジトリを取得する。"""
     return ScheduleRepository(client)
+
+
+def get_order_approval_log_repo(
+    client: Client = Depends(get_supabase_client),
+) -> OrderApprovalLogRepository:
+    """受注承認監査ログリポジトリを取得する。"""
+    return OrderApprovalLogRepository(client)
 
 
 def get_product_repo(

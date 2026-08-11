@@ -20,3 +20,4 @@ class SupabaseTableName(Enum):
     ORDER_ATTACHMENTS = "order_attachments"
     ORDER_PARSE_LOG = "order_parse_log"
     NOTIFICATIONS = "notifications"
+    ORDER_APPROVAL_LOG = "order_approval_log"

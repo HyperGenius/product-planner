@@ -5,7 +5,11 @@ from app.repositories.supa_infra.master import (
     EquipmentRepository,
     ProductRepository,
 )
-from app.repositories.supa_infra.transaction import OrderRepository, ScheduleRepository
+from app.repositories.supa_infra.transaction import (
+    OrderApprovalLogRepository,
+    OrderRepository,
+    ScheduleRepository,
+)
 
 __all__ = [
     # common
@@ -18,4 +22,5 @@ __all__ = [
     # transaction
     "ScheduleRepository",
     "OrderRepository",
+    "OrderApprovalLogRepository",
 ]

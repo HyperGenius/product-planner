@@ -85,6 +85,20 @@ class OrderBulkApproveRequest(BaseSchema):
     order_ids: list[int] = Field(min_length=1)
 
 
+class OrderApprovalLogResponse(BaseModel):
+    """受注承認監査ログのレスポンススキーマ（表示用に注文番号・操作者名を付与）"""
+
+    id: str
+    order_id: int
+    order_number: str | None
+    action: Literal["request_approval", "approve", "reject", "withdraw"]
+    actor_user_id: str
+    actor_full_name: str | None
+    actor_email: str | None
+    reason: str | None
+    created_at: str
+
+
 class OrderAttachmentResponse(BaseModel):
     """注文添付ファイルのレスポンススキーマ"""
 

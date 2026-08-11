@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
+import { createClient } from "@/utils/supabase/client"
 import type {
   Order,
+  OrderApprovalLog,
   OrderAttachment,
   OrderBulkApproveResponse,
   OrderCreate,
@@ -115,8 +117,8 @@ export function useRequestApproval() {
 }
 
 /**
- * 承認待ちの注文を却下するフック（president限定）
- * 注文ステータスを pending_approval -> draft に差し戻す
+ * 承認待ちの注文を差し戻すフック（president限定）
+ * 注文ステータスを pending_approval -> draft に差し戻す（理由は任意）
  */
 export function useRejectOrder() {
   const queryClient = useQueryClient()
@@ -126,6 +128,24 @@ export function useRejectOrder() {
       apiClient<Order>(`/orders/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 承認依頼を取り下げるフック（order_handler限定）
+ * 誤って送信した承認依頼を自分で取り消し、注文ステータスを pending_approval -> draft に戻す
+ */
+export function useWithdrawApproval() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient<Order>(`/orders/${orderId}/withdraw-approval`, {
+        method: "POST",
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
@@ -150,6 +170,62 @@ export function useApproveOrdersBulk() {
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
     },
   })
+}
+
+/**
+ * 承認ワークフロー（承認依頼送信・承認・差し戻し・取り下げ）の監査ログを取得するフック
+ * （iso_officer / president / platform_admin のみ閲覧可）
+ *
+ * 呼び出し側は、閲覧権限を持つロールであることが確定してから
+ * `enabled: true` を渡すこと。閲覧不可ロール（order_handler等）で
+ * 常時リクエストしてしまうと、成功しない403アクセスがAPIに飛び続けてしまう。
+ */
+export function useApprovalLogs(options?: { enabled?: boolean }) {
+  return useQuery<OrderApprovalLog[]>({
+    queryKey: ["orders", "approval-logs"],
+    queryFn: () => apiClient<OrderApprovalLog[]>("/orders/approval-logs"),
+    enabled: options?.enabled ?? true,
+  })
+}
+
+/**
+ * 承認ワークフローの監査ログをCSVとしてダウンロードする
+ * （JSONを返さないエンドポイントのため apiClient は使わず直接fetchする）
+ */
+export async function downloadApprovalLogsCsv(): Promise<void> {
+  const supabase = createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) {
+    throw new Error("Unauthorized")
+  }
+  const tenantId =
+    typeof window !== "undefined" ? localStorage.getItem("currentTenantId") : null
+
+  const response = await fetch(
+    `${process.env.NEXT_PUBLIC_API_URL}/orders/approval-logs/export`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(tenantId && { "x-tenant-id": tenantId }),
+      },
+    },
+  )
+  if (!response.ok) {
+    throw new Error("承認履歴のCSV出力に失敗しました")
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = "approval_logs.csv"
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 /**

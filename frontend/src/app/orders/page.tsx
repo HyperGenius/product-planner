@@ -12,6 +12,16 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { MasterPagination } from "@/components/master-pagination"
 import { BulkActionBar } from "@/components/orders/bulk-action-bar"
 import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-confirm-dialog"
@@ -53,12 +63,14 @@ export default function OrdersPage() {
     confirmOrder,
     requestApproval,
     rejectOrder,
+    withdrawApproval,
     deleteOrder,
     simulatingOrderId,
     simulationErrorOrderId,
     setParam,
     handleApproveFromRow,
     handleRequestApprovalFromRow,
+    handleWithdrawFromRow,
     handleRejectRequest,
     handleConfirmReject,
     handleSimulate,
@@ -67,6 +79,9 @@ export default function OrdersPage() {
     closeSimResult,
     rejectTargetOrder,
     setRejectTargetOrder,
+    resubmitTargetOrder,
+    setResubmitTargetOrder,
+    handleConfirmResubmit,
     selectedOrderIds,
     selectedScheduledCount,
     selectedPendingApprovalCount,
@@ -192,6 +207,7 @@ export default function OrdersPage() {
                     hasSimulationError={simulationErrorOrderId === order.id}
                     requestApprovalIsPending={requestApproval.isPending}
                     approveIsPending={confirmOrder.isPending}
+                    withdrawIsPending={withdrawApproval.isPending}
                     currentUserRole={currentUserRole}
                     isSelected={selectedOrderIds.includes(order.id)}
                     selectionIndex={selectedOrderIds.includes(order.id) ? selectedOrderIds.indexOf(order.id) + 1 : undefined}
@@ -201,6 +217,7 @@ export default function OrdersPage() {
                     onRequestApproval={handleRequestApprovalFromRow}
                     onApprove={handleApproveFromRow}
                     onReject={handleRejectRequest}
+                    onWithdraw={handleWithdrawFromRow}
                     onEdit={handleOpenEditDialog}
                     onDelete={setDeleteTargetOrder}
                     onToggleSelect={handleToggleSelect}
@@ -257,6 +274,34 @@ export default function OrdersPage() {
           onConfirm={handleConfirmReject}
           onOpenChange={(open) => { if (!open) setRejectTargetOrder(null) }}
         />
+
+        <AlertDialog
+          open={resubmitTargetOrder !== null}
+          onOpenChange={(open) => { if (!open) setResubmitTargetOrder(null) }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>差し戻し理由を確認してください</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <p>
+                    注文「{resubmitTargetOrder?.order_no ?? ""}」は一度差し戻されています。
+                    内容を修正したうえで再送信してください。
+                  </p>
+                  <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 whitespace-pre-wrap">
+                    {resubmitTargetOrder?.rejection_reason}
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>キャンセル</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmResubmit}>
+                確認のうえ承認依頼を送信する
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <SimulationSideSheet
           open={expandedSimResult !== null}

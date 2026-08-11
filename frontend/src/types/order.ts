@@ -120,6 +120,21 @@ export interface OrderBulkApproveResponse {
 }
 
 /**
+ * 承認ワークフロー監査ログのデータ型（iso_officer / president / platform_admin のみ閲覧可）
+ */
+export interface OrderApprovalLog {
+  id: string
+  order_id: number
+  order_number: string | null
+  action: 'request_approval' | 'approve' | 'reject' | 'withdraw'
+  actor_user_id: string
+  actor_full_name: string | null
+  actor_email: string | null
+  reason: string | null
+  created_at: string
+}
+
+/**
  * 注文添付ファイルのデータ型
  */
 export interface OrderAttachment {
