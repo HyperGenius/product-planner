@@ -154,8 +154,14 @@ PostgRESTがINSERT結果を返す際にSELECT用RLSポリシー（`iso_officer`/
   アクセス不可メッセージを表示し、編集・承認操作用のUIは一切持たない（閲覧・出力のみ）。
   `useApprovalLogs({ enabled: !isMemberLoading && canView })` として、ロール確定前・閲覧不可ロールでは
   一覧取得APIを呼び出さない。
-- サイドバー（`frontend/src/components/layout/app-sidebar.tsx`）に「承認監査ログ」リンクを追加
-  （ページ側でロールチェックするため、リンク自体は全ロールに表示）。
+- サイドバー（`frontend/src/components/layout/app-sidebar.tsx`）に「承認監査ログ」リンクを追加。
+  当初はページ側のロールチェックのみに依存し、リンク自体は全ロールに表示していたが、
+  `order_handler` にもクリックできてしまいアクセス拒否画面が出る体験だったため、
+  Issue #337 で表示自体もロール制御するよう変更（defense in depth）。
+  `frontend/src/types/member.ts` の `ORDER_APPROVAL_LOG_VIEWER_ROLES`（`iso_officer` / `president` /
+  `platform_admin`）を `page.tsx` の `canView` 判定とサイドバーの両方から共通参照する。
+  `MenuItem` 型に `allowedRoles?: MemberRole[]` を追加し、指定された項目のみ `useCurrentMember()` の
+  ロールでフィルタする。ロール未確定（`isMemberLoading`）の間は `allowedRoles` 付き項目を表示しない。
 
 ### テスト
 
