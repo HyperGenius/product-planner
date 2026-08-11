@@ -86,13 +86,14 @@ Issue #323 で実装。受注確認・承認ワークフロー（#322）の権�
 
 ## メンバー招待フローの新ロール対応（Issue #328）
 
-Issue #328 は、上記の本Issue（#323）実装により要件がすでに満たされていることを確認した:
+Issue #328 は、上記の本Issue（#323）実装により大部分の要件がすでに満たされていることを確認した
+（招待者ロールを `president` のみに限定するかどうかについては後述の通り別途方針判断がある）:
 
 - `MemberCreateSchema.role` は既に新ロール四値（`president` / `iso_officer` / `order_handler` / `platform_admin`）に
   対応済みで、`create_member`（`backend/app/routers/tenant/members.py`）もそのまま新ロール値を受け付ける
 - 招待フォーム（`frontend/src/app/settings/members/page.tsx`）のロール選択肢は既に新ロール名（社長 / ISO担当 /
   受注担当 / プラットフォーム管理者）で表示されている
-- パスワード初期発行（president がその場で生成・共有）、`email_confirm: True` によるメール確認スキップの即時
+- パスワード初期発行（president がその場で設定・共有）、`email_confirm: True` によるメール確認スキップの即時
   ログインフローは変更なく維持されている
 
 追加対応として、president が三ロール（`order_handler` / `iso_officer` / `president`）いずれでも招待できることを
