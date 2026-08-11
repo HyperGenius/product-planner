@@ -14,6 +14,7 @@ import {
   Calendar,
   Users,
   Settings,
+  ClipboardList,
 } from "lucide-react"
 
 import {
@@ -63,6 +64,11 @@ const menuItems: MenuItem[] = [
     title: "生産スケジュール",
     url: "/schedule",
     icon: Calendar,
+  },
+  {
+    title: "承認監査ログ",
+    url: "/orders/approval-logs",
+    icon: ClipboardList,
   },
   {
     title: "マスタデータ",

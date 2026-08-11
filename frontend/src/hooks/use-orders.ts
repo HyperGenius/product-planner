@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
+import { createClient } from "@/utils/supabase/client"
 import type {
   Order,
+  OrderApprovalLog,
   OrderAttachment,
   OrderBulkApproveResponse,
   OrderCreate,
@@ -150,6 +152,57 @@ export function useApproveOrdersBulk() {
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
     },
   })
+}
+
+/**
+ * 承認ワークフロー（承認依頼送信・承認・却下）の監査ログを取得するフック
+ * （iso_officer / president / platform_admin のみ閲覧可）
+ */
+export function useApprovalLogs() {
+  return useQuery<OrderApprovalLog[]>({
+    queryKey: ["orders", "approval-logs"],
+    queryFn: () => apiClient<OrderApprovalLog[]>("/orders/approval-logs"),
+  })
+}
+
+/**
+ * 承認ワークフローの監査ログをCSVとしてダウンロードする
+ * （JSONを返さないエンドポイントのため apiClient は使わず直接fetchする）
+ */
+export async function downloadApprovalLogsCsv(): Promise<void> {
+  const supabase = createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) {
+    throw new Error("Unauthorized")
+  }
+  const tenantId =
+    typeof window !== "undefined" ? localStorage.getItem("currentTenantId") : null
+
+  const response = await fetch(
+    `${process.env.NEXT_PUBLIC_API_URL}/orders/approval-logs/export`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(tenantId && { "x-tenant-id": tenantId }),
+      },
+    },
+  )
+  if (!response.ok) {
+    throw new Error("承認履歴のCSV出力に失敗しました")
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = "approval_logs.csv"
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 /**

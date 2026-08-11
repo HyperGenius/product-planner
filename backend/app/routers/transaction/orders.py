@@ -1,8 +1,11 @@
 # routers/transaction/orders.py
+import csv
+import io
 from datetime import UTC, date, datetime
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
 
 from app.dependencies import (
@@ -10,6 +13,7 @@ from app.dependencies import (
     get_current_user_id,
     get_current_user_role,
     get_equipment_repo,
+    get_order_approval_log_repo,
     get_order_repo,
     get_product_repo,
     get_schedule_repo,
@@ -17,6 +21,7 @@ from app.dependencies import (
     get_supabase_client,
 )
 from app.models.transaction.order_schema import (
+    OrderApprovalLogResponse,
     OrderAttachmentResponse,
     OrderBulkApproveRequest,
     OrderCreate,
@@ -31,6 +36,9 @@ from app.repositories.supa_infra.common.scheduling_settings_repo import (
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.repositories.supa_infra.master.equipment_repo import EquipmentRepository
 from app.repositories.supa_infra.master.product_repo import ProductRepository
+from app.repositories.supa_infra.transaction.order_approval_log_repo import (
+    OrderApprovalLogRepository,
+)
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
@@ -132,6 +140,137 @@ def get_unconfirmed_routing_queue(
 
     items.sort(key=lambda x: (x["buffer_days"] is None, x["buffer_days"] or 0))
     return {"count": len(items), "items": items}
+
+
+# 承認履歴の閲覧・出力を許可するロール（iso_officer: 監査目的、president: 承認者本人としての確認）。
+# order_handler は自身の操作ログであっても閲覧不可とし、監査ログとしての独立性を保つ。
+_APPROVAL_LOG_VIEWER_ROLES = ("iso_officer", "president", "platform_admin")
+
+
+def _fetch_enriched_approval_logs(
+    tenant_id: str,
+    user_id: str,
+    client: Client,
+    admin_client: Client,
+    approval_log_repo: OrderApprovalLogRepository,
+) -> list[dict[str, Any]]:
+    _require_any_role(
+        tenant_id, user_id, client, _APPROVAL_LOG_VIEWER_ROLES, "承認履歴の閲覧"
+    )
+
+    # RLS (is_tenant_member + ロール制約) を通すためユーザーJWTクライアントで取得する。
+    logs = approval_log_repo.get_all()
+    if not logs:
+        return []
+
+    order_ids = list({log["order_id"] for log in logs})
+    actor_ids = list({log["actor_user_id"] for log in logs})
+
+    orders_res = (
+        admin_client.table("orders")
+        .select("id, order_number")
+        .in_("id", order_ids)
+        .execute()
+    )
+    order_number_map = {
+        o["id"]: o["order_number"]
+        for o in cast(list[dict[str, Any]], orders_res.data or [])
+    }
+
+    profiles_res = (
+        admin_client.table("profiles")
+        .select("id, full_name, email")
+        .in_("id", actor_ids)
+        .execute()
+    )
+    profiles_map = {
+        p["id"]: p for p in cast(list[dict[str, Any]], profiles_res.data or [])
+    }
+
+    enriched: list[dict[str, Any]] = []
+    for log in logs:
+        profile = profiles_map.get(log["actor_user_id"], {})
+        enriched.append(
+            {
+                "id": log["id"],
+                "order_id": log["order_id"],
+                "order_number": order_number_map.get(log["order_id"]),
+                "action": log["action"],
+                "actor_user_id": log["actor_user_id"],
+                "actor_full_name": profile.get("full_name"),
+                "actor_email": profile.get("email"),
+                "reason": log.get("reason"),
+                "created_at": log["created_at"],
+            }
+        )
+    return enriched
+
+
+@orders_router.get("/approval-logs", response_model=list[OrderApprovalLogResponse])
+def list_approval_logs(
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
+):
+    """
+    承認ワークフロー（承認依頼送信・承認・却下）の監査ログを一覧取得する
+    （iso_officer / president / platform_admin のみ閲覧可）。
+    """
+    return _fetch_enriched_approval_logs(
+        tenant_id, user_id, client, admin_client, approval_log_repo
+    )
+
+
+@orders_router.get("/approval-logs/export")
+def export_approval_logs_csv(
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
+):
+    """
+    承認ワークフローの監査ログをCSV形式で出力する（iso_officer / president / platform_admin のみ）。
+    """
+    logs = _fetch_enriched_approval_logs(
+        tenant_id, user_id, client, admin_client, approval_log_repo
+    )
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["注文番号", "操作", "操作者氏名", "操作者メール", "理由", "操作日時"]
+    )
+    action_labels = {
+        "request_approval": "承認依頼送信",
+        "approve": "承認",
+        "reject": "却下",
+    }
+    for log in logs:
+        writer.writerow(
+            [
+                log["order_number"] or "",
+                action_labels.get(log["action"], log["action"]),
+                log["actor_full_name"] or "",
+                log["actor_email"] or "",
+                log["reason"] or "",
+                log["created_at"],
+            ]
+        )
+
+    # Excelでの文字化けを避けるためBOMを付与する
+    csv_content = "﻿" + buffer.getvalue()
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="approval_logs.csv"'},
+    )
 
 
 @orders_router.get("/{order_id}")
@@ -443,6 +582,22 @@ def _require_role(
         )
 
 
+def _require_any_role(
+    tenant_id: str,
+    user_id: str,
+    client: Client,
+    allowed_roles: tuple[str, ...],
+    action: str,
+) -> None:
+    """複数ロールのいずれかであれば実行可能な操作のロールチェック。許可されなければ403を送出する。"""
+    role = get_current_user_role(tenant_id, user_id, client)
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{action}は {'/'.join(allowed_roles)} のみ操作できます",
+        )
+
+
 def _confirm_single_order(
     order_id: int,
     tenant_id: str,
@@ -502,6 +657,9 @@ def request_order_approval(
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
     order_repo: OrderRepository = Depends(get_order_repo),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
 ):
     """
     下書き注文の承認依頼を送信し、注文ステータスをpending_approvalにする（order_handler限定）。
@@ -523,6 +681,7 @@ def request_order_approval(
     result = order_repo.update(
         order_id, {"status": "pending_approval", "rejection_reason": None}
     )
+    approval_log_repo.log_action(tenant_id, order_id, "request_approval", user_id)
     return _map_order_response(result)
 
 
@@ -536,6 +695,9 @@ def confirm_order(
     product_repo: ProductRepository = Depends(get_product_repo),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
     settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
 ):
     """
     受注を承認する。スケジュールを確定・保存し、注文ステータスをconfirmedにする（president限定）。
@@ -544,9 +706,11 @@ def confirm_order(
     _require_role(tenant_id, user_id, client, "president", "受注の承認（確定）")
 
     try:
-        return _confirm_single_order(
+        result = _confirm_single_order(
             order_id, tenant_id, order_repo, product_repo, schedule_repo, settings_repo
         )
+        approval_log_repo.log_action(tenant_id, order_id, "approve", user_id)
+        return result
     except RoutingUnconfirmedError as e:
         raise HTTPException(
             status_code=422,
@@ -569,6 +733,9 @@ def approve_orders_bulk(
     product_repo: ProductRepository = Depends(get_product_repo),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
     settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
 ):
     """
     複数の承認待ち注文をまとめて承認する（president限定）。1件ごとの成否を返す。
@@ -587,6 +754,7 @@ def approve_orders_bulk(
                 schedule_repo,
                 settings_repo,
             )
+            approval_log_repo.log_action(tenant_id, order_id, "approve", user_id)
             results.append(
                 {
                     "order_id": order_id,
@@ -623,6 +791,9 @@ def reject_order(
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
     order_repo: OrderRepository = Depends(get_order_repo),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
 ):
     """
     承認待ちの注文を却下し、下書きに差し戻す（president限定）。却下理由は任意入力。
@@ -641,5 +812,8 @@ def reject_order(
 
     result = order_repo.update(
         order_id, {"status": "draft", "rejection_reason": reject_data.reason}
+    )
+    approval_log_repo.log_action(
+        tenant_id, order_id, "reject", user_id, reject_data.reason
     )
     return _map_order_response(result)

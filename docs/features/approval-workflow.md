@@ -55,3 +55,59 @@ order_handler へディスパッチし、president は最終承認（および�
 - `backend/__tests__/api/routers/transaction/test_orders.py`: 各エンドポイントのロール別403、
   ステータス遷移バリデーション違反、`request-approval` の `product_unmatched`、`approve-bulk` の
   部分失敗（1件成功・1件404）を検証
+
+## 操作主体の記録（監査ログ基盤） (Issue #326)
+
+共有端末での操作であっても、承認依頼送信・承認・却下の各操作を実行したユーザーと日時をアプリ層で記録し、
+ISO要件である承認プロセスの証跡を残す。
+
+### データモデル
+
+- `order_approval_log`
+  （[20260811000000_add_order_approval_log.sql](../../supabase/migrations/20260811000000_add_order_approval_log.sql)）
+  - `id, tenant_id, order_id, action(request_approval/approve/reject), actor_user_id, reason, created_at`
+  - RLS: `is_tenant_member(tenant_id)` に加え、SELECTは `organization_members.role` が
+    `iso_officer` / `president` / `platform_admin` のいずれかであることを要求（`order_handler` は
+    自身の操作ログであっても閲覧不可とし、監査ログとしての独立性を保つ）。INSERTは
+    `actor_user_id = auth.uid()` を要求し、なりすまし記録を防ぐ。
+- `backend/app/repositories/supa_infra/transaction/order_approval_log_repo.py`:
+  `OrderApprovalLogRepository.log_action()` / `get_all()` / `get_by_order_id()`
+
+### 記録タイミング
+
+`backend/app/routers/transaction/orders.py` の各エンドポイントで、状態遷移の更新が成功した直後に
+`approval_log_repo.log_action(tenant_id, order_id, action, user_id, reason)` を呼び出す。
+
+| エンドポイント | action | reason |
+|---|---|---|
+| `POST /orders/{id}/request-approval` | `request_approval` | なし |
+| `POST /orders/{id}/confirm` | `approve` | なし |
+| `POST /orders/approve-bulk` | `approve`（成功した注文ごと） | なし |
+| `POST /orders/{id}/reject` | `reject` | 却下理由（任意） |
+
+### 閲覧・出力API
+
+- `GET /orders/approval-logs`（`iso_officer` / `president` / `platform_admin` のみ）: 監査ログ一覧を
+  新しい順に返す。`order_number` と操作者の `actor_full_name` / `actor_email` を
+  `profiles` テーブルから補完して返す（`_fetch_enriched_approval_logs`）。
+- `GET /orders/approval-logs/export`（同ロール限定）: 同内容をCSV（BOM付きUTF-8、Excel向け）で
+  ダウンロードする。
+- ルーティング順序の都合上、`/orders/{order_id}` より前に定義する必要がある
+  （`{order_id}: int` へのパス変換失敗で `/approval-logs` が誤って先にマッチするのを防ぐため）。
+
+### Frontend
+
+- `frontend/src/hooks/use-orders.ts`: `useApprovalLogs()`（一覧取得）、`downloadApprovalLogsCsv()`
+  （CSVダウンロード、JSON以外を返すため `apiClient` を使わず直接 `fetch`）
+- `frontend/src/app/orders/approval-logs/page.tsx`: 監査ログ一覧画面。
+  `useCurrentMember()` の `role` が `iso_officer` / `president` / `platform_admin` 以外の場合は
+  アクセス不可メッセージを表示し、編集・承認操作用のUIは一切持たない（閲覧・出力のみ）。
+- サイドバー（`frontend/src/components/layout/app-sidebar.tsx`）に「承認監査ログ」リンクを追加
+  （ページ側でロールチェックするため、リンク自体は全ロールに表示）。
+
+### テスト
+
+- `backend/__tests__/api/routers/transaction/test_orders.py`:
+  各操作エンドポイントで監査ログが正しい引数で記録されること、`GET /orders/approval-logs` /
+  `/export` が `iso_officer`/`president` では成功し `order_handler` では403になること、
+  CSVレスポンスの内容を検証
