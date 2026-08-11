@@ -1,8 +1,9 @@
--- テストユーザーは2名分作成する（承認ワークフロー Issue #325 の動作確認用）。
--- どちらもパスワードは Test123!（backend/.env.sample の TEST_USER_PASS と同じ
+-- テストユーザーは3名分作成する（承認ワークフロー Issue #325 / 監査ログ Issue #326 の動作確認用）。
+-- いずれもパスワードは Test123!（backend/.env.sample の TEST_USER_PASS と同じ
 -- bcryptハッシュを共有しているため、パスワード自体はハッシュ化前の平文で共通）。
---   test@example.com          … president（承認・却下を行う）
---   order_handler@example.com … order_handler（承認依頼の送信を行う）
+--   test@example.com          … president（承認・却下、承認監査ログの閲覧を行う）
+--   order_handler@example.com … order_handler（承認依頼の送信を行う。監査ログは閲覧不可）
+--   iso_officer@example.com   … iso_officer（承認監査ログの閲覧・CSV出力のみ行う）
 
 -- 1. Create Test Users
 INSERT INTO auth.users (
@@ -24,6 +25,15 @@ INSERT INTO auth.users (
     '33333333-3333-3333-3333-333333333333',
     'authenticated', 'authenticated',
     'order_handler@example.com',
+    '$2a$10$.Ulu3FXi6elgYxA/bwIjYuYBYi05tEYmknOuBfeIb1VE1D.KNzxhe',  -- ハッシュ化されたパスワード (Test123!)
+    now(), '{"provider":"email","providers":["email"]}', '{}',
+    now(), now(), '', '', '', ''
+),
+(
+    '00000000-0000-0000-0000-000000000000',
+    '44444444-4444-4444-4444-444444444444',
+    'authenticated', 'authenticated',
+    'iso_officer@example.com',
     '$2a$10$.Ulu3FXi6elgYxA/bwIjYuYBYi05tEYmknOuBfeIb1VE1D.KNzxhe',  -- ハッシュ化されたパスワード (Test123!)
     now(), '{"provider":"email","providers":["email"]}', '{}',
     now(), now(), '', '', '', ''
@@ -56,6 +66,14 @@ INSERT INTO auth.identities (
     'email',
     '33333333-3333-3333-3333-333333333333', -- provider_idとしてuser_idと同じものを指定
     now(), now(), now()
+),
+(
+    '44444444-4444-4444-4444-444444444444', -- pkey用
+    '44444444-4444-4444-4444-444444444444', -- auth.usersのID
+    format('{"sub":"%s","email":"%s"}', '44444444-4444-4444-4444-444444444444', 'iso_officer@example.com')::jsonb,
+    'email',
+    '44444444-4444-4444-4444-444444444444', -- provider_idとしてuser_idと同じものを指定
+    now(), now(), now()
 )
 ON CONFLICT (provider_id, provider) DO NOTHING;
 
@@ -67,5 +85,14 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.organization_members (user_id, tenant_id, role)
 VALUES
     ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', 'president'),
-    ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222', 'order_handler')
+    ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222', 'order_handler'),
+    ('44444444-4444-4444-4444-444444444444', '22222222-2222-2222-2222-222222222222', 'iso_officer')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;
+
+-- 4. Profiles（承認監査ログ画面 (Issue #326) で操作者の氏名・メールを表示するため）
+INSERT INTO public.profiles (id, full_name, email)
+VALUES
+    ('11111111-1111-1111-1111-111111111111', '社長 太郎', 'test@example.com'),
+    ('33333333-3333-3333-3333-333333333333', '受注 花子', 'order_handler@example.com'),
+    ('44444444-4444-4444-4444-444444444444', 'ISO 次郎', 'iso_officer@example.com')
+ON CONFLICT (id) DO NOTHING;

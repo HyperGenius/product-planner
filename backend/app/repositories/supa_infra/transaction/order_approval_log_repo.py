@@ -1,6 +1,8 @@
 # repositories/supa_infra/transaction/order_approval_log_repo.py
 from typing import Any, cast
 
+from postgrest.types import ReturnMethod
+
 from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
 
@@ -15,17 +17,26 @@ class OrderApprovalLogRepository(BaseRepository):
         action: str,
         actor_user_id: str,
         reason: str | None = None,
-    ) -> dict:
-        """承認ワークフローの操作（依頼送信・承認・却下）を監査ログに記録する。"""
-        return self.create(
+    ) -> None:
+        """
+        承認ワークフローの操作（依頼送信・承認・却下）を監査ログに記録する。
+
+        order_handler など監査ログの閲覧権限を持たないロールも書き込みは行うため、
+        `returning="minimal"` でINSERT後のRETURNING句を省略する。デフォルトの
+        `returning="representation"` のままだと、PostgRESTがINSERT結果を返す際に
+        SELECT用のRLSポリシー（iso_officer/president/platform_admin限定）が
+        適用され、対象外ロールでは書き込みそのものが失敗してしまう。
+        """
+        self.client.table(self.table_name).insert(
             {
                 "tenant_id": tenant_id,
                 "order_id": order_id,
                 "action": action,
                 "actor_user_id": actor_user_id,
                 "reason": reason,
-            }
-        )
+            },
+            returning=ReturnMethod.minimal,
+        ).execute()
 
     def get_all(self) -> list[dict]:
         """テナント内の承認監査ログを新しい順に全件取得する（RLSでテナント境界を強制）。"""
