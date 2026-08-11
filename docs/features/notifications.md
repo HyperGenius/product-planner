@@ -72,7 +72,8 @@ CREATE TABLE notifications (
   ベストエフォート（`_notify_approval_requested_safely`）
 - `detail` には `{"order_no": ...}` のみを保存する
 - `link_url` は `_resolve_link_urls()` で `/orders/{order_id}`（アプリ内相対パス）に解決する
-  （他のnotif_typeのような署名付きURL生成や外部リンク組み立ては不要）
+  （他のnotif_typeのような署名付きURL生成や外部リンク組み立ては不要）。`source_id` が数値
+  文字列でない場合は `link_url: null` とする（下記のPRレビュー指摘対応）
 
 #### 書き込み経路の追加（RLS）
 
@@ -82,6 +83,13 @@ CREATE TABLE notifications (
 `notif_type = 'approval_requested' AND source_table = 'orders'` に限定した INSERT ポリシーを
 新設した（`supabase/migrations/20260812000000_add_approval_requested_notif_type.sql`）。
 他のnotif_type（PDF解析ログ等、cron専用）はこれまで通りユーザーJWT経由での偽装挿入を防ぐ。
+
+`source_id` はアプリ層が渡す値をそのまま信頼せず、RLS側でも検証する（PRレビュー指摘対応）。
+INSERTポリシーの `WITH CHECK` に `source_id ~ '^[0-9]+$'`（数値形式）と
+`EXISTS (... orders o WHERE o.id = source_id::bigint AND o.tenant_id = notifications.tenant_id)`
+（同一テナントに実在する注文であること）を追加し、任意文字列や他テナントの注文IDを
+`source_id` に持つ通知の作成を防ぐ。アプリ側（`_resolve_link_urls`）でも `source_id.isdigit()`
+を確認してから `link_url` を組み立てる二重防御にしている。
 
 #### フロントエンド
 
@@ -240,11 +248,15 @@ cd backend && pytest __tests__/integration/test_notifications_rls.py -v --run-in
 - `backend/__tests__/api/routers/transaction/test_orders.py::test_request_order_approval_notifies_approval_requested`
   — `request-approval` 成功時に `notifications` へ `approval_requested` がinsertされること（モック）
 - `backend/__tests__/api/routers/transaction/test_notifications.py` — `approval_requested` の
-  `link_url` が `/orders/{order_id}` に解決されること
+  `link_url` が `/orders/{order_id}` に解決されること（数値以外の `source_id` では `null` になること含む）
 - `backend/__tests__/integration/test_notifications_rls.py`
   - `test_insert_approval_requested_via_user_jwt_succeeds_for_own_tenant` — ユーザーJWT経由で
-    自テナントの `approval_requested` はINSERTできる
+    自テナントの実在する注文を指す `approval_requested` はINSERTできる
   - `test_insert_approval_requested_via_user_jwt_rejected_for_other_tenant` — 他テナント宛は拒否される
+  - `test_insert_approval_requested_via_user_jwt_rejected_for_non_numeric_source_id` —
+    `source_id` が数値でない場合はRLSで拒否される（PRレビュー指摘対応）
+  - `test_insert_approval_requested_via_user_jwt_rejected_for_other_tenant_order_id` —
+    `source_id` が数値でも他テナントの注文を指す場合はRLSで拒否される（IDOR対策、PRレビュー指摘対応）
   - 既存 `test_direct_insert_via_user_jwt_is_rejected`（`non_order_email`）で、新設ポリシーが
     `approval_requested` 以外には影響しないことを回帰確認
 

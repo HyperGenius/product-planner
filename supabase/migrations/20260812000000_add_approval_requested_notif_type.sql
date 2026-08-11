@@ -17,13 +17,22 @@ CHECK (notif_type IN (
 -- order_approval_log (20260811000000_add_order_approval_log.sql) と同じ考え方で、
 -- notif_type と source_table をこの用途に固定した WITH CHECK により、他のnotif_type
 -- （PDF解析ログ等、cron専用）をユーザーJWT経由で偽装挿入できないようにする。
--- source_id（orders.id）の正当性については、is_tenant_member(tenant_id) チェックに加え、
--- アプリ層（POST /orders/{order_id}/request-approval）で常にログイン中テナントの
--- 注文からしか呼び出されないことで担保する。
+--
+-- source_id（orders.id想定）はアプリ層が渡す値をそのまま信頼せず、DB側でも
+-- 数値形式であること・その注文が同一tenant_idに実在することを検証する
+-- （PRレビュー指摘対応）。これを怠ると、任意のsource_idを持つ通知をユーザーJWT
+-- 経由で作成でき、GET /notifications の link_url 組み立て（/orders/{source_id}）で
+-- 不正な相対パスや他テナント注文IDの詮索に使われうる。
 CREATE POLICY "insert approval_requested from user jwt" ON notifications
   FOR INSERT
   WITH CHECK (
     is_tenant_member(tenant_id)
     AND notif_type = 'approval_requested'
     AND source_table = 'orders'
+    AND source_id ~ '^[0-9]+$'
+    AND EXISTS (
+      SELECT 1 FROM orders o
+      WHERE o.id = source_id::bigint
+        AND o.tenant_id = notifications.tenant_id
+    )
   );

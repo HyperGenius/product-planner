@@ -83,7 +83,12 @@ def _collect_parse_log_ids(
         if row["notif_type"] == "non_order_email":
             link_urls[row["id"]] = f"https://mail.google.com/mail/u/0/#all/{source_id}"
         elif row["notif_type"] == "approval_requested":
-            link_urls[row["id"]] = f"/orders/{source_id}"
+            # source_id はRLS側で数値かつ自テナントの注文であることを検証しているが
+            # （20260812000000_...migration）、アプリ層でも念のため数値のみ許可し、
+            # 不正な相対パス（/orders/../..等）が生成されないようにする。
+            link_urls[row["id"]] = (
+                f"/orders/{source_id}" if source_id.isdigit() else None
+            )
         elif (
             row["source_table"] == "order_parse_log"
             and row["notif_type"] in _PARSE_LOG_NOTIF_TYPES

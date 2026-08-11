@@ -259,6 +259,48 @@ class TestNotificationsRls:
                 }
             ).execute()
 
+    def test_insert_approval_requested_via_user_jwt_rejected_for_non_numeric_source_id(
+        self, real_supabase_client, notif_tenants
+    ):
+        """
+        PRレビュー指摘対応: source_id が数値でない場合、GET /notifications の
+        link_url組み立て（/orders/{source_id}）で不正な相対パスになりうるため、
+        DB側でも数値形式であることを検証し拒否する。
+        """
+        with pytest.raises(APIError):
+            real_supabase_client.table("notifications").insert(
+                {
+                    "tenant_id": notif_tenants["own_id"],
+                    "notif_type": "approval_requested",
+                    "source_table": "orders",
+                    "source_id": "../not-a-valid-order-id",
+                }
+            ).execute()
+
+    def test_insert_approval_requested_via_user_jwt_rejected_for_other_tenant_order_id(
+        self, real_supabase_client, admin_db, notif_tenants
+    ):
+        """
+        PRレビュー指摘対応: source_id が数値であっても、その注文が別テナントに
+        属する場合はEXISTS句（tenant_id一致）により拒否される（IDOR対策）。
+        """
+        other_order = (
+            admin_db.table("orders")
+            .insert({"tenant_id": notif_tenants["other_id"], "quantity": 1})
+            .execute()
+        )
+        other_order_id = cast(list[dict[str, Any]], other_order.data)[0]["id"]
+
+        with pytest.raises(APIError):
+            real_supabase_client.table("notifications").insert(
+                {
+                    "tenant_id": notif_tenants["own_id"],
+                    "notif_type": "approval_requested",
+                    "source_table": "orders",
+                    "source_id": str(other_order_id),
+                }
+            ).execute()
+
     def test_direct_update_via_user_jwt_is_rejected(
         self, real_supabase_client, admin_db, notif_tenants
     ):
