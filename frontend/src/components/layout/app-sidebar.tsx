@@ -39,6 +39,11 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { logout } from "@/lib/auth-server-actions"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
+import {
+  ORDER_APPROVAL_LOG_VIEWER_ROLES,
+  type MemberRole,
+} from "@/types/member"
 
 type SubMenuItem = { title: string; url: string; icon: React.ElementType }
 type MenuItem = {
@@ -47,6 +52,8 @@ type MenuItem = {
   url?: string
   activePrefix?: string
   items?: SubMenuItem[]
+  /** 指定した場合、このロールを持つメンバーにのみメニュー項目を表示する */
+  allowedRoles?: MemberRole[]
 }
 
 const menuItems: MenuItem[] = [
@@ -69,6 +76,7 @@ const menuItems: MenuItem[] = [
     title: "承認監査ログ",
     url: "/orders/approval-logs",
     icon: ClipboardList,
+    allowedRoles: ORDER_APPROVAL_LOG_VIEWER_ROLES,
   },
   {
     title: "マスタデータ",
@@ -99,6 +107,15 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 export function AppSidebar({ user, ...props }: AppSidebarProps) {
   const pathname = usePathname()
   const [isLoggingOut, setIsLoggingOut] = React.useState(false)
+  const { data: currentMember, isLoading: isMemberLoading } = useCurrentMember()
+  const currentUserRole = currentMember?.role ?? null
+
+  const visibleMenuItems = menuItems.filter((item) => {
+    if (!item.allowedRoles) return true
+    // ロール未確定の間はロール制御付き項目を表示しない
+    if (isMemberLoading || !currentUserRole) return false
+    return item.allowedRoles.includes(currentUserRole)
+  })
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
@@ -120,7 +137,7 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
           <SidebarGroupLabel>メニュー</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) =>
+              {visibleMenuItems.map((item) =>
                 item.items ? (
                   <Collapsible
                     key={item.title}

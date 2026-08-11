@@ -17,6 +17,7 @@ import {
 import { useApprovalLogs, downloadApprovalLogsCsv } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import type { OrderApprovalLog } from "@/types/order"
+import { ORDER_APPROVAL_LOG_VIEWER_ROLES } from "@/types/member"
 
 const ACTION_LABELS: Record<OrderApprovalLog["action"], string> = {
   request_approval: "承認依頼送信",
@@ -48,9 +49,8 @@ export default function ApprovalLogsPage() {
   const { data: currentMember, isLoading: isMemberLoading } = useCurrentMember()
   const currentUserRole = currentMember?.role ?? null
   const canView =
-    currentUserRole === "iso_officer" ||
-    currentUserRole === "president" ||
-    currentUserRole === "platform_admin"
+    !!currentUserRole &&
+    ORDER_APPROVAL_LOG_VIEWER_ROLES.includes(currentUserRole)
 
   const { data: logs, isLoading, isError } = useApprovalLogs({
     enabled: !isMemberLoading && canView,
