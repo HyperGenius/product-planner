@@ -17,20 +17,12 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { SimulationResult } from "@/components/simulation-result"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
+import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
+import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import {
   useOrder,
@@ -82,7 +74,8 @@ export default function OrderDetailPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false)
-  const [isResubmitConfirmOpen, setIsResubmitConfirmOpen] = useState(false)
+  const [isRequestApprovalConfirmOpen, setIsRequestApprovalConfirmOpen] = useState(false)
+  const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false)
 
   const handleOpenEditDialog = () => {
     setIsEditDialogOpen(true)
@@ -133,31 +126,29 @@ export default function OrderDetailPage() {
     try {
       await requestApprovalMutation.mutateAsync(orderId)
       toast.success("承認依頼を送信しました")
-      setIsResubmitConfirmOpen(false)
+      setIsRequestApprovalConfirmOpen(false)
     } catch {
       toast.error("承認依頼の送信に失敗しました")
     }
   }
 
-  const handleRequestApprovalClick = () => {
-    // 差し戻し理由が残っている場合は、内容を見落としたまま再送信しないよう
-    // 一度確認ダイアログを挟む（Issue #326 E2Eフィードバック）
-    if (order?.rejection_reason) {
-      setIsResubmitConfirmOpen(true)
-    } else {
-      handleRequestApproval()
-    }
-  }
+  // 承認・承認依頼は受注ステータスを不可逆に進める重要な操作のため、
+  // 実行前に必ず確認モーダルを挟む（Issue #338）。差し戻し理由が残っている場合の
+  // 表示もこのモーダルに統合する（Issue #326 E2Eフィードバック）
+  const handleRequestApprovalClick = () => setIsRequestApprovalConfirmOpen(true)
 
   const handleApprove = async () => {
     try {
       await confirmMutation.mutateAsync(orderId)
       toast.success("注文を承認しました")
+      setIsApproveConfirmOpen(false)
       router.push("/orders")
     } catch {
       toast.error("注文の承認に失敗しました")
     }
   }
+
+  const handleApproveClick = () => setIsApproveConfirmOpen(true)
 
   const handleReject = async (reason: string) => {
     try {
@@ -433,7 +424,7 @@ export default function OrderDetailPage() {
             {isPendingApproval && currentUserRole === "president" && (
               <>
                 <Button
-                  onClick={handleApprove}
+                  onClick={handleApproveClick}
                   disabled={confirmMutation.isPending}
                   variant="default"
                   className="flex-1"
@@ -519,27 +510,21 @@ export default function OrderDetailPage() {
         onOpenChange={(open) => { if (!open) setIsRejectDialogOpen(false) }}
       />
 
-      <AlertDialog open={isResubmitConfirmOpen} onOpenChange={setIsResubmitConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>差し戻し理由を確認してください</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                <p>この注文は一度差し戻されています。内容を修正したうえで再送信してください。</p>
-                <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 whitespace-pre-wrap">
-                  {order.rejection_reason}
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRequestApproval}>
-              確認のうえ承認依頼を送信する
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RequestApprovalConfirmDialog
+        order={isRequestApprovalConfirmOpen ? order : null}
+        products={products}
+        isPending={requestApprovalMutation.isPending}
+        onConfirm={handleRequestApproval}
+        onOpenChange={(open) => { if (!open) setIsRequestApprovalConfirmOpen(false) }}
+      />
+
+      <ApproveConfirmDialog
+        order={isApproveConfirmOpen ? order : null}
+        products={products}
+        isPending={confirmMutation.isPending}
+        onConfirm={handleApprove}
+        onOpenChange={(open) => { if (!open) setIsApproveConfirmOpen(false) }}
+      />
     </div>
   )
 }

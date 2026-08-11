@@ -55,7 +55,10 @@ export function useOrdersPage() {
   const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
   const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
   const [rejectTargetOrder, setRejectTargetOrder] = useState<Order | null>(null)
-  const [resubmitTargetOrder, setResubmitTargetOrder] = useState<Order | null>(null)
+  const [requestApprovalTargetOrder, setRequestApprovalTargetOrder] = useState<Order | null>(null)
+  const [approveTargetOrder, setApproveTargetOrder] = useState<Order | null>(null)
+  const [isBulkRequestApprovalConfirmOpen, setIsBulkRequestApprovalConfirmOpen] = useState(false)
+  const [isBulkApproveConfirmOpen, setIsBulkApproveConfirmOpen] = useState(false)
 
   const queryClient = useQueryClient()
 
@@ -132,6 +135,20 @@ export function useOrdersPage() {
     ).length,
     [selectedOrderIds, orders]
   )
+  const selectedScheduledOrders = useMemo(
+    () =>
+      selectedOrderIds
+        .map((id) => orders?.find((o) => o.id === id))
+        .filter((o): o is Order => o != null && o.is_scheduled === true),
+    [selectedOrderIds, orders]
+  )
+  const selectedPendingApprovalOrders = useMemo(
+    () =>
+      selectedOrderIds
+        .map((id) => orders?.find((o) => o.id === id))
+        .filter((o): o is Order => o != null && o.status === "pending_approval"),
+    [selectedOrderIds, orders]
+  )
   const allDraftOnPageSelected =
     draftPageOrders.length > 0 && draftPageOrders.every((o) => selectedOrderIds.includes(o.id))
   const someDraftOnPageSelected =
@@ -148,10 +165,18 @@ export function useOrdersPage() {
     setBulkSimFailedIds(new Set())
   }, [page, statusFilter])
 
-  const handleApproveFromRow = (orderId: number, orderNo: string) => {
+  // 承認・承認依頼は受注ステータスを不可逆に進める重要な操作のため、
+  // 実行前に必ず確認モーダル（ApproveConfirmDialog / RequestApprovalConfirmDialog）を挟む（Issue #338）
+  const handleApproveFromRow = (order: Order) => setApproveTargetOrder(order)
+
+  const handleConfirmApprove = () => {
+    if (!approveTargetOrder) return
+    const orderId = approveTargetOrder.id
+    const orderNo = approveTargetOrder.order_no ?? ""
     confirmOrder.mutate(orderId, {
       onSuccess: () => {
         toast.success(`注文「${orderNo}」を承認し、スケジュールを作成しました`)
+        setApproveTargetOrder(null)
         setExpandedOrderId(null)
         setExpandedSimResult(null)
       },
@@ -167,7 +192,7 @@ export function useOrdersPage() {
         toast.success(`注文「${orderNo}」の承認依頼を送信しました`)
         setExpandedOrderId(null)
         setExpandedSimResult(null)
-        setResubmitTargetOrder(null)
+        setRequestApprovalTargetOrder(null)
       },
       onError: (error: Error) => {
         toast.error(`承認依頼の送信に失敗しました: ${error.message}`)
@@ -175,19 +200,11 @@ export function useOrdersPage() {
     })
   }
 
-  const handleRequestApprovalFromRow = (order: Order) => {
-    // 差し戻し理由が残っている場合は、内容を見落としたまま再送信しないよう
-    // 一度確認ダイアログを挟む（Issue #326 E2Eフィードバック）
-    if (order.rejection_reason) {
-      setResubmitTargetOrder(order)
-    } else {
-      submitRequestApproval(order.id, order.order_no ?? "")
-    }
-  }
+  const handleRequestApprovalFromRow = (order: Order) => setRequestApprovalTargetOrder(order)
 
-  const handleConfirmResubmit = () => {
-    if (!resubmitTargetOrder) return
-    submitRequestApproval(resubmitTargetOrder.id, resubmitTargetOrder.order_no ?? "")
+  const handleConfirmRequestApproval = () => {
+    if (!requestApprovalTargetOrder) return
+    submitRequestApproval(requestApprovalTargetOrder.id, requestApprovalTargetOrder.order_no ?? "")
   }
 
   const handleWithdrawFromRow = (orderId: number, orderNo: string) => {
@@ -370,7 +387,12 @@ export function useOrdersPage() {
     }
   }
 
-  const handleBulkRequestApproval = async () => {
+  const handleBulkRequestApprovalRequest = () => setIsBulkRequestApprovalConfirmOpen(true)
+
+  const handleBulkRequestApprovalCancel = () => setIsBulkRequestApprovalConfirmOpen(false)
+
+  const handleBulkRequestApprovalConfirm = async () => {
+    setIsBulkRequestApprovalConfirmOpen(false)
     const ids = selectedOrderIds
     const scheduledIds = ids.filter((id) => orders?.find((o) => o.id === id)?.is_scheduled)
     const skippedCount = ids.length - scheduledIds.length
@@ -402,7 +424,12 @@ export function useOrdersPage() {
     }
   }
 
-  const handleBulkApprove = async () => {
+  const handleBulkApproveRequest = () => setIsBulkApproveConfirmOpen(true)
+
+  const handleBulkApproveCancel = () => setIsBulkApproveConfirmOpen(false)
+
+  const handleBulkApproveConfirm = async () => {
+    setIsBulkApproveConfirmOpen(false)
     const ids = selectedOrderIds.filter(
       (id) => orders?.find((o) => o.id === id)?.status === "pending_approval"
     )
@@ -480,14 +507,20 @@ export function useOrdersPage() {
     // Reject dialog state
     rejectTargetOrder,
     setRejectTargetOrder,
-    // Resubmit (差し戻し後の再送信) confirmation dialog state
-    resubmitTargetOrder,
-    setResubmitTargetOrder,
-    handleConfirmResubmit,
+    // Request approval confirmation dialog state（差し戻し後の再送信確認も統合、Issue #338）
+    requestApprovalTargetOrder,
+    setRequestApprovalTargetOrder,
+    handleConfirmRequestApproval,
+    // Approve confirmation dialog state（Issue #338）
+    approveTargetOrder,
+    setApproveTargetOrder,
+    handleConfirmApprove,
     // Bulk selection
     selectedOrderIds,
     selectedScheduledCount,
     selectedPendingApprovalCount,
+    selectedScheduledOrders,
+    selectedPendingApprovalOrders,
     draftPageOrders,
     pendingApprovalPageOrders,
     allDraftOnPageSelected,
@@ -498,6 +531,8 @@ export function useOrdersPage() {
     isBulkRequestingApproval,
     isBulkApproving,
     isBulkSimulateConfirmOpen,
+    isBulkRequestApprovalConfirmOpen,
+    isBulkApproveConfirmOpen,
     handleToggleSelect,
     handleToggleSelectAll,
     handleToggleSelectAllPendingApproval,
@@ -505,8 +540,12 @@ export function useOrdersPage() {
     handleBulkSimulateRequest,
     handleBulkSimulateConfirm,
     handleBulkSimulateCancel,
-    handleBulkRequestApproval,
-    handleBulkApprove,
+    handleBulkRequestApprovalRequest,
+    handleBulkRequestApprovalConfirm,
+    handleBulkRequestApprovalCancel,
+    handleBulkApproveRequest,
+    handleBulkApproveConfirm,
+    handleBulkApproveCancel,
     bulkSimSummary,
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
