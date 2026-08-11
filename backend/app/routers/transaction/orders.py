@@ -250,7 +250,7 @@ def export_approval_logs_csv(
     for log in logs:
         writer.writerow(
             [
-                log["order_number"] or "",
+                log["order_number"] or f"#{log['order_id']}",
                 action_labels.get(log["action"], log["action"]),
                 log["actor_full_name"] or "",
                 log["actor_email"] or "",

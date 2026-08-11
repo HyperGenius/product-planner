@@ -1197,6 +1197,37 @@ class TestOrderRouter:
         assert "ORD-001" in body
         assert "承認 太郎" in body
 
+    def test_export_approval_logs_csv_falls_back_to_order_id_when_order_number_missing(
+        self, headers, mock_supabase_client, mock_approval_log_repo
+    ):
+        """GET /approval-logs/export: order_numberがNULLの場合は #order_id にフォールバックする"""
+        self._set_role(mock_supabase_client, "iso_officer")
+        mock_approval_log_repo.get_all.return_value = [self._SAMPLE_LOG_ROW]
+
+        default_table_return = mock_supabase_client.table.return_value
+
+        def table_side_effect(name):
+            if name == "orders":
+                m = MagicMock()
+                # order_number が NULL の注文（例: 未確定の自動起票注文）
+                m.select.return_value.in_.return_value.execute.return_value.data = [
+                    {"id": 1, "order_number": None}
+                ]
+                return m
+            if name == "profiles":
+                m = MagicMock()
+                m.select.return_value.in_.return_value.execute.return_value.data = []
+                return m
+            return default_table_return
+
+        mock_supabase_client.table.side_effect = table_side_effect
+
+        response = client.get("/orders/approval-logs/export", headers=headers)
+
+        assert response.status_code == 200
+        body = response.content.decode("utf-8-sig")
+        assert "#1" in body
+
     def test_export_approval_logs_csv_forbidden_for_order_handler(
         self, headers, mock_supabase_client, mock_approval_log_repo
     ):
