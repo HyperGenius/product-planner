@@ -670,6 +670,7 @@ export function ProductRoutingsDialog({
             <div className="flex gap-2 mt-4">
               <Button
                 onClick={handleSave}
+                disabled={!processName.trim() || equipmentGroupId === ""}
                 className="flex-1"
               >
                 {editingId !== null ? (
