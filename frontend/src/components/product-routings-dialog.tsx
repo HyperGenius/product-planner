@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Pencil, Trash2, Plus, Loader2, Lock, CheckCircle2, ArrowUp, ArrowDown } from "lucide-react"
+import { Pencil, Trash2, Plus, Loader2, Lock, ArrowUp, ArrowDown } from "lucide-react"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -467,12 +467,6 @@ export function ProductRoutingsDialog({
                             {routing.id < 0 && (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500 text-amber-600 bg-amber-50">
                                 未保存
-                              </Badge>
-                            )}
-                            {routing.is_confirmed && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-500 text-green-600 bg-green-50">
-                                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
-                                確定済み
                               </Badge>
                             )}
                           </div>
