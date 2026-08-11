@@ -84,6 +84,31 @@ class TestMembersRouter:
 
         assert response.status_code == 403
 
+    @pytest.mark.parametrize("role", ["order_handler", "iso_officer", "president"])
+    def test_create_member_allowed_for_president_with_each_role(
+        self, headers, mock_client, mock_admin_client, role
+    ):
+        """POST /: president は order_handler / iso_officer / president のいずれのロールでも招待できる（Issue #328）"""
+        _set_role(mock_client, "president")
+        mock_admin_client.auth.admin.create_user.return_value.user.id = "new-user-id"
+
+        response = client.post(
+            "/tenant/members",
+            json={
+                "email": "new@example.com",
+                "password": "password123",
+                "full_name": "New User",
+                "role": role,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["role"] == role
+        # email_confirm: True によりメール確認なしで即座にログイン可能な招待フローを踏襲していることを確認
+        (create_user_payload,), _ = mock_admin_client.auth.admin.create_user.call_args
+        assert create_user_payload["email_confirm"] is True
+
     def test_delete_member_forbidden_for_order_handler(self, headers, mock_client):
         """DELETE /{user_id}: president / platform_admin 以外は403"""
         _set_role(mock_client, "order_handler")
