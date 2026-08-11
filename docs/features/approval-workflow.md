@@ -163,3 +163,16 @@ PostgRESTがINSERT結果を返す際にSELECT用RLSポリシー（`iso_officer`/
   各操作エンドポイントで監査ログが正しい引数で記録されること、`GET /orders/approval-logs` /
   `/export` が `iso_officer`/`president` では成功し `order_handler` では403になること、
   CSVレスポンスの内容を検証
+
+## 承認依頼のアプリ内通知 (Issue #327)
+
+`request-approval`（`draft → pending_approval`）成功時、president 向けに `notifications`
+テーブルへ `approval_requested` 通知を書き込む。メール確認依頼で発生していた「返信が来ない」
+問題の代替として、アプリ内で完結させる狙い。`approve-bulk` からの一括承認時は既存の通知に
+対する操作（既読化等）のみで、新規通知の書き込みは発生しない
+（一括承認対象はいずれも `request-approval` 送信時に既に通知済みのため）。
+
+社長ダッシュボード（ホーム画面）には `pending_approval` 件数が1件以上あれば目立つバナーを表示し、
+`/orders?status=pending_approval`（本ページの一括承認UI）へ直接遷移できる。
+
+詳細な通知テーブル設計・RLS・フロントエンド実装は [notifications.md](notifications.md) を参照。

@@ -79,6 +79,26 @@ class TestNotificationsRouter:
                 "read_at": None,
                 "created_at": "2026-07-22T00:03:00+00:00",
             },
+            {
+                "id": "n5",
+                "tenant_id": TENANT_ID,
+                "notif_type": "approval_requested",
+                "source_table": "orders",
+                "source_id": "42",
+                "detail": {"order_no": "ORD-042"},
+                "read_at": None,
+                "created_at": "2026-07-22T00:04:00+00:00",
+            },
+            {
+                "id": "n6",
+                "tenant_id": TENANT_ID,
+                "notif_type": "approval_requested",
+                "source_table": "orders",
+                "source_id": "../not-a-valid-order-id",
+                "detail": None,
+                "read_at": None,
+                "created_at": "2026-07-22T00:05:00+00:00",
+            },
         ]
 
         mock_client = MagicMock()
@@ -126,6 +146,8 @@ class TestNotificationsRouter:
         assert body["n2"]["link_url"] == "https://example.com/signed/att-2.pdf"
         assert body["n3"]["link_url"] == "https://mail.google.com/mail/u/0/#all/gmail-3"
         assert body["n4"]["link_url"] is None
+        assert body["n5"]["link_url"] == "/orders/42"
+        assert body["n6"]["link_url"] is None
 
         # order_parse_log / order_attachments への問い合わせが通知件数分ではなく
         # 1回ずつ（バッチ）にまとまっていること（N+1回避の確認）

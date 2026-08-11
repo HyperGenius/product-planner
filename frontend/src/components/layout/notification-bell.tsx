@@ -21,6 +21,7 @@ const NOTIF_TYPE_LABELS: Record<NotificationType, string> = {
   non_order_email: "対象外メール",
   customer_draft_created: "顧客の下書き作成",
   multi_order_suspected: "複数受注の疑い",
+  approval_requested: "承認依頼",
 }
 
 function groupByType(notifications: Notification[]): [NotificationType, Notification[]][] {
@@ -133,6 +134,10 @@ function NotificationRow({ notif }: { notif: Notification }) {
 function formatDetail(notif: Notification): string {
   const detail = notif.detail
   if (!detail) return "詳細なし"
+  if (notif.notif_type === "approval_requested") {
+    const orderNo = detail.order_no
+    return typeof orderNo === "string" ? `注文「${orderNo}」の承認依頼` : "承認依頼"
+  }
   const productName = detail.product_name_raw ?? detail.product_number_raw
   if (typeof productName === "string") return productName
   const snippet = detail.body_snippet

@@ -12,10 +12,12 @@ import {
   ArrowRight,
   CalendarDays,
   PackageSearch,
+  BellRing,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { format, startOfDay, addDays, startOfWeek } from "date-fns"
 import { ja } from "date-fns/locale"
 import { getProductName, getStatusLabel } from "@/lib/order-utils"
@@ -31,6 +33,7 @@ export default function Home() {
   const router = useRouter()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
+  const { data: currentMember } = useCurrentMember()
   const today = useMemo(() => startOfDay(new Date()), [])
   const tomorrow = useMemo(() => addDays(today, 1), [today])
   const weekStart = useMemo(() => startOfWeek(today, { locale: ja }), [today])
@@ -46,6 +49,12 @@ export default function Home() {
   const draftOrdersCount = useMemo(() => {
     return orders?.filter((order) => order.status === "draft").length ?? 0
   }, [orders])
+
+  const pendingApprovalCount = useMemo(() => {
+    return orders?.filter((order) => order.status === "pending_approval").length ?? 0
+  }, [orders])
+
+  const isPresident = currentMember?.role === "president"
 
   const confirmedOrdersCount = useMemo(() => {
     return orders?.filter((order) => order.status === "confirmed").length ?? 0
@@ -120,6 +129,29 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* 承認待ちバナー（president 限定・メール確認依頼の「後回しにされる」問題を再発させないため、
+          ログイン直後に目立つ形で表示する） */}
+      {isPresident && !ordersLoading && pendingApprovalCount > 0 && (
+        <button
+          type="button"
+          onClick={() => router.push("/orders?status=pending_approval")}
+          className="mb-8 flex w-full items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 px-6 py-4 text-left shadow-sm transition-colors hover:bg-red-100"
+        >
+          <div className="flex items-center gap-3">
+            <div className="rounded-full bg-red-100 p-2.5">
+              <BellRing className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <p className="font-semibold text-red-800">
+                承認待ちの注文が{pendingApprovalCount}件あります
+              </p>
+              <p className="text-sm text-red-600">確認して承認をお願いします</p>
+            </div>
+          </div>
+          <ArrowRight className="h-5 w-5 shrink-0 text-red-600" />
+        </button>
+      )}
 
       {/* KPI カード */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">

@@ -7,6 +7,7 @@ export type NotificationType =
   | "non_order_email"
   | "customer_draft_created"
   | "multi_order_suspected"
+  | "approval_requested"
 
 export interface Notification {
   id: string
