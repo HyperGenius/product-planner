@@ -36,13 +36,17 @@ interface OrderTableRowProps {
   customers?: Customer[]
   isSimulating: boolean
   hasSimulationError: boolean
-  confirmIsPending: boolean
+  requestApprovalIsPending: boolean
+  approveIsPending: boolean
+  currentUserRole: string | null
   isSelected: boolean
   selectionIndex?: number
   isBulkOperationInProgress: boolean
   hasBulkSimFailed?: boolean
   onSimulate: (order: Order) => void
-  onConfirm: (orderId: number, orderNo: string) => void
+  onRequestApproval: (orderId: number, orderNo: string) => void
+  onApprove: (orderId: number, orderNo: string) => void
+  onReject: (order: Order) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
   onToggleSelect: (orderId: number) => void
@@ -54,13 +58,17 @@ export function OrderTableRow({
   customers,
   isSimulating,
   hasSimulationError,
-  confirmIsPending,
+  requestApprovalIsPending,
+  approveIsPending,
+  currentUserRole,
   isSelected,
   selectionIndex,
   isBulkOperationInProgress,
   hasBulkSimFailed,
   onSimulate,
-  onConfirm,
+  onRequestApproval,
+  onApprove,
+  onReject,
   onEdit,
   onDelete,
   onToggleSelect,
@@ -78,7 +86,8 @@ export function OrderTableRow({
   return (
       <TableRow className={rowClassName}>
         <TableCell className="w-10">
-          {order.status === "draft" ? (
+          {order.status === "draft" ||
+          (order.status === "pending_approval" && currentUserRole === "president") ? (
             <div className="relative flex items-center justify-center">
               <Checkbox
                 checked={isSelected}
@@ -189,15 +198,34 @@ export function OrderTableRow({
                 </Button>
               )
             )}
-            {order.status === "draft" && order.is_scheduled && (
+            {order.status === "draft" && order.is_scheduled && currentUserRole === "order_handler" && (
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onConfirm(order.id, order.order_no ?? "")}
-                disabled={confirmIsPending || isBulkOperationInProgress}
+                onClick={() => onRequestApproval(order.id, order.order_no ?? "")}
+                disabled={requestApprovalIsPending || isBulkOperationInProgress}
               >
-                確定
+                承認依頼を送信
               </Button>
+            )}
+            {order.status === "pending_approval" && currentUserRole === "president" && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => onApprove(order.id, order.order_no ?? "")}
+                  disabled={approveIsPending || isBulkOperationInProgress}
+                >
+                  承認
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onReject(order)}
+                  disabled={isBulkOperationInProgress}
+                >
+                  却下
+                </Button>
+              </>
             )}
             {order.status !== "completed" && (
               <DropdownMenu>

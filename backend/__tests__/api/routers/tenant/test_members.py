@@ -148,3 +148,31 @@ class TestMembersRouter:
         response = client.delete("/tenant/members/other-user-id", headers=headers)
 
         assert response.status_code == 400
+
+    def test_get_my_membership_allowed_for_order_handler(self, headers, mock_client):
+        """GET /me: order_handler など非管理ロールでも自分自身の情報は取得できる（一覧とは異なりロール制限なし）"""
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+            "user_id": "test-user-id",
+            "role": "order_handler",
+        }
+        mock_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
+            "full_name": "受注担当 太郎",
+            "email": "handler@example.com",
+        }
+
+        response = client.get("/tenant/members/me", headers=headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["user_id"] == "test-user-id"
+        assert result["role"] == "order_handler"
+        assert result["email"] == "handler@example.com"
+        assert result["full_name"] == "受注担当 太郎"
+
+    def test_get_my_membership_not_found(self, headers, mock_client):
+        """GET /me: 対象テナントのメンバーでない場合は404"""
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = None
+
+        response = client.get("/tenant/members/me", headers=headers)
+
+        assert response.status_code == 404

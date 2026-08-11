@@ -29,13 +29,17 @@ draft ──────────▶ pending_approval ───────�
 | `completed` | 完了 |
 | `canceled` | キャンセル |
 
-順方向遷移のみを許可し、差し戻し `pending_approval → draft` のみ例外的に許可する
-（実際の却下APIは別Issueで実装予定）。バリデーションは
+順方向遷移のみを許可し、差し戻し `pending_approval → draft` のみ例外的に許可する。
+バリデーションは
 [order_status_service.py](../../backend/app/services/order_status_service.py) の
 `validate_order_status_transition()` が担い、`POST /orders/{id}/confirm`
 （[orders.py](../../backend/app/routers/transaction/orders.py)）はこれを経由して
 `pending_approval → confirmed` の遷移のみを許可するよう変更した
 （それ以前は無条件にステータスを上書きしていた）。
+
+`draft → pending_approval`（承認依頼送信）、`pending_approval → draft`（却下・差し戻し）を
+実行するAPIエンドポイントは Issue #325 で実装した。詳細は
+[approval-workflow.md](approval-workflow.md) を参照。
 
 ## 自動処理（メール/PDF取込）との整合
 
@@ -43,8 +47,3 @@ draft ──────────▶ pending_approval ───────�
 は、既存の `confirmed`/`completed`/`canceled` 保護に加えて `pending_approval` 状態の
 受注も自動処理から保護し、誤って上書き・降格させないようにしている。
 
-## 承認申請API・却下API（本Issueのスコープ外）
-
-`draft → pending_approval`（承認申請）、`pending_approval → draft`（却下・差し戻し）を
-実行するAPIエンドポイント自体は別Issue（Issue #322 の後続）で実装する。本Issueでは
-`orders.status` の値追加と遷移バリデーションの土台のみを提供する。

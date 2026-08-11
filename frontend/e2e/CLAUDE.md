@@ -44,6 +44,6 @@
 
 - CI では自動実行されない。実装者が手元で Supabase / backend / frontend を
   起動してから `npm run test:e2e` を実行することが前提
-- admin ロール限定の操作（工程の確定など）を検証するテストは、
-  `E2E_USER_EMAIL` / `E2E_USER_PASSWORD` で指定するユーザーが admin ロールを
+- president ロール限定の操作（工程の確定、受注承認・却下など）を検証するテストは、
+  `E2E_USER_EMAIL` / `E2E_USER_PASSWORD` で指定するユーザーが president ロールを
   持っている前提で書かれている

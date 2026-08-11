@@ -1,19 +1,36 @@
--- 1. Create Test User
+-- テストユーザーは2名分作成する（承認ワークフロー Issue #325 の動作確認用）。
+-- どちらもパスワードは Test123!（backend/.env.sample の TEST_USER_PASS と同じ
+-- bcryptハッシュを共有しているため、パスワード自体はハッシュ化前の平文で共通）。
+--   test@example.com          … president（承認・却下を行う）
+--   order_handler@example.com … order_handler（承認依頼の送信を行う）
+
+-- 1. Create Test Users
 INSERT INTO auth.users (
-    instance_id, id, aud, role, email, encrypted_password, 
-    email_confirmed_at, raw_app_meta_data, raw_user_meta_data, 
+    instance_id, id, aud, role, email, encrypted_password,
+    email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
     created_at, updated_at, confirmation_token, recovery_token, email_change_token_new, email_change
-) VALUES (
+) VALUES
+(
     '00000000-0000-0000-0000-000000000000',
     '11111111-1111-1111-1111-111111111111',
     'authenticated', 'authenticated',
     'test@example.com',
-    '$2a$10$.Ulu3FXi6elgYxA/bwIjYuYBYi05tEYmknOuBfeIb1VE1D.KNzxhe',  -- ハッシュ化されたパスワード
+    '$2a$10$.Ulu3FXi6elgYxA/bwIjYuYBYi05tEYmknOuBfeIb1VE1D.KNzxhe',  -- ハッシュ化されたパスワード (Test123!)
     now(), '{"provider":"email","providers":["email"]}', '{}',
     now(), now(), '', '', '', ''
-) ON CONFLICT (id) DO NOTHING;
+),
+(
+    '00000000-0000-0000-0000-000000000000',
+    '33333333-3333-3333-3333-333333333333',
+    'authenticated', 'authenticated',
+    'order_handler@example.com',
+    '$2a$10$.Ulu3FXi6elgYxA/bwIjYuYBYi05tEYmknOuBfeIb1VE1D.KNzxhe',  -- ハッシュ化されたパスワード (Test123!)
+    now(), '{"provider":"email","providers":["email"]}', '{}',
+    now(), now(), '', '', '', ''
+)
+ON CONFLICT (id) DO NOTHING;
 
--- 2. Identity
+-- 2. Identities
 INSERT INTO auth.identities (
     id,
     user_id,
@@ -23,14 +40,24 @@ INSERT INTO auth.identities (
     last_sign_in_at,
     created_at,
     updated_at
-) VALUES (
+) VALUES
+(
     '11111111-1111-1111-1111-111111111111', -- pkey用
     '11111111-1111-1111-1111-111111111111', -- auth.usersのID
     format('{"sub":"%s","email":"%s"}', '11111111-1111-1111-1111-111111111111', 'test@example.com')::jsonb,
     'email',
     '11111111-1111-1111-1111-111111111111', -- provider_idとしてuser_idと同じものを指定
     now(), now(), now()
-) ON CONFLICT (provider_id, provider) DO NOTHING;
+),
+(
+    '33333333-3333-3333-3333-333333333333', -- pkey用
+    '33333333-3333-3333-3333-333333333333', -- auth.usersのID
+    format('{"sub":"%s","email":"%s"}', '33333333-3333-3333-3333-333333333333', 'order_handler@example.com')::jsonb,
+    'email',
+    '33333333-3333-3333-3333-333333333333', -- provider_idとしてuser_idと同じものを指定
+    now(), now(), now()
+)
+ON CONFLICT (provider_id, provider) DO NOTHING;
 
 -- 3. Tenants & Members
 INSERT INTO public.tenants (id, name)
@@ -38,5 +65,7 @@ VALUES ('22222222-2222-2222-2222-222222222222', 'Test Tenant')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.organization_members (user_id, tenant_id, role)
-VALUES ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', 'admin')
+VALUES
+    ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', 'president'),
+    ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222', 'order_handler')
 ON CONFLICT (user_id, tenant_id) DO NOTHING;

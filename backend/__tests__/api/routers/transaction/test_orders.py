@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from app.dependencies import (
+    get_current_user_id,
     get_equipment_repo,
     get_order_repo,
     get_product_repo,
@@ -77,8 +78,16 @@ class TestOrderRouter:
         app.dependency_overrides[get_schedule_repo] = lambda: mock_schedule_repo
         app.dependency_overrides[get_settings_repo] = lambda: mock_settings_repo
         app.dependency_overrides[get_supabase_client] = lambda: mock_supabase_client
+        app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
         yield
         app.dependency_overrides = {}
+
+    @staticmethod
+    def _set_role(mock_supabase_client, role: str):
+        """organization_members.role の問い合わせ結果をモックする"""
+        (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data
+        ) = {"role": role}
 
     def test_get_orders(self, mock_repo):
         """GET /: 全件取得のテスト"""
@@ -294,8 +303,9 @@ class TestOrderRouter:
         mock_product_repo,
         mock_equipment_repo,
         mock_schedule_repo,
+        mock_supabase_client,
     ):
-        """POST /{order_id}/confirm: 注文確定のテスト"""
+        """POST /{order_id}/confirm: 注文確定（承認）のテスト"""
         order_id = 1
         order_data = {
             "id": order_id,
@@ -304,6 +314,7 @@ class TestOrderRouter:
             "order_number": "ORD-001",
             "status": "pending_approval",
         }
+        self._set_role(mock_supabase_client, "president")
 
         # Mockの設定
         mock_repo.get_by_id.return_value = order_data
@@ -352,9 +363,10 @@ class TestOrderRouter:
         assert "confirmed_at" in called_data
         assert "confirmed_deadline" in called_data
 
-    def test_confirm_order_not_found(self, headers, mock_repo):
+    def test_confirm_order_not_found(self, headers, mock_repo, mock_supabase_client):
         """POST /{order_id}/confirm: 注文が存在しない場合の404エラーテスト"""
         order_id = 999
+        self._set_role(mock_supabase_client, "president")
         mock_repo.get_by_id.return_value = None
 
         response = client.post(f"/orders/{order_id}/confirm", headers=headers)
@@ -362,7 +374,9 @@ class TestOrderRouter:
         assert response.status_code == 404
         assert response.json()["detail"] == "Order not found"
 
-    def test_confirm_order_invalid_transition_from_draft(self, headers, mock_repo):
+    def test_confirm_order_invalid_transition_from_draft(
+        self, headers, mock_repo, mock_supabase_client
+    ):
         """POST /{order_id}/confirm: draftから直接confirmedへの遷移は拒否される (Issue #324)"""
         order_id = 1
         order_data = {
@@ -372,12 +386,237 @@ class TestOrderRouter:
             "order_number": "ORD-001",
             "status": "draft",
         }
+        self._set_role(mock_supabase_client, "president")
         mock_repo.get_by_id.return_value = order_data
 
         response = client.post(f"/orders/{order_id}/confirm", headers=headers)
 
         assert response.status_code == 400
         mock_repo.update.assert_not_called()
+
+    def test_confirm_order_forbidden_for_non_president(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/confirm: president以外は403"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+
+        response = client.post(f"/orders/{order_id}/confirm", headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_by_id.assert_not_called()
+
+    def test_request_order_approval_success(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/request-approval: draft -> pending_approval への遷移が成功する"""
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "draft",
+        }
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = order_data
+        mock_repo.update.return_value = {**order_data, "status": "pending_approval"}
+
+        response = client.post(f"/orders/{order_id}/request-approval", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "pending_approval"
+        mock_repo.update.assert_called_once_with(
+            order_id, {"status": "pending_approval", "rejection_reason": None}
+        )
+
+    def test_request_order_approval_forbidden_for_non_order_handler(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/request-approval: order_handler以外は403"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+
+        response = client.post(f"/orders/{order_id}/request-approval", headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_by_id.assert_not_called()
+
+    def test_request_order_approval_product_unmatched(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/request-approval: product_id未確定の場合は422"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": None,
+            "status": "draft",
+        }
+
+        response = client.post(f"/orders/{order_id}/request-approval", headers=headers)
+
+        assert response.status_code == 422
+        mock_repo.update.assert_not_called()
+
+    def test_request_order_approval_invalid_transition(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/request-approval: pending_approvalからは再度依頼できない"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 100,
+            "status": "pending_approval",
+        }
+
+        response = client.post(f"/orders/{order_id}/request-approval", headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
+
+    def test_reject_order_success(self, headers, mock_repo, mock_supabase_client):
+        """POST /{order_id}/reject: pending_approval -> draft への差し戻しが成功する"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 100,
+            "status": "pending_approval",
+        }
+        mock_repo.update.return_value = {
+            "id": order_id,
+            "status": "draft",
+            "rejection_reason": "表記揺れを修正してください",
+        }
+
+        response = client.post(
+            f"/orders/{order_id}/reject",
+            json={"reason": "表記揺れを修正してください"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "draft"
+        mock_repo.update.assert_called_once_with(
+            order_id,
+            {"status": "draft", "rejection_reason": "表記揺れを修正してください"},
+        )
+
+    def test_reject_order_reason_optional(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/reject: reasonなしでも却下できる"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 100,
+            "status": "pending_approval",
+        }
+        mock_repo.update.return_value = {"id": order_id, "status": "draft"}
+
+        response = client.post(f"/orders/{order_id}/reject", json={}, headers=headers)
+
+        assert response.status_code == 200
+        mock_repo.update.assert_called_once_with(
+            order_id, {"status": "draft", "rejection_reason": None}
+        )
+
+    def test_reject_order_forbidden_for_non_president(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/reject: president以外は403"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+
+        response = client.post(f"/orders/{order_id}/reject", json={}, headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_by_id.assert_not_called()
+
+    def test_reject_order_invalid_transition(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/reject: draftからは却下できない"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id.return_value = {"id": order_id, "status": "draft"}
+
+        response = client.post(f"/orders/{order_id}/reject", json={}, headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
+
+    def test_approve_orders_bulk_partial_failure(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+    ):
+        """POST /approve-bulk: 1件成功・1件404の混在結果を返す"""
+        self._set_role(mock_supabase_client, "president")
+
+        order_data = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "pending_approval",
+        }
+
+        def get_by_id(order_id):
+            return order_data if order_id == 1 else None
+
+        mock_repo.get_by_id.side_effect = get_by_id
+
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,
+                "unit_time_seconds": 600,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
+        mock_schedule_repo.create.return_value = None
+        mock_repo.update.return_value = {**order_data, "status": "confirmed"}
+
+        response = client.post(
+            "/orders/approve-bulk",
+            json={"order_ids": [1, 2]},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        results = {r["order_id"]: r for r in response.json()["results"]}
+        assert results[1]["status"] == "confirmed"
+        assert results[2]["status"] == "error"
+        assert results[2]["detail"] == "Order not found"
+
+    def test_approve_orders_bulk_forbidden_for_non_president(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /approve-bulk: president以外は403"""
+        self._set_role(mock_supabase_client, "order_handler")
+
+        response = client.post(
+            "/orders/approve-bulk", json={"order_ids": [1]}, headers=headers
+        )
+
+        assert response.status_code == 403
+        mock_repo.get_by_id.assert_not_called()
 
     def test_split_order_not_found(self, headers, mock_repo):
         """POST /{order_id}/split: 注文が存在しない場合の404エラーテスト"""

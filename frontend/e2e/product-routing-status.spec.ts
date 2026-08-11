@@ -4,8 +4,8 @@ import { test, expect, type Page, type Locator } from "@playwright/test"
  * 前提:
  * - Supabase (supabase start), backend (uvicorn app.main:app --port 8000),
  *   frontend (npm run dev) がすべてローカルで起動していること
- * - E2E_USER_EMAIL / E2E_USER_PASSWORD で指定するユーザーが admin ロールを持つこと
- *   (工程の確定操作は admin のみ可能なため)
+ * - E2E_USER_EMAIL / E2E_USER_PASSWORD で指定するユーザーが president ロールを持つこと
+ *   (工程の確定操作は president のみ可能なため)
  */
 const email = process.env.E2E_USER_EMAIL ?? "test@example.com"
 const password = process.env.E2E_USER_PASSWORD ?? "Test123!"

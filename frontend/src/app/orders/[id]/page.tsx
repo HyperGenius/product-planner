@@ -19,14 +19,18 @@ import { Badge } from "@/components/ui/badge"
 import { SimulationResult } from "@/components/simulation-result"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
+import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import {
   useOrder,
   useOrderAttachments,
   useSimulateOrderById,
   useConfirmOrder,
+  useRequestApproval,
+  useRejectOrder,
   useDeleteOrder,
 } from "@/hooks/use-orders"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import {
@@ -50,9 +54,13 @@ export default function OrderDetailPage() {
   const { data: products } = useProducts()
   const { data: customers } = useCustomers()
   const { data: attachments } = useOrderAttachments(orderId)
+  const { data: currentMember } = useCurrentMember()
+  const currentUserRole = currentMember?.role ?? null
 
   const simulateMutation = useSimulateOrderById()
   const confirmMutation = useConfirmOrder()
+  const requestApprovalMutation = useRequestApproval()
+  const rejectMutation = useRejectOrder()
   const deleteMutation = useDeleteOrder()
 
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
@@ -60,6 +68,7 @@ export default function OrderDetailPage() {
   const [editDialogGeneration, setEditDialogGeneration] = useState(0)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
+  const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false)
 
   const handleOpenEditDialog = () => {
     setIsEditDialogOpen(true)
@@ -106,13 +115,33 @@ export default function OrderDetailPage() {
     }
   }
 
-  const handleConfirm = async () => {
+  const handleRequestApproval = async () => {
     try {
-      await confirmMutation.mutateAsync(orderId)
-      toast.success("注文を確定しました")
+      await requestApprovalMutation.mutateAsync(orderId)
+      toast.success("承認依頼を送信しました")
       router.push("/orders")
     } catch {
-      toast.error("注文の確定に失敗しました")
+      toast.error("承認依頼の送信に失敗しました")
+    }
+  }
+
+  const handleApprove = async () => {
+    try {
+      await confirmMutation.mutateAsync(orderId)
+      toast.success("注文を承認しました")
+      router.push("/orders")
+    } catch {
+      toast.error("注文の承認に失敗しました")
+    }
+  }
+
+  const handleReject = async (reason: string) => {
+    try {
+      await rejectMutation.mutateAsync({ id: orderId, reason: reason || undefined })
+      toast.success("注文を却下しました")
+      setIsRejectDialogOpen(false)
+    } catch {
+      toast.error("却下に失敗しました")
     }
   }
 
@@ -149,6 +178,7 @@ export default function OrderDetailPage() {
   }
 
   const isDraft = order.status === "draft"
+  const isPendingApproval = order.status === "pending_approval"
   const canDelete = order.status === "draft" || order.status === "canceled"
   // 自動起票で製品を識別できなかった明細（product_id === null）は、
   // has_no_routings も併せて true になるため、工程未登録の警告と二重表示
@@ -333,16 +363,35 @@ export default function OrderDetailPage() {
                 )}
               </div>
             )}
-            {isDraft && order.is_scheduled && (
+            {isDraft && order.is_scheduled && currentUserRole === "order_handler" && (
               <Button
-                onClick={handleConfirm}
-                disabled={confirmMutation.isPending}
+                onClick={handleRequestApproval}
+                disabled={requestApprovalMutation.isPending}
                 variant="default"
                 className="flex-1"
               >
                 <Check className="mr-2 h-4 w-4" />
-                {confirmMutation.isPending ? "処理中..." : "注文確定"}
+                {requestApprovalMutation.isPending ? "処理中..." : "承認依頼を送信"}
               </Button>
+            )}
+            {isPendingApproval && currentUserRole === "president" && (
+              <>
+                <Button
+                  onClick={handleApprove}
+                  disabled={confirmMutation.isPending}
+                  variant="default"
+                  className="flex-1"
+                >
+                  <Check className="mr-2 h-4 w-4" />
+                  {confirmMutation.isPending ? "処理中..." : "承認"}
+                </Button>
+                <Button
+                  onClick={() => setIsRejectDialogOpen(true)}
+                  variant="outline"
+                >
+                  却下
+                </Button>
+              </>
             )}
             {isDraft && (
               <Button
@@ -403,6 +452,15 @@ export default function OrderDetailPage() {
         open={isSplitDialogOpen}
         onOpenChange={setIsSplitDialogOpen}
         onSplit={() => router.push("/orders")}
+      />
+
+      <RejectOrderDialog
+        order={isRejectDialogOpen ? order : null}
+        products={products}
+        customers={customers}
+        isPending={rejectMutation.isPending}
+        onConfirm={handleReject}
+        onOpenChange={(open) => { if (!open) setIsRejectDialogOpen(false) }}
       />
     </div>
   )

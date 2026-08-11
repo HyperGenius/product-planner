@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
-import { createClient } from "@/utils/supabase/client"
 import type { TenantMember, MemberCreate, MemberUpdate } from "@/types/member"
 
 const MEMBERS_QUERY_KEY = ["tenant-members"]
@@ -54,18 +53,16 @@ export function useUpdateTenantMember() {
 }
 
 /**
- * 現在ログイン中のユーザーのテナントメンバー情報を取得するフック
+ * 現在ログイン中のユーザー自身のテナントメンバー情報（自分のロール等）を取得するフック
+ *
+ * `GET /tenant/members`（一覧）は president / platform_admin 限定のため、
+ * それ以外のロールのユーザーが自分のロールを知りたい場合（画面の表示制御等）は
+ * ロール制限のない `GET /tenant/members/me` を使う。
  */
 export function useCurrentMember() {
-  const { data: members } = useTenantMembers()
-  return useQuery({
+  return useQuery<TenantMember | null>({
     queryKey: ["current-member"],
-    queryFn: async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      return user ?? null
-    },
-    select: (user) => members?.find((m) => m.user_id === user?.id) ?? null,
+    queryFn: () => apiClient<TenantMember>("/tenant/members/me"),
   })
 }
 

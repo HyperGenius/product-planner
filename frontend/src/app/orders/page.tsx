@@ -18,6 +18,7 @@ import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-con
 import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
+import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
 import { OrderTableRow } from "@/components/orders/order-table-row"
@@ -47,35 +48,51 @@ export default function OrdersPage() {
     setDeleteTargetOrder,
     expandedOrderId,
     expandedSimResult,
+    currentUserRole,
+    isPresident,
     confirmOrder,
+    requestApproval,
+    rejectOrder,
     deleteOrder,
     simulatingOrderId,
     simulationErrorOrderId,
     setParam,
-    handleConfirmFromRow,
+    handleApproveFromRow,
+    handleRequestApprovalFromRow,
+    handleRejectRequest,
+    handleConfirmReject,
     handleSimulate,
     handleOpenEditDialog,
     handleConfirmDelete,
     closeSimResult,
+    rejectTargetOrder,
+    setRejectTargetOrder,
     selectedOrderIds,
     selectedScheduledCount,
+    selectedPendingApprovalCount,
     draftPageOrders,
+    pendingApprovalPageOrders,
     allDraftOnPageSelected,
     someDraftOnPageSelected,
+    allPendingApprovalOnPageSelected,
+    somePendingApprovalOnPageSelected,
     isBulkSimulating,
-    isBulkConfirming,
+    isBulkRequestingApproval,
+    isBulkApproving,
     isBulkSimulateConfirmOpen,
     handleToggleSelect,
     handleToggleSelectAll,
+    handleToggleSelectAllPendingApproval,
     handleClearSelection,
     handleBulkSimulateRequest,
     handleBulkSimulateConfirm,
     handleBulkSimulateCancel,
-    handleBulkConfirm,
+    handleBulkRequestApproval,
+    handleBulkApprove,
     bulkSimSummary,
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
-    handleBulkConfirmFromSummary,
+    handleBulkRequestApprovalFromSummary,
   } = useOrdersPage()
 
   const expandedOrder = orders?.find((o) => o.id === expandedOrderId) ?? null
@@ -121,18 +138,37 @@ export default function OrdersPage() {
                 <TableRow>
                   <TableHead className="w-10">
                     <div className="flex items-center justify-center">
-                      <Checkbox
-                        checked={
-                          allDraftOnPageSelected
-                            ? true
-                            : someDraftOnPageSelected
-                            ? "indeterminate"
-                            : false
-                        }
-                        onCheckedChange={handleToggleSelectAll}
-                        disabled={draftPageOrders.length === 0 || isBulkSimulating || isBulkConfirming}
-                        aria-label="全選択"
-                      />
+                      {statusFilter === "pending_approval" ? (
+                        <Checkbox
+                          checked={
+                            allPendingApprovalOnPageSelected
+                              ? true
+                              : somePendingApprovalOnPageSelected
+                              ? "indeterminate"
+                              : false
+                          }
+                          onCheckedChange={handleToggleSelectAllPendingApproval}
+                          disabled={
+                            !isPresident ||
+                            pendingApprovalPageOrders.length === 0 ||
+                            isBulkApproving
+                          }
+                          aria-label="全選択"
+                        />
+                      ) : (
+                        <Checkbox
+                          checked={
+                            allDraftOnPageSelected
+                              ? true
+                              : someDraftOnPageSelected
+                              ? "indeterminate"
+                              : false
+                          }
+                          onCheckedChange={handleToggleSelectAll}
+                          disabled={draftPageOrders.length === 0 || isBulkSimulating || isBulkRequestingApproval}
+                          aria-label="全選択"
+                        />
+                      )}
                     </div>
                   </TableHead>
                   <TableHead>注文番号</TableHead>
@@ -154,13 +190,17 @@ export default function OrdersPage() {
                     customers={customers}
                     isSimulating={simulatingOrderId === order.id}
                     hasSimulationError={simulationErrorOrderId === order.id}
-                    confirmIsPending={confirmOrder.isPending}
+                    requestApprovalIsPending={requestApproval.isPending}
+                    approveIsPending={confirmOrder.isPending}
+                    currentUserRole={currentUserRole}
                     isSelected={selectedOrderIds.includes(order.id)}
                     selectionIndex={selectedOrderIds.includes(order.id) ? selectedOrderIds.indexOf(order.id) + 1 : undefined}
-                    isBulkOperationInProgress={isBulkSimulating || isBulkConfirming}
+                    isBulkOperationInProgress={isBulkSimulating || isBulkRequestingApproval || isBulkApproving}
                     hasBulkSimFailed={bulkSimFailedIds.has(order.id)}
                     onSimulate={handleSimulate}
-                    onConfirm={handleConfirmFromRow}
+                    onRequestApproval={handleRequestApprovalFromRow}
+                    onApprove={handleApproveFromRow}
+                    onReject={handleRejectRequest}
                     onEdit={handleOpenEditDialog}
                     onDelete={setDeleteTargetOrder}
                     onToggleSelect={handleToggleSelect}
@@ -209,22 +249,36 @@ export default function OrdersPage() {
           onOpenChange={(open) => { if (!open) setDeleteTargetOrder(null) }}
         />
 
+        <RejectOrderDialog
+          order={rejectTargetOrder}
+          products={products}
+          customers={customers}
+          isPending={rejectOrder.isPending}
+          onConfirm={handleConfirmReject}
+          onOpenChange={(open) => { if (!open) setRejectTargetOrder(null) }}
+        />
+
         <SimulationSideSheet
           open={expandedSimResult !== null}
           order={expandedOrder}
           result={expandedSimResult}
-          confirmIsPending={confirmOrder.isPending}
+          requestApprovalIsPending={requestApproval.isPending}
+          currentUserRole={currentUserRole}
           onClose={closeSimResult}
-          onConfirm={handleConfirmFromRow}
+          onRequestApproval={handleRequestApprovalFromRow}
         />
 
         <BulkActionBar
           selectedCount={selectedOrderIds.length}
           selectedScheduledCount={selectedScheduledCount}
+          selectedPendingApprovalCount={selectedPendingApprovalCount}
+          currentUserRole={currentUserRole}
           isBulkSimulating={isBulkSimulating}
-          isBulkConfirming={isBulkConfirming}
+          isBulkRequestingApproval={isBulkRequestingApproval}
+          isBulkApproving={isBulkApproving}
           onBulkSimulate={handleBulkSimulateRequest}
-          onBulkConfirm={handleBulkConfirm}
+          onBulkRequestApproval={handleBulkRequestApproval}
+          onBulkApprove={handleBulkApprove}
           onClearSelection={handleClearSelection}
         />
 
@@ -241,7 +295,7 @@ export default function OrdersPage() {
         <BulkSimulateSummaryDialog
           results={bulkSimSummary}
           onClose={handleCloseBulkSimSummary}
-          onBulkConfirm={handleBulkConfirmFromSummary}
+          onBulkRequestApproval={handleBulkRequestApprovalFromSummary}
         />
       </div>
     </TooltipProvider>

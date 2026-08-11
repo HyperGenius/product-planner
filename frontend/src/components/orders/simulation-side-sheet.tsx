@@ -15,18 +15,20 @@ interface SimulationSideSheetProps {
   open: boolean
   order: Order | null
   result: OrderSimulateResponse | null
-  confirmIsPending: boolean
+  requestApprovalIsPending: boolean
+  currentUserRole: string | null
   onClose: () => void
-  onConfirm: (orderId: number, orderNo: string) => void
+  onRequestApproval: (orderId: number, orderNo: string) => void
 }
 
 export function SimulationSideSheet({
   open,
   order,
   result,
-  confirmIsPending,
+  requestApprovalIsPending,
+  currentUserRole,
   onClose,
-  onConfirm,
+  onRequestApproval,
 }: SimulationSideSheetProps) {
   return (
     <Sheet open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose() }}>
@@ -47,14 +49,16 @@ export function SimulationSideSheet({
           <Button variant="outline" onClick={onClose}>
             閉じる
           </Button>
-          <Button
-            disabled={confirmIsPending || !order}
-            onClick={() => {
-              if (order) onConfirm(order.id, order.order_no ?? '')
-            }}
-          >
-            この内容で確定
-          </Button>
+          {currentUserRole === "order_handler" && (
+            <Button
+              disabled={requestApprovalIsPending || !order}
+              onClick={() => {
+                if (order) onRequestApproval(order.id, order.order_no ?? '')
+              }}
+            >
+              承認依頼を送信
+            </Button>
+          )}
         </SheetFooter>
       </SheetContent>
     </Sheet>
