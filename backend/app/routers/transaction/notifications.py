@@ -82,6 +82,8 @@ def _collect_parse_log_ids(
             continue
         if row["notif_type"] == "non_order_email":
             link_urls[row["id"]] = f"https://mail.google.com/mail/u/0/#all/{source_id}"
+        elif row["notif_type"] == "approval_requested":
+            link_urls[row["id"]] = f"/orders/{source_id}"
         elif (
             row["source_table"] == "order_parse_log"
             and row["notif_type"] in _PARSE_LOG_NOTIF_TYPES

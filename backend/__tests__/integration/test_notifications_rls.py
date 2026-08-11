@@ -199,8 +199,10 @@ class TestNotificationsRls:
         self, real_supabase_client, notif_tenants
     ):
         """
-        notifications はSELECTポリシーのみでINSERT/UPDATE/DELETEにポリシーが
-        無い（デフォルト拒否）。以前の FOR ALL ポリシーからの回帰確認。
+        notifications はSELECTと、notif_type='approval_requested'限定のINSERT
+        （Issue #327）以外にポリシーが無い（デフォルト拒否）。
+        それ以外のnotif_type（本テストのnon_order_email等、cron専用）は
+        ユーザーJWT経由で偽装挿入できないことの回帰確認。
         """
         with pytest.raises(APIError):
             real_supabase_client.table("notifications").insert(
@@ -209,6 +211,51 @@ class TestNotificationsRls:
                     "notif_type": "non_order_email",
                     "source_table": "gmail_message",
                     "source_id": "spy-insert-attempt",
+                }
+            ).execute()
+
+    def test_insert_approval_requested_via_user_jwt_succeeds_for_own_tenant(
+        self, real_supabase_client, admin_db, notif_tenants
+    ):
+        """
+        Issue #327: 承認依頼通知はユーザーJWT経由での書き込みを新設したパスのため、
+        notif_type='approval_requested' かつ source_table='orders' であれば
+        自テナントに対しては書き込める。
+        """
+        order = (
+            admin_db.table("orders")
+            .insert({"tenant_id": notif_tenants["own_id"], "quantity": 1})
+            .execute()
+        )
+        order_id = cast(list[dict[str, Any]], order.data)[0]["id"]
+
+        result = (
+            real_supabase_client.table("notifications")
+            .insert(
+                {
+                    "tenant_id": notif_tenants["own_id"],
+                    "notif_type": "approval_requested",
+                    "source_table": "orders",
+                    "source_id": str(order_id),
+                }
+            )
+            .execute()
+        )
+        assert cast(list[dict[str, Any]], result.data)[0]["notif_type"] == (
+            "approval_requested"
+        )
+
+    def test_insert_approval_requested_via_user_jwt_rejected_for_other_tenant(
+        self, real_supabase_client, notif_tenants
+    ):
+        """所属していないテナント宛の承認依頼通知はis_tenant_memberにより拒否される"""
+        with pytest.raises(APIError):
+            real_supabase_client.table("notifications").insert(
+                {
+                    "tenant_id": notif_tenants["other_id"],
+                    "notif_type": "approval_requested",
+                    "source_table": "orders",
+                    "source_id": "spy-other-tenant-order",
                 }
             ).execute()
 

@@ -58,6 +58,41 @@ CREATE TABLE notifications (
 | `failed_image` | 同上 | `order_attachments` | `attachment_id` |
 | `non_order_email` | `gmail_service._process_message` | `gmail_message` | Gmail `msg_id` |
 | `customer_draft_created` | `resolve_or_create_customer` 呼び出し元（`gmail_service._process_message`）| `gmail_message` | Gmail `msg_id` |
+| `approval_requested` | `orders.request_order_approval`（`POST /orders/{id}/request-approval`）| `orders` | `order_id` |
+
+### `approval_requested`（承認依頼のアプリ内通知, Issue #327）
+
+社長（president）向けに、[承認ワークフロー](approval-workflow.md)（Issue #325）の承認依頼送信
+（`draft → pending_approval`）を通知する。メール確認依頼で発生していた「返信が来ない」問題の
+代替として、アプリ内で完結させる。
+
+- 書き込み元は `orders.py` の `request_order_approval`。既存の `create_notification()` を
+  ユーザーJWTクライアント（`client`、`get_supabase_client`）で呼び出す。監査ログ記録
+  （`_log_approval_action_safely`）と同様、通知の記録失敗は承認依頼送信自体を失敗させない
+  ベストエフォート（`_notify_approval_requested_safely`）
+- `detail` には `{"order_no": ...}` のみを保存する
+- `link_url` は `_resolve_link_urls()` で `/orders/{order_id}`（アプリ内相対パス）に解決する
+  （他のnotif_typeのような署名付きURL生成や外部リンク組み立ては不要）
+
+#### 書き込み経路の追加（RLS）
+
+これまで `notifications` への書き込みは cron/Service Role Key 経由（admin_client, RLSバイパス）に
+限定され、ユーザーJWTからの書き込みは default deny だった。承認依頼はユーザー操作起点のため、
+[order_approval_log](approval-workflow.md) と同じ考え方で、ユーザーJWT経由の書き込みを
+`notif_type = 'approval_requested' AND source_table = 'orders'` に限定した INSERT ポリシーを
+新設した（`supabase/migrations/20260812000000_add_approval_requested_notif_type.sql`）。
+他のnotif_type（PDF解析ログ等、cron専用）はこれまで通りユーザーJWT経由での偽装挿入を防ぐ。
+
+#### フロントエンド
+
+- `NotificationType` / `NOTIF_TYPE_LABELS`（`notification-bell.tsx`）に `approval_requested`（「承認依頼」）
+  を追加。`formatDetail()` で `detail.order_no` から「注文「ORD-xxx」の承認依頼」を表示する
+- ホームダッシュボード（`frontend/src/app/page.tsx`）: president がログインした際、
+  `pending_approval` 件数が1件以上あればページ上部に目立つバナーを表示し、
+  クリックで `/orders?status=pending_approval`（[承認ワークフロー](approval-workflow.md)の
+  一括承認UI）へ遷移する。メール確認依頼と同じ「後回しにされる」問題の再発を防ぐため、
+  通知ベルの未読バッジだけでなく能動的に表示する設計とした
+  （バナーは `orders` の現在ステータス集計ベースで、通知イベントの既読/未読とは独立して表示する）
 
 ---
 
@@ -151,6 +186,9 @@ RLSの `is_tenant_member(tenant_id)` は所属する全テナントの行を許�
 - [x] 通知ベル＋未読バッジがUIに表示される（ブラウザで実際にログインし目視確認済み）
 - [x] 通知一覧から各詳細（PDF/添付ファイル/Gmailメール）へ遷移できる（`link_url` 経由）
 - [x] 一覧表示（オープン時）で既読化される
+- [x] 承認依頼送信時に president へアプリ内通知（`approval_requested`）が届く（Issue #327）
+- [x] 社長ダッシュボードで承認待ち件数・一覧が確認できる（Issue #327、ホーム画面の目立つバナー）
+- [x] 一覧から一括承認ができる（Issue #325 で実装済みの `/orders?status=pending_approval` 経由）
 
 ---
 
@@ -197,6 +235,19 @@ supabase start
 cd backend && pytest __tests__/integration/test_notifications_rls.py -v --run-integration
 ```
 
+### Issue #327 で追加したテスト
+
+- `backend/__tests__/api/routers/transaction/test_orders.py::test_request_order_approval_notifies_approval_requested`
+  — `request-approval` 成功時に `notifications` へ `approval_requested` がinsertされること（モック）
+- `backend/__tests__/api/routers/transaction/test_notifications.py` — `approval_requested` の
+  `link_url` が `/orders/{order_id}` に解決されること
+- `backend/__tests__/integration/test_notifications_rls.py`
+  - `test_insert_approval_requested_via_user_jwt_succeeds_for_own_tenant` — ユーザーJWT経由で
+    自テナントの `approval_requested` はINSERTできる
+  - `test_insert_approval_requested_via_user_jwt_rejected_for_other_tenant` — 他テナント宛は拒否される
+  - 既存 `test_direct_insert_via_user_jwt_is_rejected`（`non_order_email`）で、新設ポリシーが
+    `approval_requested` 以外には影響しないことを回帰確認
+
 ## 関連
 
 - [pdf-order-parsing.md](pdf-order-parsing.md): PDF自動パース処理（Issue #249, #252、通知発生元）
@@ -205,5 +256,8 @@ cd backend && pytest __tests__/integration/test_notifications_rls.py -v --run-in
   の定義（`failed_encrypted` / `failed_image` の発生元、対象外メール検知時の挙動変更）
 - [customer-draft-auto-create.md](customer-draft-auto-create.md): `customer_draft_created`
   の追加（Issue #263）
+- [approval-workflow.md](approval-workflow.md): 承認ワークフロー本体（Issue #325）。
+  `approval_requested` 通知（Issue #327）はこのワークフローの `request-approval` に連動する
 - Issue #249, #252: `order_parse_log` への記録処理（本Issueの通知発生元）
 - Issue #256: integrationテスト追加（RLS/IDOR回帰）
+- Issue #327: 承認依頼のアプリ内通知（`approval_requested`）

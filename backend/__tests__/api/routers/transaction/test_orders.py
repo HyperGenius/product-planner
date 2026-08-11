@@ -924,6 +924,39 @@ class TestOrderRouter:
             headers["x-tenant-id"], order_id, "request_approval", "test-user-id", None
         )
 
+    # --- アプリ内通知 (Issue #327) ---
+
+    def test_request_order_approval_notifies_approval_requested(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/request-approval: notificationsにapproval_requestedが書き込まれる"""
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "draft",
+        }
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = order_data
+        mock_repo.update.return_value = {**order_data, "status": "pending_approval"}
+
+        response = client.post(f"/orders/{order_id}/request-approval", headers=headers)
+
+        assert response.status_code == 200
+        insert_calls = [
+            call
+            for call in mock_supabase_client.table.return_value.insert.call_args_list
+            if call.args and call.args[0].get("notif_type") == "approval_requested"
+        ]
+        assert len(insert_calls) == 1
+        inserted = insert_calls[0].args[0]
+        assert inserted["tenant_id"] == headers["x-tenant-id"]
+        assert inserted["source_table"] == "orders"
+        assert inserted["source_id"] == str(order_id)
+        assert inserted["detail"] == {"order_no": "ORD-001"}
+
     def test_confirm_order_logs_action(
         self,
         headers,
