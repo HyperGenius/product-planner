@@ -76,7 +76,7 @@ ISO要件である承認プロセスの証跡を残す。
 ### 記録タイミング
 
 `backend/app/routers/transaction/orders.py` の各エンドポイントで、状態遷移の更新が成功した直後に
-`approval_log_repo.log_action(tenant_id, order_id, action, user_id, reason)` を呼び出す。
+`_log_approval_action_safely()`（内部で `approval_log_repo.log_action(...)` を呼ぶ）を実行する。
 
 | エンドポイント | action | reason |
 |---|---|---|
@@ -85,11 +85,27 @@ ISO要件である承認プロセスの証跡を残す。
 | `POST /orders/approve-bulk` | `approve`（成功した注文ごと） | なし |
 | `POST /orders/{id}/reject` | `reject` | 却下理由（任意） |
 
+監査ログの記録はベストエフォートとする（`_log_approval_action_safely`
+が例外を捕捉してログ出力のみ行う）。状態遷移自体は既にDB更新が成功しているため、
+監査ログ書き込みの失敗（一時的なDB不調等）で業務上成功した操作をエラー扱いにしない。
+特に `approve-bulk` は複数注文をループ処理するため、1件のログ記録失敗で他の注文の
+確定結果まで失われて500になることを避ける。
+
+`OrderApprovalLogRepository.log_action()` はINSERT時に `returning=ReturnMethod.minimal`
+を指定する。デフォルトの `returning=representation`（`BaseRepository.create()` の挙動）のままだと、
+PostgRESTがINSERT結果を返す際にSELECT用RLSポリシー（`iso_officer`/`president`/`platform_admin`限定）
+を評価してしまい、閲覧権限を持たない `order_handler` からの書き込みそのものが失敗する
+（`42501 new row violates row-level security policy` で500になる不具合があった）。
+
 ### 閲覧・出力API
 
 - `GET /orders/approval-logs`（`iso_officer` / `president` / `platform_admin` のみ）: 監査ログ一覧を
   新しい順に返す。`order_number` と操作者の `actor_full_name` / `actor_email` を
-  `profiles` テーブルから補完して返す（`_fetch_enriched_approval_logs`）。
+  `orders` / `profiles` テーブルから補完して返す（`_fetch_enriched_approval_logs`）。
+  補完クエリは呼び出し元ユーザー自身のJWTクライアント（`get_supabase_client`）で行い、
+  Service Role Key（`get_supabase_admin_client`）は使わない。`orders`・`profiles` はいずれも
+  「同一テナントのメンバーなら閲覧可」というRLSを既に持つため、`_require_any_role` で
+  閲覧許可ロールであることを検証済みのユーザーであれば、RLSをバイパスせず素通しで参照できる。
 - `GET /orders/approval-logs/export`（同ロール限定）: 同内容をCSV（BOM付きUTF-8、Excel向け）で
   ダウンロードする。
 - ルーティング順序の都合上、`/orders/{order_id}` より前に定義する必要がある
@@ -97,11 +113,14 @@ ISO要件である承認プロセスの証跡を残す。
 
 ### Frontend
 
-- `frontend/src/hooks/use-orders.ts`: `useApprovalLogs()`（一覧取得）、`downloadApprovalLogsCsv()`
-  （CSVダウンロード、JSON以外を返すため `apiClient` を使わず直接 `fetch`）
+- `frontend/src/hooks/use-orders.ts`: `useApprovalLogs({ enabled })`（一覧取得。閲覧不可ロールで
+  無駄な403リクエストを飛ばさないよう、呼び出し側がロール確定後にのみ `enabled: true` を渡す設計）、
+  `downloadApprovalLogsCsv()`（CSVダウンロード、JSON以外を返すため `apiClient` を使わず直接 `fetch`）
 - `frontend/src/app/orders/approval-logs/page.tsx`: 監査ログ一覧画面。
   `useCurrentMember()` の `role` が `iso_officer` / `president` / `platform_admin` 以外の場合は
   アクセス不可メッセージを表示し、編集・承認操作用のUIは一切持たない（閲覧・出力のみ）。
+  `useApprovalLogs({ enabled: !isMemberLoading && canView })` として、ロール確定前・閲覧不可ロールでは
+  一覧取得APIを呼び出さない。
 - サイドバー（`frontend/src/components/layout/app-sidebar.tsx`）に「承認監査ログ」リンクを追加
   （ページ側でロールチェックするため、リンク自体は全ロールに表示）。
 

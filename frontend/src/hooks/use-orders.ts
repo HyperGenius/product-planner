@@ -157,11 +157,16 @@ export function useApproveOrdersBulk() {
 /**
  * 承認ワークフロー（承認依頼送信・承認・却下）の監査ログを取得するフック
  * （iso_officer / president / platform_admin のみ閲覧可）
+ *
+ * 呼び出し側は、閲覧権限を持つロールであることが確定してから
+ * `enabled: true` を渡すこと。閲覧不可ロール（order_handler等）で
+ * 常時リクエストしてしまうと、成功しない403アクセスがAPIに飛び続けてしまう。
  */
-export function useApprovalLogs() {
+export function useApprovalLogs(options?: { enabled?: boolean }) {
   return useQuery<OrderApprovalLog[]>({
     queryKey: ["orders", "approval-logs"],
     queryFn: () => apiClient<OrderApprovalLog[]>("/orders/approval-logs"),
+    enabled: options?.enabled ?? true,
   })
 }
 

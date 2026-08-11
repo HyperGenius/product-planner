@@ -151,14 +151,17 @@ def _fetch_enriched_approval_logs(
     tenant_id: str,
     user_id: str,
     client: Client,
-    admin_client: Client,
     approval_log_repo: OrderApprovalLogRepository,
 ) -> list[dict[str, Any]]:
     _require_any_role(
         tenant_id, user_id, client, _APPROVAL_LOG_VIEWER_ROLES, "承認履歴の閲覧"
     )
 
-    # RLS (is_tenant_member + ロール制約) を通すためユーザーJWTクライアントで取得する。
+    # 監査ログ本体・注文番号・操作者プロフィールのいずれも、閲覧者自身のユーザーJWT
+    # クライアントで取得する（Service Role Keyは使わない）。orders / profiles は
+    # 「同一テナントのメンバーなら閲覧可」というRLSを既に持つため、
+    # _require_any_role でテナントメンバー かつ 閲覧許可ロールであることを検証済みの
+    # このユーザーであれば、RLSをバイパスせずに参照できる。
     logs = approval_log_repo.get_all()
     if not logs:
         return []
@@ -167,10 +170,7 @@ def _fetch_enriched_approval_logs(
     actor_ids = list({log["actor_user_id"] for log in logs})
 
     orders_res = (
-        admin_client.table("orders")
-        .select("id, order_number")
-        .in_("id", order_ids)
-        .execute()
+        client.table("orders").select("id, order_number").in_("id", order_ids).execute()
     )
     order_number_map = {
         o["id"]: o["order_number"]
@@ -178,7 +178,7 @@ def _fetch_enriched_approval_logs(
     }
 
     profiles_res = (
-        admin_client.table("profiles")
+        client.table("profiles")
         .select("id, full_name, email")
         .in_("id", actor_ids)
         .execute()
@@ -211,7 +211,6 @@ def list_approval_logs(
     tenant_id: str = Depends(get_current_tenant_id),
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
-    admin_client: Client = Depends(get_supabase_admin_client),
     approval_log_repo: OrderApprovalLogRepository = Depends(
         get_order_approval_log_repo
     ),
@@ -220,9 +219,7 @@ def list_approval_logs(
     承認ワークフロー（承認依頼送信・承認・却下）の監査ログを一覧取得する
     （iso_officer / president / platform_admin のみ閲覧可）。
     """
-    return _fetch_enriched_approval_logs(
-        tenant_id, user_id, client, admin_client, approval_log_repo
-    )
+    return _fetch_enriched_approval_logs(tenant_id, user_id, client, approval_log_repo)
 
 
 @orders_router.get("/approval-logs/export")
@@ -230,7 +227,6 @@ def export_approval_logs_csv(
     tenant_id: str = Depends(get_current_tenant_id),
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
-    admin_client: Client = Depends(get_supabase_admin_client),
     approval_log_repo: OrderApprovalLogRepository = Depends(
         get_order_approval_log_repo
     ),
@@ -238,9 +234,7 @@ def export_approval_logs_csv(
     """
     承認ワークフローの監査ログをCSV形式で出力する（iso_officer / president / platform_admin のみ）。
     """
-    logs = _fetch_enriched_approval_logs(
-        tenant_id, user_id, client, admin_client, approval_log_repo
-    )
+    logs = _fetch_enriched_approval_logs(tenant_id, user_id, client, approval_log_repo)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -582,6 +576,29 @@ def _require_role(
         )
 
 
+def _log_approval_action_safely(
+    approval_log_repo: OrderApprovalLogRepository,
+    tenant_id: str,
+    order_id: int,
+    action: str,
+    user_id: str,
+    reason: str | None = None,
+) -> None:
+    """
+    承認監査ログの記録はベストエフォートとする。
+    状態遷移（承認依頼送信・承認・却下）自体は既にDB更新が成功しており、
+    監査ログの記録に失敗したからといって業務上成功した操作をエラー扱いにはしない
+    （特に `approve-bulk` では、1件のログ記録失敗が他の注文の確定結果を
+    巻き込んで500にしてしまうことを防ぐ）。
+    """
+    try:
+        approval_log_repo.log_action(tenant_id, order_id, action, user_id, reason)
+    except Exception:
+        logger.exception(
+            f"Failed to record approval log: order_id={order_id}, action={action}"
+        )
+
+
 def _require_any_role(
     tenant_id: str,
     user_id: str,
@@ -681,7 +698,9 @@ def request_order_approval(
     result = order_repo.update(
         order_id, {"status": "pending_approval", "rejection_reason": None}
     )
-    approval_log_repo.log_action(tenant_id, order_id, "request_approval", user_id)
+    _log_approval_action_safely(
+        approval_log_repo, tenant_id, order_id, "request_approval", user_id
+    )
     return _map_order_response(result)
 
 
@@ -709,7 +728,9 @@ def confirm_order(
         result = _confirm_single_order(
             order_id, tenant_id, order_repo, product_repo, schedule_repo, settings_repo
         )
-        approval_log_repo.log_action(tenant_id, order_id, "approve", user_id)
+        _log_approval_action_safely(
+            approval_log_repo, tenant_id, order_id, "approve", user_id
+        )
         return result
     except RoutingUnconfirmedError as e:
         raise HTTPException(
@@ -754,7 +775,9 @@ def approve_orders_bulk(
                 schedule_repo,
                 settings_repo,
             )
-            approval_log_repo.log_action(tenant_id, order_id, "approve", user_id)
+            _log_approval_action_safely(
+                approval_log_repo, tenant_id, order_id, "approve", user_id
+            )
             results.append(
                 {
                     "order_id": order_id,
@@ -813,7 +836,7 @@ def reject_order(
     result = order_repo.update(
         order_id, {"status": "draft", "rejection_reason": reject_data.reason}
     )
-    approval_log_repo.log_action(
-        tenant_id, order_id, "reject", user_id, reject_data.reason
+    _log_approval_action_safely(
+        approval_log_repo, tenant_id, order_id, "reject", user_id, reject_data.reason
     )
     return _map_order_response(result)

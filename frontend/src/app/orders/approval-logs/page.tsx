@@ -50,7 +50,9 @@ export default function ApprovalLogsPage() {
     currentUserRole === "president" ||
     currentUserRole === "platform_admin"
 
-  const { data: logs, isLoading, isError } = useApprovalLogs()
+  const { data: logs, isLoading, isError } = useApprovalLogs({
+    enabled: !isMemberLoading && canView,
+  })
   const [isExporting, setIsExporting] = useState(false)
 
   const handleExport = async () => {

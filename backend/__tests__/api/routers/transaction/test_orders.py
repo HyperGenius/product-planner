@@ -862,7 +862,7 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         mock_approval_log_repo.log_action.assert_called_once_with(
-            headers["x-tenant-id"], order_id, "request_approval", "test-user-id"
+            headers["x-tenant-id"], order_id, "request_approval", "test-user-id", None
         )
 
     def test_confirm_order_logs_action(
@@ -908,7 +908,7 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         mock_approval_log_repo.log_action.assert_called_once_with(
-            headers["x-tenant-id"], order_id, "approve", "test-user-id"
+            headers["x-tenant-id"], order_id, "approve", "test-user-id", None
         )
 
     def test_reject_order_logs_action_with_reason(
@@ -985,8 +985,60 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         mock_approval_log_repo.log_action.assert_called_once_with(
-            headers["x-tenant-id"], 1, "approve", "test-user-id"
+            headers["x-tenant-id"], 1, "approve", "test-user-id", None
         )
+
+    def test_approve_orders_bulk_succeeds_even_if_log_action_raises(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+        mock_approval_log_repo,
+    ):
+        """
+        POST /approve-bulk: 監査ログ記録が例外を送出しても、既に確定した注文の結果は
+        失われず200で返る（記録はベストエフォート）
+        """
+        self._set_role(mock_supabase_client, "president")
+        order_data = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "pending_approval",
+        }
+        mock_repo.get_by_id.return_value = order_data
+        routings = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,
+                "unit_time_seconds": 600,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+        mock_product_repo.get_routings_by_product.return_value = routings
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
+        mock_schedule_repo.create.return_value = None
+        mock_repo.update.return_value = {**order_data, "status": "confirmed"}
+        mock_approval_log_repo.log_action.side_effect = RuntimeError("DB down")
+
+        response = client.post(
+            "/orders/approve-bulk",
+            json={"order_ids": [1]},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        results = {r["order_id"]: r for r in response.json()["results"]}
+        assert results[1]["status"] == "confirmed"
 
     # --- 監査ログ閲覧・出力 (Issue #326) ---
 
@@ -999,17 +1051,24 @@ class TestOrderRouter:
         "created_at": "2026-08-11T00:00:00+00:00",
     }
 
-    def _mock_enrichment(self, mock_admin_client):
-        """orders / profiles への補完クエリのモックを設定する"""
-        table_mock = mock_admin_client.table
+    def _mock_enrichment(self, mock_supabase_client):
+        """
+        orders / profiles への補完クエリのモックを設定する。
+        監査ログの補完取得はユーザーJWTクライアント（mock_supabase_client）で行うため、
+        `_set_role` が使う organization_members 向けチェーンはそのまま残しつつ、
+        table("orders") / table("profiles") の呼び出しだけ差し替える。
+        """
+        default_table_return = mock_supabase_client.table.return_value
 
         def table_side_effect(name):
-            m = MagicMock()
             if name == "orders":
+                m = MagicMock()
                 m.select.return_value.in_.return_value.execute.return_value.data = [
                     {"id": 1, "order_number": "ORD-001"}
                 ]
-            elif name == "profiles":
+                return m
+            if name == "profiles":
+                m = MagicMock()
                 m.select.return_value.in_.return_value.execute.return_value.data = [
                     {
                         "id": "user-1",
@@ -1017,17 +1076,18 @@ class TestOrderRouter:
                         "email": "taro@example.com",
                     }
                 ]
-            return m
+                return m
+            return default_table_return
 
-        table_mock.side_effect = table_side_effect
+        mock_supabase_client.table.side_effect = table_side_effect
 
     def test_list_approval_logs_success(
-        self, headers, mock_supabase_client, mock_admin_client, mock_approval_log_repo
+        self, headers, mock_supabase_client, mock_approval_log_repo
     ):
         """GET /approval-logs: iso_officer は承認履歴を閲覧できる"""
         self._set_role(mock_supabase_client, "iso_officer")
         mock_approval_log_repo.get_all.return_value = [self._SAMPLE_LOG_ROW]
-        self._mock_enrichment(mock_admin_client)
+        self._mock_enrichment(mock_supabase_client)
 
         response = client.get("/orders/approval-logs", headers=headers)
 
@@ -1051,7 +1111,7 @@ class TestOrderRouter:
         mock_approval_log_repo.get_all.assert_not_called()
 
     def test_list_approval_logs_allowed_for_president(
-        self, headers, mock_supabase_client, mock_admin_client, mock_approval_log_repo
+        self, headers, mock_supabase_client, mock_approval_log_repo
     ):
         """GET /approval-logs: president も閲覧できる"""
         self._set_role(mock_supabase_client, "president")
@@ -1063,12 +1123,12 @@ class TestOrderRouter:
         assert response.json() == []
 
     def test_export_approval_logs_csv(
-        self, headers, mock_supabase_client, mock_admin_client, mock_approval_log_repo
+        self, headers, mock_supabase_client, mock_approval_log_repo
     ):
         """GET /approval-logs/export: CSVとして出力される"""
         self._set_role(mock_supabase_client, "iso_officer")
         mock_approval_log_repo.get_all.return_value = [self._SAMPLE_LOG_ROW]
-        self._mock_enrichment(mock_admin_client)
+        self._mock_enrichment(mock_supabase_client)
 
         response = client.get("/orders/approval-logs/export", headers=headers)
 
