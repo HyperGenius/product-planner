@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Pencil, Trash2, Plus, Loader2, Lock, CheckCircle2, ArrowUp, ArrowDown } from "lucide-react"
+import { Pencil, Trash2, Plus, Loader2, Lock, ArrowUp, ArrowDown } from "lucide-react"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -469,12 +469,6 @@ export function ProductRoutingsDialog({
                                 未保存
                               </Badge>
                             )}
-                            {routing.is_confirmed && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-500 text-green-600 bg-green-50">
-                                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
-                                確定済み
-                              </Badge>
-                            )}
                           </div>
                         </TableCell>
                         <TableCell>{getEquipmentGroupName(routing.equipment_group_id)}</TableCell>
@@ -676,6 +670,7 @@ export function ProductRoutingsDialog({
             <div className="flex gap-2 mt-4">
               <Button
                 onClick={handleSave}
+                disabled={!processName.trim() || equipmentGroupId === ""}
                 className="flex-1"
               >
                 {editingId !== null ? (
