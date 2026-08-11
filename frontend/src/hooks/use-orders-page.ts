@@ -12,6 +12,7 @@ import {
   useRejectOrder,
   useRequestApproval,
   useSimulateOrderById,
+  useWithdrawApproval,
 } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
@@ -54,6 +55,7 @@ export function useOrdersPage() {
   const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
   const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
   const [rejectTargetOrder, setRejectTargetOrder] = useState<Order | null>(null)
+  const [resubmitTargetOrder, setResubmitTargetOrder] = useState<Order | null>(null)
 
   const queryClient = useQueryClient()
 
@@ -66,6 +68,7 @@ export function useOrdersPage() {
   const confirmOrder = useConfirmOrder()
   const requestApproval = useRequestApproval()
   const rejectOrder = useRejectOrder()
+  const withdrawApproval = useWithdrawApproval()
   const approveOrdersBulk = useApproveOrdersBulk()
   const deleteOrder = useDeleteOrder()
   const simulateOrderById = useSimulateOrderById()
@@ -158,15 +161,44 @@ export function useOrdersPage() {
     })
   }
 
-  const handleRequestApprovalFromRow = (orderId: number, orderNo: string) => {
+  const submitRequestApproval = (orderId: number, orderNo: string) => {
     requestApproval.mutate(orderId, {
       onSuccess: () => {
         toast.success(`注文「${orderNo}」の承認依頼を送信しました`)
         setExpandedOrderId(null)
         setExpandedSimResult(null)
+        setResubmitTargetOrder(null)
       },
       onError: (error: Error) => {
         toast.error(`承認依頼の送信に失敗しました: ${error.message}`)
+      },
+    })
+  }
+
+  const handleRequestApprovalFromRow = (order: Order) => {
+    // 差し戻し理由が残っている場合は、内容を見落としたまま再送信しないよう
+    // 一度確認ダイアログを挟む（Issue #326 E2Eフィードバック）
+    if (order.rejection_reason) {
+      setResubmitTargetOrder(order)
+    } else {
+      submitRequestApproval(order.id, order.order_no ?? "")
+    }
+  }
+
+  const handleConfirmResubmit = () => {
+    if (!resubmitTargetOrder) return
+    submitRequestApproval(resubmitTargetOrder.id, resubmitTargetOrder.order_no ?? "")
+  }
+
+  const handleWithdrawFromRow = (orderId: number, orderNo: string) => {
+    withdrawApproval.mutate(orderId, {
+      onSuccess: () => {
+        toast.success(`注文「${orderNo}」の承認依頼を取り下げました`)
+        setExpandedOrderId(null)
+        setExpandedSimResult(null)
+      },
+      onError: (error: Error) => {
+        toast.error(`承認依頼の取り下げに失敗しました: ${error.message}`)
       },
     })
   }
@@ -181,11 +213,11 @@ export function useOrdersPage() {
       { id: targetId, reason: reason || undefined },
       {
         onSuccess: () => {
-          toast.success(`注文「${orderNo}」を却下しました`)
+          toast.success(`注文「${orderNo}」を差し戻しました`)
           setRejectTargetOrder(null)
         },
         onError: (error: Error) => {
-          toast.error(`却下に失敗しました: ${error.message}`)
+          toast.error(`差し戻しに失敗しました: ${error.message}`)
         },
       }
     )
@@ -430,6 +462,7 @@ export function useOrdersPage() {
     confirmOrder,
     requestApproval,
     rejectOrder,
+    withdrawApproval,
     deleteOrder,
     simulateOrderById,
     simulatingOrderId,
@@ -437,6 +470,7 @@ export function useOrdersPage() {
     // Handlers
     handleApproveFromRow,
     handleRequestApprovalFromRow,
+    handleWithdrawFromRow,
     handleRejectRequest,
     handleConfirmReject,
     handleSimulate,
@@ -446,6 +480,10 @@ export function useOrdersPage() {
     // Reject dialog state
     rejectTargetOrder,
     setRejectTargetOrder,
+    // Resubmit (差し戻し後の再送信) confirmation dialog state
+    resubmitTargetOrder,
+    setResubmitTargetOrder,
+    handleConfirmResubmit,
     // Bulk selection
     selectedOrderIds,
     selectedScheduledCount,

@@ -117,8 +117,8 @@ export function useRequestApproval() {
 }
 
 /**
- * 承認待ちの注文を却下するフック（president限定）
- * 注文ステータスを pending_approval -> draft に差し戻す
+ * 承認待ちの注文を差し戻すフック（president限定）
+ * 注文ステータスを pending_approval -> draft に差し戻す（理由は任意）
  */
 export function useRejectOrder() {
   const queryClient = useQueryClient()
@@ -128,6 +128,24 @@ export function useRejectOrder() {
       apiClient<Order>(`/orders/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 承認依頼を取り下げるフック（order_handler限定）
+ * 誤って送信した承認依頼を自分で取り消し、注文ステータスを pending_approval -> draft に戻す
+ */
+export function useWithdrawApproval() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient<Order>(`/orders/${orderId}/withdraw-approval`, {
+        method: "POST",
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
@@ -155,7 +173,7 @@ export function useApproveOrdersBulk() {
 }
 
 /**
- * 承認ワークフロー（承認依頼送信・承認・却下）の監査ログを取得するフック
+ * 承認ワークフロー（承認依頼送信・承認・差し戻し・取り下げ）の監査ログを取得するフック
  * （iso_officer / president / platform_admin のみ閲覧可）
  *
  * 呼び出し側は、閲覧権限を持つロールであることが確定してから

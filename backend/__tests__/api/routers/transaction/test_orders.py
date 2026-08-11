@@ -527,7 +527,7 @@ class TestOrderRouter:
     def test_reject_order_reason_optional(
         self, headers, mock_repo, mock_supabase_client
     ):
-        """POST /{order_id}/reject: reasonなしでも却下できる"""
+        """POST /{order_id}/reject: reasonなしでも差し戻しできる"""
         order_id = 1
         self._set_role(mock_supabase_client, "president")
         mock_repo.get_by_id.return_value = {
@@ -559,7 +559,7 @@ class TestOrderRouter:
     def test_reject_order_invalid_transition(
         self, headers, mock_repo, mock_supabase_client
     ):
-        """POST /{order_id}/reject: draftからは却下できない"""
+        """POST /{order_id}/reject: draftからは差し戻しできない"""
         order_id = 1
         self._set_role(mock_supabase_client, "president")
         mock_repo.get_by_id.return_value = {"id": order_id, "status": "draft"}
@@ -568,6 +568,65 @@ class TestOrderRouter:
 
         assert response.status_code == 400
         mock_repo.update.assert_not_called()
+
+    def test_withdraw_order_approval_success(
+        self, headers, mock_repo, mock_supabase_client, mock_approval_log_repo
+    ):
+        """POST /{order_id}/withdraw-approval: pending_approval -> draft への取り下げが成功する"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 100,
+            "status": "pending_approval",
+        }
+        mock_repo.update.return_value = {"id": order_id, "status": "draft"}
+
+        response = client.post(f"/orders/{order_id}/withdraw-approval", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "draft"
+        mock_repo.update.assert_called_once_with(order_id, {"status": "draft"})
+        mock_approval_log_repo.log_action.assert_called_once_with(
+            headers["x-tenant-id"], order_id, "withdraw", "test-user-id", None
+        )
+
+    def test_withdraw_order_approval_forbidden_for_non_order_handler(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/withdraw-approval: order_handler以外は403"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+
+        response = client.post(f"/orders/{order_id}/withdraw-approval", headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_by_id.assert_not_called()
+
+    def test_withdraw_order_approval_invalid_transition(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/withdraw-approval: draftからは取り下げできない"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {"id": order_id, "status": "draft"}
+
+        response = client.post(f"/orders/{order_id}/withdraw-approval", headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
+
+    def test_withdraw_order_approval_not_found(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/withdraw-approval: 注文が存在しない場合の404エラーテスト"""
+        order_id = 999
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = None
+
+        response = client.post(f"/orders/{order_id}/withdraw-approval", headers=headers)
+
+        assert response.status_code == 404
 
     def test_approve_orders_bulk_partial_failure(
         self,
@@ -914,7 +973,7 @@ class TestOrderRouter:
     def test_reject_order_logs_action_with_reason(
         self, headers, mock_repo, mock_supabase_client, mock_approval_log_repo
     ):
-        """POST /{order_id}/reject: 却下理由付きで監査ログに記録される"""
+        """POST /{order_id}/reject: 差し戻し理由付きで監査ログに記録される"""
         order_id = 1
         self._set_role(mock_supabase_client, "president")
         mock_repo.get_by_id.return_value = {

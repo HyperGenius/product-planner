@@ -21,7 +21,8 @@ import type { OrderApprovalLog } from "@/types/order"
 const ACTION_LABELS: Record<OrderApprovalLog["action"], string> = {
   request_approval: "承認依頼送信",
   approve: "承認",
-  reject: "却下",
+  reject: "差し戻し",
+  withdraw: "取り下げ",
 }
 
 const ACTION_BADGE_VARIANTS: Record<
@@ -31,6 +32,7 @@ const ACTION_BADGE_VARIANTS: Record<
   request_approval: "secondary",
   approve: "default",
   reject: "outline",
+  withdraw: "outline",
 }
 
 function formatDateTime(value: string): string {
@@ -89,7 +91,7 @@ export default function ApprovalLogsPage() {
         <div>
           <h1 className="text-xl font-bold">承認監査ログ</h1>
           <p className="text-sm text-muted-foreground">
-            承認依頼送信・承認・却下の各操作の記録です。閲覧・出力のみで編集はできません。
+            承認依頼送信・承認・差し戻し・取り下げの各操作の記録です。閲覧・出力のみで編集はできません。
           </p>
         </div>
         <Button onClick={handleExport} disabled={isExporting} variant="outline">

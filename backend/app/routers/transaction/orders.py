@@ -216,7 +216,7 @@ def list_approval_logs(
     ),
 ):
     """
-    承認ワークフロー（承認依頼送信・承認・却下）の監査ログを一覧取得する
+    承認ワークフロー（承認依頼送信・承認・差し戻し・取り下げ）の監査ログを一覧取得する
     （iso_officer / president / platform_admin のみ閲覧可）。
     """
     return _fetch_enriched_approval_logs(tenant_id, user_id, client, approval_log_repo)
@@ -244,7 +244,8 @@ def export_approval_logs_csv(
     action_labels = {
         "request_approval": "承認依頼送信",
         "approve": "承認",
-        "reject": "却下",
+        "reject": "差し戻し",
+        "withdraw": "取り下げ",
     }
     for log in logs:
         writer.writerow(
@@ -586,7 +587,7 @@ def _log_approval_action_safely(
 ) -> None:
     """
     承認監査ログの記録はベストエフォートとする。
-    状態遷移（承認依頼送信・承認・却下）自体は既にDB更新が成功しており、
+    状態遷移（承認依頼送信・承認・差し戻し・取り下げ）自体は既にDB更新が成功しており、
     監査ログの記録に失敗したからといって業務上成功した操作をエラー扱いにはしない
     （特に `approve-bulk` では、1件のログ記録失敗が他の注文の確定結果を
     巻き込んで500にしてしまうことを防ぐ）。
@@ -819,10 +820,10 @@ def reject_order(
     ),
 ):
     """
-    承認待ちの注文を却下し、下書きに差し戻す（president限定）。却下理由は任意入力。
+    承認待ちの注文を差し戻す（president限定）。理由は任意入力。
     """
     logger.info(f"Rejecting order {order_id}")
-    _require_role(tenant_id, user_id, client, "president", "受注の却下")
+    _require_role(tenant_id, user_id, client, "president", "受注の差し戻し")
 
     order = order_repo.get_by_id(order_id)
     if not order:
@@ -838,5 +839,42 @@ def reject_order(
     )
     _log_approval_action_safely(
         approval_log_repo, tenant_id, order_id, "reject", user_id, reject_data.reason
+    )
+    return _map_order_response(result)
+
+
+@orders_router.post("/{order_id}/withdraw-approval")
+def withdraw_order_approval(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
+):
+    """
+    誤って送信した承認依頼を取り下げ、下書きに差し戻す（order_handler限定）。
+
+    president による差し戻し（`reject`）とは異なり理由は付かない。
+    「差し戻し」を業務上の判断（president による reject）と、送信主自身による単純な取り消しとで
+    区別できるよう、監査ログには別action（`withdraw`）として記録する。
+    """
+    logger.info(f"Withdrawing approval request for order {order_id}")
+    _require_role(tenant_id, user_id, client, "order_handler", "承認依頼の取り下げ")
+
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    try:
+        validate_order_status_transition(order.get("status"), "draft")
+    except InvalidOrderStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    result = order_repo.update(order_id, {"status": "draft"})
+    _log_approval_action_safely(
+        approval_log_repo, tenant_id, order_id, "withdraw", user_id
     )
     return _map_order_response(result)

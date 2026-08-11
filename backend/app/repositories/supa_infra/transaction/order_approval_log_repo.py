@@ -19,7 +19,7 @@ class OrderApprovalLogRepository(BaseRepository):
         reason: str | None = None,
     ) -> None:
         """
-        承認ワークフローの操作（依頼送信・承認・却下）を監査ログに記録する。
+        承認ワークフローの操作（依頼送信・承認・差し戻し・取り下げ）を監査ログに記録する。
 
         order_handler など監査ログの閲覧権限を持たないロールも書き込みは行うため、
         `returning="minimal"` でINSERT後のRETURNING句を省略する。デフォルトの

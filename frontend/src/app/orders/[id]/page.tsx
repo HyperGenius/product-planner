@@ -13,9 +13,20 @@ import {
   Pencil,
   Split,
   Trash2,
+  Undo2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { SimulationResult } from "@/components/simulation-result"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
@@ -28,6 +39,7 @@ import {
   useConfirmOrder,
   useRequestApproval,
   useRejectOrder,
+  useWithdrawApproval,
   useDeleteOrder,
 } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
@@ -61,6 +73,7 @@ export default function OrderDetailPage() {
   const confirmMutation = useConfirmOrder()
   const requestApprovalMutation = useRequestApproval()
   const rejectMutation = useRejectOrder()
+  const withdrawMutation = useWithdrawApproval()
   const deleteMutation = useDeleteOrder()
 
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
@@ -69,6 +82,7 @@ export default function OrderDetailPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false)
+  const [isResubmitConfirmOpen, setIsResubmitConfirmOpen] = useState(false)
 
   const handleOpenEditDialog = () => {
     setIsEditDialogOpen(true)
@@ -119,9 +133,19 @@ export default function OrderDetailPage() {
     try {
       await requestApprovalMutation.mutateAsync(orderId)
       toast.success("承認依頼を送信しました")
-      router.push("/orders")
+      setIsResubmitConfirmOpen(false)
     } catch {
       toast.error("承認依頼の送信に失敗しました")
+    }
+  }
+
+  const handleRequestApprovalClick = () => {
+    // 差し戻し理由が残っている場合は、内容を見落としたまま再送信しないよう
+    // 一度確認ダイアログを挟む（Issue #326 E2Eフィードバック）
+    if (order?.rejection_reason) {
+      setIsResubmitConfirmOpen(true)
+    } else {
+      handleRequestApproval()
     }
   }
 
@@ -138,10 +162,19 @@ export default function OrderDetailPage() {
   const handleReject = async (reason: string) => {
     try {
       await rejectMutation.mutateAsync({ id: orderId, reason: reason || undefined })
-      toast.success("注文を却下しました")
+      toast.success("注文を差し戻しました")
       setIsRejectDialogOpen(false)
     } catch {
-      toast.error("却下に失敗しました")
+      toast.error("差し戻しに失敗しました")
+    }
+  }
+
+  const handleWithdraw = async () => {
+    try {
+      await withdrawMutation.mutateAsync(orderId)
+      toast.success("承認依頼を取り下げました")
+    } catch {
+      toast.error("承認依頼の取り下げに失敗しました")
     }
   }
 
@@ -257,6 +290,19 @@ export default function OrderDetailPage() {
             </dl>
           </div>
 
+          {/* 差し戻し理由パネル (draft かつ 直近に差し戻された場合のみ) */}
+          {isDraft && order.rejection_reason && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <p className="text-sm font-medium text-amber-800 flex items-center gap-1.5">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                差し戻し理由
+              </p>
+              <p className="text-sm text-amber-900 mt-1 whitespace-pre-wrap">
+                {order.rejection_reason}
+              </p>
+            </div>
+          )}
+
           {/* メール本文パネル (メール起票時のみ) */}
           {order.source_type === 'email' && order.source_raw && (
             <div className="rounded-lg border bg-muted/50 p-4">
@@ -365,13 +411,23 @@ export default function OrderDetailPage() {
             )}
             {isDraft && order.is_scheduled && currentUserRole === "order_handler" && (
               <Button
-                onClick={handleRequestApproval}
+                onClick={handleRequestApprovalClick}
                 disabled={requestApprovalMutation.isPending}
                 variant="default"
                 className="flex-1"
               >
                 <Check className="mr-2 h-4 w-4" />
                 {requestApprovalMutation.isPending ? "処理中..." : "承認依頼を送信"}
+              </Button>
+            )}
+            {isPendingApproval && currentUserRole === "order_handler" && (
+              <Button
+                onClick={handleWithdraw}
+                disabled={withdrawMutation.isPending}
+                variant="outline"
+              >
+                <Undo2 className="mr-2 h-4 w-4" />
+                {withdrawMutation.isPending ? "処理中..." : "承認依頼を取り下げる"}
               </Button>
             )}
             {isPendingApproval && currentUserRole === "president" && (
@@ -389,7 +445,7 @@ export default function OrderDetailPage() {
                   onClick={() => setIsRejectDialogOpen(true)}
                   variant="outline"
                 >
-                  却下
+                  差し戻し
                 </Button>
               </>
             )}
@@ -462,6 +518,28 @@ export default function OrderDetailPage() {
         onConfirm={handleReject}
         onOpenChange={(open) => { if (!open) setIsRejectDialogOpen(false) }}
       />
+
+      <AlertDialog open={isResubmitConfirmOpen} onOpenChange={setIsResubmitConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>差し戻し理由を確認してください</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>この注文は一度差し戻されています。内容を修正したうえで再送信してください。</p>
+                <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 whitespace-pre-wrap">
+                  {order.rejection_reason}
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRequestApproval}>
+              確認のうえ承認依頼を送信する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

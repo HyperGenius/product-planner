@@ -18,7 +18,7 @@ interface SimulationSideSheetProps {
   requestApprovalIsPending: boolean
   currentUserRole: string | null
   onClose: () => void
-  onRequestApproval: (orderId: number, orderNo: string) => void
+  onRequestApproval: (order: Order) => void
 }
 
 export function SimulationSideSheet({
@@ -53,7 +53,7 @@ export function SimulationSideSheet({
             <Button
               disabled={requestApprovalIsPending || !order}
               onClick={() => {
-                if (order) onRequestApproval(order.id, order.order_no ?? '')
+                if (order) onRequestApproval(order)
               }}
             >
               承認依頼を送信

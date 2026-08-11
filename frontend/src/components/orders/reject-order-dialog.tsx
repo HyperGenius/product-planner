@@ -46,14 +46,14 @@ function RejectOrderDialogForm({
   return (
     <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-[720px]">
       <DialogHeader className="px-6 pb-4 pt-6">
-        <DialogTitle>受注の却下</DialogTitle>
+        <DialogTitle>受注の差し戻し</DialogTitle>
         <DialogDescription>
-          注文「{order.order_no ?? ""}」を却下し、下書きに差し戻します。理由は任意で入力できます。
+          注文「{order.order_no ?? ""}」を下書きに差し戻します。理由は任意で入力できます。
         </DialogDescription>
       </DialogHeader>
 
       <div className="flex min-h-0 flex-1 border-t">
-        {/* 左: 注文基本情報（却下理由を書く際に注文内容を見返せるようにする） */}
+        {/* 左: 注文基本情報（差し戻し理由を書く際に注文内容を見返せるようにする） */}
         <div className="w-[280px] shrink-0 space-y-4 overflow-y-auto border-r bg-muted/30 p-5">
           <p className="text-sm font-medium">注文基本情報</p>
           <dl className="space-y-3 text-sm">
@@ -84,9 +84,9 @@ function RejectOrderDialogForm({
           </dl>
         </div>
 
-        {/* 右: 却下理由 */}
+        {/* 右: 差し戻し理由 */}
         <div className="flex flex-1 flex-col gap-2 p-5">
-          <Label htmlFor="reject-reason">却下理由（任意）</Label>
+          <Label htmlFor="reject-reason">差し戻し理由（任意）</Label>
           <textarea
             id="reject-reason"
             value={reason}
@@ -105,7 +105,7 @@ function RejectOrderDialogForm({
           キャンセル
         </Button>
         <Button variant="destructive" onClick={() => onConfirm(reason)} disabled={isPending}>
-          {isPending ? "却下中..." : "却下する"}
+          {isPending ? "差し戻し中..." : "差し戻す"}
         </Button>
       </DialogFooter>
     </DialogContent>

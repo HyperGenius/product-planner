@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertCircle, Loader2, Mail, MoreHorizontal } from "lucide-react"
+import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Undo2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,15 +38,17 @@ interface OrderTableRowProps {
   hasSimulationError: boolean
   requestApprovalIsPending: boolean
   approveIsPending: boolean
+  withdrawIsPending: boolean
   currentUserRole: string | null
   isSelected: boolean
   selectionIndex?: number
   isBulkOperationInProgress: boolean
   hasBulkSimFailed?: boolean
   onSimulate: (order: Order) => void
-  onRequestApproval: (orderId: number, orderNo: string) => void
+  onRequestApproval: (order: Order) => void
   onApprove: (orderId: number, orderNo: string) => void
   onReject: (order: Order) => void
+  onWithdraw: (orderId: number, orderNo: string) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
   onToggleSelect: (orderId: number) => void
@@ -60,6 +62,7 @@ export function OrderTableRow({
   hasSimulationError,
   requestApprovalIsPending,
   approveIsPending,
+  withdrawIsPending,
   currentUserRole,
   isSelected,
   selectionIndex,
@@ -69,6 +72,7 @@ export function OrderTableRow({
   onRequestApproval,
   onApprove,
   onReject,
+  onWithdraw,
   onEdit,
   onDelete,
   onToggleSelect,
@@ -151,9 +155,21 @@ export function OrderTableRow({
         </TableCell>
         <TableCell>
           <div className="flex flex-col items-start gap-1">
-            <Badge className={getStatusBadgeClass(order.status)}>
-              {getStatusLabel(order.status)}
-            </Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge className={getStatusBadgeClass(order.status)}>
+                {getStatusLabel(order.status)}
+              </Badge>
+              {order.status === "draft" && order.rejection_reason && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <MessageSquareWarning className="h-4 w-4 text-amber-600 shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs whitespace-pre-wrap">
+                    差し戻し理由: {order.rejection_reason}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
             {order.customer_certainty && (
               <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
                 {getCertaintyLabel(order.customer_certainty)}
@@ -202,10 +218,21 @@ export function OrderTableRow({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => onRequestApproval(order.id, order.order_no ?? "")}
+                onClick={() => onRequestApproval(order)}
                 disabled={requestApprovalIsPending || isBulkOperationInProgress}
               >
                 承認依頼を送信
+              </Button>
+            )}
+            {order.status === "pending_approval" && currentUserRole === "order_handler" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onWithdraw(order.id, order.order_no ?? "")}
+                disabled={withdrawIsPending || isBulkOperationInProgress}
+              >
+                <Undo2 className="mr-1.5 h-3.5 w-3.5" />
+                取り下げ
               </Button>
             )}
             {order.status === "pending_approval" && currentUserRole === "president" && (
@@ -223,7 +250,7 @@ export function OrderTableRow({
                   onClick={() => onReject(order)}
                   disabled={isBulkOperationInProgress}
                 >
-                  却下
+                  差し戻し
                 </Button>
               </>
             )}

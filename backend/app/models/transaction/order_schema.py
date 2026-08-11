@@ -91,7 +91,7 @@ class OrderApprovalLogResponse(BaseModel):
     id: str
     order_id: int
     order_number: str | None
-    action: Literal["request_approval", "approve", "reject"]
+    action: Literal["request_approval", "approve", "reject", "withdraw"]
     actor_user_id: str
     actor_full_name: str | None
     actor_email: str | None
