@@ -71,9 +71,6 @@ export function RequestApprovalConfirmDialog({
                   </p>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">
-                承認者（president）に通知が送信されます。
-              </p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
