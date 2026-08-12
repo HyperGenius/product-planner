@@ -46,7 +46,7 @@ interface OrderTableRowProps {
   hasBulkSimFailed?: boolean
   onSimulate: (order: Order) => void
   onRequestApproval: (order: Order) => void
-  onApprove: (orderId: number, orderNo: string) => void
+  onApprove: (order: Order) => void
   onReject: (order: Order) => void
   onWithdraw: (orderId: number, orderNo: string) => void
   onEdit: (order: Order) => void
@@ -239,7 +239,7 @@ export function OrderTableRow({
               <>
                 <Button
                   size="sm"
-                  onClick={() => onApprove(order.id, order.order_no ?? "")}
+                  onClick={() => onApprove(order)}
                   disabled={approveIsPending || isBulkOperationInProgress}
                 >
                   承認

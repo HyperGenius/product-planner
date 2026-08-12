@@ -55,8 +55,9 @@ order_handler が誤って承認依頼を送信してしまった場合、presid
    理由全文を表示するアラートパネル（`orders/[id]/page.tsx`）を表示する。閲覧はロール制限なし
    （order_handler含め誰でも見える）。
 2. **再送信前の確認**: `rejection_reason` が設定されたままの注文に対して「承認依頼を送信」を押すと、
-   理由を表示する確認ダイアログ（`AlertDialog`）を挟んでから送信する（一覧・詳細どちらも同様）。
+   理由を表示する確認ダイアログを挟んでから送信する（一覧・詳細どちらも同様）。
    実際に内容を修正したかどうかまでは検証しない（ソフトな注意喚起であり、ハードなブロックではない）。
+   Issue #338 でこのダイアログは通常の承認依頼確認モーダル（下記）に統合された。
 
 ## Frontend
 
@@ -169,6 +170,36 @@ PostgRESTがINSERT結果を返す際にSELECT用RLSポリシー（`iso_officer`/
   各操作エンドポイントで監査ログが正しい引数で記録されること、`GET /orders/approval-logs` /
   `/export` が `iso_officer`/`president` では成功し `order_handler` では403になること、
   CSVレスポンスの内容を検証
+
+## 承認依頼・承認の事前確認モーダル (Issue #338)
+
+「承認依頼を送信」「承認」は受注ステータスを不可逆に進める操作だが、従来は（差し戻し理由が
+残っている場合を除き）確認なしのワンクリックで即実行されていた。誤クリックによる意図しない
+実行を防ぐため、実行前に対象注文の主要項目（注文番号・製品・数量・希望納期、承認確認では
+確定納期も）と、送信先（承認依頼では「承認者（president）に通知が送信されます」）を表示する
+確認モーダルを一覧・詳細ページの両方に追加した。
+
+- `frontend/src/components/orders/request-approval-confirm-dialog.tsx`
+  （`RequestApprovalConfirmDialog`）: 承認依頼送信の確認モーダル。`order.rejection_reason` が
+  設定されている場合は差し戻し理由も同じモーダル内に表示し、Issue #326
+  の再送信確認ダイアログと二重表示にならないよう統合した。
+- `frontend/src/components/orders/approve-confirm-dialog.tsx`（`ApproveConfirmDialog`）:
+  承認（確定）の確認モーダル。
+- どちらも `reject-order-dialog.tsx` / `delete-order-dialog.tsx` と同じ `AlertDialog` ベースの
+  トンマナで統一。キャンセル時はAPIを呼ばずモーダルを閉じるのみ。
+- 一覧ページの行内アクション（`handleApproveFromRow` / `handleRequestApprovalFromRow`、
+  `use-orders-page.ts`）と詳細ページのボタン（`handleApproveClick` / `handleRequestApprovalClick`、
+  `orders/[id]/page.tsx`）は、いずれも直接APIを呼ばず対象注文をモーダル用stateにセットするだけに
+  変更し、実際の実行はモーダルの確定コールバック（`handleConfirmApprove` /
+  `handleConfirmRequestApproval`）に一本化した。
+- `OrderTableRow` の `onApprove` は `(orderId, orderNo)` から `(order: Order)` に変更し、
+  `onRequestApproval` / `onReject` と同じシグネチャに揃えた。
+- 一括承認依頼（`BulkActionBar` → `handleBulkRequestApprovalRequest`）・一括承認
+  （`handleBulkApproveRequest`）も、実行前に対象注文一覧を表示する確認モーダル
+  （`bulk-request-approval-confirm-dialog.tsx` / `bulk-approve-confirm-dialog.tsx`、
+  `bulk-simulate-confirm-dialog.tsx` と同じ一覧表示パターン）を挟むようにした。
+  ただし `BulkSimulateSummaryDialog` からの一括承認依頼（`handleBulkRequestApprovalFromSummary`）は、
+  シミュレーション結果画面で既に対象一覧を確認済みの導線のため対象外とした。
 
 ## 承認依頼のアプリ内通知 (Issue #327)
 

@@ -12,23 +12,17 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { MasterPagination } from "@/components/master-pagination"
 import { BulkActionBar } from "@/components/orders/bulk-action-bar"
 import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-confirm-dialog"
 import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
+import { BulkRequestApprovalConfirmDialog } from "@/components/orders/bulk-request-approval-confirm-dialog"
+import { BulkApproveConfirmDialog } from "@/components/orders/bulk-approve-confirm-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
+import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
+import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
 import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
 import { OrderTableRow } from "@/components/orders/order-table-row"
@@ -79,12 +73,17 @@ export default function OrdersPage() {
     closeSimResult,
     rejectTargetOrder,
     setRejectTargetOrder,
-    resubmitTargetOrder,
-    setResubmitTargetOrder,
-    handleConfirmResubmit,
+    requestApprovalTargetOrder,
+    setRequestApprovalTargetOrder,
+    handleConfirmRequestApproval,
+    approveTargetOrder,
+    setApproveTargetOrder,
+    handleConfirmApprove,
     selectedOrderIds,
     selectedScheduledCount,
     selectedPendingApprovalCount,
+    selectedScheduledOrders,
+    selectedPendingApprovalOrders,
     draftPageOrders,
     pendingApprovalPageOrders,
     allDraftOnPageSelected,
@@ -95,6 +94,8 @@ export default function OrdersPage() {
     isBulkRequestingApproval,
     isBulkApproving,
     isBulkSimulateConfirmOpen,
+    isBulkRequestApprovalConfirmOpen,
+    isBulkApproveConfirmOpen,
     handleToggleSelect,
     handleToggleSelectAll,
     handleToggleSelectAllPendingApproval,
@@ -102,8 +103,12 @@ export default function OrdersPage() {
     handleBulkSimulateRequest,
     handleBulkSimulateConfirm,
     handleBulkSimulateCancel,
-    handleBulkRequestApproval,
-    handleBulkApprove,
+    handleBulkRequestApprovalRequest,
+    handleBulkRequestApprovalConfirm,
+    handleBulkRequestApprovalCancel,
+    handleBulkApproveRequest,
+    handleBulkApproveConfirm,
+    handleBulkApproveCancel,
     bulkSimSummary,
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
@@ -275,33 +280,21 @@ export default function OrdersPage() {
           onOpenChange={(open) => { if (!open) setRejectTargetOrder(null) }}
         />
 
-        <AlertDialog
-          open={resubmitTargetOrder !== null}
-          onOpenChange={(open) => { if (!open) setResubmitTargetOrder(null) }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>差し戻し理由を確認してください</AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <div className="space-y-2">
-                  <p>
-                    注文「{resubmitTargetOrder?.order_no ?? ""}」は一度差し戻されています。
-                    内容を修正したうえで再送信してください。
-                  </p>
-                  <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 whitespace-pre-wrap">
-                    {resubmitTargetOrder?.rejection_reason}
-                  </p>
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>キャンセル</AlertDialogCancel>
-              <AlertDialogAction onClick={handleConfirmResubmit}>
-                確認のうえ承認依頼を送信する
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <RequestApprovalConfirmDialog
+          order={requestApprovalTargetOrder}
+          products={products}
+          isPending={requestApproval.isPending}
+          onConfirm={handleConfirmRequestApproval}
+          onOpenChange={(open) => { if (!open) setRequestApprovalTargetOrder(null) }}
+        />
+
+        <ApproveConfirmDialog
+          order={approveTargetOrder}
+          products={products}
+          isPending={confirmOrder.isPending}
+          onConfirm={handleConfirmApprove}
+          onOpenChange={(open) => { if (!open) setApproveTargetOrder(null) }}
+        />
 
         <SimulationSideSheet
           open={expandedSimResult !== null}
@@ -322,8 +315,8 @@ export default function OrdersPage() {
           isBulkRequestingApproval={isBulkRequestingApproval}
           isBulkApproving={isBulkApproving}
           onBulkSimulate={handleBulkSimulateRequest}
-          onBulkRequestApproval={handleBulkRequestApproval}
-          onBulkApprove={handleBulkApprove}
+          onBulkRequestApproval={handleBulkRequestApprovalRequest}
+          onBulkApprove={handleBulkApproveRequest}
           onClearSelection={handleClearSelection}
         />
 
@@ -335,6 +328,24 @@ export default function OrdersPage() {
           products={products}
           onConfirm={handleBulkSimulateConfirm}
           onCancel={handleBulkSimulateCancel}
+        />
+
+        <BulkRequestApprovalConfirmDialog
+          open={isBulkRequestApprovalConfirmOpen}
+          orders={selectedScheduledOrders}
+          products={products}
+          isPending={isBulkRequestingApproval}
+          onConfirm={handleBulkRequestApprovalConfirm}
+          onCancel={handleBulkRequestApprovalCancel}
+        />
+
+        <BulkApproveConfirmDialog
+          open={isBulkApproveConfirmOpen}
+          orders={selectedPendingApprovalOrders}
+          products={products}
+          isPending={isBulkApproving}
+          onConfirm={handleBulkApproveConfirm}
+          onCancel={handleBulkApproveCancel}
         />
 
         <BulkSimulateSummaryDialog
