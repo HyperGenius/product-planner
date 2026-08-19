@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Pencil, Trash2, Copy, RefreshCw } from "lucide-react"
+import { Plus, Pencil, Trash2, Copy, RefreshCw, KeyRound } from "lucide-react"
 import { toast } from "sonner"
 import {
   useTenantMembers,
@@ -9,6 +9,7 @@ import {
   useUpdateTenantMember,
   useDeleteTenantMember,
 } from "@/hooks/use-tenant-members"
+import { useResetMemberPin } from "@/hooks/use-member-pin"
 import type { TenantMember, MemberRole } from "@/types/member"
 import { Button } from "@/components/ui/button"
 import {
@@ -101,6 +102,7 @@ export default function MembersPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isPinResetDialogOpen, setIsPinResetDialogOpen] = useState(false)
   const [selectedMember, setSelectedMember] = useState<TenantMember | null>(null)
   const [createdPassword, setCreatedPassword] = useState<string | null>(null)
 
@@ -118,6 +120,7 @@ export default function MembersPage() {
   const createMutation = useCreateTenantMember()
   const updateMutation = useUpdateTenantMember()
   const deleteMutation = useDeleteTenantMember()
+  const resetPinMutation = useResetMemberPin()
 
   // 追加ダイアログを開く
   const handleOpenCreateDialog = () => {
@@ -141,6 +144,12 @@ export default function MembersPage() {
   const handleOpenDeleteDialog = (member: TenantMember) => {
     setSelectedMember(member)
     setIsDeleteDialogOpen(true)
+  }
+
+  // PINリセットダイアログを開く
+  const handleOpenPinResetDialog = (member: TenantMember) => {
+    setSelectedMember(member)
+    setIsPinResetDialogOpen(true)
   }
 
   // メンバー追加
@@ -193,6 +202,20 @@ export default function MembersPage() {
       },
       onError: (err) => {
         toast.error(err.message || "削除に失敗しました")
+      },
+    })
+  }
+
+  // PINリセット（共有端末でのPINログインを本人が再設定するまで無効化する）
+  const handleResetPin = () => {
+    if (!selectedMember) return
+    resetPinMutation.mutate(selectedMember.user_id, {
+      onSuccess: () => {
+        setIsPinResetDialogOpen(false)
+        toast.success("PINをリセットしました")
+      },
+      onError: (err) => {
+        toast.error(err.message || "PINのリセットに失敗しました")
       },
     })
   }
@@ -257,6 +280,14 @@ export default function MembersPage() {
                           onClick={() => handleOpenEditDialog(member)}
                         >
                           <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="PINをリセット"
+                          onClick={() => handleOpenPinResetDialog(member)}
+                        >
+                          <KeyRound className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -472,6 +503,28 @@ export default function MembersPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleteMutation.isPending ? "削除中..." : "削除"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* PINリセット確認ダイアログ */}
+      <AlertDialog open={isPinResetDialogOpen} onOpenChange={setIsPinResetDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>PINをリセットしますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedMember?.full_name ?? selectedMember?.email} の共有端末PINログインを無効化します。
+              本人が新しいPINを設定するまで、共有端末上でのPINログインは利用できなくなります（パスワードでのログインは引き続き可能です）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleResetPin}
+              disabled={resetPinMutation.isPending}
+            >
+              {resetPinMutation.isPending ? "リセット中..." : "リセット"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

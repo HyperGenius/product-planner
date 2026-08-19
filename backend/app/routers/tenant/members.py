@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.dependencies import (
@@ -8,7 +9,12 @@ from app.dependencies import (
     get_supabase_admin_client,
     get_supabase_client,
 )
-from app.models.tenant import MemberCreateSchema, MemberResponse, MemberUpdateSchema
+from app.models.tenant import (
+    MemberCreateSchema,
+    MemberResponse,
+    MemberUpdateSchema,
+    PinSetSchema,
+)
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
 
@@ -352,4 +358,50 @@ def delete_member(
     # organization_members から削除（テナント紐付けを解除）
     admin_client.table("organization_members").delete().eq("user_id", user_id).eq(
         "tenant_id", tenant_id
+    ).execute()
+
+    # member_pins を削除しておかないと、テナントから外れた後もPINハッシュが
+    # 残り続け、共有端末のPINログイン候補一覧に表示されたり、PINログインが
+    # 通ってしまう（Copilotレビュー指摘）
+    admin_client.table("member_pins").delete().eq("tenant_id", tenant_id).eq(
+        "user_id", user_id
+    ).execute()
+
+
+@member_router.patch("/me/pin", status_code=status.HTTP_204_NO_CONTENT)
+def set_my_pin(
+    data: PinSetSchema,
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user_id: str = Depends(get_current_user_id),
+    admin_client: Client = Depends(get_supabase_admin_client),
+):
+    """信頼済み端末でのPINログイン用に、自分自身のPINを設定/変更する。"""
+    pin_hash = bcrypt.hashpw(data.pin.encode(), bcrypt.gensalt()).decode()
+    admin_client.table("member_pins").upsert(
+        {
+            "tenant_id": tenant_id,
+            "user_id": current_user_id,
+            "pin_hash": pin_hash,
+            "failed_attempts": 0,
+            "locked_until": None,
+        }
+    ).execute()
+
+
+@member_router.post("/{user_id}/pin/reset", status_code=status.HTTP_204_NO_CONTENT)
+def reset_member_pin(
+    user_id: str,
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
+):
+    """対象メンバーのPINを削除する（president / platform_admin のみ）。
+
+    本人が再度PINを設定するまでPINログインは利用できなくなる。
+    パスワードによる復旧経路を残すための操作。
+    """
+    _require_member_admin(current_user_id, tenant_id, client)
+    admin_client.table("member_pins").delete().eq("tenant_id", tenant_id).eq(
+        "user_id", user_id
     ).execute()

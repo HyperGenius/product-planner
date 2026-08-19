@@ -117,6 +117,28 @@ class TestMembersRouter:
 
         assert response.status_code == 403
 
+    def test_delete_member_also_deletes_member_pins(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """DELETE /{user_id}: メンバー削除時にmember_pinsも削除される（Copilotレビュー指摘）
+
+        削除しないと、テナントから外れた後もPINハッシュが残り続け、共有端末の
+        PINログイン候補一覧に表示されたりPINログインが通ってしまう。
+        """
+        _set_role(mock_client, "president")
+        # 対象ユーザーの role も president 扱いになる（single()チェーンを共有するため）ので、
+        # 「最後の president を削除できない」ガードに掛からないよう人数を2人以上にしておく
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.count = 2
+
+        response = client.delete("/tenant/members/other-user-id", headers=headers)
+
+        assert response.status_code == 204
+        deleted_tables = [
+            call.args[0] for call in mock_admin_client.table.call_args_list
+        ]
+        assert "organization_members" in deleted_tables
+        assert "member_pins" in deleted_tables
+
     def test_list_members_allowed_for_platform_admin(
         self, headers, mock_client, mock_admin_client
     ):
@@ -201,3 +223,49 @@ class TestMembersRouter:
         response = client.get("/tenant/members/me", headers=headers)
 
         assert response.status_code == 403
+
+    def test_set_my_pin_success(self, headers, mock_client, mock_admin_client):
+        """PATCH /me/pin: 自分自身のPINを設定できる（ロール制限なし）"""
+        _set_role(mock_client, "order_handler")
+
+        response = client.patch(
+            "/tenant/members/me/pin", json={"pin": "1234"}, headers=headers
+        )
+
+        assert response.status_code == 204
+        (upsert_payload,), _ = mock_admin_client.table.return_value.upsert.call_args
+        assert upsert_payload["user_id"] == "test-user-id"
+        assert upsert_payload["pin_hash"] != "1234"
+
+    def test_set_my_pin_rejects_non_digit(self, headers, mock_client):
+        """PATCH /me/pin: 4桁の数字以外は422"""
+        _set_role(mock_client, "order_handler")
+
+        response = client.patch(
+            "/tenant/members/me/pin", json={"pin": "abcd"}, headers=headers
+        )
+
+        assert response.status_code == 422
+
+    def test_reset_member_pin_forbidden_for_order_handler(self, headers, mock_client):
+        """POST /{user_id}/pin/reset: president / platform_admin 以外は403"""
+        _set_role(mock_client, "order_handler")
+
+        response = client.post(
+            "/tenant/members/other-user-id/pin/reset", headers=headers
+        )
+
+        assert response.status_code == 403
+
+    def test_reset_member_pin_allowed_for_president(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /{user_id}/pin/reset: president は他メンバーのPINを削除できる"""
+        _set_role(mock_client, "president")
+
+        response = client.post(
+            "/tenant/members/other-user-id/pin/reset", headers=headers
+        )
+
+        assert response.status_code == 204
+        mock_admin_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.assert_called_once()
