@@ -3,6 +3,7 @@ import os
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from postgrest.exceptions import APIError
 
 from app.repositories.supa_infra import (
     CustomerRepository,
@@ -23,11 +24,6 @@ def get_current_user_token(
 ) -> str:
     """Authorizationヘッダーからトークンを取り出す"""
     return credentials.credentials
-
-
-def get_current_tenant_id(x_tenant_id: str = Header(...)) -> str:
-    """テナントIDを取得する"""
-    return x_tenant_id
 
 
 def get_supabase_client(token: str = Depends(get_current_user_token)) -> Client:
@@ -82,6 +78,43 @@ def get_current_user_id(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
         ) from e
+
+
+def get_current_tenant_id(
+    x_tenant_id: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+) -> str:
+    """テナントIDを取得する。
+
+    `x-tenant-id` ヘッダーはクライアント供給値のため、JWTで認証されたユーザーが
+    実際にそのテナント（organization_members）に所属していることをサーバー側で検証する。
+    所属していない場合は403を返し、クライアントによる値の改ざんを防ぐ。
+    """
+    try:
+        res = (
+            client.table("organization_members")
+            .select("user_id")
+            .eq("tenant_id", x_tenant_id)
+            .eq("user_id", user_id)
+            .single()
+            .execute()
+        )
+    except APIError as e:
+        # 不正なUUID形式（22P02）や0件時のsingle()エラー（PGRST116）等は
+        # 「テナントに所属していない」として扱う。それ以外は500として再送出する。
+        if e.code in ("22P02", "PGRST116"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="指定されたテナントのメンバーではありません",
+            ) from e
+        raise
+    if not res.data:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="指定されたテナントのメンバーではありません",
+        )
+    return x_tenant_id
 
 
 # --- Dependency Injection用の関数 ---

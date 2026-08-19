@@ -2,7 +2,11 @@
 from unittest.mock import MagicMock
 
 import pytest
-from app.dependencies import get_equipment_repo
+from app.dependencies import (
+    get_current_user_id,
+    get_equipment_repo,
+    get_supabase_client,
+)
 
 # テスト対象のAPIインスタンス
 from app.main import app
@@ -26,8 +30,16 @@ class TestEquipmentRouter:
     def override_dependency(self, mock_repo):
         """
         テスト実行中だけ get_equipment_repo を mock_repo に差し替える。
+        get_current_user_id / get_supabase_client は get_current_tenant_id の
+        テナント所属検証で参照されるため、所属ありの結果を返すようにモックする。
         """
+        mock_tenant_client = MagicMock()
+        mock_tenant_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+            "user_id": "test-user-id"
+        }
         app.dependency_overrides[get_equipment_repo] = lambda: mock_repo
+        app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
+        app.dependency_overrides[get_supabase_client] = lambda: mock_tenant_client
         yield
         app.dependency_overrides = {}
 

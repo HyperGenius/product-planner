@@ -195,9 +195,9 @@ class TestMembersRouter:
         assert result["full_name"] == "受注担当 太郎"
 
     def test_get_my_membership_not_found(self, headers, mock_client):
-        """GET /me: 対象テナントのメンバーでない場合は404"""
+        """GET /me: 対象テナントのメンバーでない場合は403（get_current_tenant_idのテナント所属検証で拒否される）"""
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = None
 
         response = client.get("/tenant/members/me", headers=headers)
 
-        assert response.status_code == 404
+        assert response.status_code == 403
