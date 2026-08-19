@@ -129,9 +129,7 @@ class TestRecordCorrectionIfApplicable:
         )
 
         mock_db._tables[_ALIASES].insert.assert_not_called()
-        mock_db._tables[_ALIASES].update.assert_called_with(
-            {"product_id": 2, "created_by": "user-1"}
-        )
+        mock_db._tables[_ALIASES].update.assert_called_with({"product_id": 2})
 
         history_insert_call = mock_db._tables[_HISTORY].insert.call_args
         assert history_insert_call.args[0]["action"] == "updated"
@@ -153,9 +151,7 @@ class TestRecordCorrectionIfApplicable:
             mock_db, "tenant-1", order_before, order_after, "user-1"
         )
 
-        mock_db._tables[_ALIASES].update.assert_called_with(
-            {"product_id": 2, "created_by": "user-1"}
-        )
+        mock_db._tables[_ALIASES].update.assert_called_with({"product_id": 2})
         history_insert_call = mock_db._tables[_HISTORY].insert.call_args
         assert history_insert_call.args[0]["action"] == "updated"
 
@@ -176,3 +172,40 @@ class TestRecordCorrectionIfApplicable:
         history_insert_call = mock_db._tables[_HISTORY].insert.call_args
         assert history_insert_call.args[0]["action"] == "created"
         assert history_insert_call.args[0]["source_order_label_snapshot"] == "注文 #5"
+
+    def test_updating_existing_alias_does_not_overwrite_created_by(self):
+        """created_by は最初の登録者を表す監査カラムのため、再修正時に
+        上書きしないこと（PRレビュー指摘対応）。"""
+        mock_db = self._mock_db(existing_alias_rows=[{"id": "alias-1"}])
+        order_before = {"id": 1, "product_id": 3}
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "email",
+            "extracted_product_name": "セイヒンA",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-2"
+        )
+
+        update_call_args = mock_db._tables[_ALIASES].update.call_args.args[0]
+        assert "created_by" not in update_call_args
+
+    def test_unexpected_error_is_logged_and_not_raised(self):
+        """記録処理は注文更新とは別トランザクションのベストエフォート処理のため、
+        例外を送出せずログに記録するのみとする（PRレビュー指摘対応: これにより
+        呼び出し元 update_order/split_order のレスポンスが誤って500にならない）。"""
+        mock_db = self._mock_db(existing_alias_rows=[])
+        mock_db._tables[_HISTORY].insert.side_effect = RuntimeError("boom")
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "email",
+            "extracted_product_name": "セイヒンA",
+        }
+
+        # 例外が外へ伝播しないこと
+        record_correction_if_applicable(
+            mock_db, "tenant-1", None, order_after, "user-1"
+        )

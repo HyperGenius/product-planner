@@ -16,18 +16,48 @@ CREATE TABLE product_name_aliases (
 
 ALTER TABLE product_name_aliases ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "tenant members can manage product_name_aliases"
+-- backend/app/dependencies.py の get_supabase_admin_client 経由（cron によるメール/PDF
+-- 起票パイプライン）は Service Role Key で RLS をバイパスするため、以下のポリシーは
+-- ユーザーJWT経由の呼び出し（別名の登録・履歴閲覧）のみに適用される。
+CREATE POLICY "tenant members can view product_name_aliases"
   ON product_name_aliases
-  FOR ALL
+  FOR SELECT
+  USING (is_tenant_member(tenant_id));
+
+-- created_by は「最初に登録したユーザー」を表す監査カラム。クライアントが任意の
+-- created_by を指定して他人になりすませないよう、INSERT時は auth.uid() と一致する
+-- ことを強制する（PRレビュー指摘対応）。UPDATE（別名の上書き）では created_by を
+-- 変更させない（下の product_name_aliases_preserve_created_by トリガー参照）。
+CREATE POLICY "tenant members can insert product_name_aliases"
+  ON product_name_aliases
+  FOR INSERT
+  WITH CHECK (is_tenant_member(tenant_id) AND created_by = auth.uid());
+
+CREATE POLICY "tenant members can update product_name_aliases"
+  ON product_name_aliases
+  FOR UPDATE
   USING (is_tenant_member(tenant_id))
   WITH CHECK (is_tenant_member(tenant_id));
 
--- backend/app/dependencies.py の get_supabase_admin_client 経由（cron によるメール/PDF
--- 起票パイプライン）は Service Role Key で RLS をバイパスするため、上記ポリシーは
--- ユーザーJWT経由の呼び出し（別名の登録・履歴閲覧）のみに適用される。
 CREATE TRIGGER product_name_aliases_set_updated_at
   BEFORE UPDATE ON product_name_aliases
   FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
+
+-- created_by（最初の登録者）はUPDATEでは変更させない。誰が今回の修正を行ったかは
+-- product_name_alias_history.changed_by 側に記録される（PRレビュー指摘対応）。
+CREATE OR REPLACE FUNCTION public.preserve_product_name_alias_created_by()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.created_by := OLD.created_by;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER product_name_aliases_preserve_created_by
+  BEFORE UPDATE ON product_name_aliases
+  FOR EACH ROW EXECUTE PROCEDURE public.preserve_product_name_alias_created_by();
 
 CREATE INDEX idx_product_name_aliases_tenant_raw_text
   ON product_name_aliases (tenant_id, raw_text);
@@ -61,5 +91,8 @@ CREATE POLICY "tenant members can insert product_name_alias_history"
   FOR INSERT
   WITH CHECK (is_tenant_member(tenant_id) AND changed_by = auth.uid());
 
-CREATE INDEX idx_product_name_alias_history_tenant_product
-  ON product_name_alias_history (tenant_id, product_id, changed_at DESC);
+-- 取得クエリ（ProductNameAliasHistoryRepository.get_by_product_id）は product_id の
+-- みで絞り込む（tenant分離はRLSに委譲）ため、そのクエリ形に合わせたインデックスとする
+-- （PRレビュー指摘対応）。
+CREATE INDEX idx_product_name_alias_history_product_changed_at
+  ON product_name_alias_history (product_id, changed_at DESC);

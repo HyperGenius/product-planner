@@ -555,7 +555,7 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
 - [x] 同一 `raw_text` への再修正時に履歴が追記され、`product_name_aliases` には
       最新の対応が反映される（Issue #347）
 - [x] `product_matching_service` が別名辞書を pg_trgm より優先的に参照する（Issue #347）
-- [x] `GET /master/products/{product_id}/aliases` が登録者表示名・トリガー注文情報を
+- [x] `GET /products/{product_id}/aliases` が登録者表示名・トリガー注文情報を
       含む集約レスポンスを返す（Issue #347）
 
 ### 手動分割UI（Issue #280 Phase3）

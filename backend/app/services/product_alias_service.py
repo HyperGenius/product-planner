@@ -38,7 +38,30 @@ def record_correction_if_applicable(
     - order_after["extracted_product_name"] が未設定
     - order_after["product_id"] が未設定
     - 変更前後の product_id が同一（実質的な修正でない）
+
+    注文本体の更新（呼び出し元の repo.update() / repo.create()）とは別トランザクション
+    のベストエフォート処理。ここで例外が発生しても、既に完了している注文更新自体を
+    失敗として扱わせない（クライアントの誤ったリトライによる二重更新を防ぐ）ため、
+    例外を送出せずログに記録するのみとする（PRレビュー指摘対応）。
     """
+    try:
+        _record_correction(client, tenant_id, order_before, order_after, changed_by)
+    except Exception:
+        order_id = order_after.get("id")
+        logger.error(
+            f"product_alias_service: failed to record alias correction "
+            f"for order_id={order_id}",
+            exc_info=True,
+        )
+
+
+def _record_correction(
+    client: Client,
+    tenant_id: str,
+    order_before: dict[str, Any] | None,
+    order_after: dict[str, Any],
+    changed_by: str,
+) -> None:
     if order_after.get("source_type") != "email":
         return
 
@@ -112,8 +135,11 @@ def _upsert_alias(
     existing_rows = cast(list[dict[str, Any]], existing_res.data or [])
 
     if existing_rows:
+        # created_by は「最初に登録したユーザー」を表す監査カラムのため、
+        # 再修正（UPSERT の上書き）時にも書き換えない。誰が今回の修正を
+        # 行ったかは product_name_alias_history.changed_by 側に記録される。
         client.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value).update(
-            {"product_id": product_id, "created_by": changed_by}
+            {"product_id": product_id}
         ).eq("tenant_id", tenant_id).eq("raw_text", raw_text).execute()
         return "updated"
 
@@ -132,6 +158,6 @@ def _upsert_alias(
             raise
         # 同時リクエストによる競合挿入: 既に存在するので更新として扱う
         client.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value).update(
-            {"product_id": product_id, "created_by": changed_by}
+            {"product_id": product_id}
         ).eq("tenant_id", tenant_id).eq("raw_text", raw_text).execute()
         return "updated"
