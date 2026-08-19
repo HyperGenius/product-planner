@@ -17,6 +17,7 @@
 
 - 所属していない場合: `403 Forbidden`（`指定されたテナントのメンバーではありません`）
 - 所属している場合: 従来通り `x-tenant-id` の値をそのまま返す
+- `x-tenant-id` が不正なUUID形式の場合や `.single()` が0件でエラーになる場合（PostgRESTの `APIError`、コード `22P02` / `PGRST116`）も「未所属」として `403` に正規化する。それ以外の想定外の `APIError` はそのまま再送出し `500` として扱う（Copilotレビュー指摘対応）
 
 `get_current_tenant_id` は `backend/app/routers/` 配下のほぼ全てのエンドポイントで `Depends` されているため、
 この一箇所の修正で全ルーターに対して所属検証がかかる。

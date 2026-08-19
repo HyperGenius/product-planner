@@ -3,6 +3,7 @@ import os
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from postgrest.exceptions import APIError
 
 from app.repositories.supa_infra import (
     CustomerRepository,
@@ -90,14 +91,24 @@ def get_current_tenant_id(
     実際にそのテナント（organization_members）に所属していることをサーバー側で検証する。
     所属していない場合は403を返し、クライアントによる値の改ざんを防ぐ。
     """
-    res = (
-        client.table("organization_members")
-        .select("user_id")
-        .eq("tenant_id", x_tenant_id)
-        .eq("user_id", user_id)
-        .single()
-        .execute()
-    )
+    try:
+        res = (
+            client.table("organization_members")
+            .select("user_id")
+            .eq("tenant_id", x_tenant_id)
+            .eq("user_id", user_id)
+            .single()
+            .execute()
+        )
+    except APIError as e:
+        # 不正なUUID形式（22P02）や0件時のsingle()エラー（PGRST116）等は
+        # 「テナントに所属していない」として扱う。それ以外は500として再送出する。
+        if e.code in ("22P02", "PGRST116"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="指定されたテナントのメンバーではありません",
+            ) from e
+        raise
     if not res.data:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
