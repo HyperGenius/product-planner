@@ -48,6 +48,7 @@ from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
     validate_order_status_transition,
 )
+from app.services.product_alias_service import record_correction_if_applicable
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
@@ -327,6 +328,9 @@ def get_order_attachments(
 def update_order(
     order_id: int,
     order_data: OrderUpdate,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
     repo: OrderRepository = Depends(get_order_repo),
 ):
     """注文を更新
@@ -335,11 +339,18 @@ def update_order(
     メール/PDF起票のステージング行の双方）は、orders.customer_id の UPDATE と
     同一トランザクションで実行される DB トリガー
     (sync_order_attachments_customer_id, Issue #315) が担う。
+
+    メール起票の下書きで product_id が修正された場合は、その対応を製品別名辞書
+    （product_name_aliases）へ記録する（Issue #347）。
     """
     logger.info(f"Updating order {order_id}")
+    order_before = repo.get_by_id(order_id)
     result = repo.update(order_id, order_data.model_dump(exclude_unset=True))
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
+
+    record_correction_if_applicable(client, tenant_id, order_before, result, user_id)
+
     return _map_order_response(result)
 
 
@@ -358,6 +369,7 @@ def split_order(
     order_id: int,
     split_data: OrderSplitRequest,
     tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
     repo: OrderRepository = Depends(get_order_repo),
     client: Client = Depends(get_supabase_client),
 ):
@@ -432,6 +444,8 @@ def split_order(
                 }
             )
             created_orders.append(new_order)
+
+            record_correction_if_applicable(client, tenant_id, None, new_order, user_id)
 
             client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
                 {

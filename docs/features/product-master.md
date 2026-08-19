@@ -63,6 +63,7 @@ const displayName = product.code ? product.name : null  // 製品名として表
 |---|---|---|
 | 編集 | 全員 | 品番・製品名を変更するダイアログ |
 | 工程管理 | 全員 | 製造工程ルーティングを管理（`ProductRoutingsDialog`） |
+| 表記ゆれ履歴 | 全員 | メール起票時の製品名表記ゆれ修正履歴を表示（`ProductNameAliasHistoryDialog`、#347） |
 | 有効化 / 無効化 | admin のみ | 確認モーダル経由で状態変更 |
 | 削除 | admin のみ | 確認ダイアログ付き（取り消し不可） |
 
@@ -82,8 +83,10 @@ const displayName = product.code ? product.name : null  // 製品名として表
 | `frontend/src/hooks/use-tenant-members.ts` | `useCurrentMember()` フック（権限制御） |
 | `frontend/src/components/master-pagination.tsx` | 共通ページネーション |
 | `frontend/src/components/product-routings-dialog.tsx` | 工程管理ダイアログ |
+| `frontend/src/components/product-name-alias-history-dialog.tsx` | 表記ゆれ履歴ダイアログ（#347） |
 | `frontend/src/components/product-selector.tsx` | 受注入力の製品選択（有効製品のみ表示） |
-| `backend/app/routers/master/products.py` | REST API エンドポイント |
+| `backend/app/routers/master/products.py` | REST API エンドポイント（`GET /products/{id}/aliases` を含む） |
+| `backend/app/services/product_alias_service.py` | 製品名別名の記録サービス（#347） |
 
 ## 工程ルーティング (process_routings)
 
@@ -123,6 +126,57 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 
 ---
 
+## 別名辞書 (product_name_aliases)（Issue #347）
+
+メールから受注下書きを自動起票する際に製品名の表記ゆれで未マッチ・誤マッチと
+なった明細を、担当者（`order_handler`）が下書きの `product_id` を選び直すことで
+修正するフローがある（詳細: [email-order-intake.md](./email-order-intake.md)）。
+この修正結果を「生テキスト（`raw_text`）→ 製品」の対応として蓄積し、以後の
+自動マッチングで pg_trgm 曖昧検索より優先して使う。別名登録自体は
+`president` の承認を必要とせず、`order_handler` 権限で完結する。
+
+### データモデル
+
+| テーブル | カラム | 説明 |
+|---|---|---|
+| `product_name_aliases` | `id`, `tenant_id`, `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `created_by`, `created_at`, `updated_at` | `raw_text`（`extracted_product_name` と同じ `TRIM()` のみの正規化）ごとに最新の対応を1件保持。`(tenant_id, raw_text)` UNIQUE。同一 `raw_text` への再修正は UPSERT（上書き） |
+| `product_name_alias_history` | `id`, `tenant_id`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（製品表示名・注文ラベル）を保持する |
+
+### 記録経路
+
+`backend/app/services/product_alias_service.py` の
+`record_correction_if_applicable(client, tenant_id, order_before, order_after, changed_by)`
+が唯一の記録経路。以下の2箇所（`backend/app/routers/transaction/orders.py`）から
+呼ばれる。今後 `orders.product_id` を更新する処理を追加する場合も、この関数を
+通すこと（登録漏れ防止のため個別実装しない）。
+
+- `PATCH /orders/{id}`（`update_order`）: 修正前後の `product_id` が異なる場合
+- `POST /orders/{id}/split`（`split_order`）: 分割後の各明細に `product_id` が
+  設定される場合（元の下書きの `extracted_product_name` を明細ごとに引き継ぐ）
+
+発火条件（いずれかに該当する場合は記録しない）:
+
+- 対象注文の `source_type` が `email` 以外（手動起票の注文編集では発火しない）
+- `extracted_product_name` が未設定
+- 変更前後の `product_id` が同一（実質的な修正でない）
+
+### マッチングへの反映
+
+`backend/app/services/product_matching_service.py` の `match_product_by_alias()` が
+`product_name_aliases` の完全一致検索を行う。`pdf_order_parsing_service.py` の
+`_resolve_product_id()` はこれを `products.code` 完全一致・pg_trgm 曖昧検索より
+前段で呼び出し、一致すればそれらをスキップして即採用する。
+
+### 履歴の閲覧
+
+`GET /products/{product_id}/aliases` が `product_name_alias_history` の生データ
+ではなく、`changed_by` を担当者の表示名に、`source_order_id` を注文へのリンクに
+解決した集約レスポンスを返す。フロントエンドは製品マスタのケバブメニュー
+「表記ゆれ履歴」から `ProductNameAliasHistoryDialog`（`useProductNameAliasHistory`
+フック）で一覧表示する。
+
+---
+
 ## 変更履歴
 
 | PR | 内容 |
@@ -133,3 +187,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #226 | 製品マスタ画面に工程登録状況（`has_process`）を表示（Issue #223） |
 | #227 | 新規注文フォームの製品プルダウンに工程未登録警告を表示（Issue #224） |
 | #310 | フィルタ変更時に `page` を1にリセットするよう修正（Issue #309） |
+| #347 | メール起票の製品名修正結果を別名辞書（`product_name_aliases`）として蓄積・履歴管理する機能を追加（Issue #347） |

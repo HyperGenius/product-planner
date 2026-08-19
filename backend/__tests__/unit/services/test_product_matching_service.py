@@ -1,7 +1,11 @@
 from unittest.mock import MagicMock
 
 import pytest
-from app.services.product_matching_service import match_product_by_code, match_products
+from app.services.product_matching_service import (
+    match_product_by_alias,
+    match_product_by_code,
+    match_products,
+)
 
 
 @pytest.mark.unit
@@ -33,6 +37,33 @@ class TestMatchProductByCode:
         )
 
         result = match_product_by_code(mock_db, "tenant-1", "ambiguous-code")
+
+        assert result is None
+
+
+@pytest.mark.unit
+class TestMatchProductByAlias:
+    def test_match_returns_product_id(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[{"product_id": 4242}]
+        )
+
+        result = match_product_by_alias(mock_db, "tenant-1", "  謎の表記ゆれ製品  ")
+
+        assert result == 4242
+        # raw_text は TRIM() のみ行った値で検索する
+        mock_db.table().select().eq().eq.assert_called_with(
+            "raw_text", "謎の表記ゆれ製品"
+        )
+
+    def test_no_match_returns_none(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+
+        result = match_product_by_alias(mock_db, "tenant-1", "未登録の製品名")
 
         assert result is None
 

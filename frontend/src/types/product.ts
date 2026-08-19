@@ -32,3 +32,22 @@ export interface ProductUpdate {
   type?: string
   is_active?: boolean
 }
+
+/**
+ * 製品名の表記ゆれ修正履歴（Issue #347）
+ *
+ * product_name_alias_history の生データではなく、登録者の表示名・
+ * トリガーとなった注文情報を解決した集約レスポンス。
+ */
+export interface ProductNameAliasHistoryEntry {
+  id: string
+  product_id: number | null
+  product_name_snapshot: string
+  raw_text: string
+  changed_by: string
+  changed_by_full_name: string | null
+  action: "created" | "updated"
+  source_order_id: number | null
+  source_order_label_snapshot: string
+  changed_at: string
+}

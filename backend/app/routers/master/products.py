@@ -1,14 +1,24 @@
 # routers/master/products.py
+from typing import Any, cast
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.dependencies import (
     get_current_tenant_id,
     get_current_user_id,
     get_current_user_role,
+    get_product_name_alias_history_repo,
     get_product_repo,
     get_supabase_client,
 )
-from app.models.master import ProductCreateSchema, ProductUpdateSchema
+from app.models.master import (
+    ProductCreateSchema,
+    ProductNameAliasHistoryResponse,
+    ProductUpdateSchema,
+)
+from app.repositories.supa_infra.master.product_name_alias_repo import (
+    ProductNameAliasHistoryRepository,
+)
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
@@ -41,6 +51,52 @@ def get_product(product_id: int, repo: ProductRepository = Depends(get_product_r
     """製品を1件取得"""
     logger.info(f"Fetching product {product_id}")
     return repo.get_by_id(product_id)
+
+
+@product_router.get(
+    "/{product_id}/aliases", response_model=list[ProductNameAliasHistoryResponse]
+)
+def get_product_name_alias_history(
+    product_id: int,
+    client: Client = Depends(get_supabase_client),
+    alias_history_repo: ProductNameAliasHistoryRepository = Depends(
+        get_product_name_alias_history_repo
+    ),
+):
+    """製品名の表記ゆれ修正履歴を取得する（Issue #347）。
+
+    登録者（changed_by）を表示名に、トリガーとなった注文（source_order_id）を
+    注文番号に解決した集約レスポンスを返す（生の product_name_alias_history
+    ダンプではない）。
+    """
+    logger.info(f"Fetching product name alias history for product {product_id}")
+    history = alias_history_repo.get_by_product_id(product_id)
+    if not history:
+        return []
+
+    actor_ids = list({h["changed_by"] for h in history})
+    profiles_res = (
+        client.table("profiles").select("id, full_name").in_("id", actor_ids).execute()
+    )
+    profiles_map = {
+        p["id"]: p for p in cast(list[dict[str, Any]], profiles_res.data or [])
+    }
+
+    return [
+        ProductNameAliasHistoryResponse(
+            id=str(h["id"]),
+            product_id=h.get("product_id"),
+            product_name_snapshot=h["product_name_snapshot"],
+            raw_text=h["raw_text"],
+            changed_by=h["changed_by"],
+            changed_by_full_name=profiles_map.get(h["changed_by"], {}).get("full_name"),
+            action=h["action"],
+            source_order_id=h.get("source_order_id"),
+            source_order_label_snapshot=h["source_order_label_snapshot"],
+            changed_at=str(h["changed_at"]),
+        )
+        for h in history
+    ]
 
 
 @product_router.patch("/{product_id}")

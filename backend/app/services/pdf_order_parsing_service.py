@@ -8,7 +8,11 @@ from app.services.email_extraction_service import extract_email_order_lines
 from app.services.notification_service import create_notification
 from app.services.pdf_order_extraction_service import extract_order_lines
 from app.services.pdf_text_service import extract_text
-from app.services.product_matching_service import match_product_by_code, match_products
+from app.services.product_matching_service import (
+    match_product_by_alias,
+    match_product_by_code,
+    match_products,
+)
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -288,12 +292,21 @@ def _resolve_product_id(
     product_name_raw: str | None,
 ) -> int | None:
     """
+    0. product_name_aliases（過去に担当者が確定させた表記ゆれ辞書）の完全一致
+       （Issue #347。extracted_product_name と同じ値 = product_name_raw or
+       product_number_raw で検索する）
     1. products.code の完全一致
     2. products.name に対する品番文字列でのpg_trgm検索
        （code列が未整備で、name列に品番文字列が入っているテナントに対応するため）
     3. products.name に対する品名文字列でのpg_trgm検索
     の順にフォールバックして product_id を解決する。
     """
+    alias_raw_text = product_name_raw or product_number_raw
+    if alias_raw_text:
+        alias_product_id = match_product_by_alias(db, tenant_id, alias_raw_text)
+        if alias_product_id is not None:
+            return alias_product_id
+
     product_id: int | None = None
     if product_number_raw:
         product_id = match_product_by_code(db, tenant_id, product_number_raw)

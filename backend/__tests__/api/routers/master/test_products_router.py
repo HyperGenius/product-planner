@@ -3,7 +3,12 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from app.dependencies import get_current_user_id, get_product_repo, get_supabase_client
+from app.dependencies import (
+    get_current_user_id,
+    get_product_name_alias_history_repo,
+    get_product_repo,
+    get_supabase_client,
+)
 
 # テスト対象のAPIインスタンス
 from app.main import app
@@ -35,8 +40,14 @@ class TestProductRouter:
         """Supabaseクライアントのモックを作成するフィクスチャ"""
         return MagicMock()
 
+    @pytest.fixture
+    def mock_alias_history_repo(self):
+        """製品名別名履歴リポジトリのモックを作成するフィクスチャ"""
+        mock = MagicMock()
+        return mock
+
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo, mock_client):
+    def override_dependency(self, mock_repo, mock_client, mock_alias_history_repo):
         """
         テスト実行中だけ get_product_repo / get_current_user_id / get_supabase_client を差し替える。
         PATCH は is_active 更新時にロールチェックのため get_current_user_id
@@ -45,6 +56,9 @@ class TestProductRouter:
         app.dependency_overrides[get_product_repo] = lambda: mock_repo
         app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
         app.dependency_overrides[get_supabase_client] = lambda: mock_client
+        app.dependency_overrides[get_product_name_alias_history_repo] = (
+            lambda: mock_alias_history_repo
+        )
         yield
         # テスト終了後に元に戻す（重要）
         app.dependency_overrides = {}
@@ -195,6 +209,49 @@ class TestProductRouter:
 
         assert response.status_code == 403
         mock_repo.update.assert_not_called()
+
+    def test_get_product_name_alias_history_empty(self, mock_alias_history_repo):
+        """GET /{id}/aliases: 履歴が0件の場合は空配列を返すこと"""
+        product_id = 1
+        mock_alias_history_repo.get_by_product_id.return_value = []
+
+        response = client.get(f"/products/{product_id}/aliases")
+
+        assert response.status_code == 200
+        assert response.json() == []
+        mock_alias_history_repo.get_by_product_id.assert_called_with(product_id)
+
+    def test_get_product_name_alias_history_resolves_actor_name(
+        self, mock_alias_history_repo, mock_client
+    ):
+        """GET /{id}/aliases: changed_by を担当者の表示名に解決した集約レスポンスを返すこと"""
+        product_id = 1
+        mock_alias_history_repo.get_by_product_id.return_value = [
+            {
+                "id": "hist-1",
+                "product_id": product_id,
+                "product_name_snapshot": "製品A",
+                "raw_text": "セイヒンA",
+                "changed_by": "user-1",
+                "action": "created",
+                "source_order_id": 42,
+                "source_order_label_snapshot": "ORD-042",
+                "changed_at": "2026-08-19T00:00:00Z",
+            }
+        ]
+        mock_client.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
+            {"id": "user-1", "full_name": "山田太郎"}
+        ]
+
+        response = client.get(f"/products/{product_id}/aliases")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert len(result) == 1
+        assert result[0]["raw_text"] == "セイヒンA"
+        assert result[0]["changed_by_full_name"] == "山田太郎"
+        assert result[0]["source_order_id"] == 42
+        assert result[0]["source_order_label_snapshot"] == "ORD-042"
 
     def test_delete_product_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""
