@@ -72,5 +72,11 @@ export async function apiClient<T>(endpoint: string, options: FetchOptions = {})
         throw new ApiError(response.status, errorData)
     }
 
+    // 204 No Content 等、ボディを持たないレスポンスは response.json() が
+    // "Unexpected end of JSON input" で失敗するため、先に空ボディを判定する
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+        return undefined as T
+    }
+
     return response.json()
 }
