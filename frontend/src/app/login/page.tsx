@@ -30,6 +30,7 @@ export default function LoginPage() {
 
     // 信頼済み端末・PINログイン関連の状態
     const [deviceId, setDeviceId] = useState<string | null>(null)
+    const [trustedTenantId, setTrustedTenantId] = useState<string | null>(null)
     const [trustedMembers, setTrustedMembers] = useState<DeviceMemberOption[] | null>(null)
     const [selectedMember, setSelectedMember] = useState<DeviceMemberOption | null>(null)
     const [pin, setPin] = useState('')
@@ -43,6 +44,7 @@ export default function LoginPage() {
         fetchDeviceStatus(storedDeviceId)
             .then((status) => {
                 if (status.trusted && status.members.length > 0) {
+                    setTrustedTenantId(status.tenant_id)
                     setTrustedMembers(status.members)
                 }
             })
@@ -51,14 +53,17 @@ export default function LoginPage() {
             })
     }, [])
 
-    const finishLogin = async (userId: string) => {
-        const tenantId = await fetchMyTenantId(userId)
+    // tenantId を明示的に渡さない場合は、ログインユーザーの所属テナント（先頭1件）を使う。
+    // PINログイン経路では、複数テナント所属ユーザーがいた場合に誤ったテナントが
+    // 選ばれないよう、信頼済み端末が紐づくテナントIDを明示的に渡す。
+    const finishLogin = async (userId: string, tenantId?: string) => {
+        const resolvedTenantId = tenantId ?? (await fetchMyTenantId(userId))
 
-        if (!tenantId) {
+        if (!resolvedTenantId) {
             throw new Error('所属するテナントが見つかりません。管理者に連絡してください。')
         }
 
-        localStorage.setItem('currentTenantId', tenantId)
+        localStorage.setItem('currentTenantId', resolvedTenantId)
 
         toast.success('ログイン成功', {
             description: 'ダッシュボードへ移動します',
@@ -69,7 +74,7 @@ export default function LoginPage() {
 
     const handlePinLogin = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!deviceId || !selectedMember) return
+        if (!deviceId || !selectedMember || !trustedTenantId) return
         setLoading(true)
 
         try {
@@ -82,7 +87,7 @@ export default function LoginPage() {
             })
             if (setSessionError) throw setSessionError
 
-            await finishLogin(selectedMember.user_id)
+            await finishLogin(selectedMember.user_id, trustedTenantId)
         } catch (error) {
             console.error(error)
             toast.error('ログイン失敗', {

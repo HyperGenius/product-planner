@@ -79,6 +79,26 @@ def _active_trust(admin_client: Client, device_id: str) -> dict[str, Any] | None
     return row
 
 
+def _active_member_ids(
+    admin_client: Client, tenant_id: str, user_ids: set[str]
+) -> set[str]:
+    """指定したユーザーIDのうち、現在もそのテナントに所属しているものだけを返す。
+
+    member_pins はメンバー削除時に基本連動して削除されるが、それに頼らない
+    防御的なフィルタとして、PIN候補一覧・PINログインの両方で使用する。
+    """
+    if not user_ids:
+        return set()
+    res = (
+        admin_client.table("organization_members")
+        .select("user_id")
+        .eq("tenant_id", tenant_id)
+        .in_("user_id", list(user_ids))
+        .execute()
+    )
+    return {row["user_id"] for row in cast(list[dict[str, Any]], res.data or [])}
+
+
 @device_router.post("/register", response_model=DeviceRegisterResponse)
 def register_device(
     tenant_id: str = Depends(get_current_tenant_id),
@@ -166,16 +186,23 @@ def get_device_status(
         .eq("tenant_id", tenant_id)
         .execute()
     )
-    pin_user_ids = [
+    pin_user_ids = {
         row["user_id"] for row in cast(list[dict[str, Any]], pins_res.data or [])
-    ]
+    }
     if not pin_user_ids:
+        return DeviceStatusResponse(trusted=True, tenant_id=tenant_id, members=[])
+
+    # member_pins にはPIN設定後にテナントから外れたユーザーのレコードが
+    # 残っている可能性があるため、organization_members で現在も所属している
+    # ユーザーに絞り込む（Copilotレビュー指摘）
+    active_member_ids = _active_member_ids(admin_client, tenant_id, pin_user_ids)
+    if not active_member_ids:
         return DeviceStatusResponse(trusted=True, tenant_id=tenant_id, members=[])
 
     profiles_res = (
         admin_client.table("profiles")
         .select("id, full_name")
-        .in_("id", pin_user_ids)
+        .in_("id", list(active_member_ids))
         .execute()
     )
     profiles = cast(list[dict[str, Any]], profiles_res.data or [])
@@ -199,6 +226,14 @@ def pin_login(
             detail="この端末は信頼済みではありません",
         )
     tenant_id = trust["tenant_id"]
+
+    # member_pins にはPIN設定後にテナントから外れたユーザーのレコードが
+    # 残っている可能性があるため、organization_members で現在も所属している
+    # ことを確認してからPIN照合を行う（Copilotレビュー指摘）
+    if not _active_member_ids(admin_client, tenant_id, {data.user_id}):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="PINが設定されていません"
+        )
 
     pin_res = (
         admin_client.table("member_pins")

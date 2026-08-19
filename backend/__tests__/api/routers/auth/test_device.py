@@ -44,6 +44,13 @@ def _set_trust(
     mock_admin_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = data
 
 
+def _set_active_members(mock_admin_client: MagicMock, user_ids: list[str]) -> None:
+    """organization_members からの現在所属メンバー絞り込みチェーンのモックを設定する。"""
+    mock_admin_client.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value.data = [
+        {"user_id": uid} for uid in user_ids
+    ]
+
+
 @pytest.mark.api
 class TestDeviceRouterAdminEndpoints:
     """/auth/device の管理系エンドポイント（要JWT・president/platform_admin限定）のテスト"""
@@ -170,6 +177,7 @@ class TestDeviceRouterPublicEndpoints:
         mock_admin_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
             {"user_id": "user-1"}
         ]
+        _set_active_members(mock_admin_client, ["user-1"])
         mock_admin_client.table.return_value.select.return_value.in_.return_value.execute.return_value.data = [
             {"id": "user-1", "full_name": "山田太郎"}
         ]
@@ -181,6 +189,19 @@ class TestDeviceRouterPublicEndpoints:
         assert body["trusted"] is True
         assert body["tenant_id"] == "tenant-1"
         assert body["members"] == [{"user_id": "user-1", "full_name": "山田太郎"}]
+
+    def test_status_excludes_pin_of_member_no_longer_in_tenant(self, mock_admin_client):
+        """テナントを離れた後もmember_pinsが残っている場合、候補一覧から除外される"""
+        _set_trust(mock_admin_client, tenant_id="tenant-1")
+        mock_admin_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"user_id": "left-user"}
+        ]
+        _set_active_members(mock_admin_client, [])
+
+        response = client.get("/auth/device/status", params={"device_id": "trusted"})
+
+        assert response.status_code == 200
+        assert response.json()["members"] == []
 
     def test_pin_login_untrusted_device(self, mock_admin_client):
         _set_trust(mock_admin_client, found=False)
@@ -194,6 +215,7 @@ class TestDeviceRouterPublicEndpoints:
 
     def test_pin_login_no_pin_set(self, mock_admin_client):
         _set_trust(mock_admin_client)
+        _set_active_members(mock_admin_client, ["user-1"])
         mock_admin_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = None
 
         response = client.post(
@@ -203,8 +225,21 @@ class TestDeviceRouterPublicEndpoints:
 
         assert response.status_code == 401
 
+    def test_pin_login_rejected_when_no_longer_tenant_member(self, mock_admin_client):
+        """member_pinsが残っていても、テナントを離れていればPINログインできない"""
+        _set_trust(mock_admin_client)
+        _set_active_members(mock_admin_client, [])
+
+        response = client.post(
+            "/auth/device/pin-login",
+            json={"device_id": "trusted", "user_id": "left-user", "pin": "1234"},
+        )
+
+        assert response.status_code == 401
+
     def test_pin_login_locked(self, mock_admin_client):
         _set_trust(mock_admin_client)
+        _set_active_members(mock_admin_client, ["user-1"])
         locked_until = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
         mock_admin_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
             "pin_hash": bcrypt.hashpw(b"1234", bcrypt.gensalt()).decode(),
@@ -221,6 +256,7 @@ class TestDeviceRouterPublicEndpoints:
 
     def test_pin_login_wrong_pin(self, mock_admin_client):
         _set_trust(mock_admin_client)
+        _set_active_members(mock_admin_client, ["user-1"])
         mock_admin_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
             "pin_hash": bcrypt.hashpw(b"1234", bcrypt.gensalt()).decode(),
             "failed_attempts": 0,
@@ -238,6 +274,7 @@ class TestDeviceRouterPublicEndpoints:
 
     def test_pin_login_success(self, mock_admin_client):
         _set_trust(mock_admin_client, tenant_id="tenant-1")
+        _set_active_members(mock_admin_client, ["user-1"])
         mock_admin_client.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
             "pin_hash": bcrypt.hashpw(b"1234", bcrypt.gensalt()).decode(),
             "failed_attempts": 0,

@@ -1,8 +1,10 @@
 -- 共有端末向けPIN認証・端末信頼基盤 (Issue #342)
 -- 端末を信頼済み端末として登録することで、その端末上に限りPINでの
--- 操作者識別・切り替えを許可する。PINハッシュ・端末信頼レコードは
--- いずれもクライアントJWTから直接読めないようにし、全アクセスを
--- service role (admin_client) 経由のバックエンドロジックに限定する。
+-- 操作者識別・切り替えを許可する。PINハッシュ (member_pins) はクライアント
+-- JWTから直接読めないようにし、全アクセスを service role (admin_client) 経由
+-- のバックエンドロジックに限定する。端末信頼レコード (device_trust_registrations)
+-- は書き込みのみ service role 限定とし、閲覧は端末管理画面向けに
+-- president / platform_admin のJWT経由でも許可する（後述のSELECTポリシー）。
 
 CREATE TABLE device_trust_registrations (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),

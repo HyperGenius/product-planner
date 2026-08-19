@@ -117,6 +117,28 @@ class TestMembersRouter:
 
         assert response.status_code == 403
 
+    def test_delete_member_also_deletes_member_pins(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """DELETE /{user_id}: メンバー削除時にmember_pinsも削除される（Copilotレビュー指摘）
+
+        削除しないと、テナントから外れた後もPINハッシュが残り続け、共有端末の
+        PINログイン候補一覧に表示されたりPINログインが通ってしまう。
+        """
+        _set_role(mock_client, "president")
+        # 対象ユーザーの role も president 扱いになる（single()チェーンを共有するため）ので、
+        # 「最後の president を削除できない」ガードに掛からないよう人数を2人以上にしておく
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.count = 2
+
+        response = client.delete("/tenant/members/other-user-id", headers=headers)
+
+        assert response.status_code == 204
+        deleted_tables = [
+            call.args[0] for call in mock_admin_client.table.call_args_list
+        ]
+        assert "organization_members" in deleted_tables
+        assert "member_pins" in deleted_tables
+
     def test_list_members_allowed_for_platform_admin(
         self, headers, mock_client, mock_admin_client
     ):

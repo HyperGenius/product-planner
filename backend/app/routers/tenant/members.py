@@ -360,6 +360,13 @@ def delete_member(
         "tenant_id", tenant_id
     ).execute()
 
+    # member_pins を削除しておかないと、テナントから外れた後もPINハッシュが
+    # 残り続け、共有端末のPINログイン候補一覧に表示されたり、PINログインが
+    # 通ってしまう（Copilotレビュー指摘）
+    admin_client.table("member_pins").delete().eq("tenant_id", tenant_id).eq(
+        "user_id", user_id
+    ).execute()
+
 
 @member_router.patch("/me/pin", status_code=status.HTTP_204_NO_CONTENT)
 def set_my_pin(
