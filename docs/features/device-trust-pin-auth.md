@@ -93,3 +93,44 @@
 - `backend/__tests__/api/routers/auth/test_device.py`: 権限境界・端末信頼の有効/失効/期限切れ判定・PIN照合
   （成功/失敗/ロックアウト）のFunctionalテスト
 - `backend/__tests__/api/routers/tenant/test_members.py`: PIN設定・PINリセットのFunctionalテストを追加
+
+## 運用手順
+
+顧客向けの操作手順（端末登録・PIN設定・PINログイン・失効等）は、開発者向けの本ドキュメントとは
+分離し、Wikiにまとめている:
+[共有端末PIN認証 運用マニュアル](https://github.com/HyperGenius/product-planner/wiki/共有端末PIN認証-運用マニュアル)
+
+### 開発環境（ローカル動作確認）での操作
+
+顧客環境とは異なり、Docker・Supabase CLI・バックエンド/フロントエンドの起動が必要。
+
+```bash
+# 1. ローカルSupabaseを起動（初回はDocker必須）
+supabase start
+
+# 2. マイグレーション未適用の場合は反映（ローカルDBを全消去して再構築する）
+supabase db reset
+
+# 3. デモデータ投入（製品・設備・注文等。認証用テストユーザーはsupabase/seed.sqlで自動投入済み）
+cd backend
+source .venv/bin/activate
+python scripts/seed_scenario.py standard_demo
+
+# 4. バックエンド起動
+uvicorn app.main:app --reload --port 8000
+
+# 5. フロントエンド起動（別ターミナル）
+cd frontend
+npm run dev
+```
+
+- テストユーザー（`supabase/seed.sql` で自動投入、パスワードは共通で `Test123!`）:
+  `test@example.com`（president）/ `order_handler@example.com`（order_handler）/ `iso_officer@example.com`（iso_officer）
+- 上記起動後、`http://localhost:3000/login` からID/パスワードでログイン → 設定 > 端末管理 → 「この端末を信頼済みにする」→ 設定 > PIN設定、で顧客環境と同じ手順をローカルでも再現できる。
+- バックエンドの自動テストのみで確認する場合はサーバー起動不要:
+  ```bash
+  cd backend
+  pytest __tests__/unit/ __tests__/api/          # DB不要
+  pytest __tests__/integration/ --run-integration # ローカルSupabase起動が必要
+  ```
+- 動作確認後にローカルDBをクリーンな状態へ戻す場合は `supabase db reset` を再実行し、必要に応じて手順3のシードを再投入する（本番Supabaseに対しては絶対に実行しないこと。CLAUDE.mdの本番接続手順を参照）。
