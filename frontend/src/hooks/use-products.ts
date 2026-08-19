@@ -2,7 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
-import type { Product, ProductCreate, ProductUpdate } from "@/types/product"
+import type {
+  Product,
+  ProductCreate,
+  ProductNameAliasHistoryEntry,
+  ProductUpdate,
+} from "@/types/product"
 
 // クエリキーを定数化
 export const PRODUCTS_QUERY_KEY = ["products"]
@@ -70,6 +75,18 @@ export function useDeleteProduct() {
       // 製品一覧を再取得
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
     },
+  })
+}
+
+/**
+ * 製品名の表記ゆれ修正履歴を取得するフック（Issue #347）
+ */
+export function useProductNameAliasHistory(productId: number | null) {
+  return useQuery<ProductNameAliasHistoryEntry[]>({
+    queryKey: ["products", productId, "aliases"],
+    queryFn: () =>
+      apiClient<ProductNameAliasHistoryEntry[]>(`/products/${productId}/aliases`),
+    enabled: productId !== null,
   })
 }
 

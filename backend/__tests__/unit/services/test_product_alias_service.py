@@ -1,0 +1,178 @@
+from unittest.mock import MagicMock
+
+import pytest
+from app.services.product_alias_service import record_correction_if_applicable
+from postgrest.exceptions import APIError
+
+_ALIASES = "product_name_aliases"
+_HISTORY = "product_name_alias_history"
+_PRODUCTS = "products"
+
+
+@pytest.mark.unit
+class TestRecordCorrectionIfApplicable:
+    def _mock_db(self, existing_alias_rows=None, product_name="製品A"):
+        """テーブル名ごとに独立したモックを返す db クライアント。
+
+        MagicMock().table("x") と .table("y") は既定では同一の子モックを
+        返してしまい、テーブルを跨いだ呼び出し（product_name_aliases /
+        product_name_alias_history / products）を区別できないため、
+        テーブル名で分岐する side_effect を設定する。
+        """
+        tables: dict[str, MagicMock] = {
+            _ALIASES: MagicMock(),
+            _HISTORY: MagicMock(),
+            _PRODUCTS: MagicMock(),
+        }
+
+        tables[_ALIASES].select().eq().eq().execute.return_value = MagicMock(
+            data=existing_alias_rows or []
+        )
+        tables[_PRODUCTS].select().eq().single().execute.return_value = MagicMock(
+            data={"name": product_name}
+        )
+
+        mock_db = MagicMock()
+        mock_db.table.side_effect = lambda name: tables[name]
+        mock_db._tables = tables
+        return mock_db
+
+    def test_skips_when_source_type_is_not_email(self):
+        mock_db = self._mock_db()
+        order_before = {"id": 1, "product_id": 1}
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "manual",
+            "extracted_product_name": "製品A",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-1"
+        )
+
+        mock_db._tables[_HISTORY].insert.assert_not_called()
+
+    def test_skips_when_extracted_product_name_missing(self):
+        mock_db = self._mock_db()
+        order_before = {"id": 1, "product_id": 1}
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "email",
+            "extracted_product_name": None,
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-1"
+        )
+
+        mock_db._tables[_HISTORY].insert.assert_not_called()
+
+    def test_skips_when_product_id_unchanged(self):
+        mock_db = self._mock_db()
+        order_before = {"id": 1, "product_id": 2}
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "email",
+            "extracted_product_name": "製品A",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-1"
+        )
+
+        mock_db._tables[_HISTORY].insert.assert_not_called()
+
+    def test_creates_alias_and_history_when_new(self):
+        mock_db = self._mock_db(existing_alias_rows=[])
+        order_before = {"id": 1, "product_id": None}
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "order_number": "ORD-001",
+            "source_type": "email",
+            "extracted_product_name": "  セイヒンA  ",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-1"
+        )
+
+        alias_insert_call = mock_db._tables[_ALIASES].insert.call_args
+        assert alias_insert_call.args[0]["raw_text"] == "セイヒンA"
+        assert alias_insert_call.args[0]["product_id"] == 2
+        assert alias_insert_call.args[0]["created_by"] == "user-1"
+
+        history_insert_call = mock_db._tables[_HISTORY].insert.call_args
+        history_data = history_insert_call.args[0]
+        assert history_data["action"] == "created"
+        assert history_data["raw_text"] == "セイヒンA"
+        assert history_data["product_name_snapshot"] == "製品A"
+        assert history_data["source_order_id"] == 1
+        assert history_data["source_order_label_snapshot"] == "ORD-001"
+        assert history_data["changed_by"] == "user-1"
+
+    def test_updates_existing_alias_when_raw_text_already_registered(self):
+        mock_db = self._mock_db(existing_alias_rows=[{"id": "alias-1"}])
+        order_before = {"id": 1, "product_id": 3}
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "email",
+            "extracted_product_name": "セイヒンA",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-1"
+        )
+
+        mock_db._tables[_ALIASES].insert.assert_not_called()
+        mock_db._tables[_ALIASES].update.assert_called_with(
+            {"product_id": 2, "created_by": "user-1"}
+        )
+
+        history_insert_call = mock_db._tables[_HISTORY].insert.call_args
+        assert history_insert_call.args[0]["action"] == "updated"
+
+    def test_concurrent_insert_conflict_falls_back_to_update(self):
+        mock_db = self._mock_db(existing_alias_rows=[])
+        mock_db._tables[_ALIASES].insert.side_effect = APIError(
+            {"code": "23505", "message": "duplicate key"}
+        )
+        order_before = None
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "source_type": "email",
+            "extracted_product_name": "セイヒンA",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", order_before, order_after, "user-1"
+        )
+
+        mock_db._tables[_ALIASES].update.assert_called_with(
+            {"product_id": 2, "created_by": "user-1"}
+        )
+        history_insert_call = mock_db._tables[_HISTORY].insert.call_args
+        assert history_insert_call.args[0]["action"] == "updated"
+
+    def test_order_before_none_records_created_action(self):
+        """split_order のような新規作成経路（order_before なし）でも記録されること"""
+        mock_db = self._mock_db(existing_alias_rows=[])
+        order_after = {
+            "id": 5,
+            "product_id": 9,
+            "source_type": "email",
+            "extracted_product_name": "セイヒンB",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", None, order_after, "user-1"
+        )
+
+        history_insert_call = mock_db._tables[_HISTORY].insert.call_args
+        assert history_insert_call.args[0]["action"] == "created"
+        assert history_insert_call.args[0]["source_order_label_snapshot"] == "注文 #5"

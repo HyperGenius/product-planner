@@ -48,6 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
+import { ProductNameAliasHistoryDialog } from "@/components/product-name-alias-history-dialog"
 import { MasterPagination } from "@/components/master-pagination"
 
 const PAGE_SIZE = 20
@@ -72,6 +73,7 @@ export default function ProductsPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isRoutingsDialogOpen, setIsRoutingsDialogOpen] = useState(false)
+  const [isAliasHistoryDialogOpen, setIsAliasHistoryDialogOpen] = useState(false)
   const [isToggleActiveDialogOpen, setIsToggleActiveDialogOpen] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [toggleActiveTarget, setToggleActiveTarget] = useState<Product | null>(null)
@@ -178,6 +180,11 @@ export default function ProductsPage() {
   const handleOpenRoutingsDialog = (product: Product) => {
     setSelectedProduct(product)
     setIsRoutingsDialogOpen(true)
+  }
+
+  const handleOpenAliasHistoryDialog = (product: Product) => {
+    setSelectedProduct(product)
+    setIsAliasHistoryDialogOpen(true)
   }
 
   const handleOpenToggleActiveDialog = (product: Product) => {
@@ -405,6 +412,9 @@ export default function ProductsPage() {
                             <DropdownMenuItem onClick={() => handleOpenRoutingsDialog(product)}>
                               工程管理
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleOpenAliasHistoryDialog(product)}>
+                              表記ゆれ履歴
+                            </DropdownMenuItem>
                             {isAdmin && (
                               <DropdownMenuItem onClick={() => handleOpenToggleActiveDialog(product)}>
                                 {product.is_active ? "無効化" : "有効化"}
@@ -593,6 +603,13 @@ export default function ProductsPage() {
         product={selectedProduct}
         open={isRoutingsDialogOpen}
         onOpenChange={setIsRoutingsDialogOpen}
+      />
+
+      {/* 表記ゆれ履歴ダイアログ */}
+      <ProductNameAliasHistoryDialog
+        product={selectedProduct}
+        open={isAliasHistoryDialogOpen}
+        onOpenChange={setIsAliasHistoryDialogOpen}
       />
     </div>
   )

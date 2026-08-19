@@ -274,6 +274,30 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 - `extracted_product_name` または `deadline_date` が NULL で重複判定に使える
   情報が無い場合は、常に新規行として挿入する（重複を許容する）
 
+### 製品名の表記ゆれ辞書による自動補完（Issue #347）
+
+製品未マッチ（Issue #296）や誤マッチの原因の多くは、メール本文中の製品名表記が
+`products.name`/`products.code` と完全一致しない「表記ゆれ」であり、担当者が
+下書きの `product_id` を選び直すことで都度手動修正されていた。この修正結果を
+「生テキスト（`raw_text` = `extracted_product_name` と同じ値）→ 製品」の対応と
+して `product_name_aliases` テーブルへ蓄積し、以後の自動マッチングに活用する。
+
+- `_resolve_product_id()`（`pdf_order_parsing_service.py`）は
+  `match_product_by_alias()`（`product_matching_service.py`）による別名辞書の
+  完全一致検索を、`products.code` 完全一致・pg_trgm 曖昧検索よりも前段で行う。
+  一致すればそれを最上位の確度として即採用し、以降の照合はスキップする
+- 別名の記録は `backend/app/services/product_alias_service.py` の
+  `record_correction_if_applicable()` が担い、`PATCH /orders/{id}` と
+  `POST /orders/{id}/split` の両経路（`orders.py`）から呼ばれる。対象注文が
+  `source_type='email'` かつ `extracted_product_name` が設定されている場合のみ、
+  修正前後で `product_id` が変化したときに発火する（手動起票の注文編集では
+  発火しない）
+- 別名登録自体は承認不要（`order_handler` 権限で完結）だが、
+  `product_name_alias_history` に「いつ・誰が・どの注文をトリガに」修正したかを
+  追記のみで記録する。詳細なテーブル定義・履歴閲覧APIは
+  [product-master.md](./product-master.md#別名辞書-product_name_aliasesissue-347)
+  を参照
+
 ---
 
 ## DB スキーマ変更
@@ -316,6 +340,17 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 | `completed`  | 完了                 |
 | `canceled`   | キャンセル           |
 
+`supabase/migrations/20260819000001_add_product_name_aliases.sql`（Issue #347）:
+
+- 新規テーブル `product_name_aliases`: `id, tenant_id, product_id (FK, ON DELETE
+  CASCADE), raw_text, created_by, created_at, updated_at`。`(tenant_id, raw_text)`
+  UNIQUE。同一 `raw_text` への再修正は UPSERT（上書き）する
+- 新規テーブル `product_name_alias_history`: `id, tenant_id, product_id (FK, ON
+  DELETE SET NULL), product_name_snapshot, raw_text, changed_by, changed_at,
+  action ('created'/'updated'), source_order_id (FK, ON DELETE SET NULL),
+  source_order_label_snapshot`。追記のみ（UPDATE/DELETEしない）
+- 両テーブルとも RLS (`is_tenant_member(tenant_id)`) を設定
+
 `supabase/migrations/20260712000000_add_orders_dedupe_key_unmatched_product.sql`（Issue #296）:
 
 - 部分UNIQUE制約 `orders_dedupe_key_unmatched_product`（`product_id IS NULL` の行専用）を追加
@@ -352,12 +387,22 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   - `validate_cron_secret(request)`（`gmail_poll.py` と共通化）
 - `backend/app/routers/cron/parse_order_pdfs.py`
   - `GET /api/cron/parse-order-pdfs`
+- `supabase/migrations/20260819000001_add_product_name_aliases.sql`（Issue #347）
+- `backend/app/services/product_alias_service.py`（Issue #347）
+  - `record_correction_if_applicable(client, tenant_id, order_before, order_after, changed_by)`
+- `backend/app/repositories/supa_infra/master/product_name_alias_repo.py`（Issue #347）
+  - `ProductNameAliasHistoryRepository`
 
 ### 既存ファイルへの追加
 
-- `backend/app/services/product_matching_service.py`: `match_product_by_code()` を追加
+- `backend/app/services/product_matching_service.py`: `match_product_by_code()` を追加。
+  `match_product_by_alias()` を追加（Issue #347）
 - `backend/app/services/attachment_service.py`: `download_attachment()` を追加
-- `backend/app/repositories/supa_infra/common/table_name.py`: `ORDER_PARSE_LOG` を追加
+- `backend/app/repositories/supa_infra/common/table_name.py`: `ORDER_PARSE_LOG` を追加。
+  `PRODUCT_NAME_ALIASES` / `PRODUCT_NAME_ALIAS_HISTORY` を追加（Issue #347）
+- `backend/app/routers/transaction/orders.py`: `update_order` / `split_order` に
+  `record_correction_if_applicable()` の呼び出しを追加（Issue #347）
+- `backend/app/routers/master/products.py`: `GET /products/{product_id}/aliases` を追加（Issue #347）
 - `backend/requirements.txt`: `pdfplumber==0.11.10`
 
 Issue #252 での追加:
@@ -502,6 +547,16 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
 - [x] 暗号化PDF・画像PDFで解析自体に失敗した場合も、顧客IDのみで
       `product_id`/`quantity`/`deadline_date` が `NULL` の下書き order が起票される
       （Issue #304）
+- [x] `product_name_aliases` / `product_name_alias_history` テーブルがマイグレーションで
+      追加され、RLS が設定されている（Issue #347）
+- [x] メール起票下書きの `product_id` 修正時（`PATCH /orders/{id}` /
+      `POST /orders/{id}/split` の両方）に、共通サービス関数経由で別名が
+      自動記録される。手動起票の注文編集では記録されない（Issue #347）
+- [x] 同一 `raw_text` への再修正時に履歴が追記され、`product_name_aliases` には
+      最新の対応が反映される（Issue #347）
+- [x] `product_matching_service` が別名辞書を pg_trgm より優先的に参照する（Issue #347）
+- [x] `GET /master/products/{product_id}/aliases` が登録者表示名・トリガー注文情報を
+      含む集約レスポンスを返す（Issue #347）
 
 ### 手動分割UI（Issue #280 Phase3）
 
@@ -652,3 +707,4 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 - [order-attachments.md](order-attachments.md): PDFステージング保存基盤（Issue #248、前提）
 - Issue #252: 既存orderのupsert処理（内示→確定の昇格・数量更新対応）。本ドキュメントに統合
 - [notifications.md](notifications.md): 処理ログの通知UI（Issue #254、`order_parse_log` を利用）
+- [product-master.md](product-master.md#別名辞書-product_name_aliasesissue-347): 製品名の表記ゆれ辞書・修正履歴管理（Issue #347）

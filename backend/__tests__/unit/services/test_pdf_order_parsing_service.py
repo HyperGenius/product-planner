@@ -8,6 +8,19 @@ from app.services.pdf_order_parsing_service import (
 from app.services.pdf_text_service import PdfTextResult
 
 
+@pytest.fixture(autouse=True)
+def _no_alias_match():
+    """product_name_aliases による完全一致（Issue #347）を既定で無効化し、
+    既存テストが pg_trgm・品番一致のフォールバック経路を検証できるようにする。
+    別名一致自体を検証するテストでは個別に return_value を上書きする。
+    """
+    with patch(
+        "app.services.pdf_order_parsing_service.match_product_by_alias",
+        return_value=None,
+    ) as mock_alias:
+        yield mock_alias
+
+
 @pytest.mark.unit
 class TestParsePendingOrderPdfs:
     def _staging_row(self, **overrides):
@@ -398,6 +411,38 @@ class TestProcessLineItem:
         assert rpc_params["p_product_id"] is None
         # extracted_product_name は TRIM() のみ行い、それ以外の正規化はしない
         assert rpc_params["p_extracted_product_name"] == "謎の製品"
+
+    def test_alias_exact_match_takes_priority_over_code_and_trgm(self, _no_alias_match):
+        """product_name_aliases の完全一致（Issue #347）は products.code の完全一致
+        や pg_trgm 検索より優先され、一致すればそれらはスキップされること。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+        _no_alias_match.return_value = 4242
+        line = {
+            "product_name_raw": "謎の表記ゆれ製品",
+            "product_number_raw": None,
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "confirmed",
+        }
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+            ) as mock_code,
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+            ) as mock_trgm,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), line)
+
+        assert created is True
+        mock_code.assert_not_called()
+        mock_trgm.assert_not_called()
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] == 4242
 
     def test_falls_back_to_name_search_using_product_number_raw(self):
         """
