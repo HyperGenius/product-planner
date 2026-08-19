@@ -4,39 +4,8 @@
 
 `backend/scripts/create_tenant.py` は、新規顧客テナントを本番 Supabase へコマンド一発で作成する CLI スクリプト。
 
-## 使い方
-
-```bash
-cd backend
-python scripts/create_tenant.py \
-  --company-name "株式会社〇〇" \
-  --owner-email "xxx@example.com" \
-  --owner-name "山田太郎"
-```
-
-### 出力例
-
-```
-=== テナント作成完了 ===
-テナント名  : 株式会社〇〇
-テナント ID : xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-ユーザー ID : yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
-メール     : xxx@example.com
-初期パスワード: Xy7#mK2pQ9!rNvLw
-======================
-※ 初期パスワードを安全に顧客へ伝達してください
-```
-
-初期パスワードは **標準出力のみ** に表示される。ファイルには保存されない。
-
-## 必要な環境変数
-
-| 変数名 | 説明 |
-|---|---|
-| `SUPABASE_URL` | 本番 Supabase の URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service Role Key |
-
-`backend/.env` に設定するか、環境変数として渡す。
+使い方・出力例・必要な環境変数などの運用手順は Wiki にまとめている:
+[新規テナントオンボーディング手順](https://github.com/HyperGenius/product-planner/wiki/新規テナントオンボーディング手順)
 
 ## 処理フロー
 

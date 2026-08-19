@@ -100,3 +100,8 @@ cd backend && ruff check . && mypy .
 ### Pull Requestのルール
 - 作業が完了したらプルリクエストを作成すること
 - プルリクエストを作成したら必ず `docs/features` ディレクトリ内の該当ドキュメントを更新すること
+
+### ドキュメントの配置方針（`docs/features` と Wiki の使い分け）
+- `docs/features/`: 開発者向けドキュメント。実装（エンドポイント・ファイルパス・データモデル等）と結びつく内容はここに書き、コード変更と同じPRでレビュー・更新する
+- [Wiki](https://github.com/HyperGenius/product-planner/wiki): 顧客・現場担当者向けの運用マニュアル（操作手順書等）。`docs/features` は開発者が読むには数が多くなりすぎるため、対象読者が非エンジニアの手順書はWikiに分離する。PRレビュー対象外のため、コードと無関係に随時更新してよい
+- 機能追加時に両方の対象読者向けドキュメントが必要な場合は、`docs/features/` 側に該当Wikiページへのリンクを記載すること（例: [docs/features/device-trust-pin-auth.md](docs/features/device-trust-pin-auth.md)）
