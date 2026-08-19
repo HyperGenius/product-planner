@@ -15,6 +15,8 @@ import {
   Users,
   Settings,
   ClipboardList,
+  Laptop,
+  KeyRound,
 } from "lucide-react"
 
 import {
@@ -92,6 +94,16 @@ const menuItems: MenuItem[] = [
         title: "メンバー管理",
         url: "/settings/members",
         icon: Users,
+      },
+      {
+        title: "端末管理",
+        url: "/settings/devices",
+        icon: Laptop,
+      },
+      {
+        title: "PIN設定",
+        url: "/settings/pin",
+        icon: KeyRound,
       },
     ],
   },

@@ -201,3 +201,49 @@ class TestMembersRouter:
         response = client.get("/tenant/members/me", headers=headers)
 
         assert response.status_code == 403
+
+    def test_set_my_pin_success(self, headers, mock_client, mock_admin_client):
+        """PATCH /me/pin: 自分自身のPINを設定できる（ロール制限なし）"""
+        _set_role(mock_client, "order_handler")
+
+        response = client.patch(
+            "/tenant/members/me/pin", json={"pin": "1234"}, headers=headers
+        )
+
+        assert response.status_code == 204
+        (upsert_payload,), _ = mock_admin_client.table.return_value.upsert.call_args
+        assert upsert_payload["user_id"] == "test-user-id"
+        assert upsert_payload["pin_hash"] != "1234"
+
+    def test_set_my_pin_rejects_non_digit(self, headers, mock_client):
+        """PATCH /me/pin: 4桁の数字以外は422"""
+        _set_role(mock_client, "order_handler")
+
+        response = client.patch(
+            "/tenant/members/me/pin", json={"pin": "abcd"}, headers=headers
+        )
+
+        assert response.status_code == 422
+
+    def test_reset_member_pin_forbidden_for_order_handler(self, headers, mock_client):
+        """POST /{user_id}/pin/reset: president / platform_admin 以外は403"""
+        _set_role(mock_client, "order_handler")
+
+        response = client.post(
+            "/tenant/members/other-user-id/pin/reset", headers=headers
+        )
+
+        assert response.status_code == 403
+
+    def test_reset_member_pin_allowed_for_president(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /{user_id}/pin/reset: president は他メンバーのPINを削除できる"""
+        _set_role(mock_client, "president")
+
+        response = client.post(
+            "/tenant/members/other-user-id/pin/reset", headers=headers
+        )
+
+        assert response.status_code == 204
+        mock_admin_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.assert_called_once()
