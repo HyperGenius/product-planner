@@ -80,7 +80,8 @@ export default function ProductsPage() {
   const [productName, setProductName] = useState("")
   const [productCode, setProductCode] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  // 既定は有効な製品のみ表示。無効な製品は明示的にフィルタを切り替えたときだけ見える
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
 
   const { data: products, isLoading, error } = useProducts()
   const { data: currentMember } = useCurrentMember()
@@ -147,6 +148,14 @@ export default function ProductsPage() {
     params.set("page", String(targetPage))
     router.replace(`/master/products?${params.toString()}`)
   }, [highlightId, filteredProducts, page, searchParams, router])
+
+  // highlight 対象が無効な製品（既定フィルタでは非表示）なら、その行を見せるため
+  // フィルタを「すべて」に切り替える。注文詳細などからの導線を成立させる
+  useEffect(() => {
+    if (!highlightId || !products) return
+    const target = products.find((p) => p.id === highlightId)
+    if (target && !target.is_active) setStatusFilter("all")
+  }, [highlightId, products])
 
   // highlight 対象行へスクロール
   useEffect(() => {
@@ -431,7 +440,7 @@ export default function ProductsPage() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-10">
-                    {searchQuery || statusFilter !== "all"
+                    {searchQuery || statusFilter !== "active"
                       ? "条件に一致する製品がありません"
                       : "製品がありません"}
                   </TableCell>
