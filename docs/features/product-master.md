@@ -86,7 +86,7 @@ const displayName = product.code ? product.name : null  // 品名として表示
 |---|---|---|
 | 編集 | 全員 | 図番・品名を変更するダイアログ（作成・編集とも 図番=`code` / 品名=`name` に統一。作成時は図番必須、編集時は品名必須） |
 | 工程管理 | 全員 | 製造工程ルーティングを管理（`ProductRoutingsDialog`） |
-| 表記ゆれ履歴 | 全員 | メール起票時の製品名表記ゆれ修正履歴を表示（`ProductNameAliasHistoryDialog`、#347） |
+| 表記ゆれ履歴 | 全員 | メール起票時の製品名表記ゆれ修正履歴を表示。自動マッチ由来の未検証エントリには「未確認」バッジを表示し、その場で別製品への付け替え・削除ができる（`ProductNameAliasHistoryDialog`、#347 / #350 / #351） |
 | 有効化 / 無効化 | admin のみ | 確認モーダル経由で状態変更 |
 | 削除 | admin のみ | 確認ダイアログ付き（取り消し不可） |
 
@@ -108,10 +108,11 @@ const displayName = product.code ? product.name : null  // 品名として表示
 | `frontend/src/hooks/use-tenant-members.ts` | `useCurrentMember()` フック（権限制御） |
 | `frontend/src/components/master-pagination.tsx` | 共通ページネーション |
 | `frontend/src/components/product-routings-dialog.tsx` | 工程管理ダイアログ |
-| `frontend/src/components/product-name-alias-history-dialog.tsx` | 表記ゆれ履歴ダイアログ（#347） |
+| `frontend/src/components/product-name-alias-history-dialog.tsx` | 表記ゆれ履歴ダイアログ。未確認バッジ・付け替え/削除アクション（#347 / #350 / #351） |
 | `frontend/src/components/product-selector.tsx` | 受注入力の製品選択（有効製品のみ表示） |
-| `backend/app/routers/master/products.py` | REST API エンドポイント（`GET /products/{id}/aliases` を含む） |
-| `backend/app/services/product_alias_service.py` | 製品名別名の記録サービス（#347） |
+| `backend/app/routers/master/products.py` | REST API エンドポイント（`GET` / `PATCH` / `DELETE /products/{id}/aliases[/{alias_id}]` を含む） |
+| `backend/app/services/product_alias_service.py` | 製品名別名の記録サービス（#347 / #350 / #351） |
+| `backend/app/repositories/supa_infra/master/product_name_alias_repo.py` | `product_name_aliases` / `product_name_alias_history` のリポジトリ |
 
 ## 工程ルーティング (process_routings)
 
@@ -151,7 +152,10 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 
 ---
 
-## 別名辞書 (product_name_aliases)（Issue #347 / 顧客スコープ化: Issue #349）
+## 別名辞書 (product_name_aliases)
+
+<!-- 関連 Issue: #347（基本実装）/ #349（顧客スコープ化）/ #350（由来記録・承認依頼時の自動反映）/ #351（製品マスタからの直接編集・削除） -->
+
 
 メールから受注下書きを自動起票する際に製品名の表記ゆれで未マッチ・誤マッチと
 なった明細を、担当者（`order_handler`）が下書きの `product_id` を選び直すことで
@@ -169,30 +173,52 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 下書き顧客（`customers.status='draft'`）でも別名登録は行い、顧客が後日「正規顧客」に
 確定されても `customer_id` は不変のため別名は引き継がれる。
 
+### 由来（source, Issue #350）
+
+別名エントリ・履歴に `source` を持たせ、対応関係がどの程度確からしいかを区別する。
+
+| 値 | 意味 |
+|---|---|
+| `manual_correction` | 担当者が下書き注文の `product_id` を明示的に修正した、または製品マスタから直接付け替えた。人間の確認済み |
+| `auto_match_unreviewed` | pg_trgm 自動マッチのまま担当者が承認依頼を送信した（#350）。担当者の目は通ったが明示的な修正・確認はしていない推定値 |
+
+同一キー（`(tenant_id, customer_id, raw_text)`）への UPSERT 時の `source` の扱い:
+
+- `manual_correction` は常に優先（既存が `auto_match_unreviewed` なら格上げする）
+- `auto_match_unreviewed` は既存 `manual_correction` を格下げしない（`product_id` の更新はするが `source` は据え置き）
+
 ### データモデル
 
 | テーブル | カラム | 説明 |
 |---|---|---|
-| `product_name_aliases` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE CASCADE`, `NOT NULL`), `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `created_by`, `created_at`, `updated_at` | `(tenant_id, customer_id, raw_text)` ごとに最新の対応を1件保持（`raw_text` は `extracted_product_name` と同じ `TRIM()` のみの正規化）。`(tenant_id, customer_id, raw_text)` UNIQUE。同一キーへの再修正は UPSERT（上書き） |
-| `product_name_alias_history` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE SET NULL`), `customer_name_snapshot`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除・顧客削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（顧客名・製品表示名・注文ラベル）を保持する |
+| `product_name_aliases` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE CASCADE`, `NOT NULL`), `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `source` (`manual_correction`/`auto_match_unreviewed`, 既定 `manual_correction`), `created_by`, `created_at`, `updated_at` | `(tenant_id, customer_id, raw_text)` ごとに最新の対応を1件保持（`raw_text` は `extracted_product_name` と同じ `TRIM()` のみの正規化）。`(tenant_id, customer_id, raw_text)` UNIQUE。同一キーへの再修正は UPSERT（上書き） |
+| `product_name_alias_history` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE SET NULL`), `customer_name_snapshot`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`/`deleted`), `source` (`manual_correction`/`auto_match_unreviewed`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除・顧客削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（顧客名・製品表示名・注文ラベル）を保持する。製品マスタからの直接編集・削除は `source_order_id=NULL`、`source_order_label_snapshot` に「製品マスタからの直接修正 / 直接削除」を入れる |
+
+`orders` にも `product_id_manually_corrected boolean NOT NULL DEFAULT false` を追加（#350）。
+`PATCH /orders/{id}` で `product_id` が変更されたら `true` にし、一度 `true` になったら
+`false` へは戻さない。承認依頼時の自動反映フックはこのフラグで二重記録を防ぐ。
 
 ### 記録経路
 
-`backend/app/services/product_alias_service.py` の
-`record_correction_if_applicable(client, tenant_id, order_before, order_after, changed_by)`
-が唯一の記録経路。以下の2箇所（`backend/app/routers/transaction/orders.py`）から
-呼ばれる。今後 `orders.product_id` を更新する処理を追加する場合も、この関数を
-通すこと（登録漏れ防止のため個別実装しない）。
+`backend/app/services/product_alias_service.py` に集約。`orders.product_id` を更新する
+処理を追加する場合も、これらの関数を通すこと（登録漏れ防止のため個別実装しない）。
 
-- `PATCH /orders/{id}`（`update_order`）: 修正前後の `product_id` が異なる場合
-- `POST /orders/{id}/split`（`split_order`）: 分割後の各明細に `product_id` が
-  設定される場合（元の下書きの `extracted_product_name` を明細ごとに引き継ぐ）
+| 関数 | 呼び出し元 | `source` |
+|---|---|---|
+| `record_correction_if_applicable(client, tenant_id, order_before, order_after, changed_by)` | `PATCH /orders/{id}`（`update_order`）で修正前後の `product_id` が異なる場合 / `POST /orders/{id}/split`（`split_order`）で分割後の各明細に `product_id` が設定される場合 | `manual_correction` |
+| `record_auto_match_alias_if_applicable(client, tenant_id, order, changed_by)` | `POST /orders/{id}/request-approval`（`request_order_approval`）。ステータス更新・通知の後に呼ぶ | `auto_match_unreviewed` |
+| `record_direct_alias_change(client, tenant_id, *, alias_row, action, changed_by, target_product_id=None)` | 製品マスタからの `PATCH` / `DELETE /products/{id}/aliases/{alias_id}`（#351） | 付け替えは `manual_correction`、削除は削除対象の `source` を保持 |
+
+注文経由の2関数（`record_correction_if_applicable` / `record_auto_match_alias_if_applicable`）は
+注文本体の更新とは別トランザクションのベストエフォート処理で、例外は送出せずログのみ。
+`record_direct_alias_change` はエンドポイントの主目的そのものの監査記録のため例外を伝播させる。
 
 発火条件（いずれかに該当する場合は記録しない）:
 
 - 対象注文の `source_type` が `email` 以外（手動起票の注文編集では発火しない）
-- `extracted_product_name` が未設定
-- 変更前後の `product_id` が同一（実質的な修正でない）
+- `extracted_product_name` が未設定 / `customer_id` が未設定
+- （手動修正）変更前後の `product_id` が同一（実質的な修正でない）
+- （承認依頼）`product_id_manually_corrected=true`（#347 の PATCH フックで既に `manual_correction` として記録済み。二重記録防止）
 
 ### マッチングへの反映
 
@@ -203,14 +229,29 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 場合に他顧客の別名へフォールバックはしない**（誤爆防止。従来通り `products.code`
 完全一致 → pg_trgm 曖昧検索へフォールバックする）。
 
-### 履歴の閲覧
+### 履歴の閲覧・直接編集（Issue #351）
 
 `GET /products/{product_id}/aliases` が `product_name_alias_history` の生データ
 ではなく、`changed_by` を担当者の表示名に、`source_order_id` を注文へのリンクに
-解決した集約レスポンスを返す（`customer_id` / `customer_name_snapshot` も含む）。
+解決した集約レスポンスを返す（`customer_id` / `customer_name_snapshot` / `source` も含む）。
+現在も有効な別名（`product_name_aliases` に行が残り、かつこの製品を指している）に
+ついては、その**最新の履歴行にのみ `alias_id`** を付与する（過去行・付け替え済み・
+削除済みには付かない）。
+
 フロントエンドは製品マスタのケバブメニュー「表記ゆれ履歴」から
 `ProductNameAliasHistoryDialog`（`useProductNameAliasHistory` フック）で一覧表示し、
-顧客名列の表示と顧客での絞り込みができる。
+顧客名列の表示と顧客での絞り込みができる。`source='auto_match_unreviewed'` の行には
+「未確認」バッジを表示。`alias_id` のある行では以下を承認フロー無し・`order_handler`
+権限で実行できる（#347 の「別名登録に承認不要」方針を踏襲）:
+
+- **別製品へ付け替え**: `PATCH /products/{product_id}/aliases/{alias_id}`（body `{ "product_id": <付け替え先> }`）。
+  `alias_row.source` を `manual_correction` に更新し、履歴に `action='updated'` を追記
+- **削除**: `DELETE /products/{product_id}/aliases/{alias_id}`。確認ダイアログ必須。
+  `product_name_aliases` の行のみ削除し、履歴に `action='deleted'` を残す。以後その
+  `raw_text` は辞書ヒットせず通常のマッチング（`products.code` 完全一致 → pg_trgm）に
+  フォールバックする
+
+いずれも URL の `product_id` が別名の現在の向き先と一致しない場合は 404。
 
 ---
 
@@ -226,4 +267,6 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #310 | フィルタ変更時に `page` を1にリセットするよう修正（Issue #309） |
 | #347 | メール起票の製品名修正結果を別名辞書（`product_name_aliases`）として蓄積・履歴管理する機能を追加（Issue #347） |
 | #349 | 別名辞書を顧客単位でスコープ（`customer_id` 追加・UNIQUE を `(tenant_id, customer_id, raw_text)` に変更）。他顧客の別名へフォールバックしない。履歴に `customer_id` / `customer_name_snapshot` を追加し画面で顧客ごとに確認可能に（Issue #349） |
+| #350 | 承認依頼（`POST /orders/{id}/request-approval`）時、自動マッチのままの対応も別名辞書へ反映。別名・履歴に由来 `source`（`manual_correction` / `auto_match_unreviewed`）を追加、`orders.product_id_manually_corrected` フラグで二重記録を防止。UI に「未確認」バッジ（Issue #350） |
+| #351 | 製品マスタの表記ゆれ履歴から別名エントリを直接付け替え（`PATCH`）・削除（`DELETE /products/{id}/aliases/{alias_id}`）できるように。`president` 承認不要。履歴 `action` に `deleted` を追加、削除しても監査履歴は保持（Issue #351） |
 | #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化。作成ダイアログが `name`/`code` を旧UI前提で逆に書き込んでいた不整合を修正し、作成・編集とも 図番=`code` / 品名=`name` にラベル・バリデーション・ペイロードを統一。編集で図番を空にした場合は空文字ではなく `null` を送る（`UNIQUE(tenant_id, code)` 対策）。読み取りモデル `Product.code` / フロント型 / `ProductUpdate.code` を nullable にし、作成時のみ `code` 必須（`ProductCreateSchema`）。突合スクリプトは CSV の図番重複を正規化キーで判定して非決定的 UPDATE を防止（Issue #352） |

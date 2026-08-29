@@ -11,6 +11,7 @@ from app.repositories.supa_infra import (
     OrderApprovalLogRepository,
     OrderRepository,
     ProductNameAliasHistoryRepository,
+    ProductNameAliasRepository,
     ProductRepository,
     ScheduleRepository,
 )
@@ -152,6 +153,13 @@ def get_product_name_alias_history_repo(
 ) -> ProductNameAliasHistoryRepository:
     """製品名の表記ゆれ修正履歴リポジトリを取得する。"""
     return ProductNameAliasHistoryRepository(client)
+
+
+def get_product_name_alias_repo(
+    client: Client = Depends(get_supabase_client),
+) -> ProductNameAliasRepository:
+    """製品名の表記ゆれ辞書リポジトリを取得する（Issue #351）。"""
+    return ProductNameAliasRepository(client)
 
 
 def get_equipment_repo(

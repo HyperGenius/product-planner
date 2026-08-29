@@ -300,7 +300,7 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 - 別名登録自体は承認不要（`order_handler` 権限で完結）だが、
   `product_name_alias_history` に「いつ・誰が・どの注文をトリガに」修正したかを
   追記のみで記録する。詳細なテーブル定義・履歴閲覧APIは
-  [product-master.md](./product-master.md#別名辞書-product_name_aliasesissue-347)
+  [product-master.md](./product-master.md#別名辞書-product_name_aliases)
   を参照
 
 ---
@@ -718,4 +718,4 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 - [order-attachments.md](order-attachments.md): PDFステージング保存基盤（Issue #248、前提）
 - Issue #252: 既存orderのupsert処理（内示→確定の昇格・数量更新対応）。本ドキュメントに統合
 - [notifications.md](notifications.md): 処理ログの通知UI（Issue #254、`order_parse_log` を利用）
-- [product-master.md](product-master.md#別名辞書-product_name_aliasesissue-347): 製品名の表記ゆれ辞書・修正履歴管理（Issue #347）
+- [product-master.md](product-master.md#別名辞書-product_name_aliases): 製品名の表記ゆれ辞書・修正履歴管理（Issue #347）

@@ -185,6 +185,103 @@ class TestOrderRouter:
         assert called_id == order_id
         assert called_data == payload
 
+    def test_update_order_sets_manually_corrected_flag_on_product_id_change(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: product_id を変更したら product_id_manually_corrected=true
+        を立てる（Issue #350）。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 5,
+            "product_id_manually_corrected": False,
+        }
+        mock_repo.update.return_value = {"id": order_id, "product_id": 9}
+
+        response = client.patch(
+            f"/orders/{order_id}", json={"product_id": 9}, headers=headers
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert called_data == {"product_id": 9, "product_id_manually_corrected": True}
+
+    def test_update_order_keeps_manually_corrected_flag_true(self, headers, mock_repo):
+        """PATCH /{id}: 既に true のフラグは false へ戻さない（再送でも冪等。Issue #350）。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 5,
+            "product_id_manually_corrected": True,
+        }
+        mock_repo.update.return_value = {"id": order_id, "product_id": 9}
+
+        response = client.patch(
+            f"/orders/{order_id}", json={"product_id": 9}, headers=headers
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert called_data == {"product_id": 9}
+
+    def test_update_order_no_flag_when_product_id_unchanged(self, headers, mock_repo):
+        """PATCH /{id}: product_id が同値なら（他項目だけの更新）フラグに触れない。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 5,
+            "product_id_manually_corrected": False,
+        }
+        mock_repo.update.return_value = {"id": order_id, "product_id": 5}
+
+        response = client.patch(
+            f"/orders/{order_id}",
+            json={"product_id": 5, "quantity": 3},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert "product_id_manually_corrected" not in called_data
+
+    def test_request_order_approval_records_auto_match_alias(
+        self, headers, mock_repo, mock_supabase_client, monkeypatch
+    ):
+        """POST /{order_id}/request-approval: 自動マッチのまま承認依頼したら
+        別名辞書への反映フックを呼ぶ（Issue #350）。"""
+        import app.routers.transaction.orders as orders_module
+
+        recorded: dict = {}
+
+        def _fake_record(client_, tenant_id, order, changed_by):
+            recorded["order"] = order
+            recorded["changed_by"] = changed_by
+
+        monkeypatch.setattr(
+            orders_module, "record_auto_match_alias_if_applicable", _fake_record
+        )
+
+        order_id = 1
+        order_data = {
+            "id": order_id,
+            "product_id": 100,
+            "order_number": "ORD-001",
+            "status": "draft",
+            "source_type": "email",
+            "extracted_product_name": "セイヒンA",
+            "customer_id": 55,
+            "product_id_manually_corrected": False,
+        }
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = order_data
+        mock_repo.update.return_value = {**order_data, "status": "pending_approval"}
+
+        response = client.post(f"/orders/{order_id}/request-approval", headers=headers)
+
+        assert response.status_code == 200
+        assert recorded["order"]["id"] == order_id
+        assert recorded["changed_by"] == "test-user-id"
+
     def test_delete_order_success(self, headers, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""
         order_id = 1
