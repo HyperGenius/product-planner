@@ -183,6 +183,31 @@ class TestRecordCorrectionIfApplicable:
         assert history_data["customer_id"] == 55
         assert history_data["customer_name_snapshot"] == "不明"
 
+    def test_product_name_fetch_failure_falls_back_to_unknown(self):
+        """product_name_snapshot の取得失敗（.single() の APIError）でも別名UPSERT/
+        履歴追記そのものは '不明' で継続する（Copilotレビュー指摘対応）。"""
+        mock_db = self._mock_db(existing_alias_rows=[])
+        mock_db._tables[
+            _PRODUCTS
+        ].select().eq().single().execute.side_effect = APIError(
+            {"code": "PGRST116", "message": "0 rows"}
+        )
+        order_after = {
+            "id": 1,
+            "product_id": 2,
+            "customer_id": 55,
+            "source_type": "email",
+            "extracted_product_name": "セイヒンA",
+        }
+
+        record_correction_if_applicable(
+            mock_db, "tenant-1", None, order_after, "user-1"
+        )
+
+        mock_db._tables[_ALIASES].insert.assert_called_once()
+        history_data = mock_db._tables[_HISTORY].insert.call_args.args[0]
+        assert history_data["product_name_snapshot"] == "不明"
+
     def test_updates_existing_alias_when_raw_text_already_registered(self):
         mock_db = self._mock_db(existing_alias_rows=[{"id": "alias-1"}])
         order_before = {"id": 1, "product_id": 3}

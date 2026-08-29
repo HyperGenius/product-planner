@@ -218,7 +218,9 @@ def delete_product_name_alias(
         action="deleted",
         changed_by=user_id,
     )
-    alias_repo.delete_by_id(alias_id)
+    if not alias_repo.delete_by_id(alias_id):
+        # _load_alias_or_404 の直後に他リクエストが削除した等のレアケース
+        raise HTTPException(status_code=404, detail="別名エントリが見つかりません")
     return {"status": "deleted"}
 
 

@@ -357,6 +357,7 @@ class TestProductRouter:
             "raw_text": "セイヒンA",
             "source": "auto_match_unreviewed",
         }
+        mock_alias_repo.delete_by_id.return_value = True
 
         response = client.delete("/products/3/aliases/alias-1", headers=headers)
 
@@ -375,6 +376,29 @@ class TestProductRouter:
 
         assert response.status_code == 404
         mock_alias_repo.delete_by_id.assert_not_called()
+
+    def test_delete_product_name_alias_404_when_delete_affects_no_rows(
+        self, headers, mock_alias_repo, monkeypatch
+    ):
+        """DELETE /{id}/aliases/{alias_id}: 取得直後に他リクエストが削除した等で
+        削除0件なら 404（Copilotレビュー指摘対応）。"""
+        import app.routers.master.products as products_module
+
+        monkeypatch.setattr(
+            products_module, "record_direct_alias_change", lambda *a, **kw: None
+        )
+        mock_alias_repo.get_alias_by_id.return_value = {
+            "id": "alias-1",
+            "product_id": 3,
+            "customer_id": 55,
+            "raw_text": "セイヒンA",
+            "source": "auto_match_unreviewed",
+        }
+        mock_alias_repo.delete_by_id.return_value = False
+
+        response = client.delete("/products/3/aliases/alias-1", headers=headers)
+
+        assert response.status_code == 404
 
     def test_delete_product_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

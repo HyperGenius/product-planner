@@ -219,15 +219,27 @@ def _fetch_customer_name_snapshot(client: Client, customer_id: int) -> str:
 
 
 def _fetch_product_name_snapshot(client: Client, product_id: int) -> str:
-    product_res = (
-        client.table(SupabaseTableName.PRODUCTS.value)
-        .select("name")
-        .eq("id", product_id)
-        .single()
-        .execute()
-    )
-    product_row = cast(dict[str, Any] | None, product_res.data) or {}
-    return product_row.get("name") or "不明"
+    """product_name_snapshot は表示用の付随情報。_fetch_customer_name_snapshot と
+    同様、取得失敗（.single() は該当0件でも APIError を送出する / 一時的な RLS・API
+    エラー）でも別名UPSERT/履歴追記・直接編集APIそのものは継続させたいので、
+    APIError を握りつぶして "不明" でフォールバックする（Copilotレビュー指摘対応）。"""
+    try:
+        product_res = (
+            client.table(SupabaseTableName.PRODUCTS.value)
+            .select("name")
+            .eq("id", product_id)
+            .single()
+            .execute()
+        )
+        product_row = cast(dict[str, Any] | None, product_res.data) or {}
+        return product_row.get("name") or "不明"
+    except APIError:
+        logger.warning(
+            f"product_alias_service: failed to fetch product name for "
+            f"product_id={product_id}; falling back to '不明'",
+            exc_info=True,
+        )
+        return "不明"
 
 
 def _write_alias_and_history(

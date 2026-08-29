@@ -44,9 +44,13 @@ class ProductNameAliasRepository(BaseRepository[T]):
         rows = cast(list[T], res.data or [])
         return rows[0] if rows else None
 
-    def update_product_id(self, alias_id: str, product_id: int) -> T | None:
+    def update_product_id(self, alias_id: str, product_id: int) -> T:
         """向き先製品を付け替える。担当者による明示的な確認とみなし
-        source も manual_correction へ更新する（Issue #351）。"""
+        source も manual_correction へ更新する（Issue #351）。
+
+        RLS や条件不一致で更新0件になった場合は、BaseRepository.update() と同様に
+        例外を送出して失敗を明示する（呼び出し側が 200 + null を返さないように）。
+        """
         res = (
             self.client.table(self.table_name)
             .update({"product_id": product_id, "source": "manual_correction"})
@@ -54,8 +58,17 @@ class ProductNameAliasRepository(BaseRepository[T]):
             .execute()
         )
         rows = cast(list[T], res.data or [])
-        return rows[0] if rows else None
+        if not rows:
+            raise ValueError(f"Failed to update product_name_aliases {alias_id}")
+        return rows[0]
 
     def delete_by_id(self, alias_id: str) -> bool:
-        res = self.client.table(self.table_name).delete().eq("id", alias_id).execute()
-        return bool(res.data)
+        """削除。count='exact' で削除件数を確認し、0件なら False を返す
+        （呼び出し側で 404 に変換する。BaseRepository.delete() と同じ方針）。"""
+        res = (
+            self.client.table(self.table_name)
+            .delete(count="exact")  # type: ignore
+            .eq("id", alias_id)
+            .execute()
+        )
+        return res.count is not None and res.count > 0
