@@ -227,27 +227,31 @@ applicable AS (
 )"""
 
 
-def build_diagnostic_sql(rows: list[Row], tenant_id: str) -> str:
+def build_diagnostic_queries(rows: list[Row], tenant_id: str) -> list[tuple[str, str]]:
+    """(見出し, 単一 SQL 文) の一覧を返す。
+
+    `supabase db query` は prepared statement で送るため 1 回の呼び出しに
+    複数文（`;` 区切り）を渡せない。診断は文ごとに分けて実行する。
+    """
     cte = _match_cte(rows, tenant_id)
-    return (
-        "\n\n".join(
-            [
-                f"""\
--- === サマリ ===
-{cte}
+    return [
+        (
+            "サマリ",
+            f"""{cte}
 SELECT
   (SELECT count(*) FROM applicable)                       AS will_update_code,
-  (SELECT count(*) FROM applicable WHERE by_code)         AS  _via_code_match,
-  (SELECT count(*) FROM applicable WHERE NOT by_code)     AS  _via_name_match,
+  (SELECT count(*) FROM applicable WHERE by_code)         AS _via_code_match,
+  (SELECT count(*) FROM applicable WHERE NOT by_code)     AS _via_name_match,
   (SELECT count(DISTINCT zn) FROM amb_zuban)              AS ambiguous_zuban,
   (SELECT count(DISTINCT product_id) FROM amb_prod)       AS ambiguous_product,
   (SELECT count(*) FROM name_code_set)                    AS name_match_but_code_set,
   (SELECT count(*) FROM conflict)                         AS code_conflict,
   (SELECT count(*) FROM inc WHERE zn NOT IN (SELECT zn FROM raw_match)) AS csv_unmatched,
   (SELECT count(*) FROM prod WHERE id NOT IN (SELECT product_id FROM raw_match)) AS existing_unmatched;""",
-                f"""\
--- === code を更新する対象（old_code -> new_code。name は変更しない） ===
-{cte}
+        ),
+        (
+            "code を更新する対象（old_code -> new_code。name は変更しない）",
+            f"""{cte}
 SELECT product_id, old_code, new_code, csv_hinmei, current_name, match_kind
 FROM (
   SELECT product_id, old_code, zuban AS new_code, hinmei AS csv_hinmei,
@@ -256,79 +260,81 @@ FROM (
   FROM applicable
 ) s
 ORDER BY match_kind, product_id;""",
-                f"""\
--- === 曖昧: 1 図番が複数の既存製品にマッチ（適用しない・要確認） ===
-{cte}
+        ),
+        (
+            "曖昧: 1 図番が複数の既存製品にマッチ（適用しない・要確認）",
+            f"""{cte}
 SELECT rm.zn, rm.zuban, rm.product_id, rm.old_code, rm.old_name
 FROM raw_match rm
 WHERE rm.zn IN (SELECT zn FROM amb_zuban)
 ORDER BY rm.zn, rm.product_id;""",
-                f"""\
--- === 曖昧: 1 既存製品が複数の図番にマッチ（適用しない・要確認） ===
-{cte}
+        ),
+        (
+            "曖昧: 1 既存製品が複数の図番にマッチ（適用しない・要確認）",
+            f"""{cte}
 SELECT rm.product_id, rm.old_code, rm.old_name, rm.zuban
 FROM raw_match rm
 WHERE rm.product_id IN (SELECT product_id FROM amb_prod)
 ORDER BY rm.product_id, rm.zuban;""",
-                f"""\
--- === name が図番と一致するが code が別に設定済み（上書き回避・要確認） ===
-{cte}
+        ),
+        (
+            "name が図番と一致するが code が別に設定済み（上書き回避・要確認）",
+            f"""{cte}
 SELECT product_id, old_code, old_name, zuban AS csv_zuban, hinmei AS csv_hinmei
 FROM name_code_set
 ORDER BY product_id;""",
-                f"""\
--- === 図番を code に入れると他製品の既存 code と衝突（適用しない・要確認） ===
-{cte}
+        ),
+        (
+            "図番を code に入れると他製品の既存 code と衝突（適用しない・要確認）",
+            f"""{cte}
 SELECT g.product_id, g.old_code, g.old_name, g.zuban AS would_be_code
 FROM good g
 WHERE g.product_id IN (SELECT product_id FROM conflict)
 ORDER BY g.product_id;""",
-                f"""\
--- === CSV にあるが既存製品と突合できなかった図番（今回は取り込まない） ===
-{cte}
+        ),
+        (
+            "CSV にあるが既存製品と突合できなかった図番（今回は取り込まない）",
+            f"""{cte}
 SELECT i.zuban, i.hinmei
 FROM inc i
 WHERE i.zn NOT IN (SELECT zn FROM raw_match)
 ORDER BY i.zuban;""",
-                f"""\
--- === CSV と突合できなかった既存製品（変更しない・参考） ===
-{cte}
+        ),
+        (
+            "CSV と突合できなかった既存製品（変更しない・参考）",
+            f"""{cte}
 SELECT p.id, p.code, p.name
 FROM prod p
 WHERE p.id NOT IN (SELECT product_id FROM raw_match)
 ORDER BY p.code NULLS FIRST, p.name;""",
-            ]
-        )
-        + "\n"
-    )
+        ),
+    ]
 
 
 def build_apply_sql(rows: list[Row], tenant_id: str) -> str:
-    cte = _match_cte(rows, tenant_id)
-    return f"""\
-BEGIN;
+    """code を更新する単一文（`WITH ... UPDATE`）を返す。
 
-{cte}
+    `supabase db query` は複数文を送れないため BEGIN/COMMIT は付けない。
+    `WITH ... UPDATE` は 1 文で、それ自体が 1 トランザクションとして原子的に走る。
+    """
+    cte = _match_cte(rows, tenant_id)
+    return f"""{cte}
 UPDATE products p
 SET code = a.zuban
 FROM applicable a
 WHERE p.id = a.product_id
-  AND p.code IS DISTINCT FROM a.zuban;
-
-COMMIT;
-"""
+  AND p.code IS DISTINCT FROM a.zuban;"""
 
 
-def run_query(db_url: str, sql: str) -> None:
-    """supabase db query を実行し、結果をそのまま標準出力へ流す。"""
+def run_query(db_url: str, sql: str, label: str | None = None) -> None:
+    """supabase db query で単一 SQL 文を実行し、結果を標準出力へ流す。"""
+    if label:
+        print(f"\n──── {label} ────")
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".sql", encoding="utf-8", delete=True
     ) as tf:
         tf.write(sql)
         tf.flush()
-        print(
-            f"\n$ supabase db query --db-url <hidden> -f <tmp.sql ({len(sql)} chars)>\n"
-        )
         result = subprocess.run(
             ["supabase", "db", "query", "--db-url", db_url, "-f", tf.name],
             check=False,
@@ -410,7 +416,8 @@ def main() -> None:
         )
 
     print("\n──────── DB 現状に対する診断（読み取りのみ） ────────")
-    run_query(args.db_url, build_diagnostic_sql(importable, args.tenant_id))
+    for label, sql in build_diagnostic_queries(importable, args.tenant_id):
+        run_query(args.db_url, sql, label)
 
     if not args.execute:
         print(
@@ -420,7 +427,9 @@ def main() -> None:
         return
 
     print("\n──────── code の更新を実行します（--execute） ────────")
-    run_query(args.db_url, build_apply_sql(importable, args.tenant_id))
+    run_query(
+        args.db_url, build_apply_sql(importable, args.tenant_id), "UPDATE products.code"
+    )
     print("\n✓ 完了。products を SELECT して結果を目視確認してください。")
 
 
