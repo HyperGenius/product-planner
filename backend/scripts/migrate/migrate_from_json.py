@@ -346,7 +346,6 @@ def import_products(client: Client, tenant_id: str) -> dict[str, int]:
     for row in data:
         name: str = row["name"]
         code: str | None = row.get("code") or None  # 空文字 → None
-        product_type: str | None = row.get("type") or None
 
         if name in product_map:
             skip += 1
@@ -358,7 +357,6 @@ def import_products(client: Client, tenant_id: str) -> dict[str, int]:
                 {
                     "name": name,
                     "code": code,
-                    "type": product_type,
                     "tenant_id": tenant_id,
                 }
             )

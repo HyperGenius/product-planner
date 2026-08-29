@@ -23,7 +23,6 @@ def test_create_and_read_own_data(auth_token, tenant_id, admin_db):
     payload = {
         "name": "My Tenant Product",
         "code": unique_code,
-        "type": "standard",
     }
     headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": tenant_id}
 
@@ -58,7 +57,6 @@ def test_cannot_access_other_tenant_data(auth_token):
     payload = {
         "name": "Spy Product",
         "code": f"SPY-{uuid.uuid4().hex[:8]}",
-        "type": "standard",
     }
 
     # RLSポリシー (Check) により、作成自体が拒否されるはず (403 or 500)

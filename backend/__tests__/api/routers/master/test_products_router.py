@@ -111,7 +111,6 @@ class TestProductRouter:
         payload = {
             "name": "New Product",
             "code": "NP001",
-            "type": "standard",
         }
         # 保存後に返される想定のデータ（is_active はデフォルトの True）
         created_data = {**payload, "id": 100, "is_active": True}

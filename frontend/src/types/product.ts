@@ -4,8 +4,8 @@
 export interface Product {
   id: number
   name: string
-  code: string
-  type: string
+  /** 図番。ズメーン未突合・未移行テナントの既存データは NULL があり得る */
+  code: string | null
   is_active: boolean
   has_process: boolean
   has_unconfirmed_process: boolean
@@ -20,16 +20,17 @@ export interface Product {
 export interface ProductCreate {
   name: string
   code: string
-  type: string
 }
 
 /**
  * 製品更新時のデータ型
+ *
+ * `code` は `null` を送ると図番をクリア（DB 上 NULL）できる。空文字は送らない
+ * （Backend の `ProductUpdateSchema.code: str | None` と整合、`UNIQUE(tenant_id, code)` 対策）。
  */
 export interface ProductUpdate {
   name?: string
-  code?: string
-  type?: string
+  code?: string | null
   is_active?: boolean
 }
 

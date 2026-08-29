@@ -178,7 +178,6 @@ def import_products(client: Client, tenant_id: str, base_path: str) -> dict[str,
                 {
                     "name": product_data["name"],
                     "code": product_code,
-                    "type": product_data["type"],
                     "tenant_id": tenant_id,
                 },
                 on_conflict="tenant_id, code",

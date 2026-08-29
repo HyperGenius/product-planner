@@ -19,9 +19,8 @@
 ```typescript
 interface Product {
   id: number
-  name: string        // 品番（実運用データでは品番がここに入る）
-  code: string        // 製品名（任意。旧データでは製品コードが入っている）
-  type: string        // 種別（旧フィールド。新規データでは空）
+  name: string        // 品名（図面管理アプリ「ズメーン」の品名）
+  code: string | null // 図番（ズメーンの図番）。未突合・未移行テナントの既存行は NULL があり得る
   is_active: boolean
   has_process: boolean  // 工程が1件以上登録されているか（#223 追加）
   tenant_id: string
@@ -29,31 +28,55 @@ interface Product {
 }
 ```
 
+### カラムの意味（Issue #352）
+
+`products` の各レコードは図面管理アプリ **「ズメーン」** の図番・品名を正とする。
+
+| カラム | 対応するズメーンの項目 | 備考 |
+|---|---|---|
+| `code` | 図番 | 実質的な識別子。`unique(tenant_id, code)` があるが `code IS NULL` の行同士は重複可（Postgres の UNIQUE は NULL を対象外にするため）。未突合・未移行テナントの既存行は NULL のまま残る。全テナントの図番が揃った時点で `NOT NULL` 化を別 Issue で検討 |
+| `name` | 品名 | `NOT NULL` |
+
+- カラム名のリネームは行わず、意味を上表に固定した。旧 `type` 列は #352 で `DROP COLUMN` 済み。
+- ズメーンからの取り込みは 1 回限りのスクリプト `backend/scripts/import_zumen_products.py`
+  で行う。ズメーン側・products 側ともに表記揺れが多く機械的な完全同期は危険なため、
+  **正規化（NFKC＋空白除去＋大文字化）した完全一致で突合できた既存 `products` の `code` に
+  図番を書き込むだけ**にとどめる。品名 (`name`) の同期・CSV にしか無い図番の新規作成・
+  曖昧一致の適用は行わない（必要が発生した段階で個別対応）。継続同期は別 Issue。
+- 上記の結果、`code` が入るのは Tier 1 で突合できた行のみ。突合できなかった既存行や
+  未移行テナントには旧データ（`code` が NULL で `name` に図番が入っている）が残るため、
+  下記の表示ヒューリスティックと `product_matching_service.py` のフォールバックは当面維持する
+  （全テナント移行後に別 Issue で撤去）。
+
 ## 表示ロジック
 
-`code` の有無によって表示を切り替える：
+未移行テナント向けに、`code` の有無によって表示を切り替える（全テナント移行後に撤去予定）。
+検索フィルタと一覧表示で必ず同じ関数（`resolveProductDisplay()` in `page.tsx`）を通し、
+表示ロジックを一元化する：
 
 ```typescript
-const displayCode = product.code || product.name  // 品番として表示
-const displayName = product.code ? product.name : null  // 製品名として表示
+const displayCode = product.code || product.name  // 図番として表示
+const displayName = product.code ? product.name : null  // 品名として表示
 ```
 
-- `code` あり: 品番 = `code`、製品名 = `name`
-- `code` なし: 品番 = `name`、製品名 = 「製品名未設定」（グレーイタリック）
+- `code` あり: 図番 = `code`、品名 = `name`
+- `code` なし（未移行行。`name` に図番が入っている）: 図番 = `name`、品名 = 「品名未設定」（グレー）
 
 ## 機能一覧
 
 ### 一覧表示
 
-- 4列構成：品番/製品名 / 工程登録状況 / 状態 / 操作メニュー
+- 4列構成：図番/品名 / 工程登録状況 / 状態 / 操作メニュー
 - 1ページ `PAGE_SIZE = 20` 件。件数が超えた場合のみページネーション表示
 - コンテンツ幅上限 `max-w-[860px]`（`master/layout.tsx` で全マスタ共通適用）
 
 ### 検索・フィルター・ソート
 
-- テキスト検索：品番・製品名を横断検索
-- ステータスフィルター：すべて / 有効 / 無効
-- 並べ替えセレクト：登録順 / 品番順 / 製品名順
+- テキスト検索：図番・品名を横断検索
+- ステータスフィルター：すべて / 有効 / 無効 / 工程未登録。**既定は「有効」**で、無効な製品は
+  明示的にフィルタを切り替えたときだけ表示される（製品マスタ以外の画面には一切出さない方針）。
+  例外として `?highlight=<id>` が無効な製品を指す場合のみ、その行を見せるため自動で「すべて」に切り替える
+- 並べ替えセレクト：登録順 / 図番順 / 品名順（URL の `?sort=` 値は `created_at` / `product_code` / `name` のまま）
 - ソート・ページ状態は URL クエリパラメータ（`?sort=`, `?page=`）に保持
 - テキスト検索・ステータスフィルターを変更すると `page` を自動的に `1` にリセットする（#309）。ただし `?page=N` を含む URL への直接アクセス（初回マウント時）はリセット対象外
 
@@ -61,7 +84,7 @@ const displayName = product.code ? product.name : null  // 製品名として表
 
 | 項目 | 権限 | 動作 |
 |---|---|---|
-| 編集 | 全員 | 品番・製品名を変更するダイアログ |
+| 編集 | 全員 | 図番・品名を変更するダイアログ（作成・編集とも 図番=`code` / 品名=`name` に統一。作成時は図番必須、編集時は品名必須） |
 | 工程管理 | 全員 | 製造工程ルーティングを管理（`ProductRoutingsDialog`） |
 | 表記ゆれ履歴 | 全員 | メール起票時の製品名表記ゆれ修正履歴を表示（`ProductNameAliasHistoryDialog`、#347） |
 | 有効化 / 無効化 | admin のみ | 確認モーダル経由で状態変更 |
@@ -70,7 +93,9 @@ const displayName = product.code ? product.name : null  // 製品名として表
 ### 有効/無効切り替え
 
 - 確認モーダルで製品名・影響範囲（新規受注の選択候補から除外）を表示してから実行
-- 無効化した製品は `product-selector.tsx` のコンボボックスから自動的に除外される
+- 無効化した製品は製品選択プルダウン（`product-selector.tsx` ＝ 新規受注・受注編集・受注分割で共用）から
+  自動的に除外される。製品を列挙する UI は全てこのコンポーネント経由のため、無効な製品が
+  プルダウンに出るのは製品マスタ画面の「すべて」「無効」フィルタ選択時のみ
 
 ## 関連ファイル
 
@@ -201,3 +226,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #310 | フィルタ変更時に `page` を1にリセットするよう修正（Issue #309） |
 | #347 | メール起票の製品名修正結果を別名辞書（`product_name_aliases`）として蓄積・履歴管理する機能を追加（Issue #347） |
 | #349 | 別名辞書を顧客単位でスコープ（`customer_id` 追加・UNIQUE を `(tenant_id, customer_id, raw_text)` に変更）。他顧客の別名へフォールバックしない。履歴に `customer_id` / `customer_name_snapshot` を追加し画面で顧客ごとに確認可能に（Issue #349） |
+| #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化。作成ダイアログが `name`/`code` を旧UI前提で逆に書き込んでいた不整合を修正し、作成・編集とも 図番=`code` / 品名=`name` にラベル・バリデーション・ペイロードを統一。編集で図番を空にした場合は空文字ではなく `null` を送る（`UNIQUE(tenant_id, code)` 対策）。読み取りモデル `Product.code` / フロント型 / `ProductUpdate.code` を nullable にし、作成時のみ `code` 必須（`ProductCreateSchema`）。突合スクリプトは CSV の図番重複を正規化キーで判定して非決定的 UPDATE を防止（Issue #352） |

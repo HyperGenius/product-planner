@@ -53,13 +53,28 @@ import { MasterPagination } from "@/components/master-pagination"
 
 const PAGE_SIZE = 20
 
+/**
+ * 未移行データ（`code` が NULL で `name` に図番が入っている行）を吸収する表示ヒューリスティック。
+ * 検索フィルタと一覧表示の両方でこの関数を使い、表示ロジックを一元化する
+ * （全テナントの図番が揃ったら撤去予定。docs/features/product-master.md 参照）。
+ */
+function resolveProductDisplay(p: Pick<Product, "code" | "name">): {
+  displayCode: string
+  displayName: string | null
+} {
+  return {
+    displayCode: p.code || p.name,
+    displayName: p.code ? p.name : null,
+  }
+}
+
 type StatusFilter = "all" | "active" | "inactive" | "no_process"
 type SortKey = "created_at" | "product_code" | "name"
 
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "並び順: 登録順", value: "created_at" },
-  { label: "並び順: 品番順", value: "product_code" },
-  { label: "並び順: 製品名順", value: "name" },
+  { label: "並び順: 図番順", value: "product_code" },
+  { label: "並び順: 品名順", value: "name" },
 ]
 
 export default function ProductsPage() {
@@ -79,9 +94,9 @@ export default function ProductsPage() {
   const [toggleActiveTarget, setToggleActiveTarget] = useState<Product | null>(null)
   const [productName, setProductName] = useState("")
   const [productCode, setProductCode] = useState("")
-  const [productType, setProductType] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  // 既定は有効な製品のみ表示。無効な製品は明示的にフィルタを切り替えたときだけ見える
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
 
   const { data: products, isLoading, error } = useProducts()
   const { data: currentMember } = useCurrentMember()
@@ -97,8 +112,7 @@ export default function ProductsPage() {
     if (!products) return []
     return products
       .filter((p) => {
-        const displayCode = p.code || p.name
-        const displayName = p.code ? p.name : null
+        const { displayCode, displayName } = resolveProductDisplay(p)
         const q = searchQuery.toLowerCase()
         const matchesSearch =
           !q ||
@@ -149,6 +163,14 @@ export default function ProductsPage() {
     router.replace(`/master/products?${params.toString()}`)
   }, [highlightId, filteredProducts, page, searchParams, router])
 
+  // highlight 対象が無効な製品（既定フィルタでは非表示）なら、その行を見せるため
+  // フィルタを「すべて」に切り替える。注文詳細などからの導線を成立させる
+  useEffect(() => {
+    if (!highlightId || !products) return
+    const target = products.find((p) => p.id === highlightId)
+    if (target && !target.is_active) setStatusFilter("all")
+  }, [highlightId, products])
+
   // highlight 対象行へスクロール
   useEffect(() => {
     if (!highlightId) return
@@ -160,7 +182,6 @@ export default function ProductsPage() {
   const handleOpenCreateDialog = () => {
     setProductName("")
     setProductCode("")
-    setProductType("")
     setIsCreateDialogOpen(true)
   }
 
@@ -168,7 +189,6 @@ export default function ProductsPage() {
     setSelectedProduct(product)
     setProductName(product.name)
     setProductCode(product.code ?? "")
-    setProductType(product.type)
     setIsEditDialogOpen(true)
   }
 
@@ -212,16 +232,19 @@ export default function ProductsPage() {
   }
 
   const handleCreate = async () => {
+    if (!productCode.trim()) {
+      toast.error("図番を入力してください")
+      return
+    }
     if (!productName.trim()) {
-      toast.error("品番を入力してください")
+      toast.error("品名を入力してください")
       return
     }
 
     try {
       await createMutation.mutateAsync({
-        name: productName,
-        code: productCode,
-        type: productType,
+        name: productName.trim(),
+        code: productCode.trim(),
       })
       toast.success("製品を作成しました")
       setIsCreateDialogOpen(false)
@@ -234,7 +257,7 @@ export default function ProductsPage() {
   const handleUpdate = async () => {
     if (!selectedProduct) return
     if (!productName.trim()) {
-      toast.error("品番を入力してください")
+      toast.error("品名を入力してください")
       return
     }
 
@@ -242,9 +265,10 @@ export default function ProductsPage() {
       await updateMutation.mutateAsync({
         id: selectedProduct.id,
         data: {
-          name: productName,
-          code: productCode,
-          type: productType,
+          name: productName.trim(),
+          // 空欄は null（図番クリア）で送る。空文字だと UNIQUE(tenant_id, code) で
+          // 「図番未設定」が複数作れず更新が失敗しうる
+          code: productCode.trim() || null,
         },
       })
       toast.success("製品を更新しました")
@@ -299,7 +323,7 @@ export default function ProductsPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="品番・製品名で検索..."
+            placeholder="図番・品名で検索..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -342,7 +366,7 @@ export default function ProductsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>品番 / 製品名</TableHead>
+                <TableHead>図番 / 品名</TableHead>
                 <TableHead className="w-[110px]">工程</TableHead>
                 <TableHead className="w-[100px]">状態</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
@@ -351,8 +375,7 @@ export default function ProductsPage() {
             <TableBody>
               {pagedProducts.length > 0 ? (
                 pagedProducts.map((product) => {
-                  const displayCode = product.code || "品番なし"
-                  const displayName = product.name || null
+                  const { displayCode, displayName } = resolveProductDisplay(product)
                   return (
                     <TableRow
                       key={product.id}
@@ -364,7 +387,7 @@ export default function ProductsPage() {
                         {displayName ? (
                           <div className="text-sm">{displayName}</div>
                         ) : (
-                          <div className="text-sm text-muted-foreground">製品名未設定</div>
+                          <div className="text-sm text-muted-foreground">品名未設定</div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -436,9 +459,9 @@ export default function ProductsPage() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-10">
-                    {searchQuery || statusFilter !== "all"
-                      ? "条件に一致する製品がありません"
-                      : "製品がありません"}
+                    {products && products.length === 0
+                      ? "製品がありません"
+                      : "条件に一致する製品がありません"}
                   </TableCell>
                 </TableRow>
               )}
@@ -459,20 +482,20 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="create-name">品番 *</Label>
-              <Input
-                id="create-name"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                placeholder="例: A-001"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="create-code">製品名（任意）</Label>
+              <Label htmlFor="create-code">図番 *</Label>
               <Input
                 id="create-code"
                 value={productCode}
                 onChange={(e) => setProductCode(e.target.value)}
+                placeholder="例: A-001"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="create-name">品名 *</Label>
+              <Input
+                id="create-name"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
                 placeholder="例: 製品A"
               />
             </div>
@@ -499,7 +522,7 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-code">品番（任意）</Label>
+              <Label htmlFor="edit-code">図番（任意）</Label>
               <Input
                 id="edit-code"
                 value={productCode}
@@ -508,7 +531,7 @@ export default function ProductsPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-name">製品名</Label>
+              <Label htmlFor="edit-name">品名 *</Label>
               <Input
                 id="edit-name"
                 value={productName}
