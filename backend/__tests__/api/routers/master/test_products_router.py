@@ -231,6 +231,8 @@ class TestProductRouter:
                 "id": "hist-1",
                 "product_id": product_id,
                 "product_name_snapshot": "製品A",
+                "customer_id": 7,
+                "customer_name_snapshot": "顧客X",
                 "raw_text": "セイヒンA",
                 "changed_by": "user-1",
                 "action": "created",
@@ -250,6 +252,8 @@ class TestProductRouter:
         assert len(result) == 1
         assert result[0]["raw_text"] == "セイヒンA"
         assert result[0]["changed_by_full_name"] == "山田太郎"
+        assert result[0]["customer_id"] == 7
+        assert result[0]["customer_name_snapshot"] == "顧客X"
         assert result[0]["source_order_id"] == 42
         assert result[0]["source_order_label_snapshot"] == "ORD-042"
 

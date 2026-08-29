@@ -45,25 +45,27 @@ class TestMatchProductByCode:
 class TestMatchProductByAlias:
     def test_match_returns_product_id(self):
         mock_db = MagicMock()
-        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
-            data=[{"product_id": 4242}]
+        mock_db.table().select().eq().eq().eq().limit().execute.return_value = (
+            MagicMock(data=[{"product_id": 4242}])
         )
 
-        result = match_product_by_alias(mock_db, "tenant-1", "  謎の表記ゆれ製品  ")
+        result = match_product_by_alias(mock_db, "tenant-1", 7, "  謎の表記ゆれ製品  ")
 
         assert result == 4242
+        # 別名は顧客単位でスコープする（Issue #349）
+        mock_db.table().select().eq().eq.assert_called_with("customer_id", 7)
         # raw_text は TRIM() のみ行った値で検索する
-        mock_db.table().select().eq().eq.assert_called_with(
+        mock_db.table().select().eq().eq().eq.assert_called_with(
             "raw_text", "謎の表記ゆれ製品"
         )
 
     def test_no_match_returns_none(self):
         mock_db = MagicMock()
-        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
-            data=[]
+        mock_db.table().select().eq().eq().eq().limit().execute.return_value = (
+            MagicMock(data=[])
         )
 
-        result = match_product_by_alias(mock_db, "tenant-1", "未登録の製品名")
+        result = match_product_by_alias(mock_db, "tenant-1", 7, "未登録の製品名")
 
         assert result is None
 

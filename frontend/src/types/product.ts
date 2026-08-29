@@ -43,6 +43,10 @@ export interface ProductNameAliasHistoryEntry {
   id: string
   product_id: number | null
   product_name_snapshot: string
+  /** どの顧客の別名か（Issue #349）。顧客削除後は customer_id が null になり、
+   *  customer_name_snapshot で内容を追える。 */
+  customer_id: number | null
+  customer_name_snapshot: string
   raw_text: string
   changed_by: string
   changed_by_full_name: string | null

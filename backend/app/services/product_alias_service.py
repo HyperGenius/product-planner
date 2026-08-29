@@ -78,6 +78,27 @@ def _record_correction(
     if before_product_id == new_product_id:
         return
 
+    # 別名は顧客単位でスコープする（Issue #349）。customer_id は下書き注文の
+    # 自動作成時に必ず解決されている前提だが、万一欠落している場合は
+    # customer_id NOT NULL の product_name_aliases へ INSERT できないため記録を諦める。
+    customer_id = order_after.get("customer_id")
+    if customer_id is None:
+        logger.warning(
+            f"product_alias_service: order_id={order_after.get('id')} has no "
+            f"customer_id; skip recording alias correction"
+        )
+        return
+
+    customer_res = (
+        client.table(SupabaseTableName.CUSTOMERS.value)
+        .select("name")
+        .eq("id", customer_id)
+        .single()
+        .execute()
+    )
+    customer_row = cast(dict[str, Any] | None, customer_res.data) or {}
+    customer_name_snapshot = customer_row.get("name") or "不明"
+
     product_res = (
         client.table(SupabaseTableName.PRODUCTS.value)
         .select("name")
@@ -93,13 +114,17 @@ def _record_correction(
         f"注文 #{order_id}" if order_id is not None else "不明"
     )
 
-    action = _upsert_alias(client, tenant_id, raw_text, new_product_id, changed_by)
+    action = _upsert_alias(
+        client, tenant_id, customer_id, raw_text, new_product_id, changed_by
+    )
 
     client.table(SupabaseTableName.PRODUCT_NAME_ALIAS_HISTORY.value).insert(
         {
             "tenant_id": tenant_id,
             "product_id": new_product_id,
             "product_name_snapshot": product_name_snapshot,
+            "customer_id": customer_id,
+            "customer_name_snapshot": customer_name_snapshot,
             "raw_text": raw_text,
             "changed_by": changed_by,
             "action": action,
@@ -117,6 +142,7 @@ def _record_correction(
 def _upsert_alias(
     client: Client,
     tenant_id: str,
+    customer_id: int,
     raw_text: str,
     product_id: int,
     changed_by: str,
@@ -124,11 +150,14 @@ def _upsert_alias(
     """product_name_aliases を UPSERT する。postgrest-py の on_conflict は条件付き
     ロジックを表現できないため使わず、既存有無を確認した上で insert/update を
     分岐する（docs/features/pdf-order-parsing.md の同種の議論を参照）。
+
+    別名は (tenant_id, customer_id, raw_text) でスコープする（Issue #349）。
     """
     existing_res = (
         client.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value)
         .select("id")
         .eq("tenant_id", tenant_id)
+        .eq("customer_id", customer_id)
         .eq("raw_text", raw_text)
         .execute()
     )
@@ -140,13 +169,16 @@ def _upsert_alias(
         # 行ったかは product_name_alias_history.changed_by 側に記録される。
         client.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value).update(
             {"product_id": product_id}
-        ).eq("tenant_id", tenant_id).eq("raw_text", raw_text).execute()
+        ).eq("tenant_id", tenant_id).eq("customer_id", customer_id).eq(
+            "raw_text", raw_text
+        ).execute()
         return "updated"
 
     try:
         client.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value).insert(
             {
                 "tenant_id": tenant_id,
+                "customer_id": customer_id,
                 "raw_text": raw_text,
                 "product_id": product_id,
                 "created_by": changed_by,
@@ -159,5 +191,7 @@ def _upsert_alias(
         # 同時リクエストによる競合挿入: 既に存在するので更新として扱う
         client.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value).update(
             {"product_id": product_id}
-        ).eq("tenant_id", tenant_id).eq("raw_text", raw_text).execute()
+        ).eq("tenant_id", tenant_id).eq("customer_id", customer_id).eq(
+            "raw_text", raw_text
+        ).execute()
         return "updated"

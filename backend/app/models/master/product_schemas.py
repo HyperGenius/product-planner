@@ -50,6 +50,10 @@ class ProductNameAliasHistoryResponse(BaseModel):
     id: str
     product_id: int | None
     product_name_snapshot: str
+    # どの顧客の別名かを画面で区別できるようにする（Issue #349）。顧客削除後も
+    # 履歴の文脈が読めるよう、customer_id は SET NULL・名前はスナップショットを返す。
+    customer_id: int | None
+    customer_name_snapshot: str
     raw_text: str
     changed_by: str
     changed_by_full_name: str | None
