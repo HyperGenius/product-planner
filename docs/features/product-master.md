@@ -20,7 +20,7 @@
 interface Product {
   id: number
   name: string        // 品名（図面管理アプリ「ズメーン」の品名）
-  code: string        // 図番（ズメーンの図番。テナント内で一意な識別子）
+  code: string | null // 図番（ズメーンの図番）。未突合・未移行テナントの既存行は NULL があり得る
   is_active: boolean
   has_process: boolean  // 工程が1件以上登録されているか（#223 追加）
   tenant_id: string
@@ -34,8 +34,8 @@ interface Product {
 
 | カラム | 対応するズメーンの項目 | 備考 |
 |---|---|---|
-| `code` | 図番 | テナント内で一意（`unique(tenant_id, code)`）。実質的な識別子 |
-| `name` | 品名 | |
+| `code` | 図番 | 実質的な識別子。`unique(tenant_id, code)` があるが `code IS NULL` の行同士は重複可（Postgres の UNIQUE は NULL を対象外にするため）。未突合・未移行テナントの既存行は NULL のまま残る。全テナントの図番が揃った時点で `NOT NULL` 化を別 Issue で検討 |
+| `name` | 品名 | `NOT NULL` |
 
 - カラム名のリネームは行わず、意味を上表に固定した。旧 `type` 列は #352 で `DROP COLUMN` 済み。
 - ズメーンからの取り込みは 1 回限りのスクリプト `backend/scripts/import_zumen_products.py`
@@ -64,17 +64,17 @@ const displayName = product.code ? product.name : null  // 製品名として表
 
 ### 一覧表示
 
-- 4列構成：品番/製品名 / 工程登録状況 / 状態 / 操作メニュー
+- 4列構成：図番/品名 / 工程登録状況 / 状態 / 操作メニュー
 - 1ページ `PAGE_SIZE = 20` 件。件数が超えた場合のみページネーション表示
 - コンテンツ幅上限 `max-w-[860px]`（`master/layout.tsx` で全マスタ共通適用）
 
 ### 検索・フィルター・ソート
 
-- テキスト検索：品番・製品名を横断検索
+- テキスト検索：図番・品名を横断検索
 - ステータスフィルター：すべて / 有効 / 無効 / 工程未登録。**既定は「有効」**で、無効な製品は
   明示的にフィルタを切り替えたときだけ表示される（製品マスタ以外の画面には一切出さない方針）。
   例外として `?highlight=<id>` が無効な製品を指す場合のみ、その行を見せるため自動で「すべて」に切り替える
-- 並べ替えセレクト：登録順 / 品番順 / 製品名順
+- 並べ替えセレクト：登録順 / 図番順 / 品名順（URL の `?sort=` 値は `created_at` / `product_code` / `name` のまま）
 - ソート・ページ状態は URL クエリパラメータ（`?sort=`, `?page=`）に保持
 - テキスト検索・ステータスフィルターを変更すると `page` を自動的に `1` にリセットする（#309）。ただし `?page=N` を含む URL への直接アクセス（初回マウント時）はリセット対象外
 
@@ -82,7 +82,7 @@ const displayName = product.code ? product.name : null  // 製品名として表
 
 | 項目 | 権限 | 動作 |
 |---|---|---|
-| 編集 | 全員 | 品番・製品名を変更するダイアログ |
+| 編集 | 全員 | 図番・品名を変更するダイアログ（作成・編集とも 図番=`code` / 品名=`name` に統一。作成時は図番必須、編集時は品名必須） |
 | 工程管理 | 全員 | 製造工程ルーティングを管理（`ProductRoutingsDialog`） |
 | 表記ゆれ履歴 | 全員 | メール起票時の製品名表記ゆれ修正履歴を表示（`ProductNameAliasHistoryDialog`、#347） |
 | 有効化 / 無効化 | admin のみ | 確認モーダル経由で状態変更 |
@@ -224,4 +224,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #310 | フィルタ変更時に `page` を1にリセットするよう修正（Issue #309） |
 | #347 | メール起票の製品名修正結果を別名辞書（`product_name_aliases`）として蓄積・履歴管理する機能を追加（Issue #347） |
 | #349 | 別名辞書を顧客単位でスコープ（`customer_id` 追加・UNIQUE を `(tenant_id, customer_id, raw_text)` に変更）。他顧客の別名へフォールバックしない。履歴に `customer_id` / `customer_name_snapshot` を追加し画面で顧客ごとに確認可能に（Issue #349） |
-| #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化（Issue #352） |
+| #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化。作成ダイアログが `name`/`code` を旧UI前提で逆に書き込んでいた不整合を修正し、作成・編集とも 図番=`code` / 品名=`name` にラベル・バリデーション・ペイロードを統一。`Product.code` の型を `string | null` に（Issue #352） |

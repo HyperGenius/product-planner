@@ -70,6 +70,12 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass
 
+# 突合 SQL は取り込み対象行を 1 文の VALUES (...) に展開する。ズメーンのエクスポートは
+# 通常数百件で、その規模なら問題にならないが、想定外に巨大な CSV を 1 文で流し込んで
+# 文サイズ・タイムアウト・性能劣化を招かないよう安全弁を設ける。超過時は CSV を分割し、
+# 図番の重複がまたがらない単位で複数回に分けて実行すること。
+MAX_IMPORTABLE_ROWS = 5000
+
 
 @dataclass
 class Row:
@@ -374,6 +380,13 @@ def main() -> None:
     if not importable:
         print("\n突合候補が 0 行です。終了します。")
         return
+
+    if len(importable) > MAX_IMPORTABLE_ROWS:
+        sys.exit(
+            f"突合候補が {len(importable)} 行あり、上限 {MAX_IMPORTABLE_ROWS} を超えています。"
+            " 1 文の SQL が過大になるため、CSV を分割し"
+            "（同じ図番が別ファイルにまたがらないように）複数回に分けて実行してください。"
+        )
 
     print("\n──────── DB 現状に対する診断（読み取りのみ） ────────")
     run_query(args.db_url, build_diagnostic_sql(importable, args.tenant_id))

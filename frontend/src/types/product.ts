@@ -4,7 +4,8 @@
 export interface Product {
   id: number
   name: string
-  code: string
+  /** 図番。ズメーン未突合・未移行テナントの既存データは NULL があり得る */
+  code: string | null
   is_active: boolean
   has_process: boolean
   has_unconfirmed_process: boolean

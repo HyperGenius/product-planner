@@ -58,8 +58,8 @@ type SortKey = "created_at" | "product_code" | "name"
 
 const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "並び順: 登録順", value: "created_at" },
-  { label: "並び順: 品番順", value: "product_code" },
-  { label: "並び順: 製品名順", value: "name" },
+  { label: "並び順: 図番順", value: "product_code" },
+  { label: "並び順: 品名順", value: "name" },
 ]
 
 export default function ProductsPage() {
@@ -218,8 +218,12 @@ export default function ProductsPage() {
   }
 
   const handleCreate = async () => {
+    if (!productCode.trim()) {
+      toast.error("図番を入力してください")
+      return
+    }
     if (!productName.trim()) {
-      toast.error("品番を入力してください")
+      toast.error("品名を入力してください")
       return
     }
 
@@ -239,7 +243,7 @@ export default function ProductsPage() {
   const handleUpdate = async () => {
     if (!selectedProduct) return
     if (!productName.trim()) {
-      toast.error("品番を入力してください")
+      toast.error("品名を入力してください")
       return
     }
 
@@ -303,7 +307,7 @@ export default function ProductsPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="品番・製品名で検索..."
+            placeholder="図番・品名で検索..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -346,7 +350,7 @@ export default function ProductsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>品番 / 製品名</TableHead>
+                <TableHead>図番 / 品名</TableHead>
                 <TableHead className="w-[110px]">工程</TableHead>
                 <TableHead className="w-[100px]">状態</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
@@ -355,7 +359,7 @@ export default function ProductsPage() {
             <TableBody>
               {pagedProducts.length > 0 ? (
                 pagedProducts.map((product) => {
-                  const displayCode = product.code || "品番なし"
+                  const displayCode = product.code || "図番なし"
                   const displayName = product.name || null
                   return (
                     <TableRow
@@ -368,7 +372,7 @@ export default function ProductsPage() {
                         {displayName ? (
                           <div className="text-sm">{displayName}</div>
                         ) : (
-                          <div className="text-sm text-muted-foreground">製品名未設定</div>
+                          <div className="text-sm text-muted-foreground">品名未設定</div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -463,20 +467,20 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="create-name">品番 *</Label>
-              <Input
-                id="create-name"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                placeholder="例: A-001"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="create-code">製品名（任意）</Label>
+              <Label htmlFor="create-code">図番 *</Label>
               <Input
                 id="create-code"
                 value={productCode}
                 onChange={(e) => setProductCode(e.target.value)}
+                placeholder="例: A-001"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="create-name">品名 *</Label>
+              <Input
+                id="create-name"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
                 placeholder="例: 製品A"
               />
             </div>
@@ -503,7 +507,7 @@ export default function ProductsPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-code">品番（任意）</Label>
+              <Label htmlFor="edit-code">図番（任意）</Label>
               <Input
                 id="edit-code"
                 value={productCode}
@@ -512,7 +516,7 @@ export default function ProductsPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-name">製品名</Label>
+              <Label htmlFor="edit-name">品名 *</Label>
               <Input
                 id="edit-name"
                 value={productName}
