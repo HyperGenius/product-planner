@@ -229,8 +229,8 @@ export default function ProductsPage() {
 
     try {
       await createMutation.mutateAsync({
-        name: productName,
-        code: productCode,
+        name: productName.trim(),
+        code: productCode.trim(),
       })
       toast.success("製品を作成しました")
       setIsCreateDialogOpen(false)
@@ -251,8 +251,10 @@ export default function ProductsPage() {
       await updateMutation.mutateAsync({
         id: selectedProduct.id,
         data: {
-          name: productName,
-          code: productCode,
+          name: productName.trim(),
+          // 空欄は null（図番クリア）で送る。空文字だと UNIQUE(tenant_id, code) で
+          // 「図番未設定」が複数作れず更新が失敗しうる
+          code: productCode.trim() || null,
         },
       })
       toast.success("製品を更新しました")
@@ -444,9 +446,9 @@ export default function ProductsPage() {
               ) : (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center py-10">
-                    {searchQuery || statusFilter !== "active"
-                      ? "条件に一致する製品がありません"
-                      : "製品がありません"}
+                    {products && products.length === 0
+                      ? "製品がありません"
+                      : "条件に一致する製品がありません"}
                   </TableCell>
                 </TableRow>
               )}

@@ -29,7 +29,10 @@ Tier 1 で一致しなかったものは「必要が発生した段階で個別�
 
 ## 突合と適用の条件
 
-CSV 取り込み対象行 = 図番が非空 かつ 品名が非空 かつ CSV 内で図番が一意。
+CSV 取り込み対象行 = 図番が非空 かつ 品名が非空 かつ CSV 内で図番が
+（下記の正規化キーで）一意。正規化後に同一となる図番（例: `A-001` と `Ａ-００１`）が
+複数あると、同じ製品に複数の incoming 行が対応して UPDATE が非決定的になるため、
+CSV 側も正規化キーで重複判定して除外する。
 
 各対象行の正規化図番 `zn` について、対象テナントの products を次で突合する:
 
@@ -63,9 +66,11 @@ Usage:
 
 import argparse
 import csv
+import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -90,12 +95,21 @@ class ParsedCsv:
     importable: list[Row]
     empty_zuban: list[Row]
     empty_hinmei: list[Row]  # 図番はあるが品名が空
-    dup_groups: dict[str, list[Row]]
+    dup_groups: dict[str, list[Row]]  # {正規化図番キー: 重複行}
 
 
 def _sql_str(value: str) -> str:
     """SQL の単一引用符リテラルにエスケープする。"""
     return "'" + value.replace("'", "''") + "'"
+
+
+def _norm_key(value: str) -> str:
+    """_norm() の SQL 正規化（NFKC → 空白除去 → 大文字化）を Python 側で再現する。
+
+    CSV 内で「正規化後に同一」となる図番を重複として検出するために使う。
+    SQL 側と同じく NFKC → 空白除去 の順（NFKC で全角スペース等が半角化される）。
+    """
+    return re.sub(r"\s", "", unicodedata.normalize("NFKC", value)).upper()
 
 
 def _norm(expr: str) -> str:
@@ -122,13 +136,15 @@ def parse_csv(path: str) -> ParsedCsv:
     empty_zuban = [r for r in raw if not r.zuban]
     with_zuban = [r for r in raw if r.zuban]
 
-    counts = Counter(r.zuban for r in with_zuban)
+    # 生文字列ではなく正規化キーで重複判定する（正規化後に衝突する図番を除外）
+    norm_counts = Counter(_norm_key(r.zuban) for r in with_zuban)
     dup_groups: dict[str, list[Row]] = {}
     empty_hinmei: list[Row] = []
     importable: list[Row] = []
     for r in with_zuban:
-        if counts[r.zuban] > 1:
-            dup_groups.setdefault(r.zuban, []).append(r)
+        key = _norm_key(r.zuban)
+        if norm_counts[key] > 1:
+            dup_groups.setdefault(key, []).append(r)
         elif not r.hinmei:
             empty_hinmei.append(r)
         else:
@@ -333,11 +349,16 @@ def print_skip_report(parsed: ParsedCsv) -> None:
         print(f"  - 顧客={r.customer!r} 図番={r.zuban!r} {r.url}")
 
     dup_rows = sum(len(v) for v in parsed.dup_groups.values())
-    print(f"\n[CSV 内で図番が重複] {len(parsed.dup_groups)} グループ / {dup_rows} 行")
-    for zuban, rows in sorted(parsed.dup_groups.items()):
-        print(f"  図番={zuban!r} ×{len(rows)}")
+    print(
+        f"\n[CSV 内で図番が重複（正規化後）] {len(parsed.dup_groups)} グループ / {dup_rows} 行"
+    )
+    for key, rows in sorted(parsed.dup_groups.items()):
+        variants = sorted({r.zuban for r in rows})
+        print(f"  正規化キー={key!r} ×{len(rows)}  実表記={variants}")
         for r in rows:
-            print(f"      顧客={r.customer!r} 品名={r.hinmei!r} {r.url}")
+            print(
+                f"      顧客={r.customer!r} 図番={r.zuban!r} 品名={r.hinmei!r} {r.url}"
+            )
 
 
 def main() -> None:

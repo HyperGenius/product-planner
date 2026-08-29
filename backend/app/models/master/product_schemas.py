@@ -10,22 +10,28 @@ class ProductBase(BaseSchema):
     """製品のベーススキーマ"""
 
     name: str = Field(default=..., description="品名（ズメーンの品名）")
-    code: str = Field(
-        default=..., description="図番（ズメーンの図番。テナント内で一意）"
-    )
     is_active: bool = Field(default=True, description="有効/無効フラグ")
 
 
 class ProductCreateSchema(ProductBase):
-    """製品を作成するためのスキーマ"""
+    """製品を作成するためのスキーマ。作成時は図番（code）を必須とする。"""
 
-    pass
+    code: str = Field(
+        default=..., description="図番（ズメーンの図番。テナント内で一意）"
+    )
 
 
 class Product(ProductBase):
-    """読み取り用製品のスキーマ"""
+    """読み取り用製品のスキーマ。
+
+    未突合・未移行テナントの既存行は code が NULL のため nullable とする
+    （実データ・フロント型・[docs/features/product-master.md](../../../../docs/features/product-master.md) と整合）。
+    """
 
     id: int
+    code: str | None = Field(
+        default=None, description="図番（未突合・未移行の行は NULL）"
+    )
     has_process: bool = Field(
         default=False, description="工程が1件以上登録されているか"
     )

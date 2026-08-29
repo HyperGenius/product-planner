@@ -24,10 +24,13 @@ export interface ProductCreate {
 
 /**
  * 製品更新時のデータ型
+ *
+ * `code` は `null` を送ると図番をクリア（DB 上 NULL）できる。空文字は送らない
+ * （Backend の `ProductUpdateSchema.code: str | None` と整合、`UNIQUE(tenant_id, code)` 対策）。
  */
 export interface ProductUpdate {
   name?: string
-  code?: string
+  code?: string | null
   is_active?: boolean
 }
 
