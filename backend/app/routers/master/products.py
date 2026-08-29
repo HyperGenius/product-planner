@@ -87,6 +87,8 @@ def get_product_name_alias_history(
             id=str(h["id"]),
             product_id=h.get("product_id"),
             product_name_snapshot=h["product_name_snapshot"],
+            customer_id=h.get("customer_id"),
+            customer_name_snapshot=h["customer_name_snapshot"],
             raw_text=h["raw_text"],
             changed_by=h["changed_by"],
             changed_by_full_name=profiles_map.get(h["changed_by"], {}).get("full_name"),

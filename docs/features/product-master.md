@@ -126,7 +126,7 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 
 ---
 
-## 別名辞書 (product_name_aliases)（Issue #347）
+## 別名辞書 (product_name_aliases)（Issue #347 / 顧客スコープ化: Issue #349）
 
 メールから受注下書きを自動起票する際に製品名の表記ゆれで未マッチ・誤マッチと
 なった明細を、担当者（`order_handler`）が下書きの `product_id` を選び直すことで
@@ -135,12 +135,21 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 自動マッチングで pg_trgm 曖昧検索より優先して使う。別名登録自体は
 `president` の承認を必要とせず、`order_handler` 権限で完結する。
 
+別名は**顧客単位でスコープする**（Issue #349）。「同じ顧客の中でも複数の呼び方を
+する（1顧客:N別名）」「別の顧客が同じ表記で別の製品を指す」実態があり、
+テナント単位（`(tenant_id, raw_text)` UNIQUE）のままだと顧客間の表記衝突で
+後勝ちの上書き・誤マッチが起きるため。`customer_id` はメール/PDF起票パイプラインで
+明細ごとに既に解決済み（[customer-draft-auto-create.md](./customer-draft-auto-create.md)
+により下書き顧客を含め必ず解決される）で、辞書検索・UPSERT に渡すだけでよい。
+下書き顧客（`customers.status='draft'`）でも別名登録は行い、顧客が後日「正規顧客」に
+確定されても `customer_id` は不変のため別名は引き継がれる。
+
 ### データモデル
 
 | テーブル | カラム | 説明 |
 |---|---|---|
-| `product_name_aliases` | `id`, `tenant_id`, `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `created_by`, `created_at`, `updated_at` | `raw_text`（`extracted_product_name` と同じ `TRIM()` のみの正規化）ごとに最新の対応を1件保持。`(tenant_id, raw_text)` UNIQUE。同一 `raw_text` への再修正は UPSERT（上書き） |
-| `product_name_alias_history` | `id`, `tenant_id`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（製品表示名・注文ラベル）を保持する |
+| `product_name_aliases` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE CASCADE`, `NOT NULL`), `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `created_by`, `created_at`, `updated_at` | `(tenant_id, customer_id, raw_text)` ごとに最新の対応を1件保持（`raw_text` は `extracted_product_name` と同じ `TRIM()` のみの正規化）。`(tenant_id, customer_id, raw_text)` UNIQUE。同一キーへの再修正は UPSERT（上書き） |
+| `product_name_alias_history` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE SET NULL`), `customer_name_snapshot`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除・顧客削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（顧客名・製品表示名・注文ラベル）を保持する |
 
 ### 記録経路
 
@@ -162,18 +171,21 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 
 ### マッチングへの反映
 
-`backend/app/services/product_matching_service.py` の `match_product_by_alias()` が
-`product_name_aliases` の完全一致検索を行う。`pdf_order_parsing_service.py` の
-`_resolve_product_id()` はこれを `products.code` 完全一致・pg_trgm 曖昧検索より
-前段で呼び出し、一致すればそれらをスキップして即採用する。
+`backend/app/services/product_matching_service.py` の `match_product_by_alias(db, tenant_id, customer_id, raw_text)` が
+`(tenant_id, customer_id, raw_text)` の完全一致検索を行う。`pdf_order_parsing_service.py` の
+`_resolve_product_id(db, tenant_id, customer_id, ...)` はこれを `products.code` 完全一致・pg_trgm 曖昧検索より
+前段で呼び出し、一致すればそれらをスキップして即採用する。**該当顧客の別名が無い
+場合に他顧客の別名へフォールバックはしない**（誤爆防止。従来通り `products.code`
+完全一致 → pg_trgm 曖昧検索へフォールバックする）。
 
 ### 履歴の閲覧
 
 `GET /products/{product_id}/aliases` が `product_name_alias_history` の生データ
 ではなく、`changed_by` を担当者の表示名に、`source_order_id` を注文へのリンクに
-解決した集約レスポンスを返す。フロントエンドは製品マスタのケバブメニュー
-「表記ゆれ履歴」から `ProductNameAliasHistoryDialog`（`useProductNameAliasHistory`
-フック）で一覧表示する。
+解決した集約レスポンスを返す（`customer_id` / `customer_name_snapshot` も含む）。
+フロントエンドは製品マスタのケバブメニュー「表記ゆれ履歴」から
+`ProductNameAliasHistoryDialog`（`useProductNameAliasHistory` フック）で一覧表示し、
+顧客名列の表示と顧客での絞り込みができる。
 
 ---
 
@@ -188,3 +200,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #227 | 新規注文フォームの製品プルダウンに工程未登録警告を表示（Issue #224） |
 | #310 | フィルタ変更時に `page` を1にリセットするよう修正（Issue #309） |
 | #347 | メール起票の製品名修正結果を別名辞書（`product_name_aliases`）として蓄積・履歴管理する機能を追加（Issue #347） |
+| #349 | 別名辞書を顧客単位でスコープ（`customer_id` 追加・UNIQUE を `(tenant_id, customer_id, raw_text)` に変更）。他顧客の別名へフォールバックしない。履歴に `customer_id` / `customer_name_snapshot` を追加し画面で顧客ごとに確認可能に（Issue #349） |

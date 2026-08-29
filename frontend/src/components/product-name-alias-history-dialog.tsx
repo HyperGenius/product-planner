@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import { Loader2 } from "lucide-react"
 import Link from "next/link"
 import {
@@ -11,6 +12,13 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -19,7 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useProductNameAliasHistory } from "@/hooks/use-products"
-import type { Product } from "@/types/product"
+import type { ProductNameAliasHistoryEntry, Product } from "@/types/product"
 
 interface ProductNameAliasHistoryDialogProps {
   product: Product | null
@@ -32,12 +40,25 @@ const ACTION_LABELS: Record<string, string> = {
   updated: "上書き修正",
 }
 
+const ALL_CUSTOMERS = "__all__"
+
 /**
- * 製品名の表記ゆれ修正履歴ダイアログ（Issue #347）
+ * 履歴エントリを顧客ごとにグルーピング/フィルタするためのキー。
+ * 顧客が削除されると customer_id は null になるため、その場合は
+ * スナップショット名でまとめる（Issue #349）。
+ */
+function customerKey(entry: ProductNameAliasHistoryEntry): string {
+  return entry.customer_id != null
+    ? `id:${entry.customer_id}`
+    : `snap:${entry.customer_name_snapshot}`
+}
+
+/**
+ * 製品名の表記ゆれ修正履歴ダイアログ（Issue #347 / 顧客スコープ化: Issue #349）
  *
  * メール起票の下書きで担当者が product_id を修正した際に記録される
- * 別名（raw_text → product_id）の対応履歴を、いつ・誰が・どの注文を
- * トリガに登録したかとあわせて一覧表示する。
+ * 別名（(customer_id, raw_text) → product_id）の対応履歴を、いつ・誰が・
+ * どの顧客の・どの注文をトリガに登録したかとあわせて一覧表示する。
  */
 export function ProductNameAliasHistoryDialog({
   product,
@@ -45,6 +66,32 @@ export function ProductNameAliasHistoryDialog({
   onOpenChange,
 }: ProductNameAliasHistoryDialogProps) {
   const { data: history, isLoading } = useProductNameAliasHistory(product?.id ?? null)
+  const [customerFilter, setCustomerFilter] = useState<string>(ALL_CUSTOMERS)
+
+  const customerOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of history ?? []) {
+      map.set(customerKey(entry), entry.customer_name_snapshot)
+    }
+    return Array.from(map, ([key, label]) => ({ key, label })).sort((a, b) =>
+      a.label.localeCompare(b.label, "ja"),
+    )
+  }, [history])
+
+  // 別製品のダイアログを開き直した等で前回のフィルタ値が現在の履歴に存在しない
+  // 場合、そのまま使うと「該当0件・Select も非表示」で復帰不能になる。無効な値は
+  // 「すべての顧客」と同等に扱う（state はそのままでも表示・絞り込みは破綻しない）。
+  const effectiveFilter =
+    customerFilter === ALL_CUSTOMERS ||
+    customerOptions.some((opt) => opt.key === customerFilter)
+      ? customerFilter
+      : ALL_CUSTOMERS
+
+  const visibleHistory = useMemo(() => {
+    if (!history) return []
+    if (effectiveFilter === ALL_CUSTOMERS) return history
+    return history.filter((entry) => customerKey(entry) === effectiveFilter)
+  }, [history, effectiveFilter])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -54,7 +101,7 @@ export function ProductNameAliasHistoryDialog({
           <DialogDescription>
             {product?.name}
             （{product?.code}）について、メール起票時の製品名の表記ゆれを
-            担当者が修正した履歴です。
+            担当者が修正した履歴です。別名は顧客ごとに管理されます。
           </DialogDescription>
         </DialogHeader>
 
@@ -68,46 +115,69 @@ export function ProductNameAliasHistoryDialog({
             表記ゆれの修正履歴はありません
           </p>
         ) : (
-          <div className="max-h-[60vh] overflow-y-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>メール上の表記</TableHead>
-                  <TableHead>区分</TableHead>
-                  <TableHead>登録者</TableHead>
-                  <TableHead>トリガー注文</TableHead>
-                  <TableHead>登録日時</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {history.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell className="font-medium">{entry.raw_text}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {ACTION_LABELS[entry.action] ?? entry.action}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{entry.changed_by_full_name ?? "不明"}</TableCell>
-                    <TableCell>
-                      {entry.source_order_id ? (
-                        <Link
-                          href={`/orders/${entry.source_order_id}`}
-                          className="text-primary underline underline-offset-2"
-                        >
-                          {entry.source_order_label_snapshot}
-                        </Link>
-                      ) : (
-                        entry.source_order_label_snapshot
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {new Date(entry.changed_at).toLocaleString("ja-JP")}
-                    </TableCell>
+          <div className="space-y-3">
+            {customerOptions.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">顧客で絞り込み</span>
+                <Select value={effectiveFilter} onValueChange={setCustomerFilter}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_CUSTOMERS}>すべての顧客</SelectItem>
+                    {customerOptions.map((opt) => (
+                      <SelectItem key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="max-h-[60vh] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>顧客</TableHead>
+                    <TableHead>メール上の表記</TableHead>
+                    <TableHead>区分</TableHead>
+                    <TableHead>登録者</TableHead>
+                    <TableHead>トリガー注文</TableHead>
+                    <TableHead>登録日時</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {visibleHistory.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell>{entry.customer_name_snapshot}</TableCell>
+                      <TableCell className="font-medium">{entry.raw_text}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {ACTION_LABELS[entry.action] ?? entry.action}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{entry.changed_by_full_name ?? "不明"}</TableCell>
+                      <TableCell>
+                        {entry.source_order_id ? (
+                          <Link
+                            href={`/orders/${entry.source_order_id}`}
+                            className="text-primary underline underline-offset-2"
+                          >
+                            {entry.source_order_label_snapshot}
+                          </Link>
+                        ) : (
+                          entry.source_order_label_snapshot
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(entry.changed_at).toLocaleString("ja-JP")}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         )}
       </DialogContent>

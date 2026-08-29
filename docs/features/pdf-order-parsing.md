@@ -286,6 +286,11 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   `match_product_by_alias()`（`product_matching_service.py`）による別名辞書の
   完全一致検索を、`products.code` 完全一致・pg_trgm 曖昧検索よりも前段で行う。
   一致すればそれを最上位の確度として即採用し、以降の照合はスキップする
+- 別名は顧客単位でスコープされる（Issue #349）。`match_product_by_alias(db,
+  tenant_id, customer_id, raw_text)` / `_resolve_product_id(db, tenant_id,
+  customer_id, ...)` は明細ごとに解決済みの `customer_id`（`_require_customer_id`）
+  を受け取り、`(tenant_id, customer_id, raw_text)` の完全一致のみを見る。該当顧客の
+  別名が無い場合に**他顧客の別名へフォールバックはしない**（誤爆防止）
 - 別名の記録は `backend/app/services/product_alias_service.py` の
   `record_correction_if_applicable()` が担い、`PATCH /orders/{id}` と
   `POST /orders/{id}/split` の両経路（`orders.py`）から呼ばれる。対象注文が
@@ -340,15 +345,21 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 | `completed`  | 完了                 |
 | `canceled`   | キャンセル           |
 
-`supabase/migrations/20260819000001_add_product_name_aliases.sql`（Issue #347）:
+`supabase/migrations/20260819000001_add_product_name_aliases.sql`（Issue #347）
+および `20260829000000_scope_product_name_aliases_by_customer.sql`（Issue #349）:
 
-- 新規テーブル `product_name_aliases`: `id, tenant_id, product_id (FK, ON DELETE
-  CASCADE), raw_text, created_by, created_at, updated_at`。`(tenant_id, raw_text)`
-  UNIQUE。同一 `raw_text` への再修正は UPSERT（上書き）する
-- 新規テーブル `product_name_alias_history`: `id, tenant_id, product_id (FK, ON
-  DELETE SET NULL), product_name_snapshot, raw_text, changed_by, changed_at,
+- 新規テーブル `product_name_aliases`: `id, tenant_id, customer_id (FK, ON DELETE
+  CASCADE, NOT NULL), product_id (FK, ON DELETE CASCADE), raw_text, created_by,
+  created_at, updated_at`。`(tenant_id, customer_id, raw_text)` UNIQUE（#349 で
+  `customer_id` を追加）。同一キーへの再修正は UPSERT（上書き）する。#349 適用時
+  点で両テーブルは本番含め空だったためバックフィル不要
+- 新規テーブル `product_name_alias_history`: `id, tenant_id, customer_id (FK, ON
+  DELETE SET NULL), customer_name_snapshot, product_id (FK, ON DELETE SET NULL),
+  product_name_snapshot, raw_text, changed_by, changed_at,
   action ('created'/'updated'), source_order_id (FK, ON DELETE SET NULL),
-  source_order_label_snapshot`。追記のみ（UPDATE/DELETEしない）
+  source_order_label_snapshot`。追記のみ（UPDATE/DELETEしない）。#349 で
+  `customer_id` / `customer_name_snapshot` を追加（顧客削除後もスナップショットで
+  文脈を追える）
 - 両テーブルとも RLS (`is_tenant_member(tenant_id)`) を設定
 
 `supabase/migrations/20260712000000_add_orders_dedupe_key_unmatched_product.sql`（Issue #296）:

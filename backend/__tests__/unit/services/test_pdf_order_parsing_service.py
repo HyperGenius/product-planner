@@ -441,6 +441,13 @@ class TestProcessLineItem:
         assert created is True
         mock_code.assert_not_called()
         mock_trgm.assert_not_called()
+        # 別名検索は明細ごとに解決済みの customer_id でスコープされる（Issue #349）
+        assert _no_alias_match.call_args.args == (
+            mock_db,
+            "tenant-1",
+            7,
+            "謎の表記ゆれ製品",
+        )
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
         assert rpc_params["p_product_id"] == 4242
 

@@ -41,18 +41,27 @@ def match_product_by_code(db: Client, tenant_id: str, code: str) -> int | None:
     return None
 
 
-def match_product_by_alias(db: Client, tenant_id: str, raw_text: str) -> int | None:
+def match_product_by_alias(
+    db: Client, tenant_id: str, customer_id: int, raw_text: str
+) -> int | None:
     """
     製品別名辞書 (product_name_aliases) の完全一致で製品を検索する（Issue #347）。
 
     過去に担当者が確定させた「生テキスト → 製品」の対応を pg_trgm の曖昧マッチング
     より優先して使うことで、表記ゆれの再発による未マッチ・誤マッチを減らす。
     raw_text の正規化は orders.extracted_product_name と同様 TRIM() のみ。
+
+    別名は顧客単位でスコープする（Issue #349）。同じ raw_text でも顧客が違えば
+    別の製品を指しうる（別の顧客が同じ表記で別製品を呼ぶ）ため、
+    (tenant_id, customer_id, raw_text) の完全一致のみを見る。該当顧客の別名が
+    無い場合に他顧客の別名へフォールバックはしない（誤爆防止。呼び出し元が
+    従来通り products.code 完全一致 → pg_trgm 曖昧検索へフォールバックする）。
     """
     result = (
         db.table(SupabaseTableName.PRODUCT_NAME_ALIASES.value)
         .select("product_id")
         .eq("tenant_id", tenant_id)
+        .eq("customer_id", customer_id)
         .eq("raw_text", raw_text.strip())
         .limit(1)
         .execute()

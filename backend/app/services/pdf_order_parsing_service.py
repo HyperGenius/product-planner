@@ -288,13 +288,15 @@ def _check_multi_order_suspected(
 def _resolve_product_id(
     db: Client,
     tenant_id: str,
+    customer_id: int,
     product_number_raw: str | None,
     product_name_raw: str | None,
 ) -> int | None:
     """
     0. product_name_aliases（過去に担当者が確定させた表記ゆれ辞書）の完全一致
        （Issue #347。extracted_product_name と同じ値 = product_name_raw or
-       product_number_raw で検索する）
+       product_number_raw で、明細ごとに解決済みの customer_id と合わせて検索する。
+       Issue #349。該当顧客の別名が無ければ他顧客へはフォールバックしない）
     1. products.code の完全一致
     2. products.name に対する品番文字列でのpg_trgm検索
        （code列が未整備で、name列に品番文字列が入っているテナントに対応するため）
@@ -303,7 +305,9 @@ def _resolve_product_id(
     """
     alias_raw_text = product_name_raw or product_number_raw
     if alias_raw_text:
-        alias_product_id = match_product_by_alias(db, tenant_id, alias_raw_text)
+        alias_product_id = match_product_by_alias(
+            db, tenant_id, customer_id, alias_raw_text
+        )
         if alias_product_id is not None:
             return alias_product_id
 
@@ -335,7 +339,7 @@ def _process_line_item(
     product_name_raw = line.get("product_name_raw")
 
     product_id = _resolve_product_id(
-        db, tenant_id, product_number_raw, product_name_raw
+        db, tenant_id, customer_id, product_number_raw, product_name_raw
     )
 
     # 表記ゆれ対策はTRIM()のみ行い、全角/半角統一等の高度な正規化は
