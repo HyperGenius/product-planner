@@ -179,7 +179,9 @@ def update_product_name_alias(
     if not target:
         raise HTTPException(status_code=404, detail="付け替え先の製品が見つかりません")
 
-    # 監査履歴を先に残す（付け替え自体が失敗しても履歴が欠けないように）。
+    updated = alias_repo.update_product_id(alias_id, payload.product_id)
+
+    # 付け替えが成功した場合のみ監査履歴を残す（失敗時に誤った履歴を残さない）。
     record_direct_alias_change(
         client,
         tenant_id,
@@ -188,7 +190,7 @@ def update_product_name_alias(
         changed_by=user_id,
         target_product_id=payload.product_id,
     )
-    return alias_repo.update_product_id(alias_id, payload.product_id)
+    return updated
 
 
 @product_router.delete("/{product_id}/aliases/{alias_id}")
