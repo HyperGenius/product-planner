@@ -8,7 +8,21 @@
 -- 2026-08-29 時点で product_name_aliases / product_name_alias_history は本番含め
 -- まだ空（#347 実装直後で実データ蓄積前）のためバックフィルは不要。customer_id を
 -- NOT NULL 制約付きで追加し、UNIQUE 制約・インデックスを張り替えるだけでよい。
--- 適用直前に本番の両テーブルが空であることを SELECT count(*) で確認すること。
+
+-- 前提の明示的チェック: どちらかのテーブルに既存行があると customer_id NOT NULL /
+-- customer_name_snapshot NOT NULL の追加が即失敗する。その場合はバックフィル方針を
+-- 含めて本マイグレーションの設計を見直す必要があるため、分かりやすい例外で止める。
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM product_name_aliases)
+     OR EXISTS (SELECT 1 FROM product_name_alias_history) THEN
+    RAISE EXCEPTION
+      'Issue #349 migration expects product_name_aliases / '
+      'product_name_alias_history to be empty (customer_id / '
+      'customer_name_snapshot are added NOT NULL without backfill). '
+      'Existing rows found -- revisit the migration design before applying.';
+  END IF;
+END $$;
 
 -- --- product_name_aliases ---
 ALTER TABLE product_name_aliases

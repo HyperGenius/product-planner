@@ -78,11 +78,20 @@ export function ProductNameAliasHistoryDialog({
     )
   }, [history])
 
+  // 別製品のダイアログを開き直した等で前回のフィルタ値が現在の履歴に存在しない
+  // 場合、そのまま使うと「該当0件・Select も非表示」で復帰不能になる。無効な値は
+  // 「すべての顧客」と同等に扱う（state はそのままでも表示・絞り込みは破綻しない）。
+  const effectiveFilter =
+    customerFilter === ALL_CUSTOMERS ||
+    customerOptions.some((opt) => opt.key === customerFilter)
+      ? customerFilter
+      : ALL_CUSTOMERS
+
   const visibleHistory = useMemo(() => {
     if (!history) return []
-    if (customerFilter === ALL_CUSTOMERS) return history
-    return history.filter((entry) => customerKey(entry) === customerFilter)
-  }, [history, customerFilter])
+    if (effectiveFilter === ALL_CUSTOMERS) return history
+    return history.filter((entry) => customerKey(entry) === effectiveFilter)
+  }, [history, effectiveFilter])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,7 +119,7 @@ export function ProductNameAliasHistoryDialog({
             {customerOptions.length > 1 && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">顧客で絞り込み</span>
-                <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                <Select value={effectiveFilter} onValueChange={setCustomerFilter}>
                   <SelectTrigger className="w-56">
                     <SelectValue />
                   </SelectTrigger>

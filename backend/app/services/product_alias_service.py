@@ -89,15 +89,27 @@ def _record_correction(
         )
         return
 
-    customer_res = (
-        client.table(SupabaseTableName.CUSTOMERS.value)
-        .select("name")
-        .eq("id", customer_id)
-        .single()
-        .execute()
-    )
-    customer_row = cast(dict[str, Any] | None, customer_res.data) or {}
-    customer_name_snapshot = customer_row.get("name") or "不明"
+    # customer_name_snapshot は表示用の付随情報。RLS・一時的なAPIエラー・
+    # データ不整合で取得に失敗しても、別名UPSERT/履歴追記そのものは継続したいので
+    # ここだけは APIError を握りつぶして "不明" でフォールバックする
+    # （.single() は該当0件でも APIError を送出する。PRレビュー指摘対応）。
+    try:
+        customer_res = (
+            client.table(SupabaseTableName.CUSTOMERS.value)
+            .select("name")
+            .eq("id", customer_id)
+            .single()
+            .execute()
+        )
+        customer_row = cast(dict[str, Any] | None, customer_res.data) or {}
+        customer_name_snapshot = customer_row.get("name") or "不明"
+    except APIError:
+        logger.warning(
+            f"product_alias_service: failed to fetch customer name for "
+            f"customer_id={customer_id}; falling back to '不明'",
+            exc_info=True,
+        )
+        customer_name_snapshot = "不明"
 
     product_res = (
         client.table(SupabaseTableName.PRODUCTS.value)
