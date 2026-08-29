@@ -50,15 +50,17 @@ interface Product {
 
 ## 表示ロジック
 
-未移行テナント向けに、`code` の有無によって表示を切り替える（全テナント移行後に撤去予定）：
+未移行テナント向けに、`code` の有無によって表示を切り替える（全テナント移行後に撤去予定）。
+検索フィルタと一覧表示で必ず同じ関数（`resolveProductDisplay()` in `page.tsx`）を通し、
+表示ロジックを一元化する：
 
 ```typescript
-const displayCode = product.code || product.name  // 品番として表示
-const displayName = product.code ? product.name : null  // 製品名として表示
+const displayCode = product.code || product.name  // 図番として表示
+const displayName = product.code ? product.name : null  // 品名として表示
 ```
 
-- `code` あり: 品番 = `code`、製品名 = `name`
-- `code` なし: 品番 = `name`、製品名 = 「製品名未設定」（グレーイタリック）
+- `code` あり: 図番 = `code`、品名 = `name`
+- `code` なし（未移行行。`name` に図番が入っている）: 図番 = `name`、品名 = 「品名未設定」（グレー）
 
 ## 機能一覧
 

@@ -53,6 +53,21 @@ import { MasterPagination } from "@/components/master-pagination"
 
 const PAGE_SIZE = 20
 
+/**
+ * 未移行データ（`code` が NULL で `name` に図番が入っている行）を吸収する表示ヒューリスティック。
+ * 検索フィルタと一覧表示の両方でこの関数を使い、表示ロジックを一元化する
+ * （全テナントの図番が揃ったら撤去予定。docs/features/product-master.md 参照）。
+ */
+function resolveProductDisplay(p: Pick<Product, "code" | "name">): {
+  displayCode: string
+  displayName: string | null
+} {
+  return {
+    displayCode: p.code || p.name,
+    displayName: p.code ? p.name : null,
+  }
+}
+
 type StatusFilter = "all" | "active" | "inactive" | "no_process"
 type SortKey = "created_at" | "product_code" | "name"
 
@@ -97,8 +112,7 @@ export default function ProductsPage() {
     if (!products) return []
     return products
       .filter((p) => {
-        const displayCode = p.code || p.name
-        const displayName = p.code ? p.name : null
+        const { displayCode, displayName } = resolveProductDisplay(p)
         const q = searchQuery.toLowerCase()
         const matchesSearch =
           !q ||
@@ -361,8 +375,7 @@ export default function ProductsPage() {
             <TableBody>
               {pagedProducts.length > 0 ? (
                 pagedProducts.map((product) => {
-                  const displayCode = product.code || "図番なし"
-                  const displayName = product.name || null
+                  const { displayCode, displayName } = resolveProductDisplay(product)
                   return (
                     <TableRow
                       key={product.id}
