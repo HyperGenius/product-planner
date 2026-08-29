@@ -79,7 +79,6 @@ export default function ProductsPage() {
   const [toggleActiveTarget, setToggleActiveTarget] = useState<Product | null>(null)
   const [productName, setProductName] = useState("")
   const [productCode, setProductCode] = useState("")
-  const [productType, setProductType] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
@@ -160,7 +159,6 @@ export default function ProductsPage() {
   const handleOpenCreateDialog = () => {
     setProductName("")
     setProductCode("")
-    setProductType("")
     setIsCreateDialogOpen(true)
   }
 
@@ -168,7 +166,6 @@ export default function ProductsPage() {
     setSelectedProduct(product)
     setProductName(product.name)
     setProductCode(product.code ?? "")
-    setProductType(product.type)
     setIsEditDialogOpen(true)
   }
 
@@ -221,7 +218,6 @@ export default function ProductsPage() {
       await createMutation.mutateAsync({
         name: productName,
         code: productCode,
-        type: productType,
       })
       toast.success("製品を作成しました")
       setIsCreateDialogOpen(false)
@@ -244,7 +240,6 @@ export default function ProductsPage() {
         data: {
           name: productName,
           code: productCode,
-          type: productType,
         },
       })
       toast.success("製品を更新しました")

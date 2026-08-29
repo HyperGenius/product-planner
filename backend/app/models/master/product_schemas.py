@@ -9,9 +9,10 @@ from app.models.common.base_schema import BaseSchema
 class ProductBase(BaseSchema):
     """製品のベーススキーマ"""
 
-    name: str = Field(default=..., description="製品名")
-    code: str = Field(default=..., description="製品コード")
-    type: str = Field(default=..., description="製品種別")
+    name: str = Field(default=..., description="品名（ズメーンの品名）")
+    code: str = Field(
+        default=..., description="図番（ズメーンの図番。テナント内で一意）"
+    )
     is_active: bool = Field(default=True, description="有効/無効フラグ")
 
 
@@ -33,9 +34,10 @@ class Product(ProductBase):
 class ProductUpdateSchema(BaseSchema):
     """製品を更新するためのスキーマ"""
 
-    name: str | None = Field(default=None, description="製品名")
-    code: str | None = Field(default=None, description="製品コード")
-    type: str | None = Field(default=None, description="製品種別")
+    name: str | None = Field(default=None, description="品名（ズメーンの品名）")
+    code: str | None = Field(
+        default=None, description="図番（ズメーンの図番。テナント内で一意）"
+    )
     is_active: bool | None = Field(default=None, description="有効/無効フラグ")
 
 

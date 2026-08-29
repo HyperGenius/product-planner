@@ -5,7 +5,6 @@ export interface Product {
   id: number
   name: string
   code: string
-  type: string
   is_active: boolean
   has_process: boolean
   has_unconfirmed_process: boolean
@@ -20,7 +19,6 @@ export interface Product {
 export interface ProductCreate {
   name: string
   code: string
-  type: string
 }
 
 /**
@@ -29,7 +27,6 @@ export interface ProductCreate {
 export interface ProductUpdate {
   name?: string
   code?: string
-  type?: string
   is_active?: boolean
 }
 

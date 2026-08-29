@@ -143,3 +143,6 @@ infra/terraform/environments/**/*.tfvars
 
 # OAuth2 認証情報（絶対にコミットしない）
 scripts/credentials.json
+
+# ローカルDBバックアップ（顧客データを含むためコミット禁止）
+backups/

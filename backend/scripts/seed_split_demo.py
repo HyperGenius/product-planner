@@ -79,7 +79,6 @@ def ensure_product(client, tenant_id: str) -> int:
                 "tenant_id": tenant_id,
                 "code": DEMO_PRODUCT_CODE,
                 "name": DEMO_PRODUCT_NAME,
-                "type": "standard",
             },
             on_conflict="tenant_id, code",
         )

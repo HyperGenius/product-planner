@@ -19,9 +19,8 @@
 ```typescript
 interface Product {
   id: number
-  name: string        // 品番（実運用データでは品番がここに入る）
-  code: string        // 製品名（任意。旧データでは製品コードが入っている）
-  type: string        // 種別（旧フィールド。新規データでは空）
+  name: string        // 品名（図面管理アプリ「ズメーン」の品名）
+  code: string        // 図番（ズメーンの図番。テナント内で一意な識別子）
   is_active: boolean
   has_process: boolean  // 工程が1件以上登録されているか（#223 追加）
   tenant_id: string
@@ -29,9 +28,29 @@ interface Product {
 }
 ```
 
+### カラムの意味（Issue #352）
+
+`products` の各レコードは図面管理アプリ **「ズメーン」** の図番・品名を正とする。
+
+| カラム | 対応するズメーンの項目 | 備考 |
+|---|---|---|
+| `code` | 図番 | テナント内で一意（`unique(tenant_id, code)`）。実質的な識別子 |
+| `name` | 品名 | |
+
+- カラム名のリネームは行わず、意味を上表に固定した。旧 `type` 列は #352 で `DROP COLUMN` 済み。
+- ズメーンからの取り込みは 1 回限りのスクリプト `backend/scripts/import_zumen_products.py`
+  で行う。ズメーン側・products 側ともに表記揺れが多く機械的な完全同期は危険なため、
+  **正規化（NFKC＋空白除去＋大文字化）した完全一致で突合できた既存 `products` の `code` に
+  図番を書き込むだけ**にとどめる。品名 (`name`) の同期・CSV にしか無い図番の新規作成・
+  曖昧一致の適用は行わない（必要が発生した段階で個別対応）。継続同期は別 Issue。
+- 上記の結果、`code` が入るのは Tier 1 で突合できた行のみ。突合できなかった既存行や
+  未移行テナントには旧データ（`code` が NULL で `name` に図番が入っている）が残るため、
+  下記の表示ヒューリスティックと `product_matching_service.py` のフォールバックは当面維持する
+  （全テナント移行後に別 Issue で撤去）。
+
 ## 表示ロジック
 
-`code` の有無によって表示を切り替える：
+未移行テナント向けに、`code` の有無によって表示を切り替える（全テナント移行後に撤去予定）：
 
 ```typescript
 const displayCode = product.code || product.name  // 品番として表示
@@ -201,3 +220,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #310 | フィルタ変更時に `page` を1にリセットするよう修正（Issue #309） |
 | #347 | メール起票の製品名修正結果を別名辞書（`product_name_aliases`）として蓄積・履歴管理する機能を追加（Issue #347） |
 | #349 | 別名辞書を顧客単位でスコープ（`customer_id` 追加・UNIQUE を `(tenant_id, customer_id, raw_text)` に変更）。他顧客の別名へフォールバックしない。履歴に `customer_id` / `customer_name_snapshot` を追加し画面で顧客ごとに確認可能に（Issue #349） |
+| #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）（Issue #352） |

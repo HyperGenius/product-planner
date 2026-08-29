@@ -42,7 +42,6 @@ def create_product():
     data = {
         "name": "Test Product",
         "code": "TP-003",
-        "type": "standard",
     }
 
     backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
