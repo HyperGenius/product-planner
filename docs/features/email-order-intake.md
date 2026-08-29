@@ -293,8 +293,12 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
   （`(customer_id, extracted_product_name)` → `product_id`）は別名辞書
   （`product_name_aliases`）へ自動的にフィードバックされ、以後**同じ顧客の**同じ
   表記ゆれは pg_trgm 曖昧検索より優先して即マッチする。別名は顧客単位でスコープ
-  され（Issue #349）、他顧客の別名へはフォールバックしない。詳細は
-  [product-master.md](product-master.md#別名辞書-product_name_aliasesissue-347--顧客スコープ化-issue-349)
+  され（Issue #349）、他顧客の別名へはフォールバックしない。加えて、担当者が
+  `product_id` を修正せず自動マッチのまま承認依頼（`POST /orders/{id}/request-approval`）
+  を送信した場合も、その対応が `source='auto_match_unreviewed'`（未検証の推定）
+  として辞書へ反映される（Issue #350）。この未検証エントリは製品マスタの
+  「表記ゆれ履歴」から `president` の承認なしで付け替え・削除できる（Issue #351）。
+  詳細は [product-master.md](product-master.md#別名辞書-product_name_aliases)
   および [pdf-order-parsing.md](pdf-order-parsing.md) を参照
 - 顧客が特定できない場合でも `customer_id` は必ず設定される（下書き顧客の自動作成）。
   詳細は [customer-draft-auto-create.md](customer-draft-auto-create.md) を参照
@@ -324,5 +328,5 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 手動分割UI（`POST /orders/{id}/split`、詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #280 |
 | `gmail-poll` / `parse-order-pdfs` の高頻度スケジューリング（Supabase Edge Function + pg_cron、詳細は[supabase-pgcron-parse-order-pdfs.md](../infra/supabase-pgcron-parse-order-pdfs.md)） | ✅ #261 |
 | 製品未マッチ明細のNULL product_id下書き起票（詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #296 |
-| 製品名の表記ゆれ辞書による自動補完・修正履歴管理（詳細は[pdf-order-parsing.md](pdf-order-parsing.md)、[product-master.md](product-master.md#別名辞書-product_name_aliasesissue-347--顧客スコープ化-issue-349)） | ✅ #347 |
+| 製品名の表記ゆれ辞書による自動補完・修正履歴管理（詳細は[pdf-order-parsing.md](pdf-order-parsing.md)、[product-master.md](product-master.md#別名辞書-product_name_aliases)） | ✅ #347 |
 | 表記ゆれ辞書の顧客単位スコープ化（`customer_id` 追加、他顧客へフォールバックしない） | ✅ #349 |

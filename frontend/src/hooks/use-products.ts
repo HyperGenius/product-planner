@@ -6,6 +6,7 @@ import type {
   Product,
   ProductCreate,
   ProductNameAliasHistoryEntry,
+  ProductNameAliasUpdate,
   ProductUpdate,
 } from "@/types/product"
 
@@ -87,6 +88,61 @@ export function useProductNameAliasHistory(productId: number | null) {
     queryFn: () =>
       apiClient<ProductNameAliasHistoryEntry[]>(`/products/${productId}/aliases`),
     enabled: productId !== null,
+  })
+}
+
+/**
+ * 表記ゆれ辞書エントリの向き先製品を別製品へ付け替えるフック（Issue #351）
+ *
+ * URL の productId は付け替え「元」の製品。付け替え後はエントリが別製品の履歴へ
+ * 移るため、`["products"]` 配下のクエリをまとめて無効化する。
+ */
+export function useUpdateProductAlias() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      productId,
+      aliasId,
+      data,
+    }: {
+      productId: number
+      aliasId: string
+      data: ProductNameAliasUpdate
+    }) =>
+      apiClient(`/products/${productId}/aliases/${aliasId}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 表記ゆれ辞書エントリを削除するフック（Issue #351）
+ *
+ * 削除後、その raw_text は通常のマッチングフロー（products.code 完全一致 → pg_trgm）
+ * にフォールバックする。監査履歴は残る。
+ */
+export function useDeleteProductAlias() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      productId,
+      aliasId,
+    }: {
+      productId: number
+      aliasId: string
+    }) =>
+      apiClient(`/products/${productId}/aliases/${aliasId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
+    },
   })
 }
 

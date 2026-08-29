@@ -48,7 +48,10 @@ from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
     validate_order_status_transition,
 )
-from app.services.product_alias_service import record_correction_if_applicable
+from app.services.product_alias_service import (
+    record_auto_match_alias_if_applicable,
+    record_correction_if_applicable,
+)
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
@@ -341,11 +344,25 @@ def update_order(
     (sync_order_attachments_customer_id, Issue #315) が担う。
 
     メール起票の下書きで product_id が修正された場合は、その対応を製品別名辞書
-    （product_name_aliases）へ記録する（Issue #347）。
+    （product_name_aliases）へ記録する（Issue #347）。あわせて、担当者が一度でも
+    product_id に手を入れた注文は product_id_manually_corrected=true を立てて
+    「手動修正済み」として恒久的にマークする（Issue #350。承認依頼時の
+    自動マッチ反映フックが二重記録しないための判定に使う）。
     """
     logger.info(f"Updating order {order_id}")
     order_before = repo.get_by_id(order_id)
-    result = repo.update(order_id, order_data.model_dump(exclude_unset=True))
+
+    update_dict = order_data.model_dump(exclude_unset=True)
+    if (
+        "product_id" in update_dict
+        and order_before is not None
+        and update_dict["product_id"] != order_before.get("product_id")
+        and not order_before.get("product_id_manually_corrected")
+    ):
+        # 一度 true になったら false へは戻さない（Issue #350）
+        update_dict["product_id_manually_corrected"] = True
+
+    result = repo.update(order_id, update_dict)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -718,6 +735,10 @@ def request_order_approval(
 ):
     """
     下書き注文の承認依頼を送信し、注文ステータスをpending_approvalにする（order_handler限定）。
+
+    メール起票かつ自動マッチのまま（担当者が product_id を未修正）の注文は、
+    この時点で「担当者の目を通った」とみなし、その対応を製品別名辞書へ
+    source='auto_match_unreviewed' として記録する（Issue #350）。
     """
     logger.info(f"Requesting approval for order {order_id}")
     _require_role(tenant_id, user_id, client, "order_handler", "承認依頼の送信")
@@ -742,6 +763,7 @@ def request_order_approval(
     _notify_approval_requested_safely(
         client, tenant_id, order_id, order.get("order_number")
     )
+    record_auto_match_alias_if_applicable(client, tenant_id, order, user_id)
     return _map_order_response(result)
 
 

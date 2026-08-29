@@ -4,6 +4,7 @@ from app.repositories.supa_infra.master import (
     CustomerRepository,
     EquipmentRepository,
     ProductNameAliasHistoryRepository,
+    ProductNameAliasRepository,
     ProductRepository,
 )
 from app.repositories.supa_infra.transaction import (
@@ -21,6 +22,7 @@ __all__ = [
     "ProductRepository",
     "CustomerRepository",
     "ProductNameAliasHistoryRepository",
+    "ProductNameAliasRepository",
     # transaction
     "ScheduleRepository",
     "OrderRepository",

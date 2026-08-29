@@ -6,6 +6,7 @@ import pytest
 from app.dependencies import (
     get_current_user_id,
     get_product_name_alias_history_repo,
+    get_product_name_alias_repo,
     get_product_repo,
     get_supabase_client,
 )
@@ -46,8 +47,16 @@ class TestProductRouter:
         mock = MagicMock()
         return mock
 
+    @pytest.fixture
+    def mock_alias_repo(self):
+        """製品名別名辞書リポジトリのモックを作成するフィクスチャ（Issue #351）"""
+        mock = MagicMock()
+        return mock
+
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo, mock_client, mock_alias_history_repo):
+    def override_dependency(
+        self, mock_repo, mock_client, mock_alias_history_repo, mock_alias_repo
+    ):
         """
         テスト実行中だけ get_product_repo / get_current_user_id / get_supabase_client を差し替える。
         PATCH は is_active 更新時にロールチェックのため get_current_user_id
@@ -59,6 +68,7 @@ class TestProductRouter:
         app.dependency_overrides[get_product_name_alias_history_repo] = (
             lambda: mock_alias_history_repo
         )
+        app.dependency_overrides[get_product_name_alias_repo] = lambda: mock_alias_repo
         yield
         # テスト終了後に元に戻す（重要）
         app.dependency_overrides = {}
@@ -255,6 +265,140 @@ class TestProductRouter:
         assert result[0]["customer_name_snapshot"] == "顧客X"
         assert result[0]["source_order_id"] == 42
         assert result[0]["source_order_label_snapshot"] == "ORD-042"
+
+    def test_update_product_name_alias_repoints_to_another_product(
+        self, headers, mock_repo, mock_alias_repo, monkeypatch
+    ):
+        """PATCH /{id}/aliases/{alias_id}: 向き先製品を付け替えられること（Issue #351）。"""
+        import app.routers.master.products as products_module
+
+        calls: dict = {}
+        monkeypatch.setattr(
+            products_module,
+            "record_direct_alias_change",
+            lambda *a, **kw: calls.update(kw),
+        )
+
+        mock_alias_repo.get_alias_by_id.return_value = {
+            "id": "alias-1",
+            "product_id": 3,
+            "customer_id": 55,
+            "raw_text": "セイヒンA",
+            "source": "auto_match_unreviewed",
+        }
+        mock_repo.get_by_id.return_value = {"id": 8, "name": "製品B"}
+        mock_alias_repo.update_product_id.return_value = {
+            "id": "alias-1",
+            "product_id": 8,
+        }
+
+        response = client.patch(
+            "/products/3/aliases/alias-1", json={"product_id": 8}, headers=headers
+        )
+
+        assert response.status_code == 200
+        mock_alias_repo.update_product_id.assert_called_once_with("alias-1", 8)
+        assert calls["action"] == "updated"
+        assert calls["target_product_id"] == 8
+
+    def test_update_product_name_alias_404_when_product_id_mismatch(
+        self, headers, mock_alias_repo
+    ):
+        """PATCH /{id}/aliases/{alias_id}: URL の product_id と別名の向き先が
+        食い違う場合は 404。"""
+        mock_alias_repo.get_alias_by_id.return_value = {
+            "id": "alias-1",
+            "product_id": 999,
+            "raw_text": "x",
+        }
+
+        response = client.patch(
+            "/products/3/aliases/alias-1", json={"product_id": 8}, headers=headers
+        )
+
+        assert response.status_code == 404
+        mock_alias_repo.update_product_id.assert_not_called()
+
+    def test_update_product_name_alias_404_when_target_product_missing(
+        self, headers, mock_repo, mock_alias_repo
+    ):
+        """PATCH /{id}/aliases/{alias_id}: 付け替え先の製品が存在しないと 404。"""
+        from postgrest.exceptions import APIError
+
+        mock_alias_repo.get_alias_by_id.return_value = {
+            "id": "alias-1",
+            "product_id": 3,
+            "raw_text": "x",
+        }
+        mock_repo.get_by_id.side_effect = APIError({"message": "0 rows"})
+
+        response = client.patch(
+            "/products/3/aliases/alias-1", json={"product_id": 8}, headers=headers
+        )
+
+        assert response.status_code == 404
+        mock_alias_repo.update_product_id.assert_not_called()
+
+    def test_delete_product_name_alias(self, headers, mock_alias_repo, monkeypatch):
+        """DELETE /{id}/aliases/{alias_id}: 辞書行を削除し監査履歴を残すこと（Issue #351）。"""
+        import app.routers.master.products as products_module
+
+        calls: dict = {}
+        monkeypatch.setattr(
+            products_module,
+            "record_direct_alias_change",
+            lambda *a, **kw: calls.update(kw),
+        )
+
+        mock_alias_repo.get_alias_by_id.return_value = {
+            "id": "alias-1",
+            "product_id": 3,
+            "customer_id": 55,
+            "raw_text": "セイヒンA",
+            "source": "auto_match_unreviewed",
+        }
+        mock_alias_repo.delete_by_id.return_value = True
+
+        response = client.delete("/products/3/aliases/alias-1", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "deleted"}
+        mock_alias_repo.delete_by_id.assert_called_once_with("alias-1")
+        assert calls["action"] == "deleted"
+
+    def test_delete_product_name_alias_404_when_not_found(
+        self, headers, mock_alias_repo
+    ):
+        """DELETE /{id}/aliases/{alias_id}: 別名が存在しないと 404。"""
+        mock_alias_repo.get_alias_by_id.return_value = None
+
+        response = client.delete("/products/3/aliases/alias-1", headers=headers)
+
+        assert response.status_code == 404
+        mock_alias_repo.delete_by_id.assert_not_called()
+
+    def test_delete_product_name_alias_404_when_delete_affects_no_rows(
+        self, headers, mock_alias_repo, monkeypatch
+    ):
+        """DELETE /{id}/aliases/{alias_id}: 取得直後に他リクエストが削除した等で
+        削除0件なら 404（Copilotレビュー指摘対応）。"""
+        import app.routers.master.products as products_module
+
+        monkeypatch.setattr(
+            products_module, "record_direct_alias_change", lambda *a, **kw: None
+        )
+        mock_alias_repo.get_alias_by_id.return_value = {
+            "id": "alias-1",
+            "product_id": 3,
+            "customer_id": 55,
+            "raw_text": "セイヒンA",
+            "source": "auto_match_unreviewed",
+        }
+        mock_alias_repo.delete_by_id.return_value = False
+
+        response = client.delete("/products/3/aliases/alias-1", headers=headers)
+
+        assert response.status_code == 404
 
     def test_delete_product_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

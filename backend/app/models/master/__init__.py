@@ -9,6 +9,7 @@ from .process_routings import (
 from .product_schemas import (
     ProductCreateSchema,
     ProductNameAliasHistoryResponse,
+    ProductNameAliasUpdateSchema,
     ProductUpdateSchema,
 )
 
@@ -16,6 +17,7 @@ __all__ = [
     "ProductCreateSchema",
     "ProductUpdateSchema",
     "ProductNameAliasHistoryResponse",
+    "ProductNameAliasUpdateSchema",
     "RoutingCreate",
     "RoutingUpdate",
     "RoutingResponse",

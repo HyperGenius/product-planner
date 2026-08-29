@@ -3,14 +3,27 @@
 import { useMemo, useState } from "react"
 import { Loader2 } from "lucide-react"
 import Link from "next/link"
+import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -26,7 +39,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useProductNameAliasHistory } from "@/hooks/use-products"
+import {
+  useDeleteProductAlias,
+  useProductNameAliasHistory,
+  useProducts,
+  useUpdateProductAlias,
+} from "@/hooks/use-products"
 import type { ProductNameAliasHistoryEntry, Product } from "@/types/product"
 
 interface ProductNameAliasHistoryDialogProps {
@@ -38,6 +56,7 @@ interface ProductNameAliasHistoryDialogProps {
 const ACTION_LABELS: Record<string, string> = {
   created: "新規登録",
   updated: "上書き修正",
+  deleted: "削除",
 }
 
 const ALL_CUSTOMERS = "__all__"
@@ -54,11 +73,13 @@ function customerKey(entry: ProductNameAliasHistoryEntry): string {
 }
 
 /**
- * 製品名の表記ゆれ修正履歴ダイアログ（Issue #347 / 顧客スコープ化: Issue #349）
+ * 製品名の表記ゆれ修正履歴ダイアログ（Issue #347 / 顧客スコープ化: Issue #349 /
+ * 由来表示・直接編集: Issue #350, #351）
  *
- * メール起票の下書きで担当者が product_id を修正した際に記録される
- * 別名（(customer_id, raw_text) → product_id）の対応履歴を、いつ・誰が・
- * どの顧客の・どの注文をトリガに登録したかとあわせて一覧表示する。
+ * メール起票の下書きで担当者が product_id を修正した際、あるいは自動マッチのまま
+ * 承認依頼された際に記録される別名（(customer_id, raw_text) → product_id）の
+ * 対応履歴を一覧表示する。現在も有効なエントリ（alias_id あり）は、その場で
+ * 別製品への付け替え・削除ができる（president の承認フロー不要）。
  */
 export function ProductNameAliasHistoryDialog({
   product,
@@ -66,7 +87,17 @@ export function ProductNameAliasHistoryDialog({
   onOpenChange,
 }: ProductNameAliasHistoryDialogProps) {
   const { data: history, isLoading } = useProductNameAliasHistory(product?.id ?? null)
+  const { data: products } = useProducts()
+  const updateAlias = useUpdateProductAlias()
+  const deleteAlias = useDeleteProductAlias()
   const [customerFilter, setCustomerFilter] = useState<string>(ALL_CUSTOMERS)
+
+  // 付け替え対象 / 削除対象の履歴エントリ（ダイアログ制御用）
+  const [repointTarget, setRepointTarget] =
+    useState<ProductNameAliasHistoryEntry | null>(null)
+  const [repointProductId, setRepointProductId] = useState<string>("")
+  const [deleteTarget, setDeleteTarget] =
+    useState<ProductNameAliasHistoryEntry | null>(null)
 
   const customerOptions = useMemo(() => {
     const map = new Map<string, string>()
@@ -93,15 +124,60 @@ export function ProductNameAliasHistoryDialog({
     return history.filter((entry) => customerKey(entry) === effectiveFilter)
   }, [history, effectiveFilter])
 
+  // 付け替え先候補: 現在の製品以外の有効な製品
+  const repointCandidates = useMemo(
+    () =>
+      (products ?? [])
+        .filter((p) => p.id !== product?.id && p.is_active)
+        .sort((a, b) => a.name.localeCompare(b.name, "ja")),
+    [products, product?.id],
+  )
+
+  const closeRepoint = () => {
+    setRepointTarget(null)
+    setRepointProductId("")
+  }
+
+  const handleRepoint = async () => {
+    if (!product || !repointTarget?.alias_id || !repointProductId) return
+    try {
+      await updateAlias.mutateAsync({
+        productId: product.id,
+        aliasId: repointTarget.alias_id,
+        data: { product_id: Number(repointProductId) },
+      })
+      toast.success("別名の向き先製品を付け替えました")
+      closeRepoint()
+    } catch {
+      toast.error("別名の付け替えに失敗しました")
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!product || !deleteTarget?.alias_id) return
+    try {
+      await deleteAlias.mutateAsync({
+        productId: product.id,
+        aliasId: deleteTarget.alias_id,
+      })
+      toast.success("別名を削除しました")
+      setDeleteTarget(null)
+    } catch {
+      toast.error("別名の削除に失敗しました")
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>表記ゆれ履歴</DialogTitle>
           <DialogDescription>
             {product?.name}
             （{product?.code}）について、メール起票時の製品名の表記ゆれを
-            担当者が修正した履歴です。別名は顧客ごとに管理されます。
+            担当者が修正した履歴、および自動マッチのまま承認依頼された履歴です。
+            別名は顧客ごとに管理されます。「未確認」は担当者が明示的に確認して
+            いない自動マッチ結果です。
           </DialogDescription>
         </DialogHeader>
 
@@ -145,13 +221,26 @@ export function ProductNameAliasHistoryDialog({
                     <TableHead>登録者</TableHead>
                     <TableHead>トリガー注文</TableHead>
                     <TableHead>登録日時</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {visibleHistory.map((entry) => (
                     <TableRow key={entry.id}>
                       <TableCell>{entry.customer_name_snapshot}</TableCell>
-                      <TableCell className="font-medium">{entry.raw_text}</TableCell>
+                      <TableCell className="font-medium">
+                        <span className="flex items-center gap-2">
+                          {entry.raw_text}
+                          {entry.source === "auto_match_unreviewed" && (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-500 text-amber-600"
+                            >
+                              未確認
+                            </Badge>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">
                           {ACTION_LABELS[entry.action] ?? entry.action}
@@ -173,6 +262,30 @@ export function ProductNameAliasHistoryDialog({
                       <TableCell>
                         {new Date(entry.changed_at).toLocaleString("ja-JP")}
                       </TableCell>
+                      <TableCell className="text-right">
+                        {entry.alias_id ? (
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setRepointTarget(entry)
+                                setRepointProductId("")
+                              }}
+                            >
+                              別製品へ付け替え
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              onClick={() => setDeleteTarget(entry)}
+                            >
+                              削除
+                            </Button>
+                          </div>
+                        ) : null}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -181,6 +294,80 @@ export function ProductNameAliasHistoryDialog({
           </div>
         )}
       </DialogContent>
+
+      {/* 別製品へ付け替え */}
+      <Dialog
+        open={repointTarget !== null}
+        onOpenChange={(o) => !o && closeRepoint()}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>別製品へ付け替え</DialogTitle>
+            <DialogDescription>
+              「{repointTarget?.raw_text}」（顧客:{" "}
+              {repointTarget?.customer_name_snapshot}）の向き先を別の製品へ
+              付け替えます。以後この表記は付け替え先の製品にマッチします。
+            </DialogDescription>
+          </DialogHeader>
+          <Select value={repointProductId} onValueChange={setRepointProductId}>
+            <SelectTrigger>
+              <SelectValue placeholder="付け替え先の製品を選択" />
+            </SelectTrigger>
+            <SelectContent>
+              {repointCandidates.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name}
+                  {p.code ? `（${p.code}）` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeRepoint}>
+              キャンセル
+            </Button>
+            <Button
+              onClick={handleRepoint}
+              disabled={!repointProductId || updateAlias.isPending}
+            >
+              {updateAlias.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              付け替える
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 削除確認 */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>別名を削除しますか?</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{deleteTarget?.raw_text}」（顧客:{" "}
+              {deleteTarget?.customer_name_snapshot}）の別名を削除します。
+              以後この表記は辞書ヒットせず、通常のマッチング（図番の完全一致 →
+              曖昧検索）に戻ります。この操作は取り消せません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                void handleDelete()
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              削除する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

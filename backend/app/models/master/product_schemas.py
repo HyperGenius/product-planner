@@ -67,6 +67,10 @@ class ProductNameAliasHistoryResponse(BaseModel):
     """
 
     id: str
+    # 現在も有効な別名の最新履歴行にのみ入る product_name_aliases.id（Issue #351）。
+    # 付け替え済み・削除済み・過去行では None。UI はこの値がある行にだけ
+    # 「付け替え」「削除」アクションを出す。
+    alias_id: str | None = None
     product_id: int | None
     product_name_snapshot: str
     # どの顧客の別名かを画面で区別できるようにする（Issue #349）。顧客削除後も
@@ -77,6 +81,16 @@ class ProductNameAliasHistoryResponse(BaseModel):
     changed_by: str
     changed_by_full_name: str | None
     action: str
+    # 別名の由来（Issue #350）。
+    #   manual_correction     : 担当者が明示的に product_id を修正した
+    #   auto_match_unreviewed : 自動マッチのまま承認依頼された（人間の明示確認なし）
+    source: str
     source_order_id: int | None
     source_order_label_snapshot: str
     changed_at: str
+
+
+class ProductNameAliasUpdateSchema(BaseSchema):
+    """表記ゆれ辞書エントリの向き先製品を付け替えるためのスキーマ（Issue #351）。"""
+
+    product_id: int = Field(default=..., description="付け替え先の製品ID")

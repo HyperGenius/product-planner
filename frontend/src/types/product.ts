@@ -42,6 +42,12 @@ export interface ProductUpdate {
  */
 export interface ProductNameAliasHistoryEntry {
   id: string
+  /**
+   * 現在も有効な別名の最新履歴行にのみ入る product_name_aliases.id（Issue #351）。
+   * 付け替え済み・削除済み・過去行では null。この値がある行にだけ
+   * 「付け替え」「削除」アクションを表示する。
+   */
+  alias_id: string | null
   product_id: number | null
   product_name_snapshot: string
   /** どの顧客の別名か（Issue #349）。顧客削除後は customer_id が null になり、
@@ -51,8 +57,21 @@ export interface ProductNameAliasHistoryEntry {
   raw_text: string
   changed_by: string
   changed_by_full_name: string | null
-  action: "created" | "updated"
+  action: "created" | "updated" | "deleted"
+  /**
+   * 別名の由来（Issue #350）。
+   * - `manual_correction`: 担当者が明示的に product_id を修正した
+   * - `auto_match_unreviewed`: 自動マッチのまま承認依頼された（人間の明示確認なし）
+   */
+  source: "manual_correction" | "auto_match_unreviewed"
   source_order_id: number | null
   source_order_label_snapshot: string
   changed_at: string
+}
+
+/**
+ * 表記ゆれ辞書エントリの向き先製品を付け替えるリクエスト（Issue #351）
+ */
+export interface ProductNameAliasUpdate {
+  product_id: number
 }
