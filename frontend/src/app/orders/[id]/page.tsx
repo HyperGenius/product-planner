@@ -13,6 +13,7 @@ import {
   Pencil,
   Split,
   Trash2,
+  Truck,
   Undo2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,7 @@ import {
   useRequestApproval,
   useRejectOrder,
   useWithdrawApproval,
+  useShipOrder,
   useDeleteOrder,
 } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
@@ -66,6 +68,7 @@ export default function OrderDetailPage() {
   const requestApprovalMutation = useRequestApproval()
   const rejectMutation = useRejectOrder()
   const withdrawMutation = useWithdrawApproval()
+  const shipMutation = useShipOrder()
   const deleteMutation = useDeleteOrder()
 
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
@@ -169,6 +172,15 @@ export default function OrderDetailPage() {
     }
   }
 
+  const handleShip = async () => {
+    try {
+      await shipMutation.mutateAsync(orderId)
+      toast.success("送品済みにしました")
+    } catch {
+      toast.error("送品済みへの変更に失敗しました")
+    }
+  }
+
   const handleDelete = async () => {
     try {
       await deleteMutation.mutateAsync(orderId)
@@ -203,6 +215,9 @@ export default function OrderDetailPage() {
 
   const isDraft = order.status === "draft"
   const isPendingApproval = order.status === "pending_approval"
+  const canShip =
+    order.status === "confirmed" &&
+    (currentUserRole === "president" || currentUserRole === "order_handler")
   const canDelete = order.status === "draft" || order.status === "canceled"
   // 自動起票で製品を識別できなかった明細（product_id === null）は、
   // has_no_routings も併せて true になるため、工程未登録の警告と二重表示
@@ -439,6 +454,17 @@ export default function OrderDetailPage() {
                   差し戻し
                 </Button>
               </>
+            )}
+            {canShip && (
+              <Button
+                onClick={handleShip}
+                disabled={shipMutation.isPending}
+                variant="default"
+                className="flex-1"
+              >
+                <Truck className="mr-2 h-4 w-4" />
+                {shipMutation.isPending ? "処理中..." : "送品済みにする"}
+              </Button>
             )}
             {isDraft && (
               <Button

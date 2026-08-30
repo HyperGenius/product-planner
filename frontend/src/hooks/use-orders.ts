@@ -233,6 +233,24 @@ export function useWithdrawApproval() {
 }
 
 /**
+ * 確定済の注文を送品済みにするフック（president / order_handler）
+ * 注文ステータスを confirmed -> shipped にする
+ */
+export function useShipOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient<Order>(`/orders/${orderId}/ship`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
  * 複数の承認待ち注文をまとめて承認するフック（president限定）
  */
 export function useApproveOrdersBulk() {

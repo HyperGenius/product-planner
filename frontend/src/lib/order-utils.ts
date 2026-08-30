@@ -7,6 +7,7 @@ export type StatusFilter =
   | "draft"
   | "pending_approval"
   | "confirmed"
+  | "shipped"
   | "completed"
   | "canceled"
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
@@ -16,6 +17,7 @@ export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "下書き", value: "draft" },
   { label: "承認待ち", value: "pending_approval" },
   { label: "確定済", value: "confirmed" },
+  { label: "送品済み", value: "shipped" },
   { label: "完了", value: "completed" },
   { label: "キャンセル", value: "canceled" },
 ]
@@ -100,6 +102,7 @@ export function getStatusLabel(status: Order["status"]): string {
     draft: "下書き",
     pending_approval: "承認待ち",
     confirmed: "確定",
+    shipped: "送品済み",
     completed: "完了",
     canceled: "キャンセル",
   }
@@ -114,6 +117,7 @@ export function getStatusBadgeClass(status: Order["status"]): string {
     draft:             "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
     pending_approval:  "bg-orange-100 text-orange-800 hover:bg-orange-100",
     confirmed:         "bg-green-100 text-green-800 hover:bg-green-100",
+    shipped:           "bg-teal-100 text-teal-800 hover:bg-teal-100",
     completed:         "bg-blue-100 text-blue-800 hover:bg-blue-100",
     canceled:          "bg-gray-100 text-gray-500 hover:bg-gray-100",
   }

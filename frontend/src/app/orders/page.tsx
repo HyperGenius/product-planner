@@ -58,6 +58,7 @@ export default function OrdersPage() {
     requestApproval,
     rejectOrder,
     withdrawApproval,
+    shipOrder,
     deleteOrder,
     simulatingOrderId,
     simulationErrorOrderId,
@@ -65,6 +66,7 @@ export default function OrdersPage() {
     handleApproveFromRow,
     handleRequestApprovalFromRow,
     handleWithdrawFromRow,
+    handleShipFromRow,
     handleRejectRequest,
     handleConfirmReject,
     handleSimulate,
@@ -213,6 +215,7 @@ export default function OrdersPage() {
                     requestApprovalIsPending={requestApproval.isPending}
                     approveIsPending={confirmOrder.isPending}
                     withdrawIsPending={withdrawApproval.isPending}
+                    shipIsPending={shipOrder.isPending}
                     currentUserRole={currentUserRole}
                     isSelected={selectedOrderIds.includes(order.id)}
                     selectionIndex={selectedOrderIds.includes(order.id) ? selectedOrderIds.indexOf(order.id) + 1 : undefined}
@@ -223,6 +226,7 @@ export default function OrdersPage() {
                     onApprove={handleApproveFromRow}
                     onReject={handleRejectRequest}
                     onWithdraw={handleWithdrawFromRow}
+                    onShip={handleShipFromRow}
                     onEdit={handleOpenEditDialog}
                     onDelete={setDeleteTargetOrder}
                     onToggleSelect={handleToggleSelect}
