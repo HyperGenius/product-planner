@@ -39,6 +39,31 @@ def upload_staged_attachment(
     return storage_path
 
 
+def upload_manual_email_attachment(
+    admin_client: Client,
+    tenant_id: str,
+    group_id: str,
+    filename: str,
+    content: bytes,
+    content_type: str,
+) -> str:
+    """
+    手動起票（メール起票モード）で担当者が添付したファイルを Supabase Storage に
+    保存し、storage_path を返す。パス形式: {tenant_id}/manual/{group_id}/{safe_filename}
+
+    group_id は「1回の手動起票」を束ねる任意のキー（UUID）。同一メールから複数注文を
+    起こす場合でも、全注文が同じファイル（同じ storage_path）を参照する。
+    tenant_id prefix を維持するため既存のバケットポリシーでカバーされる。
+    """
+    storage_path = f"{tenant_id}/manual/{group_id}/{_safe_filename(filename)}"
+    admin_client.storage.from_(_BUCKET).upload(
+        path=storage_path,
+        file=content,
+        file_options={"content-type": content_type, "upsert": "true"},
+    )
+    return storage_path
+
+
 def download_attachment(admin_client: Client, storage_path: str) -> bytes:
     """Supabase Storage から添付ファイルの内容をダウンロードする。"""
     return bytes(admin_client.storage.from_(_BUCKET).download(storage_path))

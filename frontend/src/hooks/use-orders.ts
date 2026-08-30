@@ -1,10 +1,12 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { apiClient } from "@/lib/api-client"
+import { ApiError, apiClient } from "@/lib/api-client"
 import { createClient } from "@/utils/supabase/client"
 import type {
   EmailIntakeResult,
+  ManualEmailIntakeRequest,
+  ManualEmailIntakeResponse,
   Order,
   OrderApprovalLog,
   OrderAttachment,
@@ -56,6 +58,66 @@ export function useCreateOrder() {
       }),
     onSuccess: () => {
       // 注文一覧を再取得
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 自動パースできない受注メールを、本文（source_raw）・添付ファイル付きで手動起票するフック
+ * （Issue #358）。1メールから複数明細（分納）をまとめて `source_type='email'` で起票する。
+ *
+ * multipart/form-data を送るため apiClient（JSON 固定）は使わず直接 fetch する。
+ */
+export function useCreateEmailOrderIntake() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      payload,
+      files,
+    }: {
+      payload: ManualEmailIntakeRequest
+      files: File[]
+    }): Promise<ManualEmailIntakeResponse> => {
+      const supabase = createClient()
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) {
+        throw new Error("Unauthorized")
+      }
+      const tenantId =
+        typeof window !== "undefined"
+          ? localStorage.getItem("currentTenantId")
+          : null
+
+      const formData = new FormData()
+      formData.append("payload", JSON.stringify(payload))
+      for (const file of files) {
+        formData.append("files", file, file.name)
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/orders/email-intake`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(tenantId && { "x-tenant-id": tenantId }),
+          },
+          body: formData,
+        },
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new ApiError(response.status, errorData)
+      }
+      return response.json()
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
     },
   })

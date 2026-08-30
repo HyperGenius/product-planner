@@ -4,7 +4,19 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { AlertTriangle, BookOpen, Calculator, Check, Save } from "lucide-react"
+import {
+  AlertTriangle,
+  BookOpen,
+  Calculator,
+  Check,
+  Mail,
+  Paperclip,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react"
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
 import { cn } from "@/lib/utils"
@@ -22,7 +34,12 @@ import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { SimulationResult } from "@/components/simulation-result"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
-import { useSimulateOrder, useCreateOrder, useConfirmOrder } from "@/hooks/use-orders"
+import {
+  useSimulateOrder,
+  useCreateOrder,
+  useConfirmOrder,
+  useCreateEmailOrderIntake,
+} from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
@@ -45,9 +62,19 @@ export default function NewOrderPage() {
   const [noRoutingDialogOpen, setNoRoutingDialogOpen] = useState(false)
   const [routingDialogOpen, setRoutingDialogOpen] = useState(false)
 
+  // 起票元モード（手動フォーム / メール起票）
+  const [intakeMode, setIntakeMode] = useState<"manual" | "email">("manual")
+  // メール起票モードの入力状態（顧客・本文・添付は全明細で共有する）
+  const [sourceRaw, setSourceRaw] = useState("")
+  const [attachments, setAttachments] = useState<File[]>([])
+  const [emailLineItems, setEmailLineItems] = useState<
+    { productId: string; quantity: string; desiredDeadline: string }[]
+  >([{ productId: "", quantity: "", desiredDeadline: "" }])
+
   const simulateMutation = useSimulateOrder()
   const createMutation = useCreateOrder()
   const confirmMutation = useConfirmOrder()
+  const emailIntakeMutation = useCreateEmailOrderIntake()
   const { data: products } = useProducts()
   const { data: customers } = useCustomers()
 
@@ -170,6 +197,79 @@ export default function NewOrderPage() {
   const step2Done = !!simulationResult
   const step3Active = !!simulationResult
 
+  // --- メール起票モードのハンドラ ---
+  const updateEmailLineItem = (
+    index: number,
+    key: "productId" | "quantity" | "desiredDeadline",
+    value: string,
+  ) => {
+    setEmailLineItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    )
+  }
+
+  const addEmailLineItem = () => {
+    setEmailLineItems((prev) => [
+      ...prev,
+      { productId: "", quantity: "", desiredDeadline: "" },
+    ])
+  }
+
+  const removeEmailLineItem = (index: number) => {
+    setEmailLineItems((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleAttachmentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length > 0) {
+      setAttachments((prev) => [...prev, ...selected])
+    }
+    // 同じファイルを選び直せるように input をリセットする
+    e.target.value = ""
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleEmailIntakeSubmit = async () => {
+    const parsedLineItems = emailLineItems.map((item) => {
+      const quantityNum = parseInt(item.quantity)
+      const productIdNum = parseInt(item.productId)
+      return {
+        product_id: Number.isNaN(productIdNum) ? undefined : productIdNum,
+        quantity: quantityNum,
+        desired_deadline: item.desiredDeadline || undefined,
+      }
+    })
+
+    if (parsedLineItems.some((item) => Number.isNaN(item.quantity) || item.quantity < 1)) {
+      toast.error("各明細の数量は1以上の整数を入力してください")
+      return
+    }
+
+    try {
+      const result = await emailIntakeMutation.mutateAsync({
+        payload: {
+          order_no: orderNo || undefined,
+          customer_id: customerId ? parseInt(customerId) : undefined,
+          source_raw: sourceRaw || undefined,
+          line_items: parsedLineItems,
+        },
+        files: attachments,
+      })
+      toast.success(
+        `メール起票で${result.created_orders.length}件の下書きを登録しました`,
+      )
+      router.push("/orders")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "メール起票の登録に失敗しました"
+      console.error("Email intake error:", error)
+      toast.error(message)
+    }
+  }
+
   return (
     <div className="container mx-auto py-6 px-4">
       <div className="mb-6">
@@ -179,6 +279,207 @@ export default function NewOrderPage() {
         </p>
       </div>
 
+      {/* 起票元モードの選択（手動フォーム / メール起票） */}
+      <div className="mb-6 inline-flex rounded-lg border bg-muted/40 p-1">
+        <button
+          type="button"
+          onClick={() => setIntakeMode("manual")}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+            intakeMode === "manual"
+              ? "bg-background shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Pencil className="h-4 w-4" />
+          手動フォーム
+        </button>
+        <button
+          type="button"
+          onClick={() => setIntakeMode("email")}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+            intakeMode === "email"
+              ? "bg-background shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Mail className="h-4 w-4" />
+          メール起票
+        </button>
+      </div>
+
+      {intakeMode === "email" && (
+        <div className="rounded-lg border bg-card p-6 shadow-sm space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold">メール起票（証跡付き手動登録）</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              自動抽出できない受注メールを、本文・添付ファイルとあわせて下書き登録します。
+              分納など1通のメールから複数注文を起こす場合は、明細行を追加してまとめて登録できます。
+              登録された注文は起票元がメール（<code>source_type=email</code>）として記録され、下書き状態になります。
+            </p>
+          </div>
+
+          {/* 注文番号（任意） */}
+          <div className="space-y-2">
+            <Label htmlFor="email-order-no">注文番号（任意）</Label>
+            <Input
+              id="email-order-no"
+              type="text"
+              placeholder="例: ORD-20260125-001（空白可・先頭明細に付与）"
+              value={orderNo}
+              onChange={(e) => setOrderNo(e.target.value)}
+            />
+          </div>
+
+          {/* 顧客（全明細で共有） */}
+          <CustomerSelector value={customerId} onValueChange={setCustomerId} />
+
+          {/* メール本文 */}
+          <div className="space-y-2">
+            <Label htmlFor="source-raw">メール本文</Label>
+            <textarea
+              id="source-raw"
+              value={sourceRaw}
+              onChange={(e) => setSourceRaw(e.target.value)}
+              placeholder="受注メールの本文を貼り付けてください"
+              rows={8}
+              className={cn(
+                "border-input placeholder:text-muted-foreground w-full min-w-0 rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] resize-y",
+                "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+              )}
+            />
+          </div>
+
+          {/* 添付ファイル */}
+          <div className="space-y-2">
+            <Label htmlFor="email-attachments">添付ファイル（任意・複数可）</Label>
+            <label
+              htmlFor="email-attachments"
+              className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
+            >
+              <Paperclip className="h-4 w-4" />
+              ファイルを選択して追加
+              <input
+                id="email-attachments"
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleAttachmentChange}
+              />
+            </label>
+            {attachments.length > 0 && (
+              <ul className="space-y-1">
+                {attachments.map((file, index) => (
+                  <li
+                    key={`${file.name}-${index}`}
+                    className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-1.5 text-sm"
+                  >
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(index)}
+                      className="ml-2 shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label="添付を削除"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 明細行（分納対応） */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <Label>明細（品番・数量・希望納期）</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addEmailLineItem}>
+                <Plus className="mr-1 h-4 w-4" />
+                明細を追加
+              </Button>
+            </div>
+
+            {emailLineItems.map((item, index) => (
+              <div
+                key={index}
+                className="rounded-lg border p-4 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    明細 {index + 1}
+                  </span>
+                  {emailLineItems.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeEmailLineItem(index)}
+                      className="text-muted-foreground hover:text-red-600"
+                      aria-label="明細を削除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                <ProductSelector
+                  value={item.productId}
+                  onValueChange={(value) =>
+                    updateEmailLineItem(index, "productId", value)
+                  }
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor={`email-qty-${index}`}>数量 *</Label>
+                    <Input
+                      id={`email-qty-${index}`}
+                      type="number"
+                      min="1"
+                      placeholder="1"
+                      value={item.quantity}
+                      onChange={(e) =>
+                        updateEmailLineItem(index, "quantity", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`email-deadline-${index}`}>希望納期（任意）</Label>
+                    <Input
+                      id={`email-deadline-${index}`}
+                      type="date"
+                      value={item.desiredDeadline}
+                      onChange={(e) =>
+                        updateEmailLineItem(index, "desiredDeadline", e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <p>
+              品番を選択しなかった明細は、製品未特定の下書きとして登録されます（後から受注一覧で紐付けできます）。
+            </p>
+          </div>
+
+          <Button
+            onClick={handleEmailIntakeSubmit}
+            disabled={emailIntakeMutation.isPending}
+            className="w-full"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {emailIntakeMutation.isPending
+              ? "登録中..."
+              : `メール起票で登録（下書き${emailLineItems.length}件）`}
+          </Button>
+        </div>
+      )}
+
+      {intakeMode === "manual" && (
+      <>
       {/* 3ステップインジケーター */}
       <div className="mb-6 flex items-center">
         {/* Step 1 */}
@@ -385,6 +686,8 @@ export default function NewOrderPage() {
           />
         </div>
       </div>
+      </>
+      )}
 
       {/* 工程未登録選択ダイアログ */}
       <Dialog open={noRoutingDialogOpen} onOpenChange={setNoRoutingDialogOpen}>

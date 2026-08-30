@@ -1,12 +1,14 @@
 # routers/transaction/orders.py
 import csv
 import io
+import uuid
 from datetime import UTC, date, datetime
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from postgrest.exceptions import APIError
+from pydantic import ValidationError
 
 from app.dependencies import (
     get_current_tenant_id,
@@ -22,6 +24,7 @@ from app.dependencies import (
 )
 from app.models.transaction.order_schema import (
     EmailIntakeResultResponse,
+    ManualEmailIntakeRequest,
     OrderApprovalLogResponse,
     OrderAttachmentResponse,
     OrderBulkApproveRequest,
@@ -43,7 +46,11 @@ from app.repositories.supa_infra.transaction.order_approval_log_repo import (
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
-from app.services.attachment_service import create_signed_url, create_signed_urls
+from app.services.attachment_service import (
+    create_signed_url,
+    create_signed_urls,
+    upload_manual_email_attachment,
+)
 from app.services.notification_service import create_notification
 from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
@@ -626,6 +633,158 @@ def split_order(
 
     return {
         "original_order_id": order_id,
+        "created_orders": [_map_order_response(o) for o in created_orders],
+    }
+
+
+@orders_router.post("/email-intake")
+async def create_email_order_intake(
+    payload: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
+    repo: OrderRepository = Depends(get_order_repo),
+):
+    """
+    自動パースできない受注メールを、本文（source_raw）・添付ファイル付きで手動起票する
+    （Issue #358）。1メール = 顧客・本文・添付を共有する N 明細（分納）としてまとめて
+    起票し、各注文は `source_type='email'`・`status='draft'` で作成される。
+
+    - 添付は Supabase Storage の `order-attachments` バケットへ保存し、作成した各注文に
+      `order_attachments` 行として紐付ける（`order_id` 未確定の集約行を1件、各注文に
+      紐づく実行を明細数×添付数だけ作成し、`source_attachment_id` で束ねる）
+    - 添付なし・本文のみでも起票可。その場合 `order_attachments` の `parse_status` は
+      自動経路（`_process_line_item`）と揃えて `failed_no_attachment` にする
+    - RLS: `order_attachments` は `is_tenant_member(tenant_id)` 前提のためユーザーJWT
+      クライアントで INSERT する。`admin_client` は Storage への保存にのみ使う
+    """
+    try:
+        intake = ManualEmailIntakeRequest.model_validate_json(payload)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from None
+
+    logger.info(
+        f"Manual email order intake: {len(intake.line_items)} line item(s), "
+        f"{len(files)} file(s)"
+    )
+
+    # 1. 添付ファイルを Storage へ保存（1回の起票を group_id で束ねる）
+    group_id = uuid.uuid4().hex
+    uploaded: list[dict[str, Any]] = []
+    for upload in files:
+        content = await upload.read()
+        if not content:
+            continue
+        content_type = upload.content_type or "application/octet-stream"
+        storage_path = upload_manual_email_attachment(
+            admin_client,
+            tenant_id,
+            group_id,
+            upload.filename or "attachment",
+            content,
+            content_type,
+        )
+        uploaded.append(
+            {
+                "storage_path": storage_path,
+                "original_filename": upload.filename or "attachment",
+                "content_type": content_type,
+                "size_bytes": len(content),
+            }
+        )
+
+    attachments_table = SupabaseTableName.ORDER_ATTACHMENTS.value
+    has_attachment = len(uploaded) > 0
+    row_parse_status = "success" if has_attachment else "failed_no_attachment"
+
+    # 2. 受信メールに相当する集約行（order_id IS NULL）を1件作成し、
+    #    各注文の source_attachment_id をここに向ける（自動経路のステージング行と同じ扱い）。
+    #    複数添付時は先頭ファイルを代表として記録する（自動経路も1メール1添付前提）。
+    representative = uploaded[0] if has_attachment else {}
+    staging_row = cast(
+        dict[str, Any],
+        client.table(attachments_table)
+        .insert(
+            {
+                "tenant_id": tenant_id,
+                "customer_id": intake.customer_id,
+                "source_raw": intake.source_raw,
+                "storage_path": representative.get("storage_path", ""),
+                "original_filename": representative.get("original_filename", ""),
+                "content_type": representative.get("content_type"),
+                "size_bytes": representative.get("size_bytes"),
+                "parse_status": "success" if has_attachment else "failed_no_attachment",
+            }
+        )
+        .execute()
+        .data[0],
+    )
+    staging_id = staging_row["id"]
+
+    # 3. 明細ごとに注文を作成し、添付行を紐付ける
+    created_orders: list[dict[str, Any]] = []
+    try:
+        for index, item in enumerate(intake.line_items):
+            new_order = repo.create(
+                {
+                    "tenant_id": tenant_id,
+                    # order_number は UNIQUE(tenant_id, order_number) のため
+                    # 先頭明細にのみ付与する（分納の2件目以降は採番なし）
+                    "order_number": intake.order_number if index == 0 else None,
+                    "product_id": item.product_id,
+                    "quantity": item.quantity,
+                    "deadline_date": item.deadline_date,
+                    "customer_id": intake.customer_id,
+                    "customer_certainty": intake.customer_certainty,
+                    "status": "draft",
+                    "source_type": "email",
+                    "source_raw": intake.source_raw,
+                    "extracted_product_name": item.extracted_product_name,
+                    "source_attachment_id": staging_id,
+                }
+            )
+            created_orders.append(new_order)
+
+            record_correction_if_applicable(client, tenant_id, None, new_order, user_id)
+
+            attachment_rows = (
+                [
+                    {
+                        "order_id": new_order["id"],
+                        "tenant_id": tenant_id,
+                        "storage_path": f["storage_path"],
+                        "original_filename": f["original_filename"],
+                        "content_type": f["content_type"],
+                        "size_bytes": f["size_bytes"],
+                        "parse_status": row_parse_status,
+                    }
+                    for f in uploaded
+                ]
+                if has_attachment
+                else [
+                    {
+                        "order_id": new_order["id"],
+                        "tenant_id": tenant_id,
+                        "storage_path": "",
+                        "original_filename": "",
+                        "content_type": None,
+                        "size_bytes": None,
+                        "parse_status": row_parse_status,
+                    }
+                ]
+            )
+            client.table(attachments_table).insert(attachment_rows).execute()
+    except (ValueError, APIError) as e:
+        for created in created_orders:
+            repo.delete(created["id"])
+        client.table(attachments_table).delete().eq("id", staging_id).execute()
+        detail = e.message if isinstance(e, APIError) else str(e)
+        raise HTTPException(status_code=400, detail=detail) from None
+
+    return {
+        "staging_attachment_id": str(staging_id),
         "created_orders": [_map_order_response(o) for o in created_orders],
     }
 

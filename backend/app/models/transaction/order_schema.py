@@ -69,6 +69,35 @@ class OrderSplitRequest(BaseSchema):
     line_items: list[OrderSplitLineItem] = Field(min_length=2)
 
 
+class ManualEmailIntakeLineItem(BaseSchema):
+    """手動メール起票（分納対応）における1明細を表すスキーマ"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    product_id: int | None = None
+    quantity: int = Field(gt=0)
+    deadline_date: str | None = Field(None, alias="desired_deadline")
+    extracted_product_name: str | None = None
+
+
+class ManualEmailIntakeRequest(BaseSchema):
+    """
+    自動パースできない受注メールを、本文・添付付きで手動起票するリクエスト。
+    1メール = 顧客・本文・添付を共有する N 明細（分納）としてまとめて起票する。
+    multipart のフォームフィールド `payload` に JSON 文字列で渡す。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    order_number: str | None = Field(None, alias="order_no")
+    customer_id: int | None = None
+    customer_certainty: (
+        Literal["confirmed", "forecast", "forecast_tentative"] | None
+    ) = None
+    source_raw: str | None = None
+    line_items: list[ManualEmailIntakeLineItem] = Field(min_length=1)
+
+
 class OrderRejectRequest(BaseSchema):
     """注文の承認却下リクエストスキーマ（却下理由は任意入力）"""
 

@@ -1,4 +1,5 @@
 # __tests__/api/routers/transaction/test_orders.py
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -1458,3 +1459,142 @@ class TestOrderRouter:
 
         assert response.status_code == 403
         mock_approval_log_repo.get_all.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # POST /orders/email-intake （手動メール起票 / 分納の複数明細, Issue #358）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _stub_attachment_insert(mock_supabase_client, staging_id="staging-1"):
+        """order_attachments への insert().execute().data[0] をスタブする"""
+        mock_supabase_client.table.return_value.insert.return_value.execute.return_value.data = [  # noqa: E501
+            {"id": staging_id}
+        ]
+
+    def test_email_intake_success_multi_line_with_attachment(
+        self, headers, mock_repo, mock_supabase_client, mock_admin_client
+    ):
+        """POST /email-intake: 本文＋添付付きで分納2明細をまとめて起票できる"""
+
+        self._stub_attachment_insert(mock_supabase_client, "staging-1")
+        mock_repo.create.side_effect = [
+            {"id": 101, "order_number": None, "product_id": 1, "quantity": 10},
+            {"id": 102, "order_number": None, "product_id": 1, "quantity": 20},
+        ]
+
+        payload = {
+            "customer_id": 7,
+            "customer_certainty": "confirmed",
+            "source_raw": "発注のご依頼\n分納でお願いします",
+            "line_items": [
+                {"product_id": 1, "quantity": 10, "desired_deadline": "2026-09-01"},
+                {"product_id": 1, "quantity": 20, "desired_deadline": "2026-10-01"},
+            ],
+        }
+
+        response = client.post(
+            "/orders/email-intake",
+            data={"payload": json.dumps(payload)},
+            files={"files": ("order.pdf", b"%PDF-1.4 test", "application/pdf")},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["staging_attachment_id"] == "staging-1"
+        assert len(body["created_orders"]) == 2
+
+        assert mock_repo.create.call_count == 2
+        first = mock_repo.create.call_args_list[0][0][0]
+        assert first["source_type"] == "email"
+        assert first["status"] == "draft"
+        assert first["source_raw"] == payload["source_raw"]
+        assert first["customer_id"] == 7
+        assert first["source_attachment_id"] == "staging-1"
+        assert first["tenant_id"] == headers["x-tenant-id"]
+
+        # Storage へ添付をアップロードしている
+        assert mock_admin_client.storage.from_.return_value.upload.called
+
+        # 集約行1件 + 明細ごとの添付行2件 = 3回 insert
+        insert_calls = mock_supabase_client.table.return_value.insert.call_args_list
+        assert len(insert_calls) == 3
+        staging_insert = insert_calls[0][0][0]
+        # 集約行は order_id を持たない（DB default で NULL = 受信メール相当のステージング行）
+        assert "order_id" not in staging_insert
+        assert staging_insert["parse_status"] == "success"
+        per_order_insert = insert_calls[1][0][0]
+        assert per_order_insert[0]["order_id"] == 101
+        assert per_order_insert[0]["parse_status"] == "success"
+
+    def test_email_intake_body_only_no_attachment(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /email-intake: 添付なし・本文のみでも起票でき parse_status は failed_no_attachment"""
+
+        self._stub_attachment_insert(mock_supabase_client, "staging-2")
+        mock_repo.create.side_effect = [
+            {"id": 201, "order_number": None, "product_id": None, "quantity": 5}
+        ]
+
+        payload = {
+            "customer_id": 3,
+            "source_raw": "本文のみ",
+            "line_items": [{"quantity": 5, "desired_deadline": "2026-09-15"}],
+        }
+
+        response = client.post(
+            "/orders/email-intake",
+            data={"payload": json.dumps(payload)},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["created_orders"]) == 1
+
+        insert_calls = mock_supabase_client.table.return_value.insert.call_args_list
+        staging_insert = insert_calls[0][0][0]
+        assert staging_insert["parse_status"] == "failed_no_attachment"
+        assert staging_insert["storage_path"] == ""
+        per_order_insert = insert_calls[1][0][0]
+        assert per_order_insert[0]["parse_status"] == "failed_no_attachment"
+
+    def test_email_intake_rejects_empty_line_items(self, headers):
+        """POST /email-intake: line_items が空なら422"""
+
+        response = client.post(
+            "/orders/email-intake",
+            data={"payload": json.dumps({"customer_id": 1, "line_items": []})},
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_email_intake_rolls_back_created_orders_on_failure(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /email-intake: 2件目の作成失敗時は既作成分と集約行をロールバックする"""
+
+        self._stub_attachment_insert(mock_supabase_client, "staging-3")
+        mock_repo.create.side_effect = [
+            {"id": 301, "order_number": None, "product_id": 1, "quantity": 10},
+            ValueError("重複データ"),
+        ]
+
+        payload = {
+            "customer_id": 9,
+            "line_items": [
+                {"product_id": 1, "quantity": 10, "desired_deadline": "2026-09-01"},
+                {"product_id": 1, "quantity": 20, "desired_deadline": "2026-10-01"},
+            ],
+        }
+
+        response = client.post(
+            "/orders/email-intake",
+            data={"payload": json.dumps(payload)},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        mock_repo.delete.assert_any_call(301)
