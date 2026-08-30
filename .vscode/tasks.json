@@ -60,7 +60,7 @@
             }
         },
         {
-            "label": "Supabase db push",
+            "label": "Supabase db push include all",
             "type": "shell",
             "command": "source ${workspaceFolder}/backend/.env && supabase db push --include-all --db-url postgresql://postgres.${SUPABASE_PROJECT_ID}:${SUPABASE_DB_PASSWORD}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres",
             "problemMatcher": [],
