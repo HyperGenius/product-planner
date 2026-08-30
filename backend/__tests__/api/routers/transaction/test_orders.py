@@ -816,6 +816,75 @@ class TestOrderRouter:
 
         assert response.status_code == 404
 
+    def test_ship_order_success(self, headers, mock_repo, mock_supabase_client):
+        """POST /{order_id}/ship: confirmed -> shipped への遷移が成功する"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 100,
+            "status": "confirmed",
+        }
+        mock_repo.update.return_value = {"id": order_id, "status": "shipped"}
+
+        response = client.post(f"/orders/{order_id}/ship", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "shipped"
+        mock_repo.update.assert_called_once_with(order_id, {"status": "shipped"})
+
+    def test_ship_order_allowed_for_president(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship: president も操作できる"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "product_id": 100,
+            "status": "confirmed",
+        }
+        mock_repo.update.return_value = {"id": order_id, "status": "shipped"}
+
+        response = client.post(f"/orders/{order_id}/ship", headers=headers)
+
+        assert response.status_code == 200
+
+    def test_ship_order_forbidden_for_iso_officer(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship: president / order_handler 以外は403"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "iso_officer")
+
+        response = client.post(f"/orders/{order_id}/ship", headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_by_id.assert_not_called()
+
+    def test_ship_order_invalid_transition_from_draft(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship: draftからは送品済みにできない"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {"id": order_id, "status": "draft"}
+
+        response = client.post(f"/orders/{order_id}/ship", headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
+
+    def test_ship_order_not_found(self, headers, mock_repo, mock_supabase_client):
+        """POST /{order_id}/ship: 注文が存在しない場合の404エラーテスト"""
+        order_id = 999
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = None
+
+        response = client.post(f"/orders/{order_id}/ship", headers=headers)
+
+        assert response.status_code == 404
+
     def test_approve_orders_bulk_partial_failure(
         self,
         headers,

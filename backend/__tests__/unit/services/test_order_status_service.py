@@ -18,6 +18,7 @@ class TestOrderStatusService:
             ("pending_approval", "draft"),
             ("confirmed", "completed"),
             ("confirmed", "canceled"),
+            ("confirmed", "shipped"),
         ],
     )
     def test_allowed_transitions(self, current_status, new_status):
@@ -37,6 +38,10 @@ class TestOrderStatusService:
             ("completed", "confirmed"),
             ("canceled", "draft"),
             (None, "confirmed"),
+            ("draft", "shipped"),
+            ("pending_approval", "shipped"),
+            ("shipped", "completed"),
+            ("shipped", "confirmed"),
         ],
     )
     def test_disallowed_transitions(self, current_status, new_status):

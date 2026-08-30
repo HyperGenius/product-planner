@@ -11,6 +11,7 @@ import {
   useOrders,
   useRejectOrder,
   useRequestApproval,
+  useShipOrder,
   useSimulateOrderById,
   useWithdrawApproval,
 } from "@/hooks/use-orders"
@@ -72,6 +73,7 @@ export function useOrdersPage() {
   const requestApproval = useRequestApproval()
   const rejectOrder = useRejectOrder()
   const withdrawApproval = useWithdrawApproval()
+  const shipOrder = useShipOrder()
   const approveOrdersBulk = useApproveOrdersBulk()
   const deleteOrder = useDeleteOrder()
   const simulateOrderById = useSimulateOrderById()
@@ -216,6 +218,17 @@ export function useOrdersPage() {
       },
       onError: (error: Error) => {
         toast.error(`承認依頼の取り下げに失敗しました: ${error.message}`)
+      },
+    })
+  }
+
+  const handleShipFromRow = (orderId: number, orderNo: string) => {
+    shipOrder.mutate(orderId, {
+      onSuccess: () => {
+        toast.success(`注文「${orderNo}」を送品済みにしました`)
+      },
+      onError: (error: Error) => {
+        toast.error(`送品済みへの変更に失敗しました: ${error.message}`)
       },
     })
   }
@@ -490,6 +503,7 @@ export function useOrdersPage() {
     requestApproval,
     rejectOrder,
     withdrawApproval,
+    shipOrder,
     deleteOrder,
     simulateOrderById,
     simulatingOrderId,
@@ -498,6 +512,7 @@ export function useOrdersPage() {
     handleApproveFromRow,
     handleRequestApprovalFromRow,
     handleWithdrawFromRow,
+    handleShipFromRow,
     handleRejectRequest,
     handleConfirmReject,
     handleSimulate,

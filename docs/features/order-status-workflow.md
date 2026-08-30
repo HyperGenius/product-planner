@@ -17,7 +17,8 @@
 
 ```
 draft ──────────▶ pending_approval ──────────▶ confirmed ──┬──▶ completed
-                        │                                    └──▶ canceled
+                        │                                    ├──▶ canceled
+                        │                                    └──▶ shipped
                         └──(差し戻し)──▶ draft
 ```
 
@@ -26,6 +27,7 @@ draft ──────────▶ pending_approval ───────�
 | `draft` | 下書き（メール自動作成 or 手動作成） |
 | `pending_approval` | 受注担当者による修正完了、社長承認待ち |
 | `confirmed` | 社長による承認済み（`POST /orders/{id}/confirm` 実行済み） |
+| `shipped` | 送品済み（出荷・納品済み。`POST /orders/{id}/ship` 実行済み、実質的な終端） |
 | `completed` | 完了 |
 | `canceled` | キャンセル |
 
@@ -41,9 +43,19 @@ draft ──────────▶ pending_approval ───────�
 実行するAPIエンドポイントは Issue #325 で実装した。詳細は
 [approval-workflow.md](approval-workflow.md) を参照。
 
+### 送品済み (`shipped`)
+
+`confirmed → shipped` の遷移は `POST /orders/{id}/ship` が担う。ロールは
+`president` / `order_handler` に開放している（出荷実務は受注担当も行うため）。
+`shipped` は実質的な終端状態で、以降の順方向遷移は無い。フロントエンドでは
+受注一覧・受注詳細に「送品済みにする」ボタンを表示する
+（`confirmed` かつ上記ロールのときのみ。[order-table-row.tsx](../../frontend/src/components/orders/order-table-row.tsx) /
+[orders/[id]/page.tsx](../../frontend/src/app/orders/[id]/page.tsx)、フックは
+`useShipOrder`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)））。
+
 ## 自動処理（メール/PDF取込）との整合
 
-`upsert_order_by_dedupe_key`（[20260810000002_add_pending_approval_order_status.sql](../../supabase/migrations/20260810000002_add_pending_approval_order_status.sql)）
-は、既存の `confirmed`/`completed`/`canceled` 保護に加えて `pending_approval` 状態の
+`upsert_order_by_dedupe_key`（[20260830150000_add_shipped_order_status.sql](../../supabase/migrations/20260830150000_add_shipped_order_status.sql)）
+は、既存の `confirmed`/`completed`/`canceled`/`pending_approval` 保護に加えて `shipped` 状態の
 受注も自動処理から保護し、誤って上書き・降格させないようにしている。
 

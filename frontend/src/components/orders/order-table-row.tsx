@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Undo2 } from "lucide-react"
+import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Truck, Undo2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,7 @@ interface OrderTableRowProps {
   requestApprovalIsPending: boolean
   approveIsPending: boolean
   withdrawIsPending: boolean
+  shipIsPending: boolean
   currentUserRole: string | null
   isSelected: boolean
   selectionIndex?: number
@@ -49,6 +50,7 @@ interface OrderTableRowProps {
   onApprove: (order: Order) => void
   onReject: (order: Order) => void
   onWithdraw: (orderId: number, orderNo: string) => void
+  onShip: (orderId: number, orderNo: string) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
   onToggleSelect: (orderId: number) => void
@@ -63,6 +65,7 @@ export function OrderTableRow({
   requestApprovalIsPending,
   approveIsPending,
   withdrawIsPending,
+  shipIsPending,
   currentUserRole,
   isSelected,
   selectionIndex,
@@ -73,6 +76,7 @@ export function OrderTableRow({
   onApprove,
   onReject,
   onWithdraw,
+  onShip,
   onEdit,
   onDelete,
   onToggleSelect,
@@ -254,6 +258,18 @@ export function OrderTableRow({
                 </Button>
               </>
             )}
+            {order.status === "confirmed" &&
+              (currentUserRole === "president" || currentUserRole === "order_handler") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onShip(order.id, order.order_no ?? "")}
+                  disabled={shipIsPending || isBulkOperationInProgress}
+                >
+                  <Truck className="mr-1.5 h-3.5 w-3.5" />
+                  送品済みにする
+                </Button>
+              )}
             {order.status !== "completed" && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

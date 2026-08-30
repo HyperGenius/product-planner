@@ -1240,3 +1240,38 @@ def withdraw_order_approval(
         approval_log_repo, tenant_id, order_id, "withdraw", user_id
     )
     return _map_order_response(result)
+
+
+@orders_router.post("/{order_id}/ship")
+def ship_order(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+):
+    """
+    確定済の注文を送品済み (shipped) にする（president / order_handler）。
+
+    confirmed からのみ遷移でき、shipped は実質的な終端状態。
+    """
+    logger.info(f"Marking order {order_id} as shipped")
+    _require_any_role(
+        tenant_id,
+        user_id,
+        client,
+        ("president", "order_handler"),
+        "送品済みへの変更",
+    )
+
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    try:
+        validate_order_status_transition(order.get("status"), "shipped")
+    except InvalidOrderStatusTransitionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    result = order_repo.update(order_id, {"status": "shipped"})
+    return _map_order_response(result)

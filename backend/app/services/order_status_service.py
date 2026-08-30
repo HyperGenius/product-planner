@@ -4,12 +4,16 @@
 draft -> pending_approval -> confirmed -> completed / canceled の順方向のみを
 許可する。差し戻し pending_approval -> draft のみ例外的に許可する
 （実際の却下APIは別Issueで実装）。
+
+confirmed からは shipped (送品済み) へも遷移できる。shipped は実質的な終端で、
+以降の順方向遷移は無い。
 """
 
 ORDER_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"pending_approval"},
     "pending_approval": {"draft", "confirmed"},
-    "confirmed": {"completed", "canceled"},
+    "confirmed": {"completed", "canceled", "shipped"},
+    "shipped": set(),
     "completed": set(),
     "canceled": set(),
 }
