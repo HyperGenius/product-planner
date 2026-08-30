@@ -287,6 +287,71 @@ class TestParsePendingOrderPdfs:
         assert notif_insert["source_table"] == "gmail_message"
         assert notif_insert["source_id"] == "msg-1"
 
+        # 既に non_order_email の parse_log があるため no_order_created は二重に
+        # 記録しない（Issue #357）
+        assert not any(c.get("reason") == "no_order_created" for c in insert_calls)
+
+    def test_all_lines_deduped_notifies_no_order_created(self):
+        """自動抽出は成功したが全明細が既存注文と重複し upsert が
+        skipped_no_change を返した場合、parse_status='success' だけで終わらず
+        no_order_created の parse_log と通知を記録すること（Issue #357）。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[self._staging_row()]
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": None, "action": "skipped_no_change"}]
+        )
+        # _notify_if_no_order_created の「既存 parse_log あり?」チェックは空を返す
+        mock_db.table().select().eq().limit().execute.return_value = MagicMock(data=[])
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(text="注文書", failure_reason=None),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value=[
+                    {
+                        "product_name_raw": "FILTER COMP",
+                        "product_number_raw": "F-1",
+                        "quantity": 20000,
+                        "delivery_date": "2026-08-31",
+                        "certainty": "confirmed",
+                    }
+                ],
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=100,
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+
+        insert_calls = [
+            c.args[0] for c in mock_db.table().insert.call_args_list if c.args
+        ]
+        log_insert = next(
+            c for c in insert_calls if c.get("reason") == "no_order_created"
+        )
+        assert log_insert["order_attachment_id"] == "att-1"
+
+        notif_insert = next(
+            c for c in insert_calls if c.get("notif_type") == "no_order_created"
+        )
+        assert notif_insert["source_table"] == "order_parse_log"
+
+        # ステージング行は success に更新される（再処理ループには戻さない）
+        update_calls = mock_db.table().update.call_args_list
+        assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
     def test_non_pdf_staging_row_skips_pdf_extraction_and_uses_email_body(self):
         """非PDF添付・添付なしメール由来のステージング行（Issue #280）は、
         PDFテキスト抽出を経由せず直接メール本文から抽出すること。"""

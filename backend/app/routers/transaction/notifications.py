@@ -27,6 +27,7 @@ _PARSE_LOG_NOTIF_TYPES = {
     "downgrade_skipped",
     "draft_conflict_skipped",
     "multi_order_suspected",
+    "no_order_created",
 }
 
 

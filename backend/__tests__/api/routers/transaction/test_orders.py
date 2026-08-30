@@ -138,6 +138,96 @@ class TestOrderRouter:
         assert result["order_no"] == "ORD-001"
         mock_repo.get_by_id_with_routing_status.assert_called_with(order_id)
 
+    def test_list_email_intake_results(
+        self, headers, mock_supabase_client, mock_admin_client
+    ):
+        """GET /orders/email-intake-results: 受信受注メール（ステージング行）ごとに
+        起票件数・スキップ理由・元PDFリンクを一覧で返す（Issue #357）。
+        全明細が重複スキップされ起票0件のメールも、parse_status='success' かつ
+        created_order_count=0 / parse_log_reasons=['no_order_created'] として
+        判別できること。"""
+
+        def _q(data):
+            q = MagicMock()
+            for m in ("select", "eq", "in_", "is_", "order", "limit"):
+                getattr(q, m).return_value = q
+            q.execute.return_value = MagicMock(data=data)
+            return q
+
+        staging_q = _q(
+            [
+                {
+                    "id": "att-1",
+                    "tenant_id": headers["x-tenant-id"],
+                    "customer_id": 2,
+                    "storage_path": "t/inbox/m1/order.pdf",
+                    "original_filename": "order.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 100,
+                    "parse_status": "success",
+                    "gmail_message_id": "1a04679c33ae25b5",
+                    "created_at": "2026-08-30T00:00:00+00:00",
+                },
+                {
+                    "id": "att-2",
+                    "tenant_id": headers["x-tenant-id"],
+                    "customer_id": 2,
+                    "storage_path": "t/inbox/m2/order.pdf",
+                    "original_filename": "order2.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 100,
+                    "parse_status": "success",
+                    "gmail_message_id": "m2",
+                    "created_at": "2026-08-29T00:00:00+00:00",
+                },
+            ]
+        )
+        customers_q = _q([{"id": 2, "name": "株式会社 飯野製作所"}])
+        orders_q = _q([{"id": 1000062, "source_attachment_id": "att-2"}])
+        logs_q = _q(
+            [
+                {
+                    "order_attachment_id": "att-1",
+                    "reason": "no_order_created",
+                    "created_at": "2026-08-30T00:00:01+00:00",
+                }
+            ]
+        )
+        table_map = {
+            "order_attachments": staging_q,
+            "customers": customers_q,
+            "orders": orders_q,
+            "order_parse_log": logs_q,
+        }
+        # organization_members など未登録テーブルは get_current_tenant_id の
+        # メンバーシップ検証用なので、デフォルトの MagicMock を返す
+        mock_supabase_client.table.side_effect = lambda name: table_map.get(
+            name, MagicMock()
+        )
+        mock_admin_client.storage.from_.return_value.create_signed_urls.return_value = [
+            {"path": "t/inbox/m1/order.pdf", "signedURL": "https://signed/1"},
+            {"path": "t/inbox/m2/order.pdf", "signedURL": "https://signed/2"},
+        ]
+
+        response = client.get("/orders/email-intake-results", headers=headers)
+
+        assert response.status_code == 200
+        rows = response.json()
+        assert [r["id"] for r in rows] == ["att-1", "att-2"]
+
+        deduped = rows[0]
+        assert deduped["parse_status"] == "success"
+        assert deduped["created_order_count"] == 0
+        assert deduped["parse_log_reasons"] == ["no_order_created"]
+        assert deduped["customer_name"] == "株式会社 飯野製作所"
+        assert deduped["signed_url"] == "https://signed/1"
+        assert deduped["gmail_url"].endswith("1a04679c33ae25b5")
+
+        created = rows[1]
+        assert created["created_order_count"] == 1
+        assert created["created_order_ids"] == [1000062]
+        assert created["parse_log_reasons"] == []
+
     def test_create_order(self, headers, mock_repo):
         """POST /: 新規作成のテスト"""
         payload = {

@@ -22,6 +22,7 @@ const NOTIF_TYPE_LABELS: Record<NotificationType, string> = {
   customer_draft_created: "顧客の下書き作成",
   multi_order_suspected: "複数受注の疑い",
   approval_requested: "承認依頼",
+  no_order_created: "起票0件（全明細が重複）",
 }
 
 function groupByType(notifications: Notification[]): [NotificationType, Notification[]][] {

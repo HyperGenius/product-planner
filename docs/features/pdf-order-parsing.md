@@ -197,7 +197,26 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 | `updated`                 | ○ | なし |
 | `skipped_downgrade`       | - | `reason='downgrade_skipped'` |
 | `skipped_draft_conflict`  | - | `reason='draft_conflict_skipped'` |
-| `skipped_no_change`       | - | なし |
+| `skipped_no_change`       | - | なし（※下記 Issue #357 の attachment 単位フォールバックを除く） |
+
+#### パース成功・起票0件の可視化（Issue #357）
+
+自動抽出は成功したのに、全明細が既存の内示注文と同一キー・同確度・同数量で
+`skipped_no_change` になると、`_process_line_item` が黙って `False` を返すだけで
+`order_parse_log` も `notifications` も残らず、`order_attachments.parse_status='success'`
+だけが記録されていた。運用側はメーラーとアプリを見比べない限り「起票0件」に
+気づけず、`parse_status='success'` のため cron の再処理対象からも外れる。
+
+対策として `_parse_one` の末尾（`parse_status='success'` 更新の直前）で
+`_notify_if_no_order_created(db, row, created_count)` を呼ぶ。
+
+- `created_count == 0` かつ、その attachment に紐づく `order_parse_log` が1件も無い場合のみ、
+  `reason='no_order_created'` の parse_log と `notif_type='no_order_created'` の通知を記録する
+- `non_order_email` / `no_product_match` / `invalid_quantity` / `downgrade_skipped` /
+  `draft_conflict_skipped` など、既に別の理由で parse_log が残っているケースは二重に
+  通知しない（既存 parse_log の有無で判定）
+- `parse_status` は `success` のまま（無限再処理を避ける）。可視化は通知と
+  [受信メール処理結果一覧](email-order-intake.md#受信受注メールの処理結果一覧issue-357) で行う
 
 `deadline_date` はdedupeキーの一部のため、内示の納期が翌月にずれるようなケースは
 既存の仕組みでは別レコードとして新規INSERTされる（旧レコードは残り続ける）。これは
