@@ -329,7 +329,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | `received_at` | `order_attachments.created_at`（受信＝ステージング保存日時） |
 | `customer_id` / `customer_name` | ステージング行の顧客（下書き顧客含む） |
 | `has_attachment` / `original_filename` / `content_type` | 添付の有無・ファイル名・MIME |
-| `parse_status` | `order_attachments.parse_status`（`pending` / `success` / `failed_*`） |
+| `parse_status` | `order_attachments.parse_status`。この一覧が対象にするステージング行（`order_id IS NULL`）では実質 `pending`（未処理）/ `success`（処理済み）の2値。`failed_*` は注文に紐づく実添付行（`order_id != NULL`）側で使われる値 |
 | `created_order_count` / `created_order_ids` | そのメールから**新規起票**された注文（`orders.source_attachment_id = staging.id`。`updated` は含まない） |
 | `parse_log_reasons` | その attachment に紐づく `order_parse_log.reason` の一覧（`no_order_created` / `no_product_match` / `draft_conflict_skipped` 等） |
 | `signed_url` | 元PDFの署名付きURL（`create_signed_urls` バッチ生成、60分） |
@@ -346,8 +346,10 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 - `frontend/src/types/order.ts`: `EmailIntakeResult` 型
 - `frontend/src/hooks/use-orders.ts`: `useEmailIntakeResults()`（60秒ポーリング）
 - `frontend/src/app/orders/email-intake/page.tsx`: 一覧テーブル。`created_order_count === 0`
-  の行は「起票0件」バッジで強調し、`parse_status='success'` かつ理由ログが無い場合は
-  「全明細が既存注文と重複（skipped_no_change）」と補足表示する
+  の行は「起票0件」バッジで強調する。`parse_status='success'` かつ理由ログが無い場合は
+  「新規起票なし（全明細が既存注文と重複、または既存注文の更新のみ）」と中立的に補足表示する
+  （`created_order_count` は `updated` を含まないため、重複スキップと断定はしない）。
+  `parse_status` のバッジは `success`=中立 / `pending`=アウトライン / それ以外=エラー系で色分けする
 - `frontend/src/components/layout/app-sidebar.tsx`: 「受信メール処理結果」メニュー項目
   （`/orders/email-intake`、全メンバーに表示）
 - `notification-bell.tsx` / `types/notification.ts`: `no_order_created`（「起票0件（全明細が重複）」）

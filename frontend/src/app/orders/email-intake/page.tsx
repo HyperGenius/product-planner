@@ -110,6 +110,14 @@ export default function EmailIntakeResultsPage() {
   )
 }
 
+function parseStatusVariant(
+  parseStatus: string,
+): "secondary" | "outline" | "destructive" {
+  if (parseStatus === "success") return "secondary"
+  if (parseStatus === "pending") return "outline"
+  return "destructive"
+}
+
 function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
   const zeroCreated = row.created_order_count === 0
   const parseSucceeded = row.parse_status === "success"
@@ -124,7 +132,7 @@ function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
         {row.has_attachment ? (row.original_filename ?? "PDF") : "（添付なし）"}
       </TableCell>
       <TableCell>
-        <Badge variant={parseSucceeded ? "secondary" : "destructive"}>
+        <Badge variant={parseStatusVariant(row.parse_status)}>
           {PARSE_STATUS_LABELS[row.parse_status] ?? row.parse_status}
         </Badge>
       </TableCell>
@@ -160,8 +168,8 @@ function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
       <TableCell>
         {row.parse_log_reasons.length === 0 ? (
           parseSucceeded && zeroCreated ? (
-            <span className="text-xs text-orange-700">
-              全明細が既存注文と重複（skipped_no_change）
+            <span className="text-xs text-muted-foreground">
+              新規起票なし（全明細が既存注文と重複、または既存注文の更新のみ）
             </span>
           ) : (
             "-"

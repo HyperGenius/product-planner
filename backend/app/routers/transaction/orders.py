@@ -297,9 +297,13 @@ def list_email_intake_results(
     admin_client は署名付きURL生成にのみ使う。
     """
     logger.info("Fetching email intake results")
+    # source_raw（メール本文）など、レスポンス生成に不要で大きい列は取得しない
     staging_res = (
         client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
-        .select("*")
+        .select(
+            "id, customer_id, storage_path, original_filename, content_type, "
+            "parse_status, gmail_message_id, created_at"
+        )
         .is_("order_id", "null")
         .eq("tenant_id", tenant_id)
         .order("created_at", desc=True)
