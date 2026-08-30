@@ -36,6 +36,36 @@ export interface OrderCreate {
 }
 
 /**
+ * 手動メール起票（Issue #358）の1明細
+ * 顧客・本文・添付は全明細で共有し、明細ごとに品番・数量・納期を持つ（分納対応）
+ */
+export interface ManualEmailIntakeLineItem {
+  product_id?: number
+  quantity: number
+  desired_deadline?: string
+  extracted_product_name?: string
+}
+
+/**
+ * 手動メール起票リクエスト（multipart の payload フィールドに JSON で渡す）
+ */
+export interface ManualEmailIntakeRequest {
+  order_no?: string
+  customer_id?: number
+  customer_certainty?: 'confirmed' | 'forecast' | 'forecast_tentative'
+  source_raw?: string
+  line_items: ManualEmailIntakeLineItem[]
+}
+
+/**
+ * 手動メール起票のレスポンス
+ */
+export interface ManualEmailIntakeResponse {
+  staging_attachment_id: string
+  created_orders: Order[]
+}
+
+/**
  * 注文シミュレーション要求のデータ型
  */
 export interface OrderSimulateRequest {

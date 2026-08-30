@@ -357,6 +357,67 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ---
 
+## 手動での「メール起票」（Issue #358）
+
+自動パイプライン（Gmail ポーリング）に乗せられない受注メール（フォーマットが抽出に
+不向き、分納スケジュール等）を、担当者が `/orders/new` から本文・添付付きで手動起票
+できるようにする。自動経路（`_process_line_item`）と同じデータの持ち方
+（`source_type='email'` / `source_raw` / `order_attachments` 紐付け / `source_attachment_id`
+による束ね）に揃えることで、以後の受注管理・突き合わせを自動起票分と同一に扱える。
+
+### API: `POST /orders/email-intake`（multipart/form-data）
+
+`backend/app/routers/transaction/orders.py::create_email_order_intake`。
+
+| パート | 内容 |
+|---|---|
+| `payload` | JSON文字列。`ManualEmailIntakeRequest`（`order_schema.py`）= `{ order_no?, customer_id?, customer_certainty?, source_raw?, line_items: [{ product_id?, quantity, desired_deadline?, extracted_product_name? }] }`。`line_items` は1件以上 |
+| `files` | 添付ファイル（0個以上・複数可） |
+
+処理:
+
+1. 添付を Supabase Storage の `order-attachments` バケットへ保存する。パスは
+   `{tenant_id}/manual/{group_id}/{safe_filename}`（`group_id` は1回の起票を束ねる UUID）。
+   `attachment_service.upload_manual_email_attachment()`
+2. 受信メールに相当する集約行を `order_attachments` に1件 INSERT（`order_id IS NULL`、
+   `source_raw` 保持、代表として先頭ファイルの `storage_path` 等を記録）。集約行の
+   `parse_status` は「処理状態」を表すため、添付有無に関わらず `success`（＝処理済み）で
+   入れる（自動経路は `pending`→parse後 `success`。手動起票は同期的に処理済みのため
+   `success` に寄せ、`/orders/email-intake-results` の表示・処理済み判定と揃える）。
+   添付なしは `storage_path=''` で表現する
+3. `line_items` ごとに `orders` を作成（`source_type='email'`、`status='draft'`、
+   `source_attachment_id` = 集約行id、`customer_id` / `customer_certainty` / `source_raw`
+   は全明細で共有）。`order_number` は UNIQUE(tenant_id, order_number) のため先頭明細にのみ付与
+4. 作成した各注文 × 各添付ファイルの数だけ `order_attachments` を INSERT。この
+   **実添付行**（`order_id != NULL`）の `parse_status` は添付ありで `success`、なしで
+   `failed_no_attachment`（自動経路 `_process_line_item` と同じ規約。注文詳細画面の
+   表示分岐もこの値を見る）
+5. 集約行の INSERT が `APIError`（RLS違反等）の場合、および明細作成の途中で失敗した
+   場合は 400 を返す（後者は作成済みの注文と集約行を削除してロールバック）
+
+- `order_attachments` は `is_tenant_member(tenant_id)` の RLS 前提のため、INSERT は
+  ユーザーJWTクライアントで行う。`admin_client` は Storage 保存にのみ使う（既存方針と同じ）
+- 担当者が明細に品番を指定した場合、`record_correction_if_applicable()` で表記ゆれ辞書へ
+  フィードバックする（`split_order` と同じ）
+- 依存に `python-multipart` を追加（`requirements.txt`）
+
+### フロントエンド
+
+- `frontend/src/types/order.ts`: `ManualEmailIntakeLineItem` / `ManualEmailIntakeRequest` / `ManualEmailIntakeResponse`
+- `frontend/src/hooks/use-orders.ts`: `useCreateEmailOrderIntake()`（multipart を送るため `apiClient` を使わず直接 `fetch`）
+- `frontend/src/app/orders/new/page.tsx`: 冒頭に「手動フォーム / メール起票」トグルを追加。
+  メール起票モードでは 注文番号（任意）・顧客（`CustomerSelector`）・メール本文（`textarea`）・
+  添付アップロード（複数可）・明細行の繰り返し（`ProductSelector` + 数量 + 希望納期、追加／削除）
+  を表示し、`useCreateEmailOrderIntake` で一括登録する。手動フォームモードの既存UI
+  （3ステップ・シミュレーション）は変更なし
+
+### 最初のユースケース
+
+`gmail_message_id=1a04679c33ae25b5`（飯野製作所の分納注文書、自動抽出不可）を、本文＋
+添付PDF＋複数明細でこのフォームから起票する。
+
+---
+
 ## 実装状況
 
 | 機能 | 状況 |
@@ -380,3 +441,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 表記ゆれ辞書の顧客単位スコープ化（`customer_id` 追加、他顧客へフォールバックしない） | ✅ #349 |
 | パース成功・起票0件の可視化（`no_order_created` 通知） | ✅ #357 |
 | 受信受注メールの処理結果一覧（`GET /orders/email-intake-results` + `/orders/email-intake`） | ✅ #357 |
+| 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
