@@ -309,6 +309,54 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ---
 
+## 受信受注メールの処理結果一覧（Issue #357）
+
+自動パースの結果（起票件数・スキップ/失敗理由）を確認する手段が通知ベルしかなく、
+特に「パースは成功したが全明細が既存注文と重複して起票0件」のケースは通知すら
+残らず（→ [pdf-order-parsing.md](pdf-order-parsing.md) の `no_order_created` 対策で解消）、
+メーラーとアプリを見比べないと起票状況を追えなかった。
+
+受信した受注メール（`order_attachments` のステージング行 = `order_id IS NULL`）を親に、
+処理結果をまとめて一覧できるビューを追加した。
+
+### API: `GET /orders/email-intake-results`
+
+`backend/app/routers/transaction/orders.py::list_email_intake_results`。
+レスポンスは `EmailIntakeResultResponse`（`order_schema.py`）の配列（受信日時の新しい順）。
+
+| フィールド | 内容 |
+|---|---|
+| `received_at` | `order_attachments.created_at`（受信＝ステージング保存日時） |
+| `customer_id` / `customer_name` | ステージング行の顧客（下書き顧客含む） |
+| `has_attachment` / `original_filename` / `content_type` | 添付の有無・ファイル名・MIME |
+| `parse_status` | `order_attachments.parse_status`。この一覧が対象にするステージング行（`order_id IS NULL`）では実質 `pending`（未処理）/ `success`（処理済み）の2値。`failed_*` は注文に紐づく実添付行（`order_id != NULL`）側で使われる値 |
+| `created_order_count` / `created_order_ids` | そのメールから**新規起票**された注文（`orders.source_attachment_id = staging.id`。`updated` は含まない） |
+| `parse_log_reasons` | その attachment に紐づく `order_parse_log.reason` の一覧（`no_order_created` / `no_product_match` / `draft_conflict_skipped` 等） |
+| `signed_url` | 元PDFの署名付きURL（`create_signed_urls` バッチ生成、60分） |
+| `gmail_url` | `https://mail.google.com/mail/u/0/#all/{gmail_message_id}` |
+
+- ステージング行・顧客・注文・parse_log はいずれも「同一テナントのメンバーなら参照可」
+  のRLSを持つため、閲覧者自身のユーザーJWTクライアントで取得する。`admin_client` は
+  署名付きURL生成にのみ使う（既存 `GET /orders/{id}/attachments` と同じ方針）
+- ルート定義は `GET /orders/{order_id}` より**前**に登録する（`email-intake-results` を
+  `order_id: int` にパースしようとして422にならないようにするため）
+
+### フロントエンド
+
+- `frontend/src/types/order.ts`: `EmailIntakeResult` 型
+- `frontend/src/hooks/use-orders.ts`: `useEmailIntakeResults()`（60秒ポーリング）
+- `frontend/src/app/orders/email-intake/page.tsx`: 一覧テーブル。`created_order_count === 0`
+  の行は「起票0件」バッジで強調する。`parse_status='success'` かつ理由ログが無い場合は
+  「新規起票なし（全明細が既存注文と重複、または既存注文の更新のみ）」と中立的に補足表示する
+  （`created_order_count` は `updated` を含まないため、重複スキップと断定はしない）。
+  `parse_status` のバッジは `success`=中立 / `pending`=アウトライン / それ以外=エラー系で色分けする
+- `frontend/src/components/layout/app-sidebar.tsx`: 「受信メール処理結果」メニュー項目
+  （`/orders/email-intake`、全メンバーに表示）
+- `notification-bell.tsx` / `types/notification.ts`: `no_order_created`（「起票0件（全明細が重複）」）
+  を `NotificationType` / ラベルに追加
+
+---
+
 ## 実装状況
 
 | 機能 | 状況 |
@@ -330,3 +378,5 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 製品未マッチ明細のNULL product_id下書き起票（詳細は[pdf-order-parsing.md](pdf-order-parsing.md)） | ✅ #296 |
 | 製品名の表記ゆれ辞書による自動補完・修正履歴管理（詳細は[pdf-order-parsing.md](pdf-order-parsing.md)、[product-master.md](product-master.md#別名辞書-product_name_aliases)） | ✅ #347 |
 | 表記ゆれ辞書の顧客単位スコープ化（`customer_id` 追加、他顧客へフォールバックしない） | ✅ #349 |
+| パース成功・起票0件の可視化（`no_order_created` 通知） | ✅ #357 |
+| 受信受注メールの処理結果一覧（`GET /orders/email-intake-results` + `/orders/email-intake`） | ✅ #357 |

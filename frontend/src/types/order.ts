@@ -135,6 +135,29 @@ export interface OrderApprovalLog {
 }
 
 /**
+ * 受信受注メール（order_attachments のステージング行）ごとの処理結果サマリ（Issue #357）
+ *
+ * 「パースは成功したが起票0件」（全明細が重複スキップ等）のケースを、
+ * メーラーを開かずに追跡できるようにするための一覧用データ型。
+ */
+export interface EmailIntakeResult {
+  id: string
+  received_at: string
+  customer_id: number | null
+  customer_name: string | null
+  original_filename: string | null
+  has_attachment: boolean
+  content_type: string | null
+  parse_status: string
+  gmail_message_id: string | null
+  gmail_url: string | null
+  signed_url: string | null
+  created_order_count: number
+  created_order_ids: number[]
+  parse_log_reasons: string[]
+}
+
+/**
  * 注文添付ファイルのデータ型
  */
 export interface OrderAttachment {

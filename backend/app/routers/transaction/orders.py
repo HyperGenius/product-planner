@@ -21,6 +21,7 @@ from app.dependencies import (
     get_supabase_client,
 )
 from app.models.transaction.order_schema import (
+    EmailIntakeResultResponse,
     OrderApprovalLogResponse,
     OrderAttachmentResponse,
     OrderBulkApproveRequest,
@@ -42,7 +43,7 @@ from app.repositories.supa_infra.transaction.order_approval_log_repo import (
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
-from app.services.attachment_service import create_signed_url
+from app.services.attachment_service import create_signed_url, create_signed_urls
 from app.services.notification_service import create_notification
 from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
@@ -271,6 +272,134 @@ def export_approval_logs_csv(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="approval_logs.csv"'},
     )
+
+
+@orders_router.get(
+    "/email-intake-results", response_model=list[EmailIntakeResultResponse]
+)
+def list_email_intake_results(
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
+):
+    """
+    受信した受注メール（order_attachments のステージング行, order_id IS NULL）ごとに、
+    受信日時・顧客・parse_status・そのメールから新規起票された注文件数・
+    スキップ/失敗理由（order_parse_log.reason）・元PDFの署名付きURL / Gmailリンクを
+    一覧で返す（Issue #357）。
+
+    「パースは成功したが起票0件」（全明細が重複スキップ等）のケースを、
+    運用側がメーラーを開かずに追跡できるようにするのが主目的。
+    parse_status / created_order_count / parse_log_reasons の組み合わせで判別する。
+
+    ステージング行・顧客・注文・parse_log はいずれも「同一テナントのメンバーなら
+    参照可」というRLSを持つため、閲覧者自身のユーザーJWTクライアントで取得する。
+    admin_client は署名付きURL生成にのみ使う。
+    """
+    logger.info("Fetching email intake results")
+    # source_raw（メール本文）など、レスポンス生成に不要で大きい列は取得しない
+    staging_res = (
+        client.table(SupabaseTableName.ORDER_ATTACHMENTS.value)
+        .select(
+            "id, customer_id, storage_path, original_filename, content_type, "
+            "parse_status, gmail_message_id, created_at"
+        )
+        .is_("order_id", "null")
+        .eq("tenant_id", tenant_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    staging_rows = cast(list[dict[str, Any]], staging_res.data or [])
+    if not staging_rows:
+        return []
+
+    staging_ids = [row["id"] for row in staging_rows]
+    customer_ids = list(
+        {row["customer_id"] for row in staging_rows if row.get("customer_id")}
+    )
+
+    customer_name_map: dict[int, str] = {}
+    if customer_ids:
+        cust_res = (
+            client.table(SupabaseTableName.CUSTOMERS.value)
+            .select("id, name")
+            .in_("id", customer_ids)
+            .execute()
+        )
+        customer_name_map = {
+            c["id"]: c["name"] for c in cast(list[dict[str, Any]], cust_res.data or [])
+        }
+
+    orders_res = (
+        client.table(SupabaseTableName.ORDERS.value)
+        .select("id, source_attachment_id")
+        .in_("source_attachment_id", staging_ids)
+        .execute()
+    )
+    orders_by_attachment: dict[str, list[int]] = {}
+    for order_row in cast(list[dict[str, Any]], orders_res.data or []):
+        orders_by_attachment.setdefault(order_row["source_attachment_id"], []).append(
+            order_row["id"]
+        )
+
+    log_res = (
+        client.table(SupabaseTableName.ORDER_PARSE_LOG.value)
+        .select("order_attachment_id, reason, created_at")
+        .in_("order_attachment_id", staging_ids)
+        .order("created_at")
+        .execute()
+    )
+    reasons_by_attachment: dict[str, list[str]] = {}
+    for log_row in cast(list[dict[str, Any]], log_res.data or []):
+        reasons_by_attachment.setdefault(log_row["order_attachment_id"], []).append(
+            log_row["reason"]
+        )
+
+    storage_paths = sorted(
+        {row["storage_path"] for row in staging_rows if row.get("storage_path")}
+    )
+    signed_url_map: dict[str, str] = {}
+    if storage_paths:
+        try:
+            signed_url_map = create_signed_urls(admin_client, storage_paths)
+        except Exception:
+            logger.warning(
+                f"Failed to generate signed URLs for {len(storage_paths)} paths"
+            )
+
+    results: list[EmailIntakeResultResponse] = []
+    for row in staging_rows:
+        order_ids = sorted(orders_by_attachment.get(row["id"], []))
+        storage_path = row.get("storage_path") or ""
+        gmail_message_id = row.get("gmail_message_id")
+        customer_id = cast("int | None", row.get("customer_id"))
+        results.append(
+            EmailIntakeResultResponse(
+                id=str(row["id"]),
+                received_at=str(row["created_at"]),
+                customer_id=customer_id,
+                customer_name=(
+                    customer_name_map.get(customer_id)
+                    if customer_id is not None
+                    else None
+                ),
+                original_filename=row.get("original_filename") or None,
+                has_attachment=bool(storage_path),
+                content_type=row.get("content_type"),
+                parse_status=row["parse_status"],
+                gmail_message_id=gmail_message_id,
+                gmail_url=(
+                    f"https://mail.google.com/mail/u/0/#all/{gmail_message_id}"
+                    if gmail_message_id
+                    else None
+                ),
+                signed_url=(signed_url_map.get(storage_path) if storage_path else None),
+                created_order_count=len(order_ids),
+                created_order_ids=order_ids,
+                parse_log_reasons=reasons_by_attachment.get(row["id"], []),
+            )
+        )
+    return results
 
 
 @orders_router.get("/{order_id}")

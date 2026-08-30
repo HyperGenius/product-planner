@@ -113,10 +113,56 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
     else:
         created_count = _process_email_body(db, row)
 
+    _notify_if_no_order_created(db, row, created_count)
     db.table(table).update({"parse_status": "success"}).eq(
         "id", attachment_id
     ).execute()
     return created_count
+
+
+def _notify_if_no_order_created(
+    db: Client, row: dict[str, Any], created_count: int
+) -> None:
+    """
+    パースは成功したのに order が1件も生成されず、parse_log も通知も残らない
+    ケースを可視化する（Issue #357）。
+
+    典型例は、自動抽出した全明細が既存の内示注文と同一キー・同数量・同確度で
+    `upsert_order_by_dedupe_key` が `skipped_no_change` を返し、
+    `_process_line_item` が黙って False を返し続けたケース。この場合
+    `parse_status='success'` だけが記録され、運用側から起票0件に気づけない。
+
+    non_order_email / no_product_match / invalid_quantity など、既に別の理由で
+    parse_log が残っている場合は二重に通知しない。
+    """
+    if created_count > 0:
+        return
+
+    tenant_id = row["tenant_id"]
+    attachment_id = row["id"]
+    existing = (
+        db.table(SupabaseTableName.ORDER_PARSE_LOG.value)
+        .select("id")
+        .eq("order_attachment_id", attachment_id)
+        .limit(1)
+        .execute()
+    )
+    if cast(list[dict[str, Any]], existing.data or []):
+        return
+
+    detail = {
+        "gmail_message_id": row.get("gmail_message_id"),
+        "original_filename": row.get("original_filename"),
+    }
+    log_id = _log_parse_event(db, tenant_id, attachment_id, "no_order_created", detail)
+    create_notification(
+        db,
+        tenant_id,
+        "no_order_created",
+        SupabaseTableName.ORDER_PARSE_LOG.value,
+        log_id,
+        detail,
+    )
 
 
 def _process_email_body(db: Client, row: dict[str, Any]) -> int:

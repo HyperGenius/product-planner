@@ -59,6 +59,25 @@ CREATE TABLE notifications (
 | `non_order_email` | `gmail_service._process_message` | `gmail_message` | Gmail `msg_id` |
 | `customer_draft_created` | `resolve_or_create_customer` 呼び出し元（`gmail_service._process_message`）| `gmail_message` | Gmail `msg_id` |
 | `approval_requested` | `orders.request_order_approval`（`POST /orders/{id}/request-approval`）| `orders` | `order_id` |
+| `no_order_created` | `pdf_order_parsing_service._notify_if_no_order_created`（`_parse_one` 末尾）| `order_parse_log` | `order_parse_log.id` |
+
+### `no_order_created`（パース成功・起票0件の可視化, Issue #357）
+
+自動抽出は成功したのに全明細が既存の内示注文と重複（`upsert_order_by_dedupe_key` が
+`skipped_no_change`）し、`order` が1件も生成されず `order_parse_log` も `notifications` も
+残らないケースを可視化する。従来は `order_attachments.parse_status='success'` だけが
+記録され、運用側から「起票0件」に気づけなかった。
+
+- 書き込み元は `pdf_order_parsing_service._notify_if_no_order_created()`。`_parse_one` の
+  末尾（`parse_status='success'` 更新の直前）で `created_count == 0` かつ その attachment に
+  紐づく `order_parse_log` が皆無のときだけ、`reason='no_order_created'` の parse_log と
+  この通知を記録する（`non_order_email` 等、既に別理由のログがあれば二重通知しない）
+- `link_url` は他の `order_parse_log` 経由通知と同じく、`order_attachment_id` を引いて
+  元PDFの署名付きURLに解決する（`_PARSE_LOG_NOTIF_TYPES` に追加）
+- 一覧ビューは [受信受注メールの処理結果一覧](email-order-intake.md#受信受注メールの処理結果一覧issue-357)
+  （`GET /orders/email-intake-results`）。`parse_status='success'` は変更しない（無限再処理を避ける）
+- フロント: `NotificationType` / `NOTIF_TYPE_LABELS`（`notification-bell.tsx`）に
+  `no_order_created`（「起票0件（全明細が重複）」）を追加
 
 ### `approval_requested`（承認依頼のアプリ内通知, Issue #327）
 

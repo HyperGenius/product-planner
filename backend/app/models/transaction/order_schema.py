@@ -111,3 +111,26 @@ class OrderAttachmentResponse(BaseModel):
     parse_status: str
     signed_url: str
     created_at: str
+
+
+class EmailIntakeResultResponse(BaseModel):
+    """受信受注メール（order_attachments のステージング行）ごとの処理結果サマリ
+
+    「パースは成功したが起票0件」（全明細が重複スキップ等）のケースを運用側が
+    メーラーを開かずに追跡できるようにするための一覧用スキーマ（Issue #357）。
+    """
+
+    id: str
+    received_at: str
+    customer_id: int | None
+    customer_name: str | None
+    original_filename: str | None
+    has_attachment: bool
+    content_type: str | None
+    parse_status: str
+    gmail_message_id: str | None
+    gmail_url: str | None
+    signed_url: str | None
+    created_order_count: int
+    created_order_ids: list[int]
+    parse_log_reasons: list[str]

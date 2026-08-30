@@ -17,6 +17,7 @@ import {
   ClipboardList,
   Laptop,
   KeyRound,
+  Inbox,
 } from "lucide-react"
 
 import {
@@ -68,6 +69,11 @@ const menuItems: MenuItem[] = [
     title: "受注管理",
     url: "/orders",
     icon: ShoppingCart,
+  },
+  {
+    title: "受信メール処理結果",
+    url: "/orders/email-intake",
+    icon: Inbox,
   },
   {
     title: "生産スケジュール",

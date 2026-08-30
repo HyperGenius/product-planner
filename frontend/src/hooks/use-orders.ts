@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import { createClient } from "@/utils/supabase/client"
 import type {
+  EmailIntakeResult,
   Order,
   OrderApprovalLog,
   OrderAttachment,
@@ -185,6 +186,19 @@ export function useApprovalLogs(options?: { enabled?: boolean }) {
     queryKey: ["orders", "approval-logs"],
     queryFn: () => apiClient<OrderApprovalLog[]>("/orders/approval-logs"),
     enabled: options?.enabled ?? true,
+  })
+}
+
+/**
+ * 受信した受注メール（order_attachments のステージング行）ごとの処理結果一覧を取得するフック
+ * （Issue #357）。起票0件・スキップ理由・元PDFリンクをまとめて確認できる。
+ */
+export function useEmailIntakeResults() {
+  return useQuery<EmailIntakeResult[]>({
+    queryKey: ["orders", "email-intake-results"],
+    queryFn: () =>
+      apiClient<EmailIntakeResult[]>("/orders/email-intake-results"),
+    refetchInterval: 1000 * 60,
   })
 }
 
