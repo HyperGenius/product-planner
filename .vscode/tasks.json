@@ -60,6 +60,18 @@
             }
         },
         {
+            "label": "Supabase db push",
+            "type": "shell",
+            "command": "source ${workspaceFolder}/backend/.env && supabase db push --include-all --db-url postgresql://postgres.${SUPABASE_PROJECT_ID}:${SUPABASE_DB_PASSWORD}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "dev-servers",
+            },
+            "options": {
+                "cwd": "${workspaceFolder}/supabase"
+            }
+        },
+        {
             "label": "Pre-commit run all files",
             "type": "shell",
             "command": "source backend/.venv/bin/activate && pre-commit run --all-files",
