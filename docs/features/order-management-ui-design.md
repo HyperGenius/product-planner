@@ -77,6 +77,7 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 |---|---|---|
 | (なし) | すべて | 全注文 |
 | `draft` | 下書き | status='draft' |
+| `pending_approval` | 承認待ち | status='pending_approval' |
 | `confirmed` | 確定済 | status='confirmed' |
 | `shipped` | 送品済み | status='shipped' |
 | `completed` | 完了 | status='completed' |
@@ -100,6 +101,7 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 | ステータス | ラベル | バッジカラー |
 |---|---|---|
 | `draft` | 下書き | `bg-yellow-100 text-yellow-800` |
+| `pending_approval` | 承認待ち | `bg-orange-100 text-orange-800` |
 | `confirmed` | 確定済 | `bg-green-100 text-green-800` |
 | `shipped` | 送品済み | `bg-teal-100 text-teal-800` |
 | `completed` | 完了 | `bg-blue-100 text-blue-800` |

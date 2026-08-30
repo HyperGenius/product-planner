@@ -244,8 +244,9 @@ export function useShipOrder() {
       apiClient<Order>(`/orders/${orderId}/ship`, {
         method: "POST",
       }),
-    onSuccess: () => {
+    onSuccess: (_data, orderId) => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
     },
   })
 }
