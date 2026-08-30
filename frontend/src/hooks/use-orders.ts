@@ -112,7 +112,23 @@ export function useCreateEmailOrderIntake() {
       )
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
+        const errorData = (await response.json().catch(() => ({}))) as {
+          detail?: unknown
+        }
+        // FastAPI の 422（ValidationError）は detail が配列になり、ApiError では
+        // 文字列でない detail が 'API Request Failed' に潰れてしまう。
+        // 表示用に detail をメッセージ文字列へ正規化してから ApiError に渡す。
+        if (Array.isArray(errorData.detail)) {
+          const message =
+            errorData.detail
+              .map((d) =>
+                d && typeof d === "object" && "msg" in d
+                  ? String((d as { msg: unknown }).msg)
+                  : String(d),
+              )
+              .join(" / ") || "入力内容を確認してください"
+          throw new ApiError(response.status, { ...errorData, detail: message })
+        }
         throw new ApiError(response.status, errorData)
       }
       return response.json()

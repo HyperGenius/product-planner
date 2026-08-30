@@ -195,9 +195,10 @@ RLS違反になっていた（`GET /orders/{id}/attachments` はこれを servic
 - 自動パースできない受注メールを、本文（`source_raw`）・添付ファイル・複数明細（分納）
   付きで手動起票する。添付は `{tenant_id}/manual/{group_id}/{safe_filename}` に保存し、
   受信メール相当の集約行（`order_id IS NULL`）を1件＋作成した各注文に紐づく実添付行を
-  INSERT する。`parse_status` は添付ありで `success` / なしで `failed_no_attachment`
-  （自動経路 `_process_line_item` と同じ規約）。詳細は
-  [email-order-intake.md](email-order-intake.md#手動でのメール起票issue-358) を参照
+  INSERT する。集約行の `parse_status` は「処理状態」を表すため添付有無に関わらず
+  `success`（＝処理済み）。実添付行（`order_id != NULL`）の `parse_status` のみ添付ありで
+  `success` / なしで `failed_no_attachment`（自動経路 `_process_line_item` と同じ規約）。
+  詳細は [email-order-intake.md](email-order-intake.md#手動でのメール起票issue-358) を参照
 
 ---
 

@@ -655,8 +655,13 @@ async def create_email_order_intake(
     - 添付は Supabase Storage の `order-attachments` バケットへ保存し、作成した各注文に
       `order_attachments` 行として紐付ける（`order_id` 未確定の集約行を1件、各注文に
       紐づく実行を明細数×添付数だけ作成し、`source_attachment_id` で束ねる）
-    - 添付なし・本文のみでも起票可。その場合 `order_attachments` の `parse_status` は
-      自動経路（`_process_line_item`）と揃えて `failed_no_attachment` にする
+    - 集約行（`order_id IS NULL`）の `parse_status` は「処理状態」を表すため常に `success`
+      とする（自動経路では gmail_service が `pending` で入れ parse 後に `success` へ更新
+      する。手動起票は同期的に処理済みのため `success` に寄せ、
+      `/orders/email-intake-results` の表示・処理済み判定と整合させる）
+    - 添付なし・本文のみでも起票可。「添付なし」は集約行の `storage_path` 空、および
+      各注文に紐づく `order_attachments` 行の `parse_status='failed_no_attachment'`
+      （自動経路 `_process_line_item` と同じ規約）で表現する
     - RLS: `order_attachments` は `is_tenant_member(tenant_id)` 前提のためユーザーJWT
       クライアントで INSERT する。`admin_client` は Storage への保存にのみ使う
     """
@@ -702,26 +707,33 @@ async def create_email_order_intake(
     # 2. 受信メールに相当する集約行（order_id IS NULL）を1件作成し、
     #    各注文の source_attachment_id をここに向ける（自動経路のステージング行と同じ扱い）。
     #    複数添付時は先頭ファイルを代表として記録する（自動経路も1メール1添付前提）。
+    #    集約行の parse_status は「処理状態」を表すため、添付有無に関わらず success で入れる。
     representative = uploaded[0] if has_attachment else {}
-    staging_row = cast(
-        dict[str, Any],
-        client.table(attachments_table)
-        .insert(
-            {
-                "tenant_id": tenant_id,
-                "customer_id": intake.customer_id,
-                "source_raw": intake.source_raw,
-                "storage_path": representative.get("storage_path", ""),
-                "original_filename": representative.get("original_filename", ""),
-                "content_type": representative.get("content_type"),
-                "size_bytes": representative.get("size_bytes"),
-                "parse_status": "success" if has_attachment else "failed_no_attachment",
-            }
+    try:
+        staging_res = (
+            client.table(attachments_table)
+            .insert(
+                {
+                    "tenant_id": tenant_id,
+                    "customer_id": intake.customer_id,
+                    "source_raw": intake.source_raw,
+                    "storage_path": representative.get("storage_path", ""),
+                    "original_filename": representative.get("original_filename", ""),
+                    "content_type": representative.get("content_type"),
+                    "size_bytes": representative.get("size_bytes"),
+                    "parse_status": "success",
+                }
+            )
+            .execute()
         )
-        .execute()
-        .data[0],
-    )
-    staging_id = staging_row["id"]
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message) from None
+    staging_rows = cast(list[dict[str, Any]], staging_res.data or [])
+    if not staging_rows:
+        raise HTTPException(
+            status_code=500, detail="受信メール（集約行）の作成に失敗しました"
+        )
+    staging_id = staging_rows[0]["id"]
 
     # 3. 明細ごとに注文を作成し、添付行を紐付ける
     created_orders: list[dict[str, Any]] = []

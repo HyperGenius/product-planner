@@ -380,14 +380,20 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
    `{tenant_id}/manual/{group_id}/{safe_filename}`（`group_id` は1回の起票を束ねる UUID）。
    `attachment_service.upload_manual_email_attachment()`
 2. 受信メールに相当する集約行を `order_attachments` に1件 INSERT（`order_id IS NULL`、
-   `source_raw` 保持、代表として先頭ファイルの `storage_path` 等を記録。添付なし時は
-   `storage_path=''` / `parse_status='failed_no_attachment'`）
+   `source_raw` 保持、代表として先頭ファイルの `storage_path` 等を記録）。集約行の
+   `parse_status` は「処理状態」を表すため、添付有無に関わらず `success`（＝処理済み）で
+   入れる（自動経路は `pending`→parse後 `success`。手動起票は同期的に処理済みのため
+   `success` に寄せ、`/orders/email-intake-results` の表示・処理済み判定と揃える）。
+   添付なしは `storage_path=''` で表現する
 3. `line_items` ごとに `orders` を作成（`source_type='email'`、`status='draft'`、
    `source_attachment_id` = 集約行id、`customer_id` / `customer_certainty` / `source_raw`
    は全明細で共有）。`order_number` は UNIQUE(tenant_id, order_number) のため先頭明細にのみ付与
-4. 作成した各注文 × 各添付ファイルの数だけ `order_attachments` を INSERT
-   （`parse_status` は添付ありで `success`、なしで `failed_no_attachment` = 自動経路と同じ規約）
-5. 途中で失敗した場合は、作成済みの注文と集約行を削除してロールバックし 400 を返す
+4. 作成した各注文 × 各添付ファイルの数だけ `order_attachments` を INSERT。この
+   **実添付行**（`order_id != NULL`）の `parse_status` は添付ありで `success`、なしで
+   `failed_no_attachment`（自動経路 `_process_line_item` と同じ規約。注文詳細画面の
+   表示分岐もこの値を見る）
+5. 集約行の INSERT が `APIError`（RLS違反等）の場合、および明細作成の途中で失敗した
+   場合は 400 を返す（後者は作成済みの注文と集約行を削除してロールバック）
 
 - `order_attachments` は `is_tenant_member(tenant_id)` の RLS 前提のため、INSERT は
   ユーザーJWTクライアントで行う。`admin_client` は Storage 保存にのみ使う（既存方針と同じ）

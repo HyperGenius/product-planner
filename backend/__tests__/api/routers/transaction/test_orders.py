@@ -1555,8 +1555,10 @@ class TestOrderRouter:
 
         insert_calls = mock_supabase_client.table.return_value.insert.call_args_list
         staging_insert = insert_calls[0][0][0]
-        assert staging_insert["parse_status"] == "failed_no_attachment"
+        # 集約行の parse_status は処理状態を表すため添付なしでも success
+        assert staging_insert["parse_status"] == "success"
         assert staging_insert["storage_path"] == ""
+        # 「添付なし」は各注文に紐づく行の parse_status で表現する
         per_order_insert = insert_calls[1][0][0]
         assert per_order_insert[0]["parse_status"] == "failed_no_attachment"
 
@@ -1570,6 +1572,34 @@ class TestOrderRouter:
         )
 
         assert response.status_code == 422
+
+    def test_email_intake_staging_insert_api_error_returns_400(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /email-intake: 集約行の INSERT が APIError なら 500 でなく 400 を返す"""
+        from postgrest.exceptions import APIError
+
+        mock_supabase_client.table.return_value.insert.return_value.execute.side_effect = APIError(  # noqa: E501
+            {"message": "new row violates row-level security policy", "code": "42501"}
+        )
+
+        response = client.post(
+            "/orders/email-intake",
+            data={
+                "payload": json.dumps(
+                    {
+                        "customer_id": 1,
+                        "line_items": [
+                            {"quantity": 1, "desired_deadline": "2026-09-01"}
+                        ],
+                    }
+                )
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        mock_repo.create.assert_not_called()
 
     def test_email_intake_rolls_back_created_orders_on_failure(
         self, headers, mock_repo, mock_supabase_client
