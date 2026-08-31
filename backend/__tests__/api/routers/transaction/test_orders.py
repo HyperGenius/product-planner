@@ -885,6 +885,68 @@ class TestOrderRouter:
 
         assert response.status_code == 404
 
+    def test_ship_overdue_drafts_success(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /ship-overdue-drafts: 納期超過の draft のみ shipped にする"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_all.return_value = [
+            {"id": 1, "status": "draft", "deadline_date": "2000-01-01"},
+            {"id": 2, "status": "draft", "deadline_date": "2999-12-31"},
+            {"id": 3, "status": "draft", "deadline_date": None},
+            {"id": 4, "status": "pending_approval", "deadline_date": "2000-01-01"},
+            {"id": 5, "status": "confirmed", "deadline_date": "2000-01-01"},
+        ]
+
+        response = client.post("/orders/ship-overdue-drafts", headers=headers)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["shipped_count"] == 1
+        assert body["order_ids"] == [1]
+        mock_repo.update.assert_called_once_with(1, {"status": "shipped"})
+
+    def test_ship_overdue_drafts_allowed_for_platform_admin(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /ship-overdue-drafts: platform_admin も実行できる"""
+        self._set_role(mock_supabase_client, "platform_admin")
+        mock_repo.get_all.return_value = [
+            {"id": 1, "status": "draft", "deadline_date": "2000-01-01"},
+        ]
+
+        response = client.post("/orders/ship-overdue-drafts", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["shipped_count"] == 1
+
+    def test_ship_overdue_drafts_forbidden_for_order_handler(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /ship-overdue-drafts: president / platform_admin 以外は403"""
+        self._set_role(mock_supabase_client, "order_handler")
+
+        response = client.post("/orders/ship-overdue-drafts", headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_all.assert_not_called()
+        mock_repo.update.assert_not_called()
+
+    def test_ship_overdue_drafts_no_targets(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /ship-overdue-drafts: 対象0件でも200を返し、更新もしない"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_all.return_value = [
+            {"id": 2, "status": "draft", "deadline_date": "2999-12-31"},
+        ]
+
+        response = client.post("/orders/ship-overdue-drafts", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"shipped_count": 0, "order_ids": []}
+        mock_repo.update.assert_not_called()
+
     def test_approve_orders_bulk_partial_failure(
         self,
         headers,

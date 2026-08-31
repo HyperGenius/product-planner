@@ -114,6 +114,13 @@ class OrderBulkApproveRequest(BaseSchema):
     order_ids: list[int] = Field(min_length=1)
 
 
+class ShipOverdueDraftsResponse(BaseModel):
+    """納期超過の下書き受注を一括で送品済みにした結果のレスポンススキーマ（Issue #367）"""
+
+    shipped_count: int
+    order_ids: list[int]
+
+
 class OrderApprovalLogResponse(BaseModel):
     """受注承認監査ログのレスポンススキーマ（表示用に注文番号・操作者名を付与）"""
 

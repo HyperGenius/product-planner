@@ -7,7 +7,14 @@ draft -> pending_approval -> confirmed -> completed / canceled の順方向の�
 
 confirmed からは shipped (送品済み) へも遷移できる。shipped は実質的な終端で、
 以降の順方向遷移は無い。
+
+例外として、トライアル運用中に溜まった「納期超過の下書き」を後片付けする
+管理者操作（Issue #367）だけは draft -> shipped の遷移を行う。これは通常の
+遷移表（`ORDER_STATUS_TRANSITIONS`）では許可されず、`is_overdue_draft()` で
+対象を判定したうえで専用エンドポイントからのみ実行される。
 """
+
+from datetime import date
 
 ORDER_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"pending_approval"},
@@ -41,3 +48,22 @@ def validate_order_status_transition(
     allowed = ORDER_STATUS_TRANSITIONS.get(current_status or "", set())
     if new_status not in allowed:
         raise InvalidOrderStatusTransitionError(current_status, new_status)
+
+
+def is_overdue_draft(
+    status: str | None, deadline_date: str | None, today: date
+) -> bool:
+    """納期を過ぎたまま残っている下書き受注か判定する（Issue #367）。
+
+    後片付け用の draft -> shipped 経路の対象抽出に使う。対象は
+    「status == 'draft' かつ 納期設定済み かつ 納期 < today」に限定する。
+    納期が不正な文字列の場合は対象外（False）とする。
+    """
+    if status != "draft":
+        return False
+    if not deadline_date:
+        return False
+    try:
+        return date.fromisoformat(deadline_date[:10]) < today
+    except ValueError:
+        return False

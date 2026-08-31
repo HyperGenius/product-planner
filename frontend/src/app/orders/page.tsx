@@ -1,8 +1,14 @@
 "use client"
 
-import { Plus } from "lucide-react"
+import { MoreHorizontal, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import {
   Table,
@@ -18,6 +24,7 @@ import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-con
 import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
 import { BulkRequestApprovalConfirmDialog } from "@/components/orders/bulk-request-approval-confirm-dialog"
 import { BulkApproveConfirmDialog } from "@/components/orders/bulk-approve-confirm-dialog"
+import { ShipOverdueDraftsConfirmDialog } from "@/components/orders/ship-overdue-drafts-confirm-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
@@ -54,6 +61,7 @@ export default function OrdersPage() {
     expandedSimResult,
     currentUserRole,
     isPresident,
+    canShipOverdueDrafts,
     confirmOrder,
     requestApproval,
     rejectOrder,
@@ -115,6 +123,12 @@ export default function OrdersPage() {
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
     handleBulkRequestApprovalFromSummary,
+    overdueDraftOrders,
+    isShipOverdueDraftsConfirmOpen,
+    handleShipOverdueDraftsRequest,
+    handleShipOverdueDraftsConfirm,
+    handleShipOverdueDraftsCancel,
+    shipOverdueDrafts,
   } = useOrdersPage()
 
   const expandedOrder = orders?.find((o) => o.id === expandedOrderId) ?? null
@@ -127,10 +141,31 @@ export default function OrdersPage() {
             <h1 className="text-3xl font-bold">注文一覧</h1>
             <p className="text-muted-foreground mt-2">登録された注文の一覧を表示します</p>
           </div>
-          <Button onClick={() => router.push("/orders/new")}>
-            <Plus className="mr-2 h-4 w-4" />
-            新規注文
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => router.push("/orders/new")}>
+              <Plus className="mr-2 h-4 w-4" />
+              新規注文
+            </Button>
+            {canShipOverdueDrafts && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon">
+                    <MoreHorizontal className="h-4 w-4" />
+                    <span className="sr-only">その他の操作</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={overdueDraftOrders.length === 0}
+                    onClick={handleShipOverdueDraftsRequest}
+                  >
+                    納期超過の下書きを送品済みにする
+                    {overdueDraftOrders.length > 0 && `（${overdueDraftOrders.length}件）`}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
 
         {!isLoading && (
@@ -356,6 +391,15 @@ export default function OrdersPage() {
           results={bulkSimSummary}
           onClose={handleCloseBulkSimSummary}
           onBulkRequestApproval={handleBulkRequestApprovalFromSummary}
+        />
+
+        <ShipOverdueDraftsConfirmDialog
+          open={isShipOverdueDraftsConfirmOpen}
+          orders={overdueDraftOrders}
+          products={products}
+          isPending={shipOverdueDrafts.isPending}
+          onConfirm={handleShipOverdueDraftsConfirm}
+          onCancel={handleShipOverdueDraftsCancel}
         />
       </div>
     </TooltipProvider>
