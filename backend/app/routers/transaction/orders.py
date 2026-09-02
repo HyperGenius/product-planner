@@ -1311,8 +1311,9 @@ def ship_overdue_drafts(
         if is_overdue_draft(order.get("status"), order.get("deadline_date"), today)
     ]
 
-    order_repo.bulk_update_status(target_ids, "shipped")
+    updated = order_repo.bulk_update_status(target_ids, "shipped")
+    updated_ids = [o["id"] for o in updated] if updated else []
 
-    logger.info(f"Shipped {len(target_ids)} overdue draft orders")
-    logger.debug(f"Shipped overdue draft order ids: {target_ids}")
-    return {"shipped_count": len(target_ids), "order_ids": target_ids}
+    logger.info(f"Shipped {len(updated_ids)} overdue draft orders")
+    logger.debug(f"Shipped overdue draft order ids: {updated_ids}")
+    return {"shipped_count": len(updated_ids), "order_ids": updated_ids}
