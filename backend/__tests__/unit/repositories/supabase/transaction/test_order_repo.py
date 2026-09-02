@@ -137,3 +137,36 @@ class TestOrderRepositoryRoutingStatus:
         assert by_id[1]["has_unconfirmed_routings"] is True
         assert by_id[2]["has_no_routings"] is True
         assert by_id[2]["has_unconfirmed_routings"] is True
+
+
+@pytest.mark.unit
+class TestOrderRepositoryBulkUpdateStatus:
+    def test_bulk_update_status_updates_in_single_request(self):
+        """複数IDを in_ で1回のリクエストにまとめて更新し、更新後の行を返す"""
+        mock_client = MagicMock()
+        updated = [
+            {"id": 1, "status": "shipped"},
+            {"id": 2, "status": "shipped"},
+        ]
+        (
+            mock_client.table.return_value.update.return_value.in_.return_value.execute.return_value.data
+        ) = updated
+
+        repo = OrderRepository(mock_client)
+        result = repo.bulk_update_status([1, 2], "shipped")
+
+        assert result == updated
+        mock_client.table.return_value.update.assert_called_once_with(
+            {"status": "shipped"}
+        )
+        mock_client.table.return_value.update.return_value.in_.assert_called_once_with(
+            "id", [1, 2]
+        )
+
+    def test_bulk_update_status_noop_for_empty_ids(self):
+        """空リストのときはクエリを投げず空を返す"""
+        mock_client = MagicMock()
+        repo = OrderRepository(mock_client)
+
+        assert repo.bulk_update_status([], "shipped") == []
+        mock_client.table.return_value.update.assert_not_called()

@@ -80,6 +80,22 @@ class OrderRepository(BaseRepository):
             "has_unconfirmed_routings": has_unconfirmed,
         }
 
+    def bulk_update_status(self, order_ids: list[int], status: str) -> list[dict]:
+        """複数注文のステータスを1リクエストでまとめて更新し、更新後の行を返す。
+
+        1件ずつ update するとAPI呼び出しがN回になるため、`in_("id", ...)` で
+        一括更新する（Issue #367）。空リストの場合はクエリを投げず空を返す。
+        """
+        if not order_ids:
+            return []
+        res = (
+            self.client.table(self.table_name)
+            .update({"status": status})
+            .in_("id", order_ids)
+            .execute()
+        )
+        return cast(list[dict[str, Any]], res.data or [])
+
     def mark_as_scheduled(self, order_id: int) -> None:
         """
         注文をスケジュール済みとしてマークする。

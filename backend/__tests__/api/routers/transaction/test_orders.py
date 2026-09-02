@@ -904,7 +904,7 @@ class TestOrderRouter:
         body = response.json()
         assert body["shipped_count"] == 1
         assert body["order_ids"] == [1]
-        mock_repo.update.assert_called_once_with(1, {"status": "shipped"})
+        mock_repo.bulk_update_status.assert_called_once_with([1], "shipped")
 
     def test_ship_overdue_drafts_allowed_for_platform_admin(
         self, headers, mock_repo, mock_supabase_client
@@ -930,7 +930,7 @@ class TestOrderRouter:
 
         assert response.status_code == 403
         mock_repo.get_all.assert_not_called()
-        mock_repo.update.assert_not_called()
+        mock_repo.bulk_update_status.assert_not_called()
 
     def test_ship_overdue_drafts_no_targets(
         self, headers, mock_repo, mock_supabase_client
@@ -945,7 +945,7 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         assert response.json() == {"shipped_count": 0, "order_ids": []}
-        mock_repo.update.assert_not_called()
+        mock_repo.bulk_update_status.assert_called_once_with([], "shipped")
 
     def test_approve_orders_bulk_partial_failure(
         self,

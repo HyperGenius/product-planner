@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -42,10 +43,10 @@ export function ShipOverdueDraftsConfirmDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>納期超過の下書きを送品済みにする</DialogTitle>
-          <p className="text-sm text-muted-foreground mt-1">
+          <DialogDescription className="mt-1">
             希望納期を過ぎたまま残っている下書きの受注 {orders.length} 件を「送品済み」にします。
             この操作は取り消せません。
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <div className="max-h-80 overflow-y-auto">

@@ -66,13 +66,33 @@ export function localTodayIso(): string {
 }
 
 /**
+ * "YYYY-MM-DD" 形式かつ実在する日付か検証する。
+ * バックエンドの `date.fromisoformat` 相当のチェックで、`2026-13-40` のような
+ * 不正な文字列を弾く（文字列比較だけだと不正日付が「納期超過」と誤判定されるため）。
+ */
+export function isValidIsoDate(dateStr: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr)
+  if (!m) return false
+  const [, y, mo, d] = m
+  const dt = new Date(`${dateStr}T00:00:00Z`)
+  return (
+    dt.getUTCFullYear() === Number(y) &&
+    dt.getUTCMonth() + 1 === Number(mo) &&
+    dt.getUTCDate() === Number(d)
+  )
+}
+
+/**
  * 納期を過ぎたまま残っている下書き受注か判定する（Issue #367）。
- * 「status === 'draft' かつ 希望納期が設定済み かつ 希望納期 < 今日」。
+ * 「status === 'draft' かつ 希望納期が有効な日付として設定済み かつ 希望納期 < 今日」。
+ * 不正な日付文字列はバックエンドと同様に対象外（false）とする。
  */
 export function isOverdueDraft(order: Order, todayIso: string = localTodayIso()): boolean {
   if (order.status !== "draft") return false
   if (!order.desired_deadline) return false
-  return order.desired_deadline.slice(0, 10) < todayIso
+  const deadline = order.desired_deadline.slice(0, 10)
+  if (!isValidIsoDate(deadline)) return false
+  return deadline < todayIso
 }
 
 export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
