@@ -12,6 +12,7 @@ import {
   useRejectOrder,
   useRequestApproval,
   useShipOrder,
+  useShipOverdueDrafts,
   useSimulateOrderById,
   useWithdrawApproval,
 } from "@/hooks/use-orders"
@@ -21,6 +22,7 @@ import { useCustomers } from "@/hooks/use-customers"
 import {
   filterOrder,
   compareOrders,
+  isOverdueDraft,
   DEFAULT_SORT,
   type StatusFilter,
   type SortKey,
@@ -60,6 +62,7 @@ export function useOrdersPage() {
   const [approveTargetOrder, setApproveTargetOrder] = useState<Order | null>(null)
   const [isBulkRequestApprovalConfirmOpen, setIsBulkRequestApprovalConfirmOpen] = useState(false)
   const [isBulkApproveConfirmOpen, setIsBulkApproveConfirmOpen] = useState(false)
+  const [isShipOverdueDraftsConfirmOpen, setIsShipOverdueDraftsConfirmOpen] = useState(false)
 
   const queryClient = useQueryClient()
 
@@ -69,11 +72,14 @@ export function useOrdersPage() {
   const { data: currentMember } = useCurrentMember()
   const currentUserRole = currentMember?.role ?? null
   const isPresident = currentUserRole === "president"
+  const canShipOverdueDrafts =
+    currentUserRole === "president" || currentUserRole === "platform_admin"
   const confirmOrder = useConfirmOrder()
   const requestApproval = useRequestApproval()
   const rejectOrder = useRejectOrder()
   const withdrawApproval = useWithdrawApproval()
   const shipOrder = useShipOrder()
+  const shipOverdueDrafts = useShipOverdueDrafts()
   const approveOrdersBulk = useApproveOrdersBulk()
   const deleteOrder = useDeleteOrder()
   const simulateOrderById = useSimulateOrderById()
@@ -105,6 +111,8 @@ export function useOrdersPage() {
     () => orders?.filter((o) => !o.desired_deadline).length ?? 0,
     [orders]
   )
+  // 納期を過ぎたまま残っている下書き（president / platform_admin が一括で送品済みにできる）
+  const overdueDraftOrders = orders?.filter((o) => isOverdueDraft(o)) ?? []
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
@@ -467,6 +475,26 @@ export function useOrdersPage() {
     }
   }
 
+  const handleShipOverdueDraftsRequest = () => setIsShipOverdueDraftsConfirmOpen(true)
+
+  const handleShipOverdueDraftsCancel = () => setIsShipOverdueDraftsConfirmOpen(false)
+
+  const handleShipOverdueDraftsConfirm = () => {
+    setIsShipOverdueDraftsConfirmOpen(false)
+    shipOverdueDrafts.mutate(undefined, {
+      onSuccess: (res) => {
+        if (res.shipped_count === 0) {
+          toast.info("対象となる納期超過の下書きはありませんでした")
+        } else {
+          toast.success(`納期超過の下書き ${res.shipped_count} 件を送品済みにしました`)
+        }
+      },
+      onError: (error: Error) => {
+        toast.error(`送品済みへの一括変更に失敗しました: ${error.message}`)
+      },
+    })
+  }
+
   return {
     // URL state
     statusFilter,
@@ -498,12 +526,14 @@ export function useOrdersPage() {
     // Role
     currentUserRole,
     isPresident,
+    canShipOverdueDrafts,
     // Mutation state
     confirmOrder,
     requestApproval,
     rejectOrder,
     withdrawApproval,
     shipOrder,
+    shipOverdueDrafts,
     deleteOrder,
     simulateOrderById,
     simulatingOrderId,
@@ -565,5 +595,11 @@ export function useOrdersPage() {
     bulkSimFailedIds,
     handleCloseBulkSimSummary,
     handleBulkRequestApprovalFromSummary,
+    // 納期超過の下書きを送品済みにする（Issue #367）
+    overdueDraftOrders,
+    isShipOverdueDraftsConfirmOpen,
+    handleShipOverdueDraftsRequest,
+    handleShipOverdueDraftsConfirm,
+    handleShipOverdueDraftsCancel,
   }
 }

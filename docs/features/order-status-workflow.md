@@ -31,6 +31,9 @@ draft ──────────▶ pending_approval ───────�
 | `completed` | 完了 |
 | `canceled` | キャンセル |
 
+> 注: 上記に加えて、管理者による後片付け操作のみ `draft → shipped` を例外的に許可する
+> （納期超過の下書き限定。詳細は下記「納期超過の下書きの一括送品済み化」）。
+
 順方向遷移のみを許可し、差し戻し `pending_approval → draft` のみ例外的に許可する。
 バリデーションは
 [order_status_service.py](../../backend/app/services/order_status_service.py) の
@@ -52,6 +55,32 @@ draft ──────────▶ pending_approval ───────�
 （`confirmed` かつ上記ロールのときのみ。[order-table-row.tsx](../../frontend/src/components/orders/order-table-row.tsx) /
 [orders/[id]/page.tsx](../../frontend/src/app/orders/[id]/page.tsx)、フックは
 `useShipOrder`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)））。
+
+### 納期超過の下書きの一括送品済み化 (`draft → shipped`、Issue #367)
+
+トライアル運用中に作成され、下書きのまま希望納期を過ぎて放置された受注を
+後片付けするための管理者操作。`POST /orders/ship-overdue-drafts`
+（[orders.py](../../backend/app/routers/transaction/orders.py)）が担う。
+
+- **ロール**: `president` / `platform_admin` 限定（`_require_any_role`）。承認操作
+  （工程確定等）は `president` 限定だが、本操作は「承認を通さず終端へ寄せる後片付け」
+  であり、閲覧・管理サポートを担う `platform_admin` にも開放する。`order_handler` /
+  `iso_officer` は実行不可（403）。
+- **対象**: テナント内の「`status == "draft"` かつ 希望納期が設定済み かつ 希望納期 < 今日」
+  の受注のみ。`pending_approval` / `confirmed` / 納期未設定 / 納期未超過は対象外。
+  判定は [order_status_service.py](../../backend/app/services/order_status_service.py) の
+  `is_overdue_draft()`。
+- **遷移バリデーション**: グローバルな `ORDER_STATUS_TRANSITIONS` は `draft → shipped` を
+  許可しない（単体の `POST /orders/{id}/ship` は従来どおり `confirmed` からのみ）。
+  この一括エンドポイントだけが `is_overdue_draft()` で対象を絞ったうえで例外的に
+  `draft → shipped` を行う。
+- **レスポンス**: `{ "shipped_count": N, "order_ids": [...] }`。対象0件でも 200。
+- **フロントエンド**: 受注一覧ヘッダ（[orders/page.tsx](../../frontend/src/app/orders/page.tsx)）の
+  3点リーダに「納期超過の下書きを送品済みにする（N件）」を表示する（`president` /
+  `platform_admin` のときのみ。対象0件のときは disabled）。確認ダイアログ
+  （`ShipOverdueDraftsConfirmDialog`）で対象一覧を確認してから実行。フックは
+  `useShipOverdueDrafts`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)）。
+  行チェックボックスによる個別選択は用いない。
 
 ## 自動処理（メール/PDF取込）との整合
 

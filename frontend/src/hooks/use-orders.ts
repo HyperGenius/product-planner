@@ -16,6 +16,7 @@ import type {
   OrderSimulateResponse,
   OrderSplitRequest,
   OrderSplitResponse,
+  ShipOverdueDraftsResponse,
 } from "@/types/order"
 
 // クエリキーを定数化
@@ -247,6 +248,24 @@ export function useShipOrder() {
     onSuccess: (_data, orderId) => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
       queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
+    },
+  })
+}
+
+/**
+ * 納期を過ぎたまま残っている下書き注文をまとめて送品済みにするフック
+ * （president / platform_admin 限定、Issue #367）
+ */
+export function useShipOverdueDrafts() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () =>
+      apiClient<ShipOverdueDraftsResponse>("/orders/ship-overdue-drafts", {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
     },
   })
 }

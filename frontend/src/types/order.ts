@@ -150,6 +150,14 @@ export interface OrderBulkApproveResponse {
 }
 
 /**
+ * 納期超過の下書き受注を一括で送品済みにした結果のデータ型（Issue #367）
+ */
+export interface ShipOverdueDraftsResponse {
+  shipped_count: number
+  order_ids: number[]
+}
+
+/**
  * 承認ワークフロー監査ログのデータ型（iso_officer / president / platform_admin のみ閲覧可）
  */
 export interface OrderApprovalLog {

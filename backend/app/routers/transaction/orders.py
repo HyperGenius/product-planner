@@ -33,6 +33,7 @@ from app.models.transaction.order_schema import (
     OrderSimulateRequest,
     OrderSplitRequest,
     OrderUpdate,
+    ShipOverdueDraftsResponse,
 )
 from app.repositories.supa_infra.common.scheduling_settings_repo import (
     SchedulingSettingsRepository,
@@ -54,6 +55,7 @@ from app.services.attachment_service import (
 from app.services.notification_service import create_notification
 from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
+    is_overdue_draft,
     validate_order_status_transition,
 )
 from app.services.product_alias_service import (
@@ -1275,3 +1277,43 @@ def ship_order(
 
     result = order_repo.update(order_id, {"status": "shipped"})
     return _map_order_response(result)
+
+
+@orders_router.post("/ship-overdue-drafts", response_model=ShipOverdueDraftsResponse)
+def ship_overdue_drafts(
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+):
+    """
+    納期を過ぎたまま残っている下書き (draft) 受注をまとめて送品済み (shipped) にする
+    （president / platform_admin 限定、Issue #367）。
+
+    トライアル運用中に溜まった「納期超過の下書き」を後片付けするための管理者操作。
+    通常の draft -> shipped は許可されておらず（承認フローを通す）、このエンドポイント
+    だけが例外的にその遷移を行う。対象は「status == 'draft' かつ 納期設定済み かつ
+    納期 < 今日」に限定する。対象が0件でも 200 を返す。
+    """
+    logger.info("Shipping overdue draft orders")
+    _require_any_role(
+        tenant_id,
+        user_id,
+        client,
+        ("president", "platform_admin"),
+        "納期超過下書きの送品済み化",
+    )
+
+    today = date.today()
+    target_ids = [
+        order["id"]
+        for order in order_repo.get_all()
+        if is_overdue_draft(order.get("status"), order.get("deadline_date"), today)
+    ]
+
+    updated = order_repo.bulk_update_status(target_ids, "shipped")
+    updated_ids = [o["id"] for o in updated] if updated else []
+
+    logger.info(f"Shipped {len(updated_ids)} overdue draft orders")
+    logger.debug(f"Shipped overdue draft order ids: {updated_ids}")
+    return {"shipped_count": len(updated_ids), "order_ids": updated_ids}
