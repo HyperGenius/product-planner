@@ -113,8 +113,14 @@ def extract_email_order_lines(
     for block in response.content:
         if block.type == "tool_use" and block.name == "extract_email_order_lines":
             data = cast(dict[str, Any], block.input)
+            line_items = data.get("line_items")
+            document_order_no = data.get("document_order_no")
             return {
-                "document_order_no": data.get("document_order_no"),
-                "line_items": data.get("line_items", []),
+                "document_order_no": (
+                    document_order_no if isinstance(document_order_no, str) else None
+                ),
+                # ツールスキーマ上は list だが、LLM が null/不正型を返しても
+                # 呼び出し側（list 前提）が壊れないよう空配列にフォールバックする
+                "line_items": line_items if isinstance(line_items, list) else [],
             }
     return {"document_order_no": None, "line_items": []}

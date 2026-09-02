@@ -362,8 +362,9 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
    して安定する
 
 解決した値は `_process_line_item()` から `upsert_order_by_dedupe_key` の
-`p_customer_order_no` 引数として渡され、INSERT／UPDATE 時に `orders.customer_order_no`
-へ保存される（UPDATE 時は既存値を上書きせず `COALESCE` で補完）。手動メール起票
+`p_customer_order_no` 引数として渡され、INSERT 時に `orders.customer_order_no` へ
+保存される。UPDATE 時は `COALESCE(v_customer_order_no, customer_order_no)`、すなわち
+新しい値が非NULL/非空ならそれで更新し、NULL のときだけ既存値を保持する。手動メール起票
 （`POST /orders/email-intake`）でも `ManualEmailIntakeLineItem.customer_order_no` で
 受け取り保存する。
 
@@ -460,8 +461,9 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   `orders.order_number`（`orders_tenant_id_order_number_idx` でテナント内ユニーク）
   とは意味が異なるため流用しない
 - `upsert_order_by_dedupe_key` に `p_customer_order_no text DEFAULT NULL` を追加し、
-  各 INSERT で保存、UPDATE 時は `COALESCE(v_customer_order_no, customer_order_no)` で
-  補完する。**dedupe キー・優先順位判定は 20260830150000 時点の定義から一切変更しない**
+  各 INSERT で保存する。UPDATE 時は `COALESCE(v_customer_order_no, customer_order_no)`
+  （新しい値が非NULL/非空ならそれで更新、NULL のときだけ既存値を保持）。
+  **dedupe キー・優先順位判定は 20260830150000 時点の定義から一切変更しない**
   （末尾に DEFAULT 付き引数を足すと旧シグネチャが残るため、10引数版を `DROP FUNCTION`
   してから作り直す）
 

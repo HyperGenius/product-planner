@@ -46,8 +46,8 @@ export interface ManualEmailIntakeLineItem {
   quantity: number
   desired_deadline?: string
   extracted_product_name?: string
-  /** 顧客側の注文番号／注文No.（Issue #366） */
-  customer_order_no?: string
+  /** 顧客側の注文番号／注文No.（Issue #366。Backend は str | None）*/
+  customer_order_no?: string | null
 }
 
 /**

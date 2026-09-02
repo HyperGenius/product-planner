@@ -78,17 +78,25 @@ def parse_pending_order_pdfs(db: Client) -> dict[str, int]:
     }
 
 
-def _get_customer_extraction_prompt(db: Client, customer_id: Any) -> str | None:
+def _get_customer_extraction_prompt(
+    db: Client, tenant_id: str, customer_id: Any
+) -> str | None:
     """
     顧客固有の抽出プロンプト断片（customers.order_extraction_prompt）を引く。
     未設定（NULL）・顧客未特定の場合は None を返し、汎用プロンプトのみで抽出する
-    （挙動不変）。RLS は customers の既存 tenant isolation ポリシーで担保される。
+    （挙動不変）。
+
+    このサービスは cron から管理者クライアント（RLS バイパス）で呼ばれるため、
+    RLS の tenant isolation に依存せず、明示的に tenant_id で絞り込む
+    （staging_row.customer_id が万一他テナントを指しても他テナントの断片を
+    読まないようにする）。
     """
     if customer_id is None:
         return None
     result = (
         db.table(SupabaseTableName.CUSTOMERS.value)
         .select("order_extraction_prompt")
+        .eq("tenant_id", tenant_id)
         .eq("id", customer_id)
         .limit(1)
         .execute()
@@ -140,7 +148,7 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
     table = SupabaseTableName.ORDER_ATTACHMENTS.value
     attachment_id = row["id"]
     customer_extraction_prompt = _get_customer_extraction_prompt(
-        db, row.get("customer_id")
+        db, row["tenant_id"], row.get("customer_id")
     )
 
     # PDF添付があればPDFのテキストから明細抽出を試み、明細が0件ならメール本文に
@@ -161,7 +169,7 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
             cast(str, text_result.text), customer_extraction_prompt
         )
         line_items = cast(list[dict[str, Any]], extraction["line_items"])
-        document_order_no = cast("str | None", extraction.get("document_order_no"))
+        document_order_no: str | None = extraction.get("document_order_no")
         auto_order_no = _generate_auto_customer_order_no(
             row.get("customer_id"), text_result.text
         )
@@ -257,7 +265,7 @@ def _process_email_body(
 
     extraction = extract_email_order_lines(body, customer_extraction_prompt)
     line_items = cast(list[dict[str, Any]], extraction["line_items"])
-    document_order_no = cast("str | None", extraction.get("document_order_no"))
+    document_order_no: str | None = extraction.get("document_order_no")
     auto_order_no = _generate_auto_customer_order_no(row.get("customer_id"), body)
 
     if not line_items:
