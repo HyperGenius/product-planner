@@ -34,21 +34,22 @@ def _upsert(
     quantity: int,
     deadline_date: str,
     certainty: str,
+    customer_order_no: str | None = None,
 ) -> dict[str, Any]:
-    result = admin_db.rpc(
-        "upsert_order_by_dedupe_key",
-        {
-            "p_tenant_id": tenant_id,
-            "p_customer_id": customer_id,
-            "p_product_id": product_id,
-            "p_quantity": quantity,
-            "p_deadline_date": deadline_date,
-            "p_customer_certainty": certainty,
-            "p_source_type": "email",
-            "p_source_raw": "integration-test upsert_order_by_dedupe_key",
-            "p_extracted_product_name": "integration test product",
-        },
-    ).execute()
+    params: dict[str, Any] = {
+        "p_tenant_id": tenant_id,
+        "p_customer_id": customer_id,
+        "p_product_id": product_id,
+        "p_quantity": quantity,
+        "p_deadline_date": deadline_date,
+        "p_customer_certainty": certainty,
+        "p_source_type": "email",
+        "p_source_raw": "integration-test upsert_order_by_dedupe_key",
+        "p_extracted_product_name": "integration test product",
+    }
+    if customer_order_no is not None:
+        params["p_customer_order_no"] = customer_order_no
+    result = admin_db.rpc("upsert_order_by_dedupe_key", params).execute()
     rows = cast(list[dict[str, Any]], result.data or [])
     assert len(rows) == 1
     return rows[0]
@@ -738,3 +739,107 @@ class TestMarkSupersededOrders:
 
         orders = OrderRepository(admin_db).get_all()
         assert not any(o["id"] == old["order_id"] for o in orders)
+
+
+@pytest.mark.integration
+class TestUpsertCustomerOrderNo:
+    """Issue #366: p_customer_order_no は保存のみ行い、dedupe キー・優先順位判定には
+    影響しないこと。"""
+
+    def test_customer_order_no_is_stored_on_insert(self, admin_db, dedupe_fixture):
+        result = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast",
+            customer_order_no="C1868",
+        )
+        assert result["action"] == "inserted"
+
+        order = (
+            admin_db.table("orders")
+            .select("customer_order_no")
+            .eq("id", result["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["customer_order_no"] == "C1868"
+
+    def test_customer_order_no_does_not_affect_dedupe_or_priority(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast",
+            customer_order_no="AAA",
+        )
+
+        # 同一 dedupe キーで customer_order_no だけ違う値 → 新規行にはならず
+        # 既存行の更新（数量昇格）になり、customer_order_no は新しい値で補完される
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=20,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast",
+            customer_order_no="BBB",
+        )
+
+        assert second["action"] == "updated"
+        assert second["order_id"] == first["order_id"]
+
+        order = (
+            admin_db.table("orders")
+            .select("quantity, customer_order_no")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["quantity"] == 20
+        assert order["customer_order_no"] == "BBB"
+
+    def test_existing_customer_order_no_is_kept_when_new_value_is_null(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast",
+            customer_order_no="KEEP-ME",
+        )
+
+        _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=30,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast",
+        )
+
+        order = (
+            admin_db.table("orders")
+            .select("customer_order_no")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["customer_order_no"] == "KEEP-ME"

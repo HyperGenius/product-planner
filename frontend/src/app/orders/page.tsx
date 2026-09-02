@@ -229,6 +229,7 @@ export default function OrdersPage() {
                     </div>
                   </TableHead>
                   <TableHead>注文番号</TableHead>
+                  <TableHead>顧客注文番号</TableHead>
                   <TableHead>製品</TableHead>
                   <TableHead>顧客</TableHead>
                   <TableHead className="text-right">数量</TableHead>

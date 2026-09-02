@@ -2,7 +2,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from app.services.pdf_order_parsing_service import (
+    _generate_auto_customer_order_no,
     _process_line_item,
+    _resolve_customer_order_no,
     parse_pending_order_pdfs,
 )
 from app.services.pdf_text_service import PdfTextResult
@@ -150,19 +152,22 @@ class TestParsePendingOrderPdfs:
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_order_lines",
-                return_value=[],
+                return_value={"document_order_no": None, "line_items": []},
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_email_order_lines",
-                return_value=[
-                    {
-                        "product_name_raw": "製品A",
-                        "product_number_raw": None,
-                        "quantity": 5,
-                        "delivery_date": "2026-08-01",
-                        "certainty": "confirmed",
-                    }
-                ],
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [
+                        {
+                            "product_name_raw": "製品A",
+                            "product_number_raw": None,
+                            "quantity": 5,
+                            "delivery_date": "2026-08-01",
+                            "certainty": "confirmed",
+                        }
+                    ],
+                },
             ),
             patch(
                 "app.services.pdf_order_parsing_service.match_product_by_code",
@@ -224,11 +229,14 @@ class TestParsePendingOrderPdfs:
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_order_lines",
-                return_value=[],
+                return_value={"document_order_no": None, "line_items": []},
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_email_order_lines",
-                return_value=line_items,
+                return_value={
+                    "document_order_no": None,
+                    "line_items": line_items,
+                },
             ),
             patch(
                 "app.services.pdf_order_parsing_service.match_product_by_code",
@@ -260,11 +268,11 @@ class TestParsePendingOrderPdfs:
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_order_lines",
-                return_value=[],
+                return_value={"document_order_no": None, "line_items": []},
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_email_order_lines",
-                return_value=[],
+                return_value={"document_order_no": None, "line_items": []},
             ),
         ):
             result = parse_pending_order_pdfs(mock_db)
@@ -316,15 +324,18 @@ class TestParsePendingOrderPdfs:
             ),
             patch(
                 "app.services.pdf_order_parsing_service.extract_order_lines",
-                return_value=[
-                    {
-                        "product_name_raw": "FILTER COMP",
-                        "product_number_raw": "F-1",
-                        "quantity": 20000,
-                        "delivery_date": "2026-08-31",
-                        "certainty": "confirmed",
-                    }
-                ],
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [
+                        {
+                            "product_name_raw": "FILTER COMP",
+                            "product_number_raw": "F-1",
+                            "quantity": 20000,
+                            "delivery_date": "2026-08-31",
+                            "certainty": "confirmed",
+                        }
+                    ],
+                },
             ),
             patch(
                 "app.services.pdf_order_parsing_service.match_product_by_code",
@@ -379,15 +390,18 @@ class TestParsePendingOrderPdfs:
             ) as mock_extract_text,
             patch(
                 "app.services.pdf_order_parsing_service.extract_email_order_lines",
-                return_value=[
-                    {
-                        "product_name_raw": "製品B",
-                        "product_number_raw": "CODE-B",
-                        "quantity": 3,
-                        "delivery_date": "2026-11-30",
-                        "certainty": "forecast_tentative",
-                    }
-                ],
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [
+                        {
+                            "product_name_raw": "製品B",
+                            "product_number_raw": "CODE-B",
+                            "quantity": 3,
+                            "delivery_date": "2026-11-30",
+                            "certainty": "forecast_tentative",
+                        }
+                    ],
+                },
             ),
             patch(
                 "app.services.pdf_order_parsing_service.match_product_by_code",
@@ -872,3 +886,115 @@ class TestProcessLineItem:
             c.args[0] for c in mock_db.table().insert.call_args_list if c.args
         ]
         assert not any(c.get("reason") == "multi_order_suspected" for c in insert_calls)
+
+
+@pytest.mark.unit
+class TestCustomerOrderNoResolution:
+    """Issue #366: 顧客側の注文番号（customer_order_no）の解決と採番。"""
+
+    def test_line_order_no_takes_priority_over_document_order_no(self):
+        line = {"line_order_no": " L-99 "}
+        assert _resolve_customer_order_no(line, "C1868", "AUTO-xxxx") == "L-99"
+
+    def test_falls_back_to_document_order_no_when_line_order_no_missing(self):
+        for line in ({}, {"line_order_no": None}, {"line_order_no": "  "}):
+            assert _resolve_customer_order_no(line, " C1868 ", "AUTO-xxxx") == "C1868"
+
+    def test_falls_back_to_auto_order_no_when_no_number_in_document(self):
+        assert (
+            _resolve_customer_order_no({}, None, "AUTO-abc1234567") == "AUTO-abc1234567"
+        )
+
+    def test_returns_none_when_nothing_available(self):
+        assert _resolve_customer_order_no({}, None, None) is None
+
+    def test_auto_order_no_is_deterministic_for_same_document(self):
+        text = "注文一覧表 2026年7月29日  FILTER COMP"
+        assert _generate_auto_customer_order_no(
+            42, text
+        ) == _generate_auto_customer_order_no(
+            42, "  注文一覧表\n2026年7月29日\tFILTER COMP "
+        )
+
+    def test_auto_order_no_differs_by_customer_and_content(self):
+        text = "注文一覧表"
+        assert _generate_auto_customer_order_no(
+            1, text
+        ) != _generate_auto_customer_order_no(2, text)
+        assert _generate_auto_customer_order_no(
+            1, "A"
+        ) != _generate_auto_customer_order_no(1, "B")
+
+    def test_auto_order_no_is_none_for_empty_text(self):
+        assert _generate_auto_customer_order_no(1, "") is None
+        assert _generate_auto_customer_order_no(1, "   ") is None
+        assert _generate_auto_customer_order_no(1, None) is None
+
+    def test_process_line_item_passes_line_order_no_to_rpc(self):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 1, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "confirmed",
+            "line_order_no": "C1868-3",
+        }
+        staging_row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "source_raw": "本文",
+            "storage_path": "p/x.pdf",
+            "original_filename": "x.pdf",
+            "content_type": "application/pdf",
+        }
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(
+                mock_db, staging_row, line, "C1868", "AUTO-fallback01"
+            )
+
+        assert created is True
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_order_no"] == "C1868-3"
+
+    def test_process_line_item_falls_back_to_document_then_auto(self):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 1, "action": "inserted"}]
+        )
+        base_line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "confirmed",
+        }
+        staging_row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "source_raw": "本文",
+            "storage_path": "p/x.pdf",
+            "original_filename": "x.pdf",
+            "content_type": "application/pdf",
+        }
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            _process_line_item(mock_db, staging_row, dict(base_line), "C1868", "AUTO-1")
+            assert (
+                mock_db.rpc.call_args_list[-1].args[1]["p_customer_order_no"] == "C1868"
+            )
+            _process_line_item(mock_db, staging_row, dict(base_line), None, "AUTO-1")
+            assert (
+                mock_db.rpc.call_args_list[-1].args[1]["p_customer_order_no"]
+                == "AUTO-1"
+            )

@@ -1,3 +1,4 @@
+import hashlib
 import os
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -77,10 +78,78 @@ def parse_pending_order_pdfs(db: Client) -> dict[str, int]:
     }
 
 
+def _get_customer_extraction_prompt(
+    db: Client, tenant_id: str, customer_id: Any
+) -> str | None:
+    """
+    顧客固有の抽出プロンプト断片（customers.order_extraction_prompt）を引く。
+    未設定（NULL）・顧客未特定の場合は None を返し、汎用プロンプトのみで抽出する
+    （挙動不変）。
+
+    このサービスは cron から管理者クライアント（RLS バイパス）で呼ばれるため、
+    RLS の tenant isolation に依存せず、明示的に tenant_id で絞り込む
+    （staging_row.customer_id が万一他テナントを指しても他テナントの断片を
+    読まないようにする）。
+    """
+    if customer_id is None:
+        return None
+    result = (
+        db.table(SupabaseTableName.CUSTOMERS.value)
+        .select("order_extraction_prompt")
+        .eq("tenant_id", tenant_id)
+        .eq("id", customer_id)
+        .limit(1)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    if not rows:
+        return None
+    prompt = rows[0].get("order_extraction_prompt")
+    return prompt if isinstance(prompt, str) and prompt.strip() else None
+
+
+def _generate_auto_customer_order_no(
+    customer_id: Any, source_text: str | None
+) -> str | None:
+    """
+    注文番号が文書に存在しない顧客（例: 飯野製作所）向けに、アプリ側で
+    `customer_order_no` を文書内容から決定的に採番する。
+
+    (customer_id, 正規化した文書テキスト) の SHA-256 から生成するため、同じ文書を
+    再パースしても同じ番号になり、観察・重複判定の土台として安定する。連番管理
+    テーブルは持たない。文書テキストが空の場合は None。
+    """
+    normalized = " ".join((source_text or "").split())
+    if not normalized:
+        return None
+    digest = hashlib.sha256(f"{customer_id}\n{normalized}".encode()).hexdigest()
+    return f"AUTO-{digest[:10]}"
+
+
+def _resolve_customer_order_no(
+    line: dict[str, Any],
+    document_order_no: str | None,
+    auto_order_no: str | None,
+) -> str | None:
+    """
+    明細ごとの顧客注文番号を解決する:
+    1. 明細レベルの line_order_no（昭和製作所のように1文書に複数ある場合）
+    2. 無ければ文書レベルの document_order_no
+    3. どちらも無ければアプリ側で採番した auto_order_no（飯野製作所等）
+    """
+    for candidate in (line.get("line_order_no"), document_order_no):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return auto_order_no
+
+
 def _parse_one(db: Client, row: dict[str, Any]) -> int:
     """1件のステージング行を処理し、生成した order 数を返す。"""
     table = SupabaseTableName.ORDER_ATTACHMENTS.value
     attachment_id = row["id"]
+    customer_extraction_prompt = _get_customer_extraction_prompt(
+        db, row["tenant_id"], row.get("customer_id")
+    )
 
     # PDF添付があればPDFのテキストから明細抽出を試み、明細が0件ならメール本文に
     # フォールバックする。非PDF添付・添付なしメール（storage_path が空）は、
@@ -96,22 +165,32 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
             ).execute()
             return created_count
 
-        line_items = extract_order_lines(cast(str, text_result.text))
+        extraction = extract_order_lines(
+            cast(str, text_result.text), customer_extraction_prompt
+        )
+        line_items = cast(list[dict[str, Any]], extraction["line_items"])
+        document_order_no: str | None = extraction.get("document_order_no")
+        auto_order_no = _generate_auto_customer_order_no(
+            row.get("customer_id"), text_result.text
+        )
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "
-            f"extracted {len(line_items)} line items"
+            f"extracted {len(line_items)} line items "
+            f"(document_order_no={document_order_no!r})"
         )
 
         if line_items:
             created_count = sum(
-                1 for line in line_items if _process_line_item(db, row, line)
+                1
+                for line in line_items
+                if _process_line_item(db, row, line, document_order_no, auto_order_no)
             )
         else:
             # PDFの内容が注文と無関係で明細が1件も抽出できなかった場合、
             # メール本文（source_raw）からの抽出にフォールバックする（Issue #278）
-            created_count = _process_email_body(db, row)
+            created_count = _process_email_body(db, row, customer_extraction_prompt)
     else:
-        created_count = _process_email_body(db, row)
+        created_count = _process_email_body(db, row, customer_extraction_prompt)
 
     _notify_if_no_order_created(db, row, created_count)
     db.table(table).update({"parse_status": "success"}).eq(
@@ -165,7 +244,11 @@ def _notify_if_no_order_created(
     )
 
 
-def _process_email_body(db: Client, row: dict[str, Any]) -> int:
+def _process_email_body(
+    db: Client,
+    row: dict[str, Any],
+    customer_extraction_prompt: str | None = None,
+) -> int:
     """
     メール本文（source_raw）から注文明細行を抽出し、order を生成する。
 
@@ -180,7 +263,10 @@ def _process_email_body(db: Client, row: dict[str, Any]) -> int:
     attachment_id = row["id"]
     body = cast(str, row.get("source_raw") or "")
 
-    line_items = extract_email_order_lines(body)
+    extraction = extract_email_order_lines(body, customer_extraction_prompt)
+    line_items = cast(list[dict[str, Any]], extraction["line_items"])
+    document_order_no: str | None = extraction.get("document_order_no")
+    auto_order_no = _generate_auto_customer_order_no(row.get("customer_id"), body)
 
     if not line_items:
         detail = {"body_snippet": body[:200]}
@@ -202,7 +288,11 @@ def _process_email_body(db: Client, row: dict[str, Any]) -> int:
         )
         return 0
 
-    created_count = sum(1 for line in line_items if _process_line_item(db, row, line))
+    created_count = sum(
+        1
+        for line in line_items
+        if _process_line_item(db, row, line, document_order_no, auto_order_no)
+    )
     logger.info(
         f"pdf_order_parsing: attachment {attachment_id} "
         f"extracted {len(line_items)} line items from email body, "
@@ -370,17 +460,28 @@ def _resolve_product_id(
 
 
 def _process_line_item(
-    db: Client, staging_row: dict[str, Any], line: dict[str, Any]
+    db: Client,
+    staging_row: dict[str, Any],
+    line: dict[str, Any],
+    document_order_no: str | None = None,
+    auto_order_no: str | None = None,
 ) -> bool:
     """
     抽出された1明細から order を生成する。
     生成できた場合 True、数量不正・重複スキップの場合 False を返す。
     品番照合に失敗した場合も product_id=NULL の下書きとして生成するため True を返す
     （Issue #296）。
+
+    document_order_no（文書レベル）・auto_order_no（アプリ側採番）と明細の
+    line_order_no から `customer_order_no` を解決し、RPC 経由で orders に保存する
+    （Issue #366。dedupe キー・優先順位判定には使わない観察用）。
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
     customer_id = _require_customer_id(staging_row, attachment_id)
+    customer_order_no = _resolve_customer_order_no(
+        line, document_order_no, auto_order_no
+    )
     product_number_raw = line.get("product_number_raw")
     product_name_raw = line.get("product_name_raw")
 
@@ -453,6 +554,7 @@ def _process_line_item(
             "p_source_raw": staging_row.get("source_raw"),
             "p_extracted_product_name": extracted_product_name,
             "p_source_attachment_id": attachment_id,
+            "p_customer_order_no": customer_order_no,
         },
     ).execute()
     rpc_rows = cast(list[dict[str, Any]], rpc_result.data or [])

@@ -78,6 +78,8 @@ class ManualEmailIntakeLineItem(BaseSchema):
     quantity: int = Field(gt=0)
     deadline_date: str | None = Field(None, alias="desired_deadline")
     extracted_product_name: str | None = None
+    # 顧客側の注文番号／注文No.（Issue #366。観察用・dedupe には未使用）
+    customer_order_no: str | None = None
 
 
 class ManualEmailIntakeRequest(BaseSchema):

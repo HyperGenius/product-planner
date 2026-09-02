@@ -756,6 +756,7 @@ async def create_email_order_intake(
                     "source_type": "email",
                     "source_raw": intake.source_raw,
                     "extracted_product_name": item.extracted_product_name,
+                    "customer_order_no": item.customer_order_no,
                     "source_attachment_id": staging_id,
                 }
             )

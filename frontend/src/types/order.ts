@@ -4,6 +4,8 @@
 export interface Order {
   id: number
   order_no: string | null
+  /** 顧客側の注文番号／注文No.（Issue #366。観察用・社内採番の order_no とは別物） */
+  customer_order_no?: string | null
   product_id: number | null
   extracted_product_name?: string | null
   customer_id?: number
@@ -44,6 +46,8 @@ export interface ManualEmailIntakeLineItem {
   quantity: number
   desired_deadline?: string
   extracted_product_name?: string
+  /** 顧客側の注文番号／注文No.（Issue #366。Backend は str | None）*/
+  customer_order_no?: string | null
 }
 
 /**

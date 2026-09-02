@@ -15,6 +15,14 @@ _EXTRACT_TOOL: Any = {
     "input_schema": {
         "type": "object",
         "properties": {
+            "document_order_no": {
+                "type": ["string", "null"],
+                "description": (
+                    "文書レベルの注文番号／注文No.（例:「注文番号: C1868」）。"
+                    "1つの注文書全体に対して1つ振られている番号。"
+                    "文書内に見当たらない場合は null。"
+                ),
+            },
             "line_items": {
                 "type": "array",
                 "description": "PDF内の明細行の配列。明細が見つからない場合は空配列。",
@@ -37,6 +45,14 @@ _EXTRACT_TOOL: Any = {
                             "type": ["string", "null"],
                             "description": "納期 (ISO 8601: YYYY-MM-DD)。不明な場合はnull",
                         },
+                        "line_order_no": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "明細レベルの注文No.。1つの注文書内で明細ごとに"
+                                "異なる注文No.が振られている場合に使用する"
+                                "（多くの顧客は明細レベルの番号を持たないため null）。"
+                            ),
+                        },
                         "certainty": {
                             "type": "string",
                             "enum": ["confirmed", "forecast", "forecast_tentative"],
@@ -55,35 +71,60 @@ _EXTRACT_TOOL: Any = {
                         "product_number_raw",
                         "quantity",
                         "delivery_date",
+                        "line_order_no",
                         "certainty",
                     ],
                 },
             },
         },
-        "required": ["line_items"],
+        "required": ["document_order_no", "line_items"],
     },
 }
 
 
-def extract_order_lines(pdf_text: str) -> list[dict[str, Any]]:
+def extract_order_lines(
+    pdf_text: str, customer_extraction_prompt: str | None = None
+) -> dict[str, Any]:
+    """
+    受注PDFのテキストから注文番号（文書レベル）と明細行を抽出する。
+
+    customer_extraction_prompt が渡された場合（顧客ごとの
+    customers.order_extraction_prompt）、汎用プロンプトの末尾に「顧客固有の抽出指示」
+    として追記する。ツールスキーマは変更せず、あくまで自然言語の指示のみ。
+
+    戻り値: {"document_order_no": str | None, "line_items": list[dict]}
+    """
     model = os.environ.get("PDF_EXTRACTION_MODEL", "claude-sonnet-5")
+    prompt = (
+        "以下は受注PDFから抽出したテキストです。"
+        "文書レベルの注文番号(document_order_no)と、明細行ごとに"
+        "品番・品名・数量・納期・確度、および明細レベルの注文No.(line_order_no)を"
+        "抽出してください。"
+    )
+    if customer_extraction_prompt and customer_extraction_prompt.strip():
+        prompt += (
+            f"\n\n【この顧客固有の抽出指示】\n{customer_extraction_prompt.strip()}"
+        )
+    prompt += f"\n\n{pdf_text}"
+
     response = _client.messages.create(
         model=model,
         max_tokens=4096,
         tools=[_EXTRACT_TOOL],
         tool_choice={"type": "tool", "name": "extract_order_lines"},
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "以下は受注PDFから抽出したテキストです。"
-                    "明細行ごとに品番・品名・数量・納期・確度を抽出してください。\n\n"
-                    f"{pdf_text}"
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
     )
     for block in response.content:
         if block.type == "tool_use" and block.name == "extract_order_lines":
-            return cast(list[dict[str, Any]], block.input.get("line_items", []))
-    return []
+            data = cast(dict[str, Any], block.input)
+            line_items = data.get("line_items")
+            document_order_no = data.get("document_order_no")
+            return {
+                "document_order_no": (
+                    document_order_no if isinstance(document_order_no, str) else None
+                ),
+                # ツールスキーマ上は list だが、LLM が null/不正型を返しても
+                # 呼び出し側（list 前提）が壊れないよう空配列にフォールバックする
+                "line_items": line_items if isinstance(line_items, list) else [],
+            }
+    return {"document_order_no": None, "line_items": []}
