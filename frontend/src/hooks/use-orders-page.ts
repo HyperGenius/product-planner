@@ -112,10 +112,7 @@ export function useOrdersPage() {
     [orders]
   )
   // 納期を過ぎたまま残っている下書き（president / platform_admin が一括で送品済みにできる）
-  const overdueDraftOrders = useMemo(
-    () => orders?.filter((o) => isOverdueDraft(o)) ?? [],
-    [orders]
-  )
+  const overdueDraftOrders = orders?.filter((o) => isOverdueDraft(o)) ?? []
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
