@@ -897,6 +897,10 @@ class TestOrderRouter:
             {"id": 4, "status": "pending_approval", "deadline_date": "2000-01-01"},
             {"id": 5, "status": "confirmed", "deadline_date": "2000-01-01"},
         ]
+        # レスポンスは実際に更新された行（bulk_update_status の戻り値）を元に作る
+        mock_repo.bulk_update_status.return_value = [
+            {"id": 1, "status": "shipped", "deadline_date": "2000-01-01"},
+        ]
 
         response = client.post("/orders/ship-overdue-drafts", headers=headers)
 
@@ -906,6 +910,27 @@ class TestOrderRouter:
         assert body["order_ids"] == [1]
         mock_repo.bulk_update_status.assert_called_once_with([1], "shipped")
 
+    def test_ship_overdue_drafts_reports_only_actually_updated_rows(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /ship-overdue-drafts: RLS等で一部しか更新できなかった場合、
+        レスポンスは実際に更新された行のみを反映する"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_all.return_value = [
+            {"id": 1, "status": "draft", "deadline_date": "2000-01-01"},
+            {"id": 2, "status": "draft", "deadline_date": "2000-01-01"},
+        ]
+        # 対象は [1, 2] だが、実際に更新されたのは 1 のみ
+        mock_repo.bulk_update_status.return_value = [
+            {"id": 1, "status": "shipped", "deadline_date": "2000-01-01"},
+        ]
+
+        response = client.post("/orders/ship-overdue-drafts", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"shipped_count": 1, "order_ids": [1]}
+        mock_repo.bulk_update_status.assert_called_once_with([1, 2], "shipped")
+
     def test_ship_overdue_drafts_allowed_for_platform_admin(
         self, headers, mock_repo, mock_supabase_client
     ):
@@ -913,6 +938,9 @@ class TestOrderRouter:
         self._set_role(mock_supabase_client, "platform_admin")
         mock_repo.get_all.return_value = [
             {"id": 1, "status": "draft", "deadline_date": "2000-01-01"},
+        ]
+        mock_repo.bulk_update_status.return_value = [
+            {"id": 1, "status": "shipped", "deadline_date": "2000-01-01"},
         ]
 
         response = client.post("/orders/ship-overdue-drafts", headers=headers)
@@ -940,6 +968,7 @@ class TestOrderRouter:
         mock_repo.get_all.return_value = [
             {"id": 2, "status": "draft", "deadline_date": "2999-12-31"},
         ]
+        mock_repo.bulk_update_status.return_value = []
 
         response = client.post("/orders/ship-overdue-drafts", headers=headers)
 
