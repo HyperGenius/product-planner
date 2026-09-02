@@ -122,6 +122,9 @@ export function OrderTableRow({
             )}
           </div>
         </TableCell>
+        <TableCell className="text-sm text-muted-foreground">
+          {order.customer_order_no ?? "-"}
+        </TableCell>
         <TableCell>{getProductName(order.product_id, products, order.extracted_product_name)}</TableCell>
         <TableCell>
           {order.customer_id == null ? (

@@ -256,6 +256,10 @@ export default function OrderDetailPage() {
                 <dd className="font-medium">{order.order_no ?? <span className="text-muted-foreground">未設定</span>}</dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-muted-foreground">顧客注文番号</dt>
+                <dd>{order.customer_order_no ?? <span className="text-muted-foreground">未設定</span>}</dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-muted-foreground">製品</dt>
                 <dd>{getProductName(order.product_id, products, order.extracted_product_name)}</dd>
               </div>

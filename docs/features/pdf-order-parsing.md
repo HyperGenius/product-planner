@@ -322,6 +322,58 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   [product-master.md](./product-master.md#別名辞書-product_name_aliases)
   を参照
 
+### 顧客別プロンプトによる注文番号抽出（Issue #366）
+
+受注書フォーマットは顧客ごとに大きく異なり、特に「注文番号／注文No.」の位置・粒度・
+呼称がばらつくため、汎用プロンプト1本では安定して抽出できない。顧客固有の抽出指示
+（自然言語のプロンプト断片）と、抽出スキーマへの注文番号フィールド追加で対応する。
+本Issueは **dedupe への統合前の観察フェーズ**であり、`customer_order_no` は保存・
+表示のみで、重複判定（`upsert_order_by_dedupe_key` のキー・優先順位）には一切使わない
+（本体は後続 Issue #365）。
+
+**顧客固有プロンプト断片（`customers.order_extraction_prompt`、nullable）**
+
+- `pdf_order_parsing_service._parse_one()` がステージング行の `customer_id` から
+  `_get_customer_extraction_prompt()` で引き、`extract_order_lines()` /
+  `extract_email_order_lines()` の第2引数へ渡す
+- 抽出サービスは、断片が非NULLなら汎用プロンプトの末尾に「【この顧客固有の抽出指示】」
+  として**追記**する（汎用プロンプトは共通ベースとして維持）。ツールスキーマ
+  （フィールド定義）は変更せず、「どこを見てどう埋めるか」の自然言語指示のみ
+- 断片が NULL の顧客は従来どおり汎用プロンプトのみで処理し、挙動は変わらない
+- RLS は `customers` の既存 tenant isolation ポリシーで自動的にカバーされる
+- 断片の投入は tenant_id / customer_id 特定が必要なため、マイグレーションの seed では
+  行わず、本番で対象 customer を `SELECT` で確認 → ユーザー承認の上で個別 `UPDATE`
+  （`CLAUDE.md` の「本番 Supabase への接続」手順に従う）
+
+**抽出スキーマの注文番号フィールド（PDF・メール両方の `_EXTRACT_TOOL`）**
+
+- `document_order_no`（文書レベル。1注文書＝1番号。多くの顧客はこれ）
+- 明細 `line_items[].line_order_no`（明細レベル。1文書に複数の注文No.がある
+  昭和製作所のようなケースで使用。無ければ null）
+
+**明細ごとの `customer_order_no` 解決（`_resolve_customer_order_no()`）**
+
+1. 明細の `line_order_no` があればそれ
+2. 無ければ文書レベルの `document_order_no`
+3. どちらも無ければ `_generate_auto_customer_order_no()` がアプリ側で採番した値
+   （注文番号が文書に存在しない飯野製作所等）。`(customer_id, 空白正規化した
+   文書テキスト)` の SHA-256 先頭10桁から `AUTO-xxxxxxxxxx` を生成する。同じ文書を
+   再パースしても同じ番号になり、連番管理テーブルを持たずに観察・重複判定の土台と
+   して安定する
+
+解決した値は `_process_line_item()` から `upsert_order_by_dedupe_key` の
+`p_customer_order_no` 引数として渡され、INSERT／UPDATE 時に `orders.customer_order_no`
+へ保存される（UPDATE 時は既存値を上書きせず `COALESCE` で補完）。手動メール起票
+（`POST /orders/email-intake`）でも `ManualEmailIntakeLineItem.customer_order_no` で
+受け取り保存する。
+
+**表示**
+
+- 受注一覧・詳細レスポンスは `_map_order_response()` が DB 行をそのまま透過するため
+  `customer_order_no` を自動的に含む
+- フロント: 受注一覧（`orders/page.tsx` + `order-table-row.tsx`）に「顧客注文番号」列、
+  受注詳細（`orders/[id]/page.tsx`）に「顧客注文番号」項目を追加（表示のみ）
+
 ---
 
 ## DB スキーマ変更
@@ -399,6 +451,19 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 
 `orders.status` とは独立しており、`customer_certainty` の値が `confirmed` であっても
 `status` は自動では `confirmed` にならない（Issue #267）。
+
+`supabase/migrations/20260902000000_add_customer_order_extraction_prompt.sql`（Issue #366）:
+
+- `customers.order_extraction_prompt text`（nullable）を追加。RLS は `customers` の
+  既存 tenant isolation ポリシーで自動的にカバーされる
+- `orders.customer_order_no text`（nullable・制約なし）を追加。社内採番の
+  `orders.order_number`（`orders_tenant_id_order_number_idx` でテナント内ユニーク）
+  とは意味が異なるため流用しない
+- `upsert_order_by_dedupe_key` に `p_customer_order_no text DEFAULT NULL` を追加し、
+  各 INSERT で保存、UPDATE 時は `COALESCE(v_customer_order_no, customer_order_no)` で
+  補完する。**dedupe キー・優先順位判定は 20260830150000 時点の定義から一切変更しない**
+  （末尾に DEFAULT 付き引数を足すと旧シグネチャが残るため、10引数版を `DROP FUNCTION`
+  してから作り直す）
 
 ---
 
