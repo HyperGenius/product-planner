@@ -264,6 +264,24 @@ class CalendarConfig:
 
 ボディは省略可（その場合は 2 または 3）。
 
+**エラーレスポンス**（`POST /orders/simulate` も同方針。Issue #374）
+
+| HTTP | 条件 | レスポンスボディ |
+|---|---|---|
+| 404 | 受注が見つからない（by-id のみ） | `{"detail": "Order not found"}` |
+| 422 | `product_id` 未マッチ（by-id のみ） | `{"detail": {"error": "product_unmatched"}}` |
+| 422 | 工程未登録 | by-id: `{"detail": {"error": "no_routing"}}` / without-id: HTTP 200 + `routing_status: "no_routing"` |
+| 422 | 未確定工程あり（by-id のみ。without-id は通過） | `{"detail": {"error": "routing_unconfirmed"}}` |
+| 422 | 作業開始日の形式が不正（保存済み・上書き指定いずれも） | `{"detail": {"error": "invalid_scheduling_start_date"}}` |
+| 403 | 非権限ロールが過去日の作業開始日を上書き指定 | `{"detail": "..."}` |
+| 500 | スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等） | `{"detail": "シミュレーションの計算に失敗しました"}` |
+
+Issue #374 以前は、スケジューラ内部の `ValueError` やパース失敗をすべて `400 Bad Request` に丸めており、
+本番のアクセスログに `400 Bad Request` だけが残って原因を追えなかった。現在は:
+
+- ユーザー入力・受注データ起因（作業開始日の形式不正・工程未確定・未マッチ）→ `422` に統一し、`{"error": "..."}` コードで返す
+- スケジューラ内部の不整合（クライアント側では対処不能）→ `500` とし、`logger.exception` で `order_id` / `scheduling_start_date` と traceback を出力する
+
 ---
 
 ### POST `/orders/{order_id}/confirm` — スケジュール確定・DB 保存
