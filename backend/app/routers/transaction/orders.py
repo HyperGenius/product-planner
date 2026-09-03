@@ -51,7 +51,11 @@ from app.repositories.supa_infra.transaction.order_scheduling_start_backdate_log
     OrderSchedulingStartBackdateLogRepository,
 )
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
-from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
+from app.scheduler_logic import (
+    InvalidRoutingDurationError,
+    RoutingUnconfirmedError,
+    schedule_order,
+)
 from app.services.attachment_service import (
     create_signed_url,
     create_signed_urls,
@@ -973,6 +977,17 @@ def simulate_schedule_without_id(
             "is_feasible": None,
             "process_schedules": [],
         }
+    except InvalidRoutingDurationError as e:
+        # 工程マスタの標準時間未設定・数量0 等。ユーザーが修正すれば解消するため 422。
+        logger.warning(
+            "simulate: invalid routing duration product_id=%s routing_id=%s",
+            order_data.product_id,
+            e.routing_id,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_routing_duration", "routing_id": e.routing_id},
+        ) from None
     except ValueError:
         # スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等）。
         # クライアント起因ではないため 500 とし、原因を traceback 付きでログに残す。
@@ -1059,6 +1074,17 @@ def simulate_schedule(
             detail={
                 "error": "no_routing" if e.no_routing else "routing_unconfirmed",
             },
+        ) from None
+    except InvalidRoutingDurationError as e:
+        # 工程マスタの標準時間未設定・数量0 等。ユーザーが修正すれば解消するため 422。
+        logger.warning(
+            "simulate_schedule: invalid routing duration order_id=%s routing_id=%s",
+            order_id,
+            e.routing_id,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_routing_duration", "routing_id": e.routing_id},
         ) from None
     except ValueError:
         # スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等）。
@@ -1284,6 +1310,11 @@ def confirm_order(
                 "desired_deadline": e.desired_deadline,
             },
         ) from None
+    except InvalidRoutingDurationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_routing_duration", "routing_id": e.routing_id},
+        ) from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
@@ -1341,6 +1372,17 @@ def approve_orders_bulk(
                     "detail": {
                         "error": "routing_unconfirmed",
                         "desired_deadline": e.desired_deadline,
+                    },
+                }
+            )
+        except InvalidRoutingDurationError as e:
+            results.append(
+                {
+                    "order_id": order_id,
+                    "status": "error",
+                    "detail": {
+                        "error": "invalid_routing_duration",
+                        "routing_id": e.routing_id,
                     },
                 }
             )

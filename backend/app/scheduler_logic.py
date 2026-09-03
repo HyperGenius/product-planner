@@ -40,6 +40,22 @@ class RoutingUnconfirmedError(ValueError):
         self.no_routing = no_routing
 
 
+class InvalidRoutingDurationError(ValueError):
+    """工程の所要時間が 0 以下でスケジュールを作成できない場合に送出する例外。
+
+    `setup_time_seconds` / `unit_time_seconds` が未設定（0）の工程マスタや、
+    数量 0 の受注が原因。ユーザーが工程マスタ・受注を修正すれば解消するため、
+    呼び出し側はこれを HTTP 422 に変換する（Issue #374）。
+    """
+
+    def __init__(self, routing_id: int | None = None):
+        super().__init__(
+            "工程の所要時間が0です。工程マスタの標準時間（unit_time_seconds）を"
+            "設定してください"
+        )
+        self.routing_id = routing_id
+
+
 def routings_are_confirmed(routings: list[dict[str, Any]]) -> bool:
     """全工程が確定済みかどうかを返す。工程が0件の場合は False。"""
     if not routings:
@@ -101,10 +117,15 @@ def schedule_order(
     for routing in routings:
         equipment_group_id = routing["equipment_group_id"]
         setup_time_sec = routing.get("setup_time_seconds", 0) or 0
-        unit_time_sec = float(routing["unit_time_seconds"])
+        unit_time_sec = float(routing.get("unit_time_seconds") or 0)
 
         total_duration_sec = setup_time_sec + (unit_time_sec * quantity)
         total_duration_min = total_duration_sec / 60
+
+        # 所要時間 0 以下（工程マスタの標準時間未設定・数量0 等）は
+        # カレンダーロジックが ValueError を送出するため、手前で明示的な例外に変換する。
+        if total_duration_min <= 0:
+            raise InvalidRoutingDurationError(routing.get("id"))
 
         if equipment_group_id is None:
             actual_start = get_next_available_start_time(

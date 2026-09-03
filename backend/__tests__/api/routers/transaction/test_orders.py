@@ -711,6 +711,40 @@ class TestOrderRouter:
 
         assert response.status_code == 500
 
+    def test_simulate_by_id_zero_duration_routing_returns_422(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /{id}/simulate: 工程の標準時間が0（工程マスタ未設定）なら、
+        500 ではなく 422 invalid_routing_duration を返す（Issue #374）。"""
+        mock_repo.get_by_id.return_value = {
+            "id": 1000051,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-1000051",
+        }
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 7,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 0,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+
+        response = client.post("/orders/1000051/simulate", headers=headers)
+
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail["error"] == "invalid_routing_duration"
+        assert detail["routing_id"] == 7
+
     def test_simulate_without_id_scheduler_internal_error_returns_500(
         self,
         headers,
