@@ -42,7 +42,8 @@ import {
 } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
-import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
+import { getProductName, getCustomerName, formatDeadlineDate, jstTodayIso } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -57,6 +58,8 @@ export default function NewOrderPage() {
   const [customerId, setCustomerId] = useState("")
   const [quantity, setQuantity] = useState("")
   const [desiredDeadline, setDesiredDeadline] = useState("")
+  // 作業開始日（工場が着手する日）。空なら実行日時から着手（Issue #372）
+  const [schedulingStartDate, setSchedulingStartDate] = useState("")
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [hasAttemptedSimulation, setHasAttemptedSimulation] = useState(false)
   const [noRoutingDialogOpen, setNoRoutingDialogOpen] = useState(false)
@@ -77,6 +80,15 @@ export default function NewOrderPage() {
   const emailIntakeMutation = useCreateEmailOrderIntake()
   const { data: products } = useProducts()
   const { data: customers } = useCustomers()
+  const { data: currentMember } = useCurrentMember()
+
+  // 作業開始日を過去日に設定できるのは president / platform_admin のみ（Issue #372）
+  const canBackdateSchedulingStart =
+    currentMember?.role === "president" || currentMember?.role === "platform_admin"
+  // 過去日判定はバックエンド（JST基準）と揃える（Issue #372）
+  const todayStr = jstTodayIso()
+  const isSchedulingStartBackdated =
+    !!schedulingStartDate && schedulingStartDate < todayStr
 
   const selectedProduct: Product | null =
     products?.find((p) => p.id === parseInt(productId)) ?? null
@@ -101,6 +113,11 @@ export default function NewOrderPage() {
       return
     }
 
+    if (isSchedulingStartBackdated && !canBackdateSchedulingStart) {
+      toast.error("作業開始日を過去日に設定できるのは president / platform_admin のみです")
+      return
+    }
+
     setSimulationResult(null)
 
     try {
@@ -108,6 +125,7 @@ export default function NewOrderPage() {
         product_id: productIdNum,
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
+        scheduling_start_date: schedulingStartDate || undefined,
       })
 
       if (result.routing_status === "no_routing") {
@@ -133,6 +151,11 @@ export default function NewOrderPage() {
       return
     }
 
+    if (isSchedulingStartBackdated && !canBackdateSchedulingStart) {
+      toast.error("作業開始日を過去日に設定できるのは president / platform_admin のみです")
+      return
+    }
+
     try {
       await createMutation.mutateAsync({
         order_no: orderNo || undefined,
@@ -140,6 +163,7 @@ export default function NewOrderPage() {
         customer_id: customerId ? parseInt(customerId) : undefined,
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
+        scheduling_start_date: schedulingStartDate || undefined,
       })
       setNoRoutingDialogOpen(false)
       toast.success("下書き保存しました。工程登録後に専門家キューから確定できます")
@@ -170,6 +194,11 @@ export default function NewOrderPage() {
       return
     }
 
+    if (isSchedulingStartBackdated && !canBackdateSchedulingStart) {
+      toast.error("作業開始日を過去日に設定できるのは president / platform_admin のみです")
+      return
+    }
+
     try {
       const createdOrder = await createMutation.mutateAsync({
         order_no: orderNo || undefined,
@@ -177,6 +206,7 @@ export default function NewOrderPage() {
         customer_id: customerId ? parseInt(customerId) : undefined,
         quantity: quantityNum,
         desired_deadline: desiredDeadline || undefined,
+        scheduling_start_date: schedulingStartDate || undefined,
       })
 
       await confirmMutation.mutateAsync(createdOrder.id)
@@ -604,6 +634,28 @@ export default function NewOrderPage() {
                 {hasAttemptedSimulation && !desiredDeadline && (
                   <p className="text-sm text-muted-foreground mt-1">
                     ℹ 希望納期を入力すると、納期に間に合うかどうかを判定できます
+                  </p>
+                )}
+              </div>
+
+              {/* 作業開始日（Issue #372） */}
+              <div className="space-y-2">
+                <Label htmlFor="scheduling-start-date">作業開始日（任意）</Label>
+                <Input
+                  id="scheduling-start-date"
+                  type="date"
+                  value={schedulingStartDate}
+                  min={canBackdateSchedulingStart ? undefined : todayStr}
+                  onChange={(e) => setSchedulingStartDate(e.target.value)}
+                />
+                <p className="text-sm text-muted-foreground mt-1">
+                  {schedulingStartDate
+                    ? "指定した日から着手する前提でスケジュールを計算します"
+                    : "未指定の場合、実行日時から着手する前提で計算します"}
+                </p>
+                {isSchedulingStartBackdated && !canBackdateSchedulingStart && (
+                  <p className="text-sm text-destructive mt-1">
+                    過去日を設定できるのは president / platform_admin のみです
                   </p>
                 )}
               </div>

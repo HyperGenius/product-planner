@@ -10,6 +10,7 @@ from app.repositories.supa_infra import (
     EquipmentRepository,
     OrderApprovalLogRepository,
     OrderRepository,
+    OrderSchedulingStartBackdateLogRepository,
     ProductNameAliasHistoryRepository,
     ProductNameAliasRepository,
     ProductRepository,
@@ -139,6 +140,13 @@ def get_order_approval_log_repo(
 ) -> OrderApprovalLogRepository:
     """受注承認監査ログリポジトリを取得する。"""
     return OrderApprovalLogRepository(client)
+
+
+def get_order_scheduling_start_backdate_log_repo(
+    client: Client = Depends(get_supabase_client),
+) -> OrderSchedulingStartBackdateLogRepository:
+    """作業開始日の遡り設定監査ログリポジトリを取得する（Issue #372）。"""
+    return OrderSchedulingStartBackdateLogRepository(client)
 
 
 def get_product_repo(

@@ -21,5 +21,6 @@ class SupabaseTableName(Enum):
     ORDER_PARSE_LOG = "order_parse_log"
     NOTIFICATIONS = "notifications"
     ORDER_APPROVAL_LOG = "order_approval_log"
+    ORDER_SCHEDULING_START_BACKDATE_LOG = "order_scheduling_start_backdate_log"
     PRODUCT_NAME_ALIASES = "product_name_aliases"
     PRODUCT_NAME_ALIAS_HISTORY = "product_name_alias_history"

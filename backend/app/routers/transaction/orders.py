@@ -17,6 +17,7 @@ from app.dependencies import (
     get_equipment_repo,
     get_order_approval_log_repo,
     get_order_repo,
+    get_order_scheduling_start_backdate_log_repo,
     get_product_repo,
     get_schedule_repo,
     get_supabase_admin_client,
@@ -30,6 +31,7 @@ from app.models.transaction.order_schema import (
     OrderBulkApproveRequest,
     OrderCreate,
     OrderRejectRequest,
+    OrderSimulateByIdRequest,
     OrderSimulateRequest,
     OrderSplitRequest,
     OrderUpdate,
@@ -45,6 +47,9 @@ from app.repositories.supa_infra.transaction.order_approval_log_repo import (
     OrderApprovalLogRepository,
 )
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
+from app.repositories.supa_infra.transaction.order_scheduling_start_backdate_log_repo import (
+    OrderSchedulingStartBackdateLogRepository,
+)
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
 from app.services.attachment_service import (
@@ -62,6 +67,12 @@ from app.services.product_alias_service import (
     record_auto_match_alias_if_applicable,
     record_correction_if_applicable,
 )
+from app.services.scheduling_start_service import (
+    PastSchedulingStartDateError,
+    is_backdated,
+    to_scheduling_start_time,
+    validate_scheduling_start_date,
+)
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
@@ -75,6 +86,10 @@ def _map_order_response(order: dict) -> dict:
     """
     データベース形式（order_number, deadline_date）を
     フロントエンド形式（order_no, desired_deadline）にマッピングする。
+
+    order_date（受注起票日）は後方互換のため created_at にも複製しつつ、
+    作業開始日（scheduling_start_date）と区別できるよう order_date 自体も残す（Issue #372）。
+    scheduling_start_date は dict(order) でそのまま透過する。
     """
     mapped = dict(order)
     if "order_number" in mapped:
@@ -82,23 +97,90 @@ def _map_order_response(order: dict) -> dict:
     if "deadline_date" in mapped:
         mapped["desired_deadline"] = mapped.pop("deadline_date")
     if "order_date" in mapped:
-        mapped["created_at"] = mapped.pop("order_date")
+        mapped["created_at"] = mapped["order_date"]
     return mapped
+
+
+def _assert_scheduling_start_date_allowed(
+    raw: str | None, tenant_id: str, user_id: str, client: Client
+) -> bool:
+    """作業開始日の形式・過去日権限を検証し、過去日だったかどうかを返す（Issue #372）。
+
+    過去日 かつ 非権限ロールなら 403、形式不正なら 400 を送出する。
+    未来日・当日・未指定の場合はロール問い合わせを行わず False を返す
+    （過去日でなければ権限チェック不要のため、無駄な organization_members 参照を避ける）。
+    """
+    if not raw:
+        return False
+    try:
+        backdated = is_backdated(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    if not backdated:
+        return False
+    role = get_current_user_role(tenant_id, user_id, client)
+    try:
+        validate_scheduling_start_date(raw, role)
+    except PastSchedulingStartDateError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(e)
+        ) from None
+    return True
+
+
+def _log_scheduling_start_backdate_safely(
+    repo: OrderSchedulingStartBackdateLogRepository,
+    tenant_id: str,
+    order_id: int,
+    scheduling_start_date: str,
+    actor_user_id: str,
+    context: str,
+) -> None:
+    """過去日の作業開始日設定の監査記録はベストエフォートとする（Issue #372）。
+
+    受注の作成／更新自体は既に成功しているため、監査ログの記録失敗で
+    業務操作をエラー扱いにはしない。
+    """
+    try:
+        repo.log_backdate(
+            tenant_id, order_id, scheduling_start_date, actor_user_id, context
+        )
+    except Exception:
+        logger.exception(
+            f"Failed to record scheduling_start backdate log: order_id={order_id}"
+        )
 
 
 @orders_router.post("")
 def create_order(
     order_data: OrderCreate,
     tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
     repo: OrderRepository = Depends(get_order_repo),
+    backdate_log_repo: OrderSchedulingStartBackdateLogRepository = Depends(
+        get_order_scheduling_start_backdate_log_repo
+    ),
 ):
     """注文を新規作成"""
     logger.info(f"Creating order {order_data}")
+    backdated = _assert_scheduling_start_date_allowed(
+        order_data.scheduling_start_date, tenant_id, user_id, client
+    )
     try:
         result = repo.create(order_data.with_tenant_id(tenant_id))
-        return _map_order_response(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+    if backdated and order_data.scheduling_start_date:
+        _log_scheduling_start_backdate_safely(
+            backdate_log_repo,
+            tenant_id,
+            result["id"],
+            order_data.scheduling_start_date,
+            user_id,
+            "create",
+        )
+    return _map_order_response(result)
 
 
 @orders_router.get("")
@@ -473,6 +555,9 @@ def update_order(
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
     repo: OrderRepository = Depends(get_order_repo),
+    backdate_log_repo: OrderSchedulingStartBackdateLogRepository = Depends(
+        get_order_scheduling_start_backdate_log_repo
+    ),
 ):
     """注文を更新
 
@@ -488,6 +573,9 @@ def update_order(
     自動マッチ反映フックが二重記録しないための判定に使う）。
     """
     logger.info(f"Updating order {order_id}")
+    backdated = _assert_scheduling_start_date_allowed(
+        order_data.scheduling_start_date, tenant_id, user_id, client
+    )
     order_before = repo.get_by_id(order_id)
 
     update_dict = order_data.model_dump(exclude_unset=True)
@@ -503,6 +591,16 @@ def update_order(
     result = repo.update(order_id, update_dict)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
+
+    if backdated and order_data.scheduling_start_date:
+        _log_scheduling_start_backdate_safely(
+            backdate_log_repo,
+            tenant_id,
+            order_id,
+            order_data.scheduling_start_date,
+            user_id,
+            "update",
+        )
 
     record_correction_if_applicable(client, tenant_id, order_before, result, user_id)
 
@@ -814,6 +912,8 @@ def get_settings_repo(
 def simulate_schedule_without_id(
     order_data: OrderSimulateRequest,
     tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
     product_repo: ProductRepository = Depends(get_product_repo),
     equipment_repo: EquipmentRepository = Depends(get_equipment_repo),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repo),
@@ -822,10 +922,20 @@ def simulate_schedule_without_id(
     """
     スケジュールのシミュレーションを行う（DB保存なし）。
     新規注文作成時にorder_idなしで呼び出される。
+
+    scheduling_start_date が指定されていればその日の稼働開始時刻を起点にする（Issue #372）。
+    過去日は president / platform_admin のみ許可。
     """
     logger.info(
-        f"Simulating schedule with product_id={order_data.product_id}, quantity={order_data.quantity}"
+        f"Simulating schedule with product_id={order_data.product_id}, "
+        f"quantity={order_data.quantity}, "
+        f"scheduling_start_date={order_data.scheduling_start_date}"
     )
+
+    _assert_scheduling_start_date_allowed(
+        order_data.scheduling_start_date, tenant_id, user_id, client
+    )
+    start_time = to_scheduling_start_time(order_data.scheduling_start_date)
 
     try:
         result = schedule_order(
@@ -835,6 +945,7 @@ def simulate_schedule_without_id(
             product_repo=product_repo,
             schedule_repo=schedule_repo,
             tenant_id=tenant_id,
+            start_time=start_time,
             dry_run=True,
             standalone=order_data.standalone,
             settings_repo=settings_repo,
@@ -856,7 +967,10 @@ def simulate_schedule_without_id(
 @orders_router.post("/{order_id}/simulate")
 def simulate_schedule(
     order_id: int,
+    body: OrderSimulateByIdRequest | None = None,
     tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
     order_repo: OrderRepository = Depends(get_order_repo),
     product_repo: ProductRepository = Depends(get_product_repo),
     equipment_repo: EquipmentRepository = Depends(get_equipment_repo),
@@ -866,6 +980,10 @@ def simulate_schedule(
     """
     スケジュールのシミュレーションを行う（DB保存なし）。
     既存の注文をベースにシミュレーションを実行。
+
+    作業開始日は、リクエストボディの scheduling_start_date（上書き指定）→
+    受注に保存済みの scheduling_start_date の順で解決する。未指定なら実行日時が起点（Issue #372）。
+    ボディで上書きする場合、過去日は president / platform_admin のみ許可。
     """
     logger.info(f"Simulating schedule for order {order_id}")
     order = order_repo.get_by_id(order_id)
@@ -873,6 +991,14 @@ def simulate_schedule(
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("product_id") is None:
         raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
+
+    override = body.scheduling_start_date if body else None
+    if override:
+        _assert_scheduling_start_date_allowed(override, tenant_id, user_id, client)
+        start_time = to_scheduling_start_time(override)
+    else:
+        # 受注に保存済みの値は書き込み時に検証済みのため、ここでは権限チェック不要
+        start_time = to_scheduling_start_time(order.get("scheduling_start_date"))
 
     try:
         result = schedule_order(
@@ -882,6 +1008,7 @@ def simulate_schedule(
             product_repo=product_repo,
             schedule_repo=schedule_repo,
             tenant_id=tenant_id,
+            start_time=start_time,
             dry_run=True,
             settings_repo=settings_repo,
         )
@@ -997,6 +1124,9 @@ def _confirm_single_order(
         raise HTTPException(status_code=400, detail=str(e)) from None
 
     # 1. 実際に保存 (dry_run=False)
+    #    受注に作業開始日が設定されていれば、その日の稼働開始時刻を起点にする（Issue #372）。
+    #    保存済みの値は書き込み時に検証済みのため、ここでは権限チェック不要。
+    start_time = to_scheduling_start_time(order.get("scheduling_start_date"))
     result = schedule_order(
         order_id=order["id"],
         product_id=order["product_id"],
@@ -1004,6 +1134,7 @@ def _confirm_single_order(
         product_repo=product_repo,
         schedule_repo=schedule_repo,
         tenant_id=tenant_id,
+        start_time=start_time,
         dry_run=False,
         settings_repo=settings_repo,
         desired_deadline=order.get("deadline_date"),

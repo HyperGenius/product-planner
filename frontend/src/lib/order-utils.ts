@@ -66,6 +66,16 @@ export function localTodayIso(): string {
 }
 
 /**
+ * Asia/Tokyo タイムゾーンの「今日」を "YYYY-MM-DD" 形式で返す。
+ * 作業開始日 (scheduling_start_date) の過去日判定はバックエンドが
+ * `datetime.now(JST).date()` 基準のため、フロント側もJSTに揃える（Issue #372）。
+ * `en-CA` ロケールは常に "YYYY-MM-DD" 形式で出力する。
+ */
+export function jstTodayIso(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" })
+}
+
+/**
  * "YYYY-MM-DD" 形式かつ実在する日付か検証する。
  * バックエンドの `date.fromisoformat` 相当のチェックで、`2026-13-40` のような
  * 不正な文字列を弾く（文字列比較だけだと不正日付が「納期超過」と誤判定されるため）。

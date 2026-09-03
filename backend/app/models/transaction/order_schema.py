@@ -21,6 +21,9 @@ class OrderCreate(BaseSchema):
     source_raw: str | None = None
     extracted_product_name: str | None = None
     product_candidates: list[dict] | None = None
+    # 作業開始日（工場が着手する日、YYYY-MM-DD）。受注起票日とは別物（Issue #372）。
+    # 過去日は president / platform_admin のみ設定可。
+    scheduling_start_date: str | None = None
 
 
 class OrderSimulateRequest(BaseSchema):
@@ -32,6 +35,19 @@ class OrderSimulateRequest(BaseSchema):
     quantity: int
     deadline_date: str | None = Field(None, alias="desired_deadline")
     standalone: bool = False
+    # 作業開始日（YYYY-MM-DD）。未指定なら実行日時から着手（従来挙動）。Issue #372。
+    scheduling_start_date: str | None = None
+
+
+class OrderSimulateByIdRequest(BaseSchema):
+    """既存受注の再シミュレーション時に作業開始日を上書き指定するためのリクエスト（Issue #372）。
+
+    本文なしでも呼べる（その場合は受注に保存済みの scheduling_start_date を使う）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    scheduling_start_date: str | None = None
 
 
 class OrderUpdate(BaseSchema):
@@ -44,6 +60,8 @@ class OrderUpdate(BaseSchema):
     quantity: int | None = None
     deadline_date: str | None = Field(None, alias="desired_deadline")
     customer_id: int | None = None
+    # 作業開始日（YYYY-MM-DD）。過去日は president / platform_admin のみ（Issue #372）。
+    scheduling_start_date: str | None = None
 
 
 class OrderSplitLineItem(BaseSchema):

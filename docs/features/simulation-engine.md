@@ -47,7 +47,7 @@ PATCH /production-schedules/{id}  ← ガントチャート上でドラッグ手
 | `product_id` | `int` | 製品 ID |
 | `quantity` | `int` | 生産数量 |
 | `tenant_id` | `str` | テナント ID（RLS 用） |
-| `start_time` | `datetime \| None` | シミュレーション開始基準時刻。`None` の場合は現在時刻 |
+| `start_time` | `datetime \| None` | 作業着手の基準時刻。`None` の場合は現在時刻（JST）。受注の `scheduling_start_date`（作業開始日）が設定されていれば、`orders` ルーターがその日の稼働開始時刻（JST 09:00）を変換して渡す（Issue #372） |
 | `dry_run` | `bool` | `True` = 算出のみ / `False` = DB 保存 |
 | `calendar_config` | `CalendarConfig \| None` | 稼働カレンダー設定 |
 | `settings_repo` | `SchedulingSettingsRepository \| None` | スケジューリング設定リポジトリ |
@@ -208,6 +208,7 @@ class CalendarConfig:
   "product_id": 100,
   "quantity": 50,
   "desired_deadline": "2024-12-31T17:00:00+00:00",
+  "scheduling_start_date": "2024-12-20",
   "standalone": false
 }
 ```
@@ -217,6 +218,7 @@ class CalendarConfig:
 | `product_id` | `int` | 製品 ID |
 | `quantity` | `int` | 生産数量 |
 | `desired_deadline` | `string \| null` | 希望納期（ISO 8601）。未指定時は `is_feasible` が常に `true` |
+| `scheduling_start_date` | `string \| null` | 作業開始日（`YYYY-MM-DD`）。指定するとその日の稼働開始時刻（JST 09:00）を起点に算出。未指定なら実行日時が起点。過去日は `president` / `platform_admin` のみ許可（それ以外は 403）。Issue #372 |
 | `standalone` | `bool` | `true` = 単体換算モード（既存スケジュール無視）。デフォルト `false` |
 
 **レスポンス**
@@ -254,11 +256,21 @@ class CalendarConfig:
 パスパラメータで受注を特定し、その `product_id`・`quantity`・`desired_deadline` を使ってシミュレーション。  
 レスポンス形式は上記と同じ。
 
+作業開始日は次の順で解決する（Issue #372）:
+
+1. リクエストボディ `{ "scheduling_start_date": "YYYY-MM-DD" }`（上書き指定。過去日は `president` / `platform_admin` のみ）
+2. 受注に保存済みの `orders.scheduling_start_date`
+3. いずれも無ければ実行日時
+
+ボディは省略可（その場合は 2 または 3）。
+
 ---
 
 ### POST `/orders/{order_id}/confirm` — スケジュール確定・DB 保存
 
 `dry_run=False` で `schedule_order()` を実行し、スケジュールを `production_schedules` に保存。  
+受注に `scheduling_start_date`（作業開始日）が設定されていれば、その日の稼働開始時刻（JST 09:00）を
+起点にスケジュールを算出する（保存済みの値は書き込み時に検証済みのため、確定時のロールチェックは不要。Issue #372）。  
 受注テーブルも以下のフィールドを更新する。
 
 | フィールド | 値 |
@@ -353,6 +365,25 @@ class CalendarConfig:
 | `is_scheduled` | `bool` | スケジュール確定済みかどうか |
 | `confirmed_deadline` | `date` | 確定時に算出された生産完了予定日 |
 | `confirmed_at` | `timestamptz` | 確定操作のタイムスタンプ |
+| `order_date` | `timestamptz` | 受注起票日（システムに受注が登録された日時）。作業開始日とは別物（Issue #372） |
+| `scheduling_start_date` | `date \| NULL` | 作業開始日（工場が着手する日）。`NULL` なら実行日時から着手。過去日の設定は `president` / `platform_admin` のみ（アプリ層で制御。Issue #372） |
+
+### `order_scheduling_start_backdate_log` テーブル（Issue #372）
+
+過去日の作業開始日を設定した操作の監査ログ（追記専用）。
+
+| カラム | 型 | 説明 |
+|---|---|---|
+| `id` | `uuid PK` | |
+| `tenant_id` | `uuid` | RLS 用 |
+| `order_id` | `bigint FK` | `orders.id`（CASCADE DELETE） |
+| `scheduling_start_date` | `date` | 設定された過去日 |
+| `actor_user_id` | `uuid FK` | 操作者（`auth.users.id`） |
+| `context` | `text` | `create`（起票時）/ `update`（受注編集時） |
+| `created_at` | `timestamptz` | 記録日時 |
+
+閲覧 RLS: `iso_officer` / `president` / `platform_admin` のみ。
+INSERT RLS: `is_tenant_member(tenant_id)` かつ `actor_user_id = auth.uid()` に加え、`order_id` が指定テナントの `orders` に属すること、`auth.uid()` のロールが `president` / `platform_admin` であることも `WITH CHECK` で検証する（監査証跡の偽造耐性。`order_approval_log` の INSERT ポリシー強化と同種の対策）。
 
 ### `work_calendars` テーブル
 
@@ -372,6 +403,8 @@ class CalendarConfig:
 | `backend/app/scheduler_logic.py` | コアスケジューリングアルゴリズム |
 | `backend/app/utils/calendar.py` | カレンダーユーティリティ（稼働時間・複数日分割） |
 | `backend/app/services/simulation_service.py` | シミュレーションレスポンスの整形 |
+| `backend/app/services/scheduling_start_service.py` | 作業開始日（`scheduling_start_date`）の解決・過去日権限チェック（Issue #372） |
+| `backend/app/repositories/supa_infra/transaction/order_scheduling_start_backdate_log_repo.py` | 過去日設定の監査ログ `order_scheduling_start_backdate_log` への書き込み（Issue #372） |
 | `backend/app/services/calendar_service.py` | DB から `CalendarConfig` を構築 |
 | `backend/app/routers/transaction/orders.py` | `/orders/simulate`, `/orders/{id}/confirm` エンドポイント |
 | `backend/app/routers/transaction/production_schedules.py` | スケジュール取得・更新エンドポイント |
@@ -390,6 +423,8 @@ class CalendarConfig:
 - **設備選択は最小負荷方式**: グループ内で「最も早く空く設備」を選択。設備の均等配分は保証しない
 - **既存スケジュールは再計算されない**: confirm 実行時に他の受注の確定済みスケジュールは変更されない。設備の空き時間は `production_schedules` の最終 `end_datetime` を基準とするため、手動でキャンセルした受注のスケジュールが残っている場合は空き時間の判定に影響する
 - **start_time デフォルト**: `schedule_order()` の `start_time=None` の場合、JST基準の現在時刻（`datetime.now(JST)`、`app.utils.calendar.JST`）が基準になる。テストや過去日付での計算が必要な場合は明示的に渡す
+- **作業開始日（`scheduling_start_date`, Issue #372）**: シミュレーション／確定エンドポイントは、指定された作業開始日（`YYYY-MM-DD`）を `app/services/scheduling_start_service.to_scheduling_start_time()` でその日の JST 09:00 の `datetime` に変換し、`schedule_order(start_time=...)` に渡す。稼働日でない日を渡してもカレンダーロジックが次の稼働日へ繰り上げる。過去日（本日 JST より前）は `president` / `platform_admin` のみ許可し、それ以外のロールが指定すると 403（`_assert_scheduling_start_date_allowed`）。`_assert_scheduling_start_date_allowed` はまず `is_backdated()` で過去日かどうかを判定し、**過去日のときだけ** `organization_members` へロール問い合わせを行う（未来日・当日は無駄なDB参照をしない）。受注に保存済みの値は書き込み時（`POST /orders`・`PATCH /orders/{id}`）に検証済みのため、確定時は再チェックしない
+- **過去日設定の監査ログ（Issue #372）**: `POST /orders`・`PATCH /orders/{id}` で過去日の `scheduling_start_date` が実際に保存された場合、`order_scheduling_start_backdate_log` テーブルに「誰が（`actor_user_id`）・いつ（`created_at`）・どの受注に（`order_id`）・どの過去日を（`scheduling_start_date`）・どの経路で（`context`: `create` / `update`）」設定したかを追記する。記録はベストエフォート（`_log_scheduling_start_backdate_safely`）で、失敗しても受注の作成／更新自体はエラーにしない。閲覧は `iso_officer` / `president` / `platform_admin` に限定（RLS。`order_approval_log` と同方針）。シミュレーション（DB非保存）では記録しない
 - **タイムゾーン**: 全 datetime は UTC（`timestamptz`）で保存。フロントエンドの表示は日本語ロケールに変換。稼働時間判定（9:00-17:00・休憩12:00-13:00）は `app/utils/calendar.py` の `_to_business_tz()` により実行ホストのタイムゾーンに関わらず常に JST(`Asia/Tokyo`) へ正規化してから行われる（Issue #282: 以前はホストのローカルタイムゾーンをそのままJSTとみなしていたため、UTCで動作するホストでは実際の稼働時間が JST 18:00-翌2:00 相当にずれる不具合があった）
 - **複数日分割**: 1 工程が 7 時間を超える場合、翌稼働日の 9:00 に続きが割り当てられる。分割された各セグメントが個別の `production_schedules` レコードとなる
 - **工程確定ガード**: `is_confirmed=false` の工程が 1 件でもある場合、`dry_run=False`（ガント登録）はブロックされる。`dry_run=True`（シミュレーション）はブロックされない。詳細は「工程確定ガード」セクション参照
