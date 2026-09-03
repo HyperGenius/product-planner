@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from app.services.pdf_order_parsing_service import (
     _generate_auto_customer_order_no,
+    _normalize_order_no_digits,
     _process_line_item,
     _resolve_customer_order_no,
     parse_pending_order_pdfs,
@@ -896,6 +897,20 @@ class TestCustomerOrderNoResolution:
         line = {"line_order_no": " L-99 "}
         assert _resolve_customer_order_no(line, "C1868", "AUTO-xxxx") == "L-99"
 
+    def test_line_order_no_circled_number_is_normalized(self):
+        # 昭和製作所: 明細表の連番 ① を文書番号へ付与した line_order_no（Issue #370）
+        assert (
+            _resolve_customer_order_no({"line_order_no": "C1869-①"}, "C1869", None)
+            == "C1869-1"
+        )
+        assert (
+            _resolve_customer_order_no({"line_order_no": " C1869-⑪ "}, "C1869", None)
+            == "C1869-11"
+        )
+
+    def test_document_order_no_circled_number_is_normalized(self):
+        assert _resolve_customer_order_no({}, "Ｃ1869-⑳", None) == "Ｃ1869-20"
+
     def test_falls_back_to_document_order_no_when_line_order_no_missing(self):
         for line in ({}, {"line_order_no": None}, {"line_order_no": "  "}):
             assert _resolve_customer_order_no(line, " C1868 ", "AUTO-xxxx") == "C1868"
@@ -964,6 +979,37 @@ class TestCustomerOrderNoResolution:
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
         assert rpc_params["p_customer_order_no"] == "C1868-3"
 
+    def test_process_line_item_normalizes_circled_line_order_no(self):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 1, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": "confirmed",
+            "line_order_no": "C1869-①",
+        }
+        staging_row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 5,
+            "source_raw": "本文",
+            "storage_path": "p/x.pdf",
+            "original_filename": "x.pdf",
+            "content_type": "application/pdf",
+        }
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            _process_line_item(mock_db, staging_row, line, "C1869", "AUTO-1")
+
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_order_no"] == "C1869-1"
+
     def test_process_line_item_falls_back_to_document_then_auto(self):
         mock_db = MagicMock()
         mock_db.rpc().execute.return_value = MagicMock(
@@ -998,3 +1044,34 @@ class TestCustomerOrderNoResolution:
                 mock_db.rpc.call_args_list[-1].args[1]["p_customer_order_no"]
                 == "AUTO-1"
             )
+
+
+@pytest.mark.unit
+class TestNormalizeOrderNoDigits:
+    """Issue #370: 丸数字・全角数字を半角アラビア数字へ正規化する。"""
+
+    def test_circled_numbers_within_first_block(self):
+        assert _normalize_order_no_digits("①") == "1"
+        assert _normalize_order_no_digits("⑩") == "10"
+        assert _normalize_order_no_digits("⑳") == "20"
+
+    def test_circled_numbers_above_twenty_are_non_contiguous_block(self):
+        # ㉑ 以降は ① ブロックと非連続。単純なコードポイント演算では扱えない領域
+        assert _normalize_order_no_digits("㉑") == "21"
+        assert _normalize_order_no_digits("㉟") == "35"
+        assert _normalize_order_no_digits("㊱") == "36"
+        assert _normalize_order_no_digits("㊿") == "50"
+
+    def test_fullwidth_digits(self):
+        assert _normalize_order_no_digits("Ｃ１８６９－１１") == "Ｃ1869－11"
+
+    def test_mixed_string_only_touches_digit_symbols(self):
+        assert _normalize_order_no_digits("C1869-⑪") == "C1869-11"
+
+    def test_ascii_only_is_noop(self):
+        for value in ("C1868-3", "AUTO-abc1234567", "L-99", ""):
+            assert _normalize_order_no_digits(value) == value
+
+    def test_idempotent(self):
+        once = _normalize_order_no_digits("C1869-⑪")
+        assert _normalize_order_no_digits(once) == once
