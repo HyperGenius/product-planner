@@ -17,6 +17,7 @@ from app.dependencies import (
     get_equipment_repo,
     get_order_approval_log_repo,
     get_order_repo,
+    get_order_scheduling_start_backdate_log_repo,
     get_product_repo,
     get_schedule_repo,
     get_supabase_admin_client,
@@ -46,6 +47,9 @@ from app.repositories.supa_infra.transaction.order_approval_log_repo import (
     OrderApprovalLogRepository,
 )
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
+from app.repositories.supa_infra.transaction.order_scheduling_start_backdate_log_repo import (
+    OrderSchedulingStartBackdateLogRepository,
+)
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.scheduler_logic import RoutingUnconfirmedError, schedule_order
 from app.services.attachment_service import (
@@ -65,6 +69,7 @@ from app.services.product_alias_service import (
 )
 from app.services.scheduling_start_service import (
     PastSchedulingStartDateError,
+    is_backdated,
     to_scheduling_start_time,
     validate_scheduling_start_date,
 )
@@ -98,14 +103,21 @@ def _map_order_response(order: dict) -> dict:
 
 def _assert_scheduling_start_date_allowed(
     raw: str | None, tenant_id: str, user_id: str, client: Client
-) -> None:
-    """作業開始日の形式・過去日権限を検証する（Issue #372）。
+) -> bool:
+    """作業開始日の形式・過去日権限を検証し、過去日だったかどうかを返す（Issue #372）。
 
     過去日 かつ 非権限ロールなら 403、形式不正なら 400 を送出する。
-    値が None / 未指定なら何もしない（ロール問い合わせも行わない）。
+    未来日・当日・未指定の場合はロール問い合わせを行わず False を返す
+    （過去日でなければ権限チェック不要のため、無駄な organization_members 参照を避ける）。
     """
     if not raw:
-        return
+        return False
+    try:
+        backdated = is_backdated(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    if not backdated:
+        return False
     role = get_current_user_role(tenant_id, user_id, client)
     try:
         validate_scheduling_start_date(raw, role)
@@ -113,8 +125,30 @@ def _assert_scheduling_start_date_allowed(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail=str(e)
         ) from None
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    return True
+
+
+def _log_scheduling_start_backdate_safely(
+    repo: OrderSchedulingStartBackdateLogRepository,
+    tenant_id: str,
+    order_id: int,
+    scheduling_start_date: str,
+    actor_user_id: str,
+    context: str,
+) -> None:
+    """過去日の作業開始日設定の監査記録はベストエフォートとする（Issue #372）。
+
+    受注の作成／更新自体は既に成功しているため、監査ログの記録失敗で
+    業務操作をエラー扱いにはしない。
+    """
+    try:
+        repo.log_backdate(
+            tenant_id, order_id, scheduling_start_date, actor_user_id, context
+        )
+    except Exception:
+        logger.exception(
+            f"Failed to record scheduling_start backdate log: order_id={order_id}"
+        )
 
 
 @orders_router.post("")
@@ -124,17 +158,29 @@ def create_order(
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
     repo: OrderRepository = Depends(get_order_repo),
+    backdate_log_repo: OrderSchedulingStartBackdateLogRepository = Depends(
+        get_order_scheduling_start_backdate_log_repo
+    ),
 ):
     """注文を新規作成"""
     logger.info(f"Creating order {order_data}")
-    _assert_scheduling_start_date_allowed(
+    backdated = _assert_scheduling_start_date_allowed(
         order_data.scheduling_start_date, tenant_id, user_id, client
     )
     try:
         result = repo.create(order_data.with_tenant_id(tenant_id))
-        return _map_order_response(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+    if backdated and order_data.scheduling_start_date:
+        _log_scheduling_start_backdate_safely(
+            backdate_log_repo,
+            tenant_id,
+            result["id"],
+            order_data.scheduling_start_date,
+            user_id,
+            "create",
+        )
+    return _map_order_response(result)
 
 
 @orders_router.get("")
@@ -509,6 +555,9 @@ def update_order(
     user_id: str = Depends(get_current_user_id),
     client: Client = Depends(get_supabase_client),
     repo: OrderRepository = Depends(get_order_repo),
+    backdate_log_repo: OrderSchedulingStartBackdateLogRepository = Depends(
+        get_order_scheduling_start_backdate_log_repo
+    ),
 ):
     """注文を更新
 
@@ -524,7 +573,7 @@ def update_order(
     自動マッチ反映フックが二重記録しないための判定に使う）。
     """
     logger.info(f"Updating order {order_id}")
-    _assert_scheduling_start_date_allowed(
+    backdated = _assert_scheduling_start_date_allowed(
         order_data.scheduling_start_date, tenant_id, user_id, client
     )
     order_before = repo.get_by_id(order_id)
@@ -542,6 +591,16 @@ def update_order(
     result = repo.update(order_id, update_dict)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
+
+    if backdated and order_data.scheduling_start_date:
+        _log_scheduling_start_backdate_safely(
+            backdate_log_repo,
+            tenant_id,
+            order_id,
+            order_data.scheduling_start_date,
+            user_id,
+            "update",
+        )
 
     record_correction_if_applicable(client, tenant_id, order_before, result, user_id)
 

@@ -14,9 +14,6 @@
 
 ALTER TABLE orders ADD COLUMN scheduling_start_date date NULL;
 
-COMMENT ON COLUMN orders.scheduling_start_date IS
-  '作業開始日（工場が着手する日）。NULL の場合はシミュレーション／確定の実行日から着手する。'
-  '過去日の設定は president / platform_admin のみ許可（起票前着手の救済措置、アプリ層で制御）。';
+COMMENT ON COLUMN orders.scheduling_start_date IS '作業開始日（工場が着手する日）。NULL の場合はシミュレーション／確定の実行日から着手する。過去日の設定は president / platform_admin のみ許可（起票前着手の救済措置、アプリ層で制御）。';
 
-COMMENT ON COLUMN orders.order_date IS
-  '受注起票日（システムに受注が登録された日時）。作業開始日（scheduling_start_date）とは別物。';
+COMMENT ON COLUMN orders.order_date IS '受注起票日（システムに受注が登録された日時）。作業開始日（scheduling_start_date）とは別物。';

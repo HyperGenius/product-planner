@@ -56,6 +56,23 @@ def to_scheduling_start_time(value: str | date | None) -> datetime | None:
     return datetime.combine(d, time(WORK_START_HOUR, 0), tzinfo=JST)
 
 
+def is_backdated(
+    value: str | date | None,
+    *,
+    today: date | None = None,
+) -> bool:
+    """作業開始日が過去日（本日 JST より前）かどうかを返す。
+
+    None / 当日 / 未来日は False。形式が不正な場合は ValueError。
+    ロール問い合わせ前に「そもそも権限チェックが要るか」を判定する用途。
+    """
+    d = parse_scheduling_start_date(value)
+    if d is None:
+        return False
+    ref = today if today is not None else datetime.now(JST).date()
+    return d < ref
+
+
 def validate_scheduling_start_date(
     value: str | date | None,
     role: str | None,

@@ -8,6 +8,7 @@ from app.dependencies import (
     get_equipment_repo,
     get_order_approval_log_repo,
     get_order_repo,
+    get_order_scheduling_start_backdate_log_repo,
     get_product_repo,
     get_schedule_repo,
     get_supabase_admin_client,
@@ -74,6 +75,11 @@ class TestOrderRouter:
         mock.get_all.return_value = []
         return mock
 
+    @pytest.fixture
+    def mock_backdate_log_repo(self):
+        """作業開始日の遡り設定監査ログリポジトリのモック（Issue #372）"""
+        return MagicMock()
+
     @pytest.fixture(autouse=True)
     def override_dependency(
         self,
@@ -85,6 +91,7 @@ class TestOrderRouter:
         mock_supabase_client,
         mock_admin_client,
         mock_approval_log_repo,
+        mock_backdate_log_repo,
     ):
         """
         テスト実行中だけ依存関係を mock に差し替える。
@@ -98,6 +105,9 @@ class TestOrderRouter:
         app.dependency_overrides[get_supabase_admin_client] = lambda: mock_admin_client
         app.dependency_overrides[get_order_approval_log_repo] = (
             lambda: mock_approval_log_repo
+        )
+        app.dependency_overrides[get_order_scheduling_start_backdate_log_repo] = (
+            lambda: mock_backdate_log_repo
         )
         app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
         yield
@@ -665,6 +675,64 @@ class TestOrderRouter:
 
         assert response.status_code == 403
         mock_repo.create.assert_not_called()
+
+    def test_create_order_backdated_start_date_is_audit_logged_for_president(
+        self, headers, mock_repo, mock_supabase_client, mock_backdate_log_repo
+    ):
+        """POST /orders: president が過去日で起票すると監査ログに記録される（Issue #372）。"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.create.return_value = {
+            "id": 100,
+            "order_number": None,
+            "product_id": 1,
+            "quantity": 5,
+            "scheduling_start_date": "2000-01-03",
+        }
+
+        response = client.post(
+            "/orders",
+            json={
+                "product_id": 1,
+                "quantity": 5,
+                "scheduling_start_date": "2000-01-03",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        mock_repo.create.assert_called_once()
+        mock_backdate_log_repo.log_backdate.assert_called_once()
+        # log_backdate(tenant_id, order_id, scheduling_start_date, actor_user_id, context)
+        pos = mock_backdate_log_repo.log_backdate.call_args.args
+        assert pos[1] == 100
+        assert pos[2] == "2000-01-03"
+        assert pos[4] == "create"
+
+    def test_create_order_future_start_date_is_not_audit_logged(
+        self, headers, mock_repo, mock_supabase_client, mock_backdate_log_repo
+    ):
+        """POST /orders: 未来日の作業開始日では監査ログを書かない（Issue #372）。"""
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.create.return_value = {
+            "id": 101,
+            "order_number": None,
+            "product_id": 1,
+            "quantity": 5,
+            "scheduling_start_date": "2099-01-05",
+        }
+
+        response = client.post(
+            "/orders",
+            json={
+                "product_id": 1,
+                "quantity": 5,
+                "scheduling_start_date": "2099-01-05",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        mock_backdate_log_repo.log_backdate.assert_not_called()
 
     def test_confirm_order(
         self,

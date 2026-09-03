@@ -10,6 +10,7 @@ from app.repositories.supa_infra.master import (
 from app.repositories.supa_infra.transaction import (
     OrderApprovalLogRepository,
     OrderRepository,
+    OrderSchedulingStartBackdateLogRepository,
     ScheduleRepository,
 )
 
@@ -27,4 +28,5 @@ __all__ = [
     "ScheduleRepository",
     "OrderRepository",
     "OrderApprovalLogRepository",
+    "OrderSchedulingStartBackdateLogRepository",
 ]

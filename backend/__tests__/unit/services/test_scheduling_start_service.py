@@ -5,6 +5,7 @@ from datetime import date, datetime
 import pytest
 from app.services.scheduling_start_service import (
     PastSchedulingStartDateError,
+    is_backdated,
     parse_scheduling_start_date,
     to_scheduling_start_time,
     validate_scheduling_start_date,
@@ -46,6 +47,26 @@ class TestToSchedulingStartTime:
         dt = to_scheduling_start_time("2026-09-10")
         assert dt == datetime(2026, 9, 10, WORK_START_HOUR, 0, tzinfo=JST)
         assert dt.tzinfo is not None
+
+
+class TestIsBackdated:
+    _TODAY = date(2026, 9, 3)
+
+    def test_none_is_not_backdated(self):
+        assert is_backdated(None, today=self._TODAY) is False
+
+    def test_today_is_not_backdated(self):
+        assert is_backdated("2026-09-03", today=self._TODAY) is False
+
+    def test_future_is_not_backdated(self):
+        assert is_backdated("2026-09-04", today=self._TODAY) is False
+
+    def test_past_is_backdated(self):
+        assert is_backdated("2026-09-02", today=self._TODAY) is True
+
+    def test_invalid_string_raises(self):
+        with pytest.raises(ValueError):
+            is_backdated("not-a-date", today=self._TODAY)
 
 
 class TestValidateSchedulingStartDate:
