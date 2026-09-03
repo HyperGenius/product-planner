@@ -657,6 +657,83 @@ class TestOrderRouter:
 
         assert response.status_code == 403
 
+    def test_simulate_by_id_invalid_stored_scheduling_start_date_returns_422(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /{id}/simulate: 受注に保存済みの作業開始日が不正フォーマットなら、
+        未捕捉の 500 ではなく 422 invalid_scheduling_start_date を返す（Issue #374）。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "scheduling_start_date": "2026/01/05",  # ISO でない
+        }
+
+        response = client.post("/orders/1/simulate", headers=headers)
+
+        assert response.status_code == 422
+        assert response.json()["detail"]["error"] == "invalid_scheduling_start_date"
+
+    def test_simulate_by_id_scheduler_internal_error_returns_500(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        monkeypatch,
+    ):
+        """POST /{id}/simulate: スケジューラ内部の想定外状態（ValueError）は
+        クライアント起因の 400 ではなく 500 で返す（Issue #374）。"""
+        import app.routers.transaction.orders as orders_module
+
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+        }
+
+        def _boom(*_args, **_kwargs):
+            raise ValueError("開始時刻が取得できません")
+
+        monkeypatch.setattr(orders_module, "schedule_order", _boom)
+
+        response = client.post("/orders/1/simulate", headers=headers)
+
+        assert response.status_code == 500
+
+    def test_simulate_without_id_scheduler_internal_error_returns_500(
+        self,
+        headers,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        monkeypatch,
+    ):
+        """POST /simulate: スケジューラ内部の想定外状態（ValueError）は 500 で返す（Issue #374）。"""
+        import app.routers.transaction.orders as orders_module
+
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+
+        def _boom(*_args, **_kwargs):
+            raise ValueError("スケジュール情報が空です")
+
+        monkeypatch.setattr(orders_module, "schedule_order", _boom)
+
+        payload = {"product_id": 100, "quantity": 10}
+        response = client.post("/orders/simulate", json=payload, headers=headers)
+
+        assert response.status_code == 500
+
     def test_create_order_past_start_date_forbidden_for_order_handler(
         self, headers, mock_repo, mock_supabase_client
     ):

@@ -106,7 +106,7 @@ def _assert_scheduling_start_date_allowed(
 ) -> bool:
     """作業開始日の形式・過去日権限を検証し、過去日だったかどうかを返す（Issue #372）。
 
-    過去日 かつ 非権限ロールなら 403、形式不正なら 400 を送出する。
+    過去日 かつ 非権限ロールなら 403、形式不正なら 422 を送出する（Issue #374）。
     未来日・当日・未指定の場合はロール問い合わせを行わず False を返す
     （過去日でなければ権限チェック不要のため、無駄な organization_members 参照を避ける）。
     """
@@ -115,7 +115,10 @@ def _assert_scheduling_start_date_allowed(
     try:
         backdated = is_backdated(raw)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+        logger.warning("invalid scheduling_start_date value=%r: %s", raw, e)
+        raise HTTPException(
+            status_code=422, detail={"error": "invalid_scheduling_start_date"}
+        ) from None
     if not backdated:
         return False
     role = get_current_user_role(tenant_id, user_id, client)
@@ -935,7 +938,17 @@ def simulate_schedule_without_id(
     _assert_scheduling_start_date_allowed(
         order_data.scheduling_start_date, tenant_id, user_id, client
     )
-    start_time = to_scheduling_start_time(order_data.scheduling_start_date)
+    try:
+        start_time = to_scheduling_start_time(order_data.scheduling_start_date)
+    except ValueError as e:
+        logger.warning(
+            "simulate: invalid scheduling_start_date value=%r: %s",
+            order_data.scheduling_start_date,
+            e,
+        )
+        raise HTTPException(
+            status_code=422, detail={"error": "invalid_scheduling_start_date"}
+        ) from None
 
     try:
         result = schedule_order(
@@ -960,8 +973,18 @@ def simulate_schedule_without_id(
             "is_feasible": None,
             "process_schedules": [],
         }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    except ValueError:
+        # スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等）。
+        # クライアント起因ではないため 500 とし、原因を traceback 付きでログに残す。
+        logger.exception(
+            "simulate failed: product_id=%s quantity=%s scheduling_start_date=%r",
+            order_data.product_id,
+            order_data.quantity,
+            order_data.scheduling_start_date,
+        )
+        raise HTTPException(
+            status_code=500, detail="シミュレーションの計算に失敗しました"
+        ) from None
 
 
 @orders_router.post("/{order_id}/simulate")
@@ -995,10 +1018,24 @@ def simulate_schedule(
     override = body.scheduling_start_date if body else None
     if override:
         _assert_scheduling_start_date_allowed(override, tenant_id, user_id, client)
-        start_time = to_scheduling_start_time(override)
+        raw_start = override
     else:
         # 受注に保存済みの値は書き込み時に検証済みのため、ここでは権限チェック不要
-        start_time = to_scheduling_start_time(order.get("scheduling_start_date"))
+        raw_start = order.get("scheduling_start_date")
+
+    try:
+        start_time = to_scheduling_start_time(raw_start)
+    except ValueError as e:
+        # 保存済み／指定された作業開始日のフォーマットが不正。データ不備のため 422 で明示する。
+        logger.warning(
+            "simulate_schedule: invalid scheduling_start_date order_id=%s value=%r: %s",
+            order_id,
+            raw_start,
+            e,
+        )
+        raise HTTPException(
+            status_code=422, detail={"error": "invalid_scheduling_start_date"}
+        ) from None
 
     try:
         result = schedule_order(
@@ -1023,8 +1060,18 @@ def simulate_schedule(
                 "error": "no_routing" if e.no_routing else "routing_unconfirmed",
             },
         ) from None
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    except ValueError:
+        # スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等）。
+        # クライアント起因ではないため 500 とし、原因をスタックトレース付きでログに残す
+        # （本番でアクセスログの "400 Bad Request" だけが残り原因不明になる事象への対策。Issue #374）。
+        logger.exception(
+            "simulate_schedule failed: order_id=%s scheduling_start_date=%r",
+            order_id,
+            raw_start,
+        )
+        raise HTTPException(
+            status_code=500, detail="シミュレーションの計算に失敗しました"
+        ) from None
 
 
 def _require_role(
