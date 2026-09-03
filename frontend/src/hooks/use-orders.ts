@@ -416,16 +416,29 @@ export function useSplitOrder() {
 
 /**
  * 既存の注文IDでシミュレーションを実行するフック
+ *
+ * 引数に数値を渡すと受注に保存済みの作業開始日を使う。
+ * `{ orderId, schedulingStartDate }` を渡すと作業開始日を上書きしてシミュレーションする（Issue #372）。
  */
+type SimulateByIdArg = number | { orderId: number; schedulingStartDate?: string }
+
 export function useSimulateOrderById() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (orderId: number) =>
-      apiClient<OrderSimulateResponse>(`/orders/${orderId}/simulate`, {
+    mutationFn: (arg: SimulateByIdArg) => {
+      const orderId = typeof arg === "number" ? arg : arg.orderId
+      const schedulingStartDate =
+        typeof arg === "number" ? undefined : arg.schedulingStartDate
+      return apiClient<OrderSimulateResponse>(`/orders/${orderId}/simulate`, {
         method: "POST",
-      }),
-    onSuccess: (_data, orderId) => {
+        body: schedulingStartDate
+          ? JSON.stringify({ scheduling_start_date: schedulingStartDate })
+          : undefined,
+      })
+    },
+    onSuccess: (_data, arg) => {
+      const orderId = typeof arg === "number" ? arg : arg.orderId
       queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
     },
   })

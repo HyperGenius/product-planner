@@ -272,6 +272,18 @@ export default function OrderDetailPage() {
                 <dd>{order.quantity}</dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-muted-foreground">受注日</dt>
+                <dd>{formatDate(order.order_date ?? order.created_at)}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-muted-foreground">作業開始日</dt>
+                <dd>
+                  {order.scheduling_start_date
+                    ? formatDate(order.scheduling_start_date)
+                    : <span className="text-muted-foreground">実行日時から着手</span>}
+                </dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-muted-foreground">希望納期</dt>
                 <dd>{formatDate(order.desired_deadline)}</dd>
               </div>

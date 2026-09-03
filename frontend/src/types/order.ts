@@ -12,6 +12,10 @@ export interface Order {
   quantity: number
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   confirmed_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
+  /** 受注起票日（システムに受注が登録された日時）。作業開始日とは別物（Issue #372） */
+  order_date?: string | null
+  /** 作業開始日（工場が着手する日、YYYY-MM-DD）。未設定なら実行日時から着手。過去日は president / platform_admin のみ設定可（Issue #372） */
+  scheduling_start_date?: string | null
   status: 'draft' | 'pending_approval' | 'confirmed' | 'shipped' | 'completed' | 'canceled'
   rejection_reason?: string | null
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
@@ -35,6 +39,8 @@ export interface OrderCreate {
   customer_id?: number
   quantity: number
   desired_deadline?: string
+  /** 作業開始日 (YYYY-MM-DD)。null で解除。過去日は president / platform_admin のみ（Issue #372） */
+  scheduling_start_date?: string | null
 }
 
 /**
@@ -77,6 +83,8 @@ export interface OrderSimulateRequest {
   quantity: number
   desired_deadline?: string
   standalone?: boolean
+  /** 作業開始日 (YYYY-MM-DD)。未指定なら実行日時から着手。過去日は president / platform_admin のみ（Issue #372） */
+  scheduling_start_date?: string
 }
 
 /**

@@ -504,6 +504,168 @@ class TestOrderRouter:
         assert result["calculated_deadline"] is None
         assert result["is_feasible"] is None
 
+    # --- Issue #372: 作業開始日（scheduling_start_date） --------------------------
+
+    @staticmethod
+    def _set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo):
+        """シミュレーションが1工程分のスケジュールを返せるようモックを整える。"""
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 1,
+                "equipment_group_id": 100,
+                "setup_time_seconds": 1800,
+                "unit_time_seconds": 600,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+        mock_product_repo.client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+            {"equipment_id": 1}
+        ]
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
+        mock_product_repo.get_process_name.return_value = "テスト工程"
+        mock_equipment_repo.get_equipment_name.return_value = "テスト設備"
+
+    def test_simulate_without_id_honors_future_scheduling_start_date(
+        self,
+        headers,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+    ):
+        """POST /simulate: 未来の作業開始日を指定すると、その日からスケジュールが始まる。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        self._set_role(mock_supabase_client, "order_handler")
+
+        payload = {
+            "product_id": 100,
+            "quantity": 10,
+            "scheduling_start_date": "2099-01-05",
+        }
+        response = client.post("/orders/simulate", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["process_schedules"][0]["start_time"].startswith("2099-01-05")
+
+    def test_simulate_without_id_past_start_date_forbidden_for_order_handler(
+        self,
+        headers,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+    ):
+        """POST /simulate: 非権限ロールが過去日の作業開始日を指定すると 403。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        self._set_role(mock_supabase_client, "order_handler")
+
+        payload = {
+            "product_id": 100,
+            "quantity": 10,
+            "scheduling_start_date": "2000-01-03",
+        }
+        response = client.post("/orders/simulate", json=payload, headers=headers)
+
+        assert response.status_code == 403
+
+    def test_simulate_without_id_past_start_date_allowed_for_president(
+        self,
+        headers,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+    ):
+        """POST /simulate: president は過去日の作業開始日を指定できる（救済措置）。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        self._set_role(mock_supabase_client, "president")
+
+        payload = {
+            "product_id": 100,
+            "quantity": 10,
+            "scheduling_start_date": "2000-01-03",
+        }
+        response = client.post("/orders/simulate", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["process_schedules"][0]["start_time"].startswith(
+            "2000-01-03"
+        )
+
+    def test_simulate_by_id_uses_stored_scheduling_start_date(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /{id}/simulate: ボディ未指定時は受注に保存済みの作業開始日を使う。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "scheduling_start_date": "2099-01-05",
+        }
+
+        response = client.post("/orders/1/simulate", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["process_schedules"][0]["start_time"].startswith(
+            "2099-01-05"
+        )
+
+    def test_simulate_by_id_body_override_past_date_forbidden(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+    ):
+        """POST /{id}/simulate: ボディで過去日を上書き指定 & 非権限ロールなら 403。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        self._set_role(mock_supabase_client, "order_handler")
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+        }
+
+        response = client.post(
+            "/orders/1/simulate",
+            json={"scheduling_start_date": "2000-01-03"},
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+
+    def test_create_order_past_start_date_forbidden_for_order_handler(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /orders: 非権限ロールが過去日の作業開始日で起票すると 403。"""
+        self._set_role(mock_supabase_client, "order_handler")
+
+        response = client.post(
+            "/orders",
+            json={
+                "product_id": 1,
+                "quantity": 5,
+                "scheduling_start_date": "2000-01-03",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        mock_repo.create.assert_not_called()
+
     def test_confirm_order(
         self,
         headers,
