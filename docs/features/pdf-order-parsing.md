@@ -361,6 +361,19 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
    再パースしても同じ番号になり、連番管理テーブルを持たずに観察・重複判定の土台と
    して安定する
 
+1・2 の値は `_normalize_order_no_digits()` で**丸数字・全角数字を半角アラビア数字へ
+正規化**してから返す（Issue #370）。昭和製作所は1ファイルに複数注文が入り、明細表で
+品名単位に `①②③…` の連番が振られるため、顧客固有プロンプトで
+`line_order_no` = `<文書の注文番号>-<連番>`（例: `C1869-①`）を返させ、保存時に
+`C1869-1` へ畳む。丸数字 `①`–`⑳` は Unicode 上で連続だが `㉑`（U+3251）以降は非連続で、
+「連番が10を超えたとき」に単純なコードポイント演算では扱えない。このため変換は
+ブロック単位（`①`–`⑳` / `㉑`–`㉟` / `㊱`–`㊿` / `⓪` / 全角 `０`–`９`）の明示的な
+マッピング辞書で行う。ASCII のみの値・`None` は no-op（冪等）で、`AUTO-xxxx` は
+アプリ採番の ASCII 値のため正規化対象外。
+
+> 昭和製作所（customer_id=5）の `order_extraction_prompt` 本番投入はコード変更とは分離し、
+> マージ後の受注起票から適用する。それまでは `line_order_no` が来ないため挙動不変。
+
 解決した値は `_process_line_item()` から `upsert_order_by_dedupe_key` の
 `p_customer_order_no` 引数として渡され、INSERT 時に `orders.customer_order_no` へ
 保存される。UPDATE 時は `COALESCE(v_customer_order_no, customer_order_no)`、すなわち

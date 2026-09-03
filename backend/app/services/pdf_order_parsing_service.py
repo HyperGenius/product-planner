@@ -126,6 +126,43 @@ def _generate_auto_customer_order_no(
     return f"AUTO-{digest[:10]}"
 
 
+# 丸数字・全角数字 → 半角アラビア数字の変換表。
+# (開始コードポイント, 先頭が表す数値, 連続個数) のブロック単位で構築する。
+# 各ブロック内は連続だが ㉑ 以降（U+3251〜）は ① ブロックと非連続なため、
+# 単一のコードポイント演算では扱えない（Issue #370: 連番が「10 を超えたとき」の懸念）。
+_DIGIT_TRANSLATION_BLOCKS = [
+    (0x2460, 1, 20),  # ①..⑳
+    (0x2474, 1, 20),  # ⑴..⒇（括弧付き）
+    (0x24EA, 0, 1),  # ⓪
+    (0x24EB, 11, 10),  # ⓫..⓴（白丸・黒数字）
+    (0x24F5, 1, 10),  # ⓵..⓾（二重丸）
+    (0x24FF, 0, 1),  # ⓿
+    (0x3251, 21, 15),  # ㉑..㉟
+    (0x32B1, 36, 15),  # ㊱..㊿
+    (0xFF10, 0, 10),  # ０..９（全角数字）
+]
+_DIGIT_TRANSLATION: dict[int, str] = {
+    start + offset: str(first_value + offset)
+    for start, first_value, count in _DIGIT_TRANSLATION_BLOCKS
+    for offset in range(count)
+}
+
+
+def _normalize_order_no_digits(value: str) -> str:
+    """
+    顧客注文番号に含まれる丸数字（①②③… ㉑… ㊿）・全角数字を半角アラビア数字へ
+    畳む。昭和製作所のように明細表の連番（品名単位の ①②③…）を注文番号へ付与する
+    ケースで、記号のまま保存すると検索・ソート・手入力がしづらく、また連番が
+    ⑳ を超える領域（㉑ 以降）は Unicode 上で ① ブロックと非連続なため、保存時点で
+    決定的に半角へ変換しておく（Issue #370）。
+
+    ASCII のみ・変換対象を含まない文字列は入力をそのまま返す（no-op・冪等）。
+    """
+    if not any(ord(ch) in _DIGIT_TRANSLATION for ch in value):
+        return value
+    return "".join(_DIGIT_TRANSLATION.get(ord(ch), ch) for ch in value)
+
+
 def _resolve_customer_order_no(
     line: dict[str, Any],
     document_order_no: str | None,
@@ -136,10 +173,13 @@ def _resolve_customer_order_no(
     1. 明細レベルの line_order_no（昭和製作所のように1文書に複数ある場合）
     2. 無ければ文書レベルの document_order_no
     3. どちらも無ければアプリ側で採番した auto_order_no（飯野製作所等）
+
+    1・2 の値は丸数字・全角数字を半角へ正規化してから返す（Issue #370）。
+    auto_order_no はアプリ側で採番した ASCII 値のため正規化しない。
     """
     for candidate in (line.get("line_order_no"), document_order_no):
         if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
+            return _normalize_order_no_digits(candidate.strip())
     return auto_order_no
 
 
