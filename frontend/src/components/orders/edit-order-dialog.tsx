@@ -18,7 +18,7 @@ import { CustomerSelector } from "@/components/customer-selector"
 import { SourceEmailPanel } from "@/components/orders/source-email-panel"
 import { useUpdateOrder } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
-import { toDateInputValue } from "@/lib/order-utils"
+import { jstTodayIso, toDateInputValue } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 
 interface EditOrderDialogProps {
@@ -47,7 +47,8 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   // 作業開始日を過去日に設定できるのは president / platform_admin のみ（Issue #372）
   const canBackdateSchedulingStart =
     currentMember?.role === "president" || currentMember?.role === "platform_admin"
-  const todayStr = new Date().toLocaleDateString("sv-SE") // YYYY-MM-DD（ローカル日付）
+  // 過去日判定はバックエンド（JST基準）と揃える（Issue #372）
+  const todayStr = jstTodayIso()
   const isSchedulingStartBackdated =
     !!schedulingStartDate && schedulingStartDate < todayStr
 

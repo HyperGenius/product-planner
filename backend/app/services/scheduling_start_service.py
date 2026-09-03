@@ -30,7 +30,9 @@ class PastSchedulingStartDateError(ValueError):
 def parse_scheduling_start_date(value: str | date | None) -> date | None:
     """ISO 形式の日付文字列（または date / datetime）を date へ正規化する。
 
-    None はそのまま None を返す。パースできない場合は ValueError。
+    None はそのまま None を返す。文字列は `YYYY-MM-DD`（date）または ISO 8601
+    日時（`2026-09-10T09:00:00+09:00` 等）のみ受け付け、それ以外は ValueError。
+    先頭10文字だけを取り出すような曖昧なパースはしない（`"2026-09-10xxx"` は弾く）。
     """
     if value is None:
         return None
@@ -38,9 +40,17 @@ def parse_scheduling_start_date(value: str | date | None) -> date | None:
         return value.date()
     if isinstance(value, date):
         return value
+    if not isinstance(value, str):
+        raise ValueError(f"作業開始日の形式が不正です: {value!r}")
     try:
-        return date.fromisoformat(value[:10])
-    except (ValueError, TypeError) as e:
+        # まず厳密に YYYY-MM-DD として解釈する
+        return date.fromisoformat(value)
+    except ValueError:
+        pass
+    try:
+        # 日時文字列（例: 2026-09-10T09:00:00+09:00）は datetime として解釈して日付に落とす
+        return datetime.fromisoformat(value).date()
+    except ValueError as e:
         raise ValueError(f"作業開始日の形式が不正です: {value!r}") from e
 
 

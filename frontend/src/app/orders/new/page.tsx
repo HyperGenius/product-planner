@@ -43,7 +43,7 @@ import {
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
-import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
+import { getProductName, getCustomerName, formatDeadlineDate, jstTodayIso } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -85,7 +85,8 @@ export default function NewOrderPage() {
   // 作業開始日を過去日に設定できるのは president / platform_admin のみ（Issue #372）
   const canBackdateSchedulingStart =
     currentMember?.role === "president" || currentMember?.role === "platform_admin"
-  const todayStr = format(new Date(), "yyyy-MM-dd")
+  // 過去日判定はバックエンド（JST基準）と揃える（Issue #372）
+  const todayStr = jstTodayIso()
   const isSchedulingStartBackdated =
     !!schedulingStartDate && schedulingStartDate < todayStr
 

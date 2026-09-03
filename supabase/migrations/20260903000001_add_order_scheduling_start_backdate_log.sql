@@ -40,9 +40,29 @@ CREATE POLICY "tenant isolation (select)" ON order_scheduling_start_backdate_log
 -- 書き込みは操作者本人（president / platform_admin）のユーザーJWTから行う。
 -- INSERT 後の RETURNING で SELECT ポリシーが評価されるのを避けるため、
 -- リポジトリ側は returning=minimal で INSERT する。
+--
+-- 監査証跡の偽造耐性のため、WITH CHECK で以下も検証する
+-- （order_approval_log の INSERT ポリシー強化と同種の対策）:
+--   * order_id が指定 tenant_id の orders に属すること（連番bigintの推測による偽装を防ぐ）
+--   * actor（＝auth.uid()）のロールが president / platform_admin であること
+--     （過去日設定はこの2ロールのみ許可するアプリ層ルールを RLS でも担保する）
 CREATE POLICY "tenant isolation (insert)" ON order_scheduling_start_backdate_log
   FOR INSERT
-  WITH CHECK (is_tenant_member(tenant_id) AND actor_user_id = auth.uid());
+  WITH CHECK (
+    is_tenant_member(tenant_id)
+    AND actor_user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1 FROM orders o
+      WHERE o.id = order_scheduling_start_backdate_log.order_id
+        AND o.tenant_id = order_scheduling_start_backdate_log.tenant_id
+    )
+    AND EXISTS (
+      SELECT 1 FROM organization_members om
+      WHERE om.tenant_id = order_scheduling_start_backdate_log.tenant_id
+        AND om.user_id = auth.uid()
+        AND om.role IN ('president', 'platform_admin')
+    )
+  );
 
 CREATE INDEX idx_order_sched_start_backdate_log_tenant_order
   ON order_scheduling_start_backdate_log (tenant_id, order_id, created_at DESC);

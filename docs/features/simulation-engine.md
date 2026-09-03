@@ -382,7 +382,8 @@ class CalendarConfig:
 | `context` | `text` | `create`（起票時）/ `update`（受注編集時） |
 | `created_at` | `timestamptz` | 記録日時 |
 
-閲覧 RLS: `iso_officer` / `president` / `platform_admin` のみ。書き込みは操作者本人のユーザー JWT から。
+閲覧 RLS: `iso_officer` / `president` / `platform_admin` のみ。
+INSERT RLS: `is_tenant_member(tenant_id)` かつ `actor_user_id = auth.uid()` に加え、`order_id` が指定テナントの `orders` に属すること、`auth.uid()` のロールが `president` / `platform_admin` であることも `WITH CHECK` で検証する（監査証跡の偽造耐性。`order_approval_log` の INSERT ポリシー強化と同種の対策）。
 
 ### `work_calendars` テーブル
 

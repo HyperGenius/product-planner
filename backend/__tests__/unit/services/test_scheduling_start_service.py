@@ -20,7 +20,7 @@ class TestParseSchedulingStartDate:
     def test_iso_date_string(self):
         assert parse_scheduling_start_date("2026-09-10") == date(2026, 9, 10)
 
-    def test_iso_datetime_string_is_truncated_to_date(self):
+    def test_iso_datetime_string_is_reduced_to_date(self):
         assert parse_scheduling_start_date("2026-09-10T09:00:00+09:00") == date(
             2026, 9, 10
         )
@@ -37,6 +37,15 @@ class TestParseSchedulingStartDate:
     def test_invalid_string_raises(self):
         with pytest.raises(ValueError):
             parse_scheduling_start_date("not-a-date")
+
+    def test_trailing_junk_is_rejected(self):
+        # 先頭10文字だけ切り出すパースはしない（入力ミスを見逃さない）
+        with pytest.raises(ValueError):
+            parse_scheduling_start_date("2026-09-10xxx")
+
+    def test_non_string_non_date_is_rejected(self):
+        with pytest.raises(ValueError):
+            parse_scheduling_start_date(20260910)  # type: ignore[arg-type]
 
 
 class TestToSchedulingStartTime:
