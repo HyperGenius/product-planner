@@ -47,14 +47,17 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
      束ね添付メール（1通にN顧客の注文書PDF）では全ステージング行がメール単位で
      解決した同じ `customer_id` を持つため、`customers.name` / `customers.alias` を
      法人格・記号・空白を無視して正規化し、抽出テキストに部分一致する顧客が
-     **一意に定まった場合のみ** その添付の `customer_id` を上書きする。
+     **一意に定まった場合のみ** その添付の `customer_id` を上書きする
+     （上書き値は「PDF明細から起票する order」にだけ適用し、メール本文へ
+     フォールバックする経路ではメール単位の `customer_id` を維持する。後述）。
      0件・複数件（判定不能）はメール単位の `customer_id` のまま
      （解決できないPDFは「不明な顧客」下書きに紐づく: Issue #263 の挙動を踏襲）。
      新規の下書き顧客はここでは作らない（作成はメール単位で1回のまま）
 3. 抽出成功時、Claude tool-use (pdf_order_extraction_service.py) で明細行の配列を取得
    { product_name_raw, product_number_raw, quantity, delivery_date, certainty }
    - 顧客固有の抽出プロンプト断片（`customers.order_extraction_prompt`）は、
-     上記で解決し直した `customer_id` から引く（Issue #385）
+     PDF明細抽出時は上記で解決し直した `customer_id`、本文フォールバック時は
+     メール単位の `customer_id` から引く（Issue #385）
 4. 明細ごとに (pdf_order_parsing_service._process_line_item):
    a. 製品照合は3段階のフォールバックで行う:
       1. `products.code` の完全一致 (match_product_by_code)
@@ -189,8 +192,10 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
   メールアドレスはPDF文面から安定して取れないため、既存の email 突合とは別経路で
   **企業名のみ**で突合する:
   - `customers.name` / `customers.alias` と PDF テキストの双方を
-    `_normalize_company_name()` で正規化（`株式会社`・`(株)`・`㈱` 等の法人格、
-    空白・中黒・ハイフン等の区切りを除去し英字を小文字化）
+    `_normalize_company_name()` で正規化する。まず **NFKC 正規化**で全角/半角・
+    互換文字を統一（`ＡＢＣ`→`ABC`、`㈱`→`(株)`、全角数字→半角、半角カナ→全角カナ）し、
+    その上で `株式会社`・`(株)` 等の法人格、空白・中黒・ハイフン等の区切りを除去して
+    英字を小文字化する。DB 側が半角・PDF側が全角（またはその逆）でも一致させるため
   - 正規化後の顧客名が正規化後のPDFテキストに **部分一致** する顧客を集め、
     **ちょうど1件**なら採用。0件（該当なし）・複数件（判定不能）は `None`
   - 正規化後2文字以下の顧客名は誤マッチしやすいため突合対象から除外
@@ -199,8 +204,14 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
 - **フォールバック**: 解決できなければステージング行の `customer_id`（メール単位で
   解決済み。「不明な顧客」下書きを含む）をそのまま使う → 解決できないPDFは
   従来どおり下書き顧客に紐づく（#263 の挙動を踏襲）
-- **顧客固有プロンプト**: `_get_customer_extraction_prompt()` は解決し直した
-  `customer_id` で引く（束ね添付でも各PDFに正しい顧客のプロンプト断片が当たる）
+- **再解決の適用範囲は「PDF明細から起票する order」に限定する**。`_parse_one()` は
+  再解決した `customer_id` を反映した `pdf_row` を別に持ち、`_process_line_item()` へは
+  これを渡す。PDFから明細が0件で **メール本文へフォールバックする経路**
+  （`_process_email_body()`、Issue #278）は、本文がメール全体の内容であり特定PDFの
+  顧客に帰属しないため、**元の row（メール単位の `customer_id`）** で処理する
+  （PDF文面由来の顧客解決を本文由来の受注へ波及させない）
+- **顧客固有プロンプト**: PDF明細抽出時は再解決後の `customer_id`、本文フォールバック時は
+  メール単位の `customer_id` で `_get_customer_extraction_prompt()` を引く
 - **下書き顧客の新規作成はしない**: 既存顧客への突合のみ。`customer_draft_created`
   通知は従来どおりメール単位で1回（`gmail_service`）
 - **既存経路への影響なし**: 単一PDF添付・非PDF添付・添付なしメールは、解決結果が

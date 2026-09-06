@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -30,8 +31,9 @@ _COMPANY_KEYWORDS_RE = re.compile(r"(株式会社|有限会社|合同会社|合�
 _CONTACT_LINE_RE = re.compile(r"(TEL|FAX|〒|e-mail|email)", re.IGNORECASE)
 
 # 会社名を照合用に正規化する際に除去する法人格表記。
+# NFKC 正規化後に判定するため、㈱ / （株） 等はここでは半角括弧形に畳まれている前提。
 _CORP_AFFIX_RE = re.compile(
-    r"(株式会社|有限会社|合同会社|合資会社|合名会社|㈱|㈲|\(株\)|\(有\)|（株）|（有）)"
+    r"(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|\(有\))"
 )
 # 会社名の照合で無視する空白・区切り記号。
 _NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-―ー－_/／|｜]+")
@@ -41,8 +43,14 @@ _MIN_COMPANY_CORE_LEN = 3
 
 
 def _normalize_company_name(value: str) -> str:
-    """会社名を照合用に正規化する。法人格・空白・区切り記号を除去し、英字を小文字化する。"""
-    without_affix = _CORP_AFFIX_RE.sub("", value)
+    """会社名を照合用に正規化する。
+
+    まず NFKC で全角/半角・互換文字を統一し（例: ＡＢＣ→ABC、㈱→(株)、ｶﾅ→カナ、
+    全角数字→半角）、その上で法人格・空白・区切り記号を除去して英字を小文字化する。
+    DB 側が半角・PDF抽出テキスト側が全角（またはその逆）でも一致させるため。
+    """
+    normalized = unicodedata.normalize("NFKC", value)
+    without_affix = _CORP_AFFIX_RE.sub("", normalized)
     without_noise = _NAME_NOISE_RE.sub("", without_affix)
     return without_noise.strip().lower()
 

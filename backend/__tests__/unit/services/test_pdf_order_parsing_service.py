@@ -1213,6 +1213,67 @@ class TestPerPdfCustomerResolution:
         # _get_customer_extraction_prompt が再解決後の customer_id で引かれる
         mock_db.table().select().eq().eq.assert_any_call("id", 55)
 
+    def test_body_fallback_keeps_email_level_customer_not_pdf_resolved(
+        self, _no_pdf_customer_match
+    ):
+        """PDFから明細が0件でメール本文へフォールバックする場合、本文由来の受注は
+        PDF文面から再解決した顧客ではなく、メール単位で解決済みの customer_id で
+        起票されること（PDF文面の顧客解決を本文経路へ波及させない）。"""
+        _no_pdf_customer_match.return_value = 55
+
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
+            data=[self._staging_row()]
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "inserted"}]
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(
+                    text="無関係な文書 ABC製作所", failure_reason=None
+                ),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value={"document_order_no": None, "line_items": []},
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_order_lines",
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [
+                        {
+                            "product_name_raw": "製品A",
+                            "product_number_raw": None,
+                            "quantity": 5,
+                            "delivery_date": "2026-08-01",
+                            "certainty": "confirmed",
+                        }
+                    ],
+                },
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=None,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+                return_value={"product_id": 100, "candidates": []},
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_id"] == 7
+
     def test_unreadable_pdf_does_not_attempt_pdf_text_resolution(
         self, _no_pdf_customer_match
     ):

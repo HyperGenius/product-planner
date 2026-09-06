@@ -547,6 +547,15 @@ class TestMatchCustomerByPdfText:
             == 50
         )
 
+    def test_matches_across_fullwidth_halfwidth_difference(self):
+        # DB は半角、PDF抽出テキストは全角（またはその逆）でも NFKC 正規化で一致する
+        mock_db = self._mock_db([{"id": 51, "name": "ABC工業 123", "alias": None}])
+
+        assert (
+            match_customer_by_pdf_text(mock_db, "tenant-1", "ＡＢＣ工業　１２３ 御中")
+            == 51
+        )
+
     def test_returns_none_for_empty_or_none_text(self):
         mock_db = self._mock_db([{"id": 60, "name": "ABC製作所", "alias": None}])
 
