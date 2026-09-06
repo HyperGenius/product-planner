@@ -5,6 +5,7 @@ import type { GanttTask, GanttViewMode } from '../types'
 import {
   buildTimelineConfig,
   getTaskGridColumns,
+  getMilestoneGridColumn,
   getNowFractionalColumn,
 } from '../utils/date-math'
 import type { WorkHoursConfig } from '../utils/date-math'
@@ -108,7 +109,14 @@ export function GanttChart({
 
           {/* タスク行 */}
           {tasks.map((task, index) => {
-            const { colStart, colEnd } = getTaskGridColumns(task.start, task.end, config)
+            const isMilestone = !task.isGroupHeader && task.isMilestone === true
+            const milestoneCol = isMilestone
+              ? getMilestoneGridColumn(task.start, config)
+              : null
+            const { colStart, colEnd } =
+              milestoneCol !== null
+                ? { colStart: milestoneCol, colEnd: milestoneCol + 1 }
+                : getTaskGridColumns(task.start, task.end, config)
             const bar = (
               <TaskBar
                 task={task}

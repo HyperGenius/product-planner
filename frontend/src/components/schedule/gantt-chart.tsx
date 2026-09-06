@@ -109,12 +109,16 @@ export function convertScheduleToTask(
 
   const name = suffix ? `${processName} - ${suffix}` : processName
 
+  const start = new Date(schedule.start_datetime)
+  const end = new Date(schedule.end_datetime)
+
   return {
     id: `schedule-${schedule.id}`,
     name,
-    start: new Date(schedule.start_datetime),
-    end: new Date(schedule.end_datetime),
+    start,
+    end,
     color: getBarColor(schedule, colorMode),
+    isMilestone: start.getTime() === end.getTime(),
   }
 }
 
@@ -141,6 +145,9 @@ function aggregateSegments(
     const first = sorted[0]
     const last = sorted[sorted.length - 1]
 
+    const aggStart = new Date(first.start_datetime)
+    const aggEnd = new Date(last.end_datetime)
+
     const processName = first.process_name || '工程'
     let suffix: string
     if (groupBy === 'equipment_group') {
@@ -153,9 +160,10 @@ function aggregateSegments(
     result.push({
       id: `schedule-${first.id}`,
       name,
-      start: new Date(first.start_datetime),
-      end: new Date(last.end_datetime),
+      start: aggStart,
+      end: aggEnd,
       color: getBarColor(first, colorMode),
+      isMilestone: aggStart.getTime() === aggEnd.getTime(),
     })
   })
 
@@ -342,7 +350,11 @@ export function GanttChart({
           <TooltipTrigger asChild>{children}</TooltipTrigger>
           <TooltipContent>
             <p className="font-semibold">{task.name}</p>
-            <p>{format(task.start, 'HH:mm', { locale: ja })} - {format(task.end, 'HH:mm', { locale: ja })}</p>
+            <p>
+              {task.isMilestone
+                ? format(task.start, 'MM/dd HH:mm', { locale: ja })
+                : `${format(task.start, 'HH:mm', { locale: ja })} - ${format(task.end, 'HH:mm', { locale: ja })}`}
+            </p>
           </TooltipContent>
         </Tooltip>
       )}

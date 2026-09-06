@@ -65,24 +65,41 @@ export function ScheduleEditDialog({
     schedule ? toLocalDatetimeValue(schedule.end_datetime) : ''
   )
 
+  // 所要時間 0 の工程（マイルストーン: 検査・承認・出荷判定など）は
+  // 開始 == 終了 を保つため「時刻のみ」編集とする
+  const isMilestone =
+    !!schedule &&
+    new Date(schedule.start_datetime).getTime() ===
+      new Date(schedule.end_datetime).getTime()
+
   const handleSave = () => {
     if (!schedule) return
     const start = new Date(startValue)
+    if (isNaN(start.getTime())) return
+    if (isMilestone) {
+      // マイルストーンは start == end を維持する
+      onSave(schedule.id, start.toISOString(), start.toISOString())
+      return
+    }
     const end = new Date(endValue)
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return
+    if (isNaN(end.getTime())) return
     // datetime-local の値をISO 8601形式に変換
     onSave(schedule.id, start.toISOString(), end.toISOString())
   }
 
-  const isValidRange =
-    !!startValue &&
-    !!endValue &&
-    !isNaN(new Date(startValue).getTime()) &&
-    !isNaN(new Date(endValue).getTime()) &&
-    new Date(startValue) < new Date(endValue)
+  const isValidRange = isMilestone
+    ? !!startValue && !isNaN(new Date(startValue).getTime())
+    : !!startValue &&
+      !!endValue &&
+      !isNaN(new Date(startValue).getTime()) &&
+      !isNaN(new Date(endValue).getTime()) &&
+      // end < start を作らせない（マイルストーン以外は start < end 必須）
+      new Date(startValue) < new Date(endValue)
 
   // 初期値から変更があるかどうか（未変更の場合は保存不要）
-  const isDirty = startValue !== initialStart || endValue !== initialEnd
+  const isDirty = isMilestone
+    ? startValue !== initialStart
+    : startValue !== initialStart || endValue !== initialEnd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -118,24 +135,41 @@ export function ScheduleEditDialog({
           </div>
 
           {/* 編集フィールド */}
-          <div className="grid gap-2">
-            <Label htmlFor="start-datetime">開始日時</Label>
-            <Input
-              id="start-datetime"
-              type="datetime-local"
-              value={startValue}
-              onChange={(e) => setStartValue(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="end-datetime">終了日時</Label>
-            <Input
-              id="end-datetime"
-              type="datetime-local"
-              value={endValue}
-              onChange={(e) => setEndValue(e.target.value)}
-            />
-          </div>
+          {isMilestone ? (
+            <div className="grid gap-2">
+              <Label htmlFor="start-datetime">時刻（マイルストーン工程・所要時間 0）</Label>
+              <Input
+                id="start-datetime"
+                type="datetime-local"
+                value={startValue}
+                onChange={(e) => {
+                  setStartValue(e.target.value)
+                  setEndValue(e.target.value)
+                }}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="start-datetime">開始日時</Label>
+                <Input
+                  id="start-datetime"
+                  type="datetime-local"
+                  value={startValue}
+                  onChange={(e) => setStartValue(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="end-datetime">終了日時</Label>
+                <Input
+                  id="end-datetime"
+                  type="datetime-local"
+                  value={endValue}
+                  onChange={(e) => setEndValue(e.target.value)}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
