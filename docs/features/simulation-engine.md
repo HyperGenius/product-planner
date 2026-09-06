@@ -92,7 +92,14 @@ if not dry_run and not routings_are_confirmed(routings):
 
    a. 所要時間の計算
       duration_sec = setup_time_seconds + (unit_time_seconds × quantity)
-      duration <= 0 なら InvalidRoutingDurationError（→ HTTP 422 invalid_routing_duration）
+      duration <  0 なら InvalidRoutingDurationError（→ HTTP 422 invalid_routing_duration）
+      duration == 0 は「マイルストーン工程」として受理（→ b'）
+
+   b'. マイルストーン工程（duration == 0）: 検査・承認・出荷判定など作業時間を持たない工程。
+       設備選定・ギャップ詰め込みをスキップし、直前工程の終了時刻（current_process_start）を
+       get_next_available_start_time() で稼働時間内に正規化した時刻に start == end の
+       ゼロ長セグメントを 1 件生成する。設備は占有しないため equipment_id = NULL。
+       current_process_start は start へ進める（単調増加を維持）。（Issue #378）
 
    b. 設備の選択（equipment_group_id が NULL の場合は設備不要）
       equipment_group_members から設備 ID 一覧を取得
@@ -274,21 +281,28 @@ class CalendarConfig:
 | 422 | 工程未登録 | by-id: `{"detail": {"error": "no_routing"}}` / without-id: HTTP 200 + `routing_status: "no_routing"` |
 | 422 | 未確定工程あり（by-id のみ。without-id は通過） | `{"detail": {"error": "routing_unconfirmed"}}` |
 | 422 | 作業開始日の形式が不正（保存済み・上書き指定いずれも） | `{"detail": {"error": "invalid_scheduling_start_date"}}` |
-| 422 | 工程の所要時間が0（`unit_time_seconds` / `setup_time_seconds` 未設定、または数量0） | `{"detail": {"error": "invalid_routing_duration", "routing_id": <id>}}` |
+| 422 | 工程の合計所要時間が**負**（`setup_time_seconds` / `unit_time_seconds` / 数量のいずれかが負値というデータ不正） | `{"detail": {"error": "invalid_routing_duration", "routing_id": <id>}}` |
 | 403 | 非権限ロールが過去日の作業開始日を上書き指定 | `{"detail": "..."}` |
+
+> 工程の合計所要時間が **0** の場合はエラーにならない。「マイルストーン工程」（検査・承認・出荷判定など
+> 作業時間を持たない工程）として受理され、`start == end` のゼロ長セグメントで正常応答（200）を返す（Issue #378）。
 | 500 | スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等） | `{"detail": "シミュレーションの計算に失敗しました"}` |
 
 Issue #374 以前は、スケジューラ内部の `ValueError` やパース失敗をすべて `400 Bad Request` に丸めており、
 本番のアクセスログに `400 Bad Request` だけが残って原因を追えなかった。現在は:
 
-- ユーザー入力・受注データ起因（作業開始日の形式不正・工程未確定・未マッチ・工程の所要時間0）→ `422` に統一し、`{"error": "..."}` コードで返す
+- ユーザー入力・受注データ起因（作業開始日の形式不正・工程未確定・未マッチ・工程の所要時間が負）→ `422` に統一し、`{"error": "..."}` コードで返す
 - スケジューラ内部の不整合（クライアント側では対処不能）→ `500` とし、`logger.exception` で `order_id` / `scheduling_start_date` と traceback を出力する
 
-`invalid_routing_duration` は、工程マスタの標準時間（`process_routings.unit_time_seconds`）と
-段取り時間（`setup_time_seconds`）がともに 0 で `total_duration = 0` になり、
-`split_work_across_days()` が「所要時間は正の値である必要があります」で落ちるケース。
-`schedule_order()` が `InvalidRoutingDurationError`（`ValueError` サブクラス）を送出し、
-シミュレーション／確定エンドポイントが 422 に変換する。`confirm` / `approve-bulk` も同じ `error` コードを返す。
+`invalid_routing_duration` は、`total_duration = setup_time_seconds + unit_time_seconds × quantity` が
+**負**になるデータ不正のケース（通常は DB 制約上発生しない）。`schedule_order()` が
+`InvalidRoutingDurationError`（`ValueError` サブクラス）を送出し、シミュレーション／確定
+エンドポイントが 422 に変換する。`confirm` / `approve-bulk` も同じ `error` コードを返す。
+
+`total_duration == 0` は Issue #374 の暫定対処（PR #377）では 422 だったが、Issue #378 で
+「マイルストーン工程」として正当に受理する挙動へ変更した。所要時間 0 の工程は設備を占有せず
+（`equipment_id = NULL`）、`start == end` のゼロ長セグメント 1 件として `production_schedules` に
+保存され、`confirmed_deadline` も算出される。
 
 ---
 
@@ -312,8 +326,10 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 |---|---|---|
 | 404 | 受注が見つからない | `{"detail": "Order not found"}` |
 | 422 | 未確定工程あり | `{"detail": {"error": "routing_unconfirmed", "desired_deadline": "YYYY-MM-DD"}}` |
-| 422 | 工程の所要時間が0 | `{"detail": {"error": "invalid_routing_duration", "routing_id": <id>}}` |
+| 422 | 工程の合計所要時間が負（データ不正） | `{"detail": {"error": "invalid_routing_duration", "routing_id": <id>}}` |
 | 400 | 工程なし・その他 ValueError | `{"detail": "<メッセージ>"}` |
+
+> 合計所要時間 0 の工程は「マイルストーン工程」として受理され、ゼロ長セグメントで確定される（Issue #378）。
 
 `approve-bulk` は 1 件ごとに `{"order_id", "status": "error", "detail": {"error": "invalid_routing_duration", ...}}` を返す。
 

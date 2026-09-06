@@ -232,8 +232,8 @@ class TestScheduleOrder:
             )
 
     def test_schedule_with_zero_duration_routing(self) -> None:
-        """工程の所要時間が0（標準時間・段取り時間とも未設定）の場合、
-        カレンダーロジックの ValueError ではなく InvalidRoutingDurationError を投げる（Issue #374）。"""
+        """工程の合計所要時間が0（マイルストーン工程）の場合、エラーを出さず
+        start == end のゼロ長セグメントを1件生成する。設備は占有しない（Issue #378）。"""
         mock_product_repo = MagicMock()
         mock_schedule_repo = MagicMock()
 
@@ -248,20 +248,180 @@ class TestScheduleOrder:
             }
         ]
 
+        result = schedule_order(
+            order_id=5,
+            product_id=5,
+            quantity=10,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=datetime(2025, 1, 6, 9, 0, tzinfo=JST),
+        )
+
+        assert len(result) == 1
+        seg = result[0]
+        assert seg["process_routing_id"] == 42
+        assert seg["equipment_id"] is None
+        # ゼロ長: 開始 == 終了、かつ起点（月曜 9:00）を正規化した時刻
+        assert seg["start_datetime"] == seg["end_datetime"]
+        assert datetime.fromisoformat(seg["start_datetime"]) == datetime(
+            2025, 1, 6, 9, 0, tzinfo=JST
+        )
+
+    def test_schedule_with_negative_duration_routing(self) -> None:
+        """合計所要時間が負（データ不正）の場合は InvalidRoutingDurationError を投げる。"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 43,
+                "equipment_group_id": None,
+                "setup_time_seconds": -600,
+                "unit_time_seconds": 0,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+
         with pytest.raises(InvalidRoutingDurationError) as exc_info:
             schedule_order(
-                order_id=5,
-                product_id=5,
-                quantity=10,
+                order_id=6,
+                product_id=6,
+                quantity=1,
                 product_repo=mock_product_repo,
                 schedule_repo=mock_schedule_repo,
                 tenant_id="test-tenant-id",
                 start_time=datetime(2025, 1, 6, 9, 0, tzinfo=JST),
             )
 
-        assert exc_info.value.routing_id == 42
+        assert exc_info.value.routing_id == 43
         # ValueError のサブクラスであること（既存の except ValueError 経路を壊さない）
         assert isinstance(exc_info.value, ValueError)
+
+    def test_schedule_with_all_zero_duration_routings(self) -> None:
+        """全工程がゼロ長のとき、納期は起点を正規化した時刻の日付になる（Issue #378）。"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": i,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 0,
+                "sequence_order": i,
+                "is_confirmed": True,
+            }
+            for i in (1, 2, 3)
+        ]
+
+        # 土曜 9:00 を起点 → 翌営業日（月曜 9:00）に正規化される
+        result = schedule_order(
+            order_id=7,
+            product_id=7,
+            quantity=5,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=datetime(2025, 1, 4, 9, 0, tzinfo=JST),
+        )
+
+        assert len(result) == 3
+        starts = [datetime.fromisoformat(s["start_datetime"]) for s in result]
+        # 全て同一時刻（月曜 9:00）・ゼロ長・単調非減少
+        assert all(s["start_datetime"] == s["end_datetime"] for s in result)
+        assert starts == sorted(starts)
+        assert starts[-1] == datetime(2025, 1, 6, 9, 0, tzinfo=JST)
+
+    def test_schedule_with_leading_zero_duration_routing(self) -> None:
+        """先頭工程がゼロ長でも起点正規化が効き、後続工程が正しく続く（Issue #378）。"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
+
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 0,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            },
+            {
+                "id": 2,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 60,  # 1分/個 * 5個 = 5分
+                "sequence_order": 2,
+                "is_confirmed": True,
+            },
+        ]
+
+        result = schedule_order(
+            order_id=8,
+            product_id=8,
+            quantity=5,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=datetime(2025, 1, 4, 9, 0, tzinfo=JST),  # 土曜
+        )
+
+        # 先頭ゼロ長 → 月曜 9:00、後続 5分工程 → 9:00-9:05
+        assert result[0]["start_datetime"] == result[0]["end_datetime"]
+        assert datetime.fromisoformat(result[0]["start_datetime"]) == datetime(
+            2025, 1, 6, 9, 0, tzinfo=JST
+        )
+        assert datetime.fromisoformat(result[-1]["end_datetime"]) == datetime(
+            2025, 1, 6, 9, 5, tzinfo=JST
+        )
+
+    def test_schedule_with_trailing_zero_duration_routing(self) -> None:
+        """末尾工程がゼロ長のとき、納期は直前工程の終了時刻になる（Issue #378）。"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+        mock_schedule_repo.get_last_end_time.return_value = None
+        mock_schedule_repo.get_schedules_by_equipment.return_value = []
+
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 1,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 60,  # 5分
+                "sequence_order": 1,
+                "is_confirmed": True,
+            },
+            {
+                "id": 2,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 0,
+                "sequence_order": 2,
+                "is_confirmed": True,
+            },
+        ]
+
+        result = schedule_order(
+            order_id=9,
+            product_id=9,
+            quantity=5,
+            product_repo=mock_product_repo,
+            schedule_repo=mock_schedule_repo,
+            tenant_id="test-tenant-id",
+            start_time=datetime(2025, 1, 6, 9, 0, tzinfo=JST),
+        )
+
+        last = result[-1]
+        assert last["process_routing_id"] == 2
+        assert last["start_datetime"] == last["end_datetime"]
+        # 直前工程（9:00-9:05）の終了時刻に一致
+        assert datetime.fromisoformat(last["end_datetime"]) == datetime(
+            2025, 1, 6, 9, 5, tzinfo=JST
+        )
 
     def test_schedule_with_no_equipment_in_group(self) -> None:
         """設備グループに設備が存在しない場合、設備なし（equipment_id=None）でスケジュールを作成する"""
