@@ -8,6 +8,7 @@ from app.services.customer_matching_service import (
     extract_email_address,
     extract_sender_email,
     extract_sender_email_candidates,
+    match_customer_by_pdf_text,
     resolve_or_create_customer,
 )
 
@@ -487,3 +488,82 @@ class TestResolveOrCreateCustomerRealFromPriority:
         assert created_draft is True
         inserted_row = mock_db.table().insert.call_args.args[0]
         assert inserted_row["email"] == "signature@customer.example.com"
+
+
+@pytest.mark.unit
+class TestMatchCustomerByPdfText:
+    def _mock_db(self, customers):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().execute.return_value = MagicMock(data=customers)
+        return mock_db
+
+    def test_resolves_unique_customer_by_name_substring(self):
+        mock_db = self._mock_db(
+            [
+                {"id": 10, "name": "株式会社ABC製作所", "alias": None},
+                {"id": 11, "name": "有限会社XYZ工業", "alias": None},
+            ]
+        )
+        pdf_text = "注文書\n発注元: ABC製作所\n御中: 当社\n品番 A-1 数量 5"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", pdf_text) == 10
+
+    def test_resolves_via_alias(self):
+        mock_db = self._mock_db(
+            [{"id": 20, "name": "オオモリ精密株式会社", "alias": "大森精密"}]
+        )
+
+        assert (
+            match_customer_by_pdf_text(mock_db, "tenant-1", "大森精密からの注文書")
+            == 20
+        )
+
+    def test_returns_none_when_no_customer_matches(self):
+        mock_db = self._mock_db([{"id": 30, "name": "無関係株式会社", "alias": None}])
+
+        assert (
+            match_customer_by_pdf_text(mock_db, "tenant-1", "ABC製作所からの注文書")
+            is None
+        )
+
+    def test_returns_none_when_multiple_customers_match(self):
+        mock_db = self._mock_db(
+            [
+                {"id": 40, "name": "ABC製作所", "alias": None},
+                {"id": 41, "name": "XYZ工業", "alias": None},
+            ]
+        )
+        pdf_text = "ABC製作所 と XYZ工業 の連名注文書"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", pdf_text) is None
+
+    def test_ignores_corp_affixes_and_whitespace_in_matching(self):
+        mock_db = self._mock_db(
+            [{"id": 50, "name": "  株式会社 ＡＢＣ  製作所 ", "alias": None}]
+        )
+
+        assert (
+            match_customer_by_pdf_text(mock_db, "tenant-1", "（株）ＡＢＣ製作所　御中")
+            == 50
+        )
+
+    def test_returns_none_for_empty_or_none_text(self):
+        mock_db = self._mock_db([{"id": 60, "name": "ABC製作所", "alias": None}])
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", None) is None
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", "   ") is None
+
+    def test_ignores_too_short_customer_names(self):
+        # 正規化後2文字以下の会社名は誤マッチしやすいため突合対象外
+        mock_db = self._mock_db([{"id": 70, "name": "AB", "alias": None}])
+
+        assert (
+            match_customer_by_pdf_text(mock_db, "tenant-1", "ABさんからの注文") is None
+        )
+
+    def test_scopes_query_by_tenant_id(self):
+        mock_db = self._mock_db([])
+
+        match_customer_by_pdf_text(mock_db, "tenant-xyz", "何らかのテキスト")
+
+        mock_db.table().select().eq.assert_any_call("tenant_id", "tenant-xyz")

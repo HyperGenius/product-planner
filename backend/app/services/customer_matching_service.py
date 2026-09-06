@@ -29,6 +29,86 @@ _COMPANY_KEYWORDS_RE = re.compile(r"(株式会社|有限会社|合同会社|合�
 # 住所・電話・メールなど、会社名/氏名の行から除外する行
 _CONTACT_LINE_RE = re.compile(r"(TEL|FAX|〒|e-mail|email)", re.IGNORECASE)
 
+# 会社名を照合用に正規化する際に除去する法人格表記。
+_CORP_AFFIX_RE = re.compile(
+    r"(株式会社|有限会社|合同会社|合資会社|合名会社|㈱|㈲|\(株\)|\(有\)|（株）|（有）)"
+)
+# 会社名の照合で無視する空白・区切り記号。
+_NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-―ー－_/／|｜]+")
+
+# PDF文面からの顧客照合で、これより短い正規化後の会社名は誤マッチしやすいため使わない。
+_MIN_COMPANY_CORE_LEN = 3
+
+
+def _normalize_company_name(value: str) -> str:
+    """会社名を照合用に正規化する。法人格・空白・区切り記号を除去し、英字を小文字化する。"""
+    without_affix = _CORP_AFFIX_RE.sub("", value)
+    without_noise = _NAME_NOISE_RE.sub("", without_affix)
+    return without_noise.strip().lower()
+
+
+def match_customer_by_pdf_text(
+    db: Client, tenant_id: str, pdf_text: str | None
+) -> int | None:
+    """PDF抽出テキストに含まれる発注元企業名から、既存顧客を1件に特定する。
+
+    束ね添付メール（1通に複数顧客の注文書PDFを添付して転送）では、メール単位で
+    解決した `customer_id` が全PDFで同一になってしまう（Issue #385）。各PDFの
+    文面から顧客を解決し直すための入口。
+
+    `customers.name` / `customers.alias` を法人格・記号・空白を無視して正規化し、
+    正規化後の文字列が PDF テキスト（同様に正規化したもの）に部分一致する顧客を
+    探す。一意に定まった場合のみ `customer_id` を返す。0件・複数件（判定不能）の
+    場合は None を返し、呼び出し側はメール単位で解決済みの `customer_id` に
+    フォールバックする（解決できないPDFは「不明な顧客」下書きに紐づく:
+    Issue #263 の挙動を踏襲）。
+
+    メールアドレスは PDF 文面から安定して取れないため、既存の email 突合
+    （`resolve_or_create_customer`）とは別経路で、企業名のみで突合する。
+    新規の下書き顧客はここでは作成しない（作成はメール単位で1回のまま）。
+
+    このサービスは cron から管理者クライアント（RLS バイパス）で呼ばれるため、
+    RLS の tenant isolation に依存せず明示的に `tenant_id` で絞り込む。
+    """
+    if not pdf_text:
+        return None
+    normalized_text = _normalize_company_name(pdf_text)
+    if not normalized_text:
+        return None
+
+    result = (
+        db.table(SupabaseTableName.CUSTOMERS.value)
+        .select("id, name, alias")
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+
+    matched_ids: set[int] = set()
+    for row in rows:
+        for raw_name in (row.get("name"), row.get("alias")):
+            if not isinstance(raw_name, str):
+                continue
+            normalized_name = _normalize_company_name(raw_name)
+            if len(normalized_name) < _MIN_COMPANY_CORE_LEN:
+                continue
+            if normalized_name in normalized_text:
+                matched_ids.add(int(row["id"]))
+                break
+
+    if len(matched_ids) == 1:
+        customer_id = next(iter(matched_ids))
+        logger.info(
+            f"customer resolved from PDF text: id={customer_id} tenant={tenant_id}"
+        )
+        return customer_id
+    if len(matched_ids) > 1:
+        logger.info(
+            f"PDF text matched multiple customers {sorted(matched_ids)} "
+            f"for tenant={tenant_id}; falling back to email-level customer"
+        )
+    return None
+
 
 def extract_sender_email_candidates(body: str) -> list[str]:
     """本文中の "From:"/"差出人:" 行にマッチする全メールアドレスを出現順・重複排除で返す。

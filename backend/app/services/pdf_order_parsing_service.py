@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import download_attachment
+from app.services.customer_matching_service import match_customer_by_pdf_text
 from app.services.email_extraction_service import extract_email_order_lines
 from app.services.notification_service import create_notification
 from app.services.pdf_order_extraction_service import extract_order_lines
@@ -187,9 +188,6 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
     """1件のステージング行を処理し、生成した order 数を返す。"""
     table = SupabaseTableName.ORDER_ATTACHMENTS.value
     attachment_id = row["id"]
-    customer_extraction_prompt = _get_customer_extraction_prompt(
-        db, row["tenant_id"], row.get("customer_id")
-    )
 
     # PDF添付があればPDFのテキストから明細抽出を試み、明細が0件ならメール本文に
     # フォールバックする。非PDF添付・添付なしメール（storage_path が空）は、
@@ -199,12 +197,33 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         text_result = extract_text(content)
 
         if text_result.failure_reason is not None:
+            # テキストが取れないPDFは文面から顧客を解決し直せないため、メール単位で
+            # 解決済みの customer_id をそのまま使う（挙動不変）。
             created_count = _process_unreadable_pdf(db, row, text_result.failure_reason)
             db.table(table).update({"parse_status": "success"}).eq(
                 "id", attachment_id
             ).execute()
             return created_count
 
+        # 束ね添付メール（Issue #384）では全ステージング行がメール単位で解決した
+        # 同じ customer_id を持つ。各PDFの文面から顧客を解決し直し、一意に定まれば
+        # この添付だけその顧客へ紐づけ直す（Issue #385）。解決できなければメール
+        # 単位の customer_id をそのまま使う（「不明な顧客」下書きを含む: Issue #263）。
+        resolved_customer_id = match_customer_by_pdf_text(
+            db, row["tenant_id"], text_result.text
+        )
+        if resolved_customer_id is not None and resolved_customer_id != row.get(
+            "customer_id"
+        ):
+            logger.info(
+                f"pdf_order_parsing: attachment {attachment_id} customer re-resolved "
+                f"from PDF text: {row.get('customer_id')} -> {resolved_customer_id}"
+            )
+            row = {**row, "customer_id": resolved_customer_id}
+
+        customer_extraction_prompt = _get_customer_extraction_prompt(
+            db, row["tenant_id"], row.get("customer_id")
+        )
         extraction = extract_order_lines(
             cast(str, text_result.text), customer_extraction_prompt
         )
@@ -230,6 +249,11 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
             # メール本文（source_raw）からの抽出にフォールバックする（Issue #278）
             created_count = _process_email_body(db, row, customer_extraction_prompt)
     else:
+        # 非PDF添付・添付なしメールは文面から顧客を解決し直せないため、メール単位で
+        # 解決済みの customer_id をそのまま使う（挙動不変）。
+        customer_extraction_prompt = _get_customer_extraction_prompt(
+            db, row["tenant_id"], row.get("customer_id")
+        )
         created_count = _process_email_body(db, row, customer_extraction_prompt)
 
     _notify_if_no_order_created(db, row, created_count)
