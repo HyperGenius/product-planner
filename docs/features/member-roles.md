@@ -105,3 +105,45 @@ Issue #328 は、上記の本Issue（#323）実装により大部分の要件が
 （#323 の設計判断を優先）。
 
 初回ログイン時のパスワード変更強制の要否は、本Issueのスコープ外として明示的に切り出す（要検討事項として残存）。
+
+## 削除済みメンバーと同じメールアドレスでの再作成（Issue #386-A）
+
+`delete_member`（`backend/app/routers/tenant/members.py`）は `organization_members` と
+`member_pins` の行のみを削除し、**Supabase Auth のユーザー（`auth.users`）と `profiles` は残す**
+（マルチテナントで1ユーザーが複数テナントに所属し得るため、テナントからの除外＝アカウント物理削除
+にはできない）。このため削除済みメンバーと同じメールアドレスで `create_member` を呼ぶと、
+`admin.create_user` が `already registered`（GoTrue のバージョンにより
+`...has already been registered` / `email_exists` などメッセージは揺れる）で失敗していた。
+
+`create_member` はこの失敗を捕捉し、`_recreate_deleted_member_or_conflict()` で以下のように分岐する:
+
+1. メールアドレスから既存の `auth.users` の id を引く（`_find_auth_user_id_by_email()`。
+   `delete_member` が `profiles` を残すため、まず `profiles.email` で引き、見つからなければ
+   `auth.admin.list_users()` をページングして突き合わせる）
+2. その user_id の `organization_members` を全テナント横断で確認する:
+   - **どのテナントにも所属していない孤児ユーザー** → リクエストで指定されたパスワードを
+     `admin.update_user_by_id` で再設定し、`profiles` を upsert（氏名の上書きを兼ねる）、
+     このテナントの `organization_members` に再紐付けして 201 を返す
+   - **既にこのテナントに所属** → 409「このメールアドレスはすでにこのテナントに登録されています」
+   - **別テナントで使用中** → 409「このメールアドレスは別のテナントで使用されています」
+   - **id を特定できない** → 安全側に倒して従来どおり 409「このメールアドレスはすでに登録されています」
+
+フロントエンド（`frontend/src/app/settings/members/page.tsx`）は変更なし。再紐付け成功時は
+新規追加と同じ 201 レスポンス・初期パスワード表示フローに乗る。
+
+### テスト
+
+`backend/__tests__/api/routers/tenant/test_members.py`:
+
+- `test_create_member_relinks_orphaned_auth_user` — 孤児 auth user は再紐付けで 201、
+  指定パスワードで `update_user_by_id` が呼ばれ、`organization_members` に insert される
+- `test_create_member_conflict_when_email_used_in_another_tenant` — 別テナント使用中は 409、
+  `update_user_by_id` は呼ばれない
+- `test_create_member_conflict_when_already_in_this_tenant` — 同一テナント所属済みは 409
+- `test_create_member_conflict_when_auth_user_not_locatable` — id を特定できない場合は汎用 409
+
+### スコープ外（後続Issue）
+
+- パスワードリセット機能（president / platform_admin がフロントから対象メンバーのパスワードを
+  再発行）: Issue #386-B
+- 対象メンバー本人へのアプリ内通知（`notifications.user_id` 追加）: Issue #388

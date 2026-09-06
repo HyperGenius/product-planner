@@ -269,3 +269,123 @@ class TestMembersRouter:
 
         assert response.status_code == 204
         mock_admin_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.assert_called_once()
+
+    # --- 削除済みメール(auth.usersに残存)での再作成 (Issue #386-A) ---
+
+    @staticmethod
+    def _stub_already_registered(mock_admin_client, *, profile_id, memberships):
+        """create_user は 'already registered' で失敗し、
+        profiles には profile_id、organization_members には memberships が返る状態にする。"""
+        mock_admin_client.auth.admin.create_user.side_effect = Exception(
+            "A user with this email address has already been registered"
+        )
+        prof_data = [{"id": profile_id}] if profile_id is not None else []
+        # profiles.select("id").eq(...).limit(1).execute()
+        mock_admin_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = prof_data
+        # organization_members.select("tenant_id").eq("user_id", ...).execute()
+        mock_admin_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = memberships
+
+    def test_create_member_relinks_orphaned_auth_user(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /: 削除済みメンバー(どのテナントにも未所属の孤児auth user)は再紐付けで201になる"""
+        _set_role(mock_client, "president")
+        self._stub_already_registered(
+            mock_admin_client, profile_id="orphan-user-id", memberships=[]
+        )
+
+        response = client.post(
+            "/tenant/members",
+            json={
+                "email": "deleted@example.com",
+                "password": "newpassword123",
+                "full_name": "復活 太郎",
+                "role": "order_handler",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["user_id"] == "orphan-user-id"
+        # 指定パスワードで再設定されること
+        (uid, attrs), _ = mock_admin_client.auth.admin.update_user_by_id.call_args
+        assert uid == "orphan-user-id"
+        assert attrs["password"] == "newpassword123"
+        # このテナントへ再紐付けされること
+        insert_tables = [c.args[0] for c in mock_admin_client.table.call_args_list]
+        assert "organization_members" in insert_tables
+
+    def test_create_member_conflict_when_email_used_in_another_tenant(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /: 別テナントで使用中のメールは409のまま（誤って再紐付けしない）"""
+        _set_role(mock_client, "president")
+        self._stub_already_registered(
+            mock_admin_client,
+            profile_id="other-tenant-user-id",
+            memberships=[{"tenant_id": "some-other-tenant-id"}],
+        )
+
+        response = client.post(
+            "/tenant/members",
+            json={
+                "email": "taken@example.com",
+                "password": "newpassword123",
+                "full_name": "別 テナント",
+                "role": "order_handler",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 409
+        assert "別のテナント" in response.json()["detail"]
+        mock_admin_client.auth.admin.update_user_by_id.assert_not_called()
+
+    def test_create_member_conflict_when_already_in_this_tenant(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /: 既にこのテナントに所属しているメールは409"""
+        _set_role(mock_client, "president")
+        self._stub_already_registered(
+            mock_admin_client,
+            profile_id="existing-user-id",
+            memberships=[{"tenant_id": headers["x-tenant-id"]}],
+        )
+
+        response = client.post(
+            "/tenant/members",
+            json={
+                "email": "member@example.com",
+                "password": "newpassword123",
+                "full_name": "既存 太郎",
+                "role": "order_handler",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 409
+        assert "このテナント" in response.json()["detail"]
+
+    def test_create_member_conflict_when_auth_user_not_locatable(
+        self, headers, mock_client, mock_admin_client
+    ):
+        """POST /: auth user の id を特定できない場合は安全側に倒して汎用409"""
+        _set_role(mock_client, "president")
+        self._stub_already_registered(
+            mock_admin_client, profile_id=None, memberships=[]
+        )
+        mock_admin_client.auth.admin.list_users.return_value = []
+
+        response = client.post(
+            "/tenant/members",
+            json={
+                "email": "ghost@example.com",
+                "password": "newpassword123",
+                "full_name": "ゴースト",
+                "role": "order_handler",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 409
+        mock_admin_client.auth.admin.update_user_by_id.assert_not_called()

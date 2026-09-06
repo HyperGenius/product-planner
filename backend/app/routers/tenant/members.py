@@ -28,6 +28,12 @@ logger = get_logger(__name__)
 # （承認系エンドポイントでは対象外とすること）。
 _MEMBER_ADMIN_ROLES = ("president", "platform_admin")
 
+# 再作成時に auth.users から既存ユーザーを突き合わせる際、profiles で id を
+# 特定できなかった場合のフォールバック（list_users のページング）上限。
+# 1テナントあたりの利用者数は小さい想定のため、この範囲で十分。
+_USER_LOOKUP_PAGE_SIZE = 200
+_MAX_USER_LOOKUP_PAGES = 10
+
 
 def _require_member_admin(
     current_user_id: str,
@@ -151,6 +157,110 @@ def get_my_membership(
     )
 
 
+def _attach_member_to_tenant(
+    admin_client: Client,
+    user_id: str,
+    tenant_id: str,
+    data: MemberCreateSchema,
+) -> None:
+    """auth ユーザーに profiles とテナント紐付け(organization_members)を登録する。"""
+    # profiles に氏名とメールアドレスを登録（再紐付け時は氏名の上書きも兼ねる）
+    admin_client.table("profiles").upsert(
+        {"id": user_id, "full_name": data.full_name, "email": str(data.email)}
+    ).execute()
+
+    # organization_members にテナント紐付けと権限を登録
+    admin_client.table("organization_members").insert(
+        {"user_id": user_id, "tenant_id": tenant_id, "role": data.role}
+    ).execute()
+
+
+def _find_auth_user_id_by_email(admin_client: Client, email: str) -> str | None:
+    """メールアドレスから既存の auth.users の id を引く。見つからなければ None。"""
+    # create_member は profiles.email を登録しているため、まず profiles で引く
+    prof_res = (
+        admin_client.table("profiles")
+        .select("id")
+        .eq("email", email)
+        .limit(1)
+        .execute()
+    )
+    prof_rows = cast(list[dict[str, Any]], prof_res.data or [])
+    if prof_rows:
+        return str(prof_rows[0]["id"])
+
+    # フォールバック: auth ユーザー一覧をページングして突き合わせる
+    email_lower = email.lower()
+    for page in range(1, _MAX_USER_LOOKUP_PAGES + 1):
+        users = admin_client.auth.admin.list_users(
+            page=page, per_page=_USER_LOOKUP_PAGE_SIZE
+        )
+        if not users:
+            break
+        for user in users:
+            if (user.email or "").lower() == email_lower:
+                return str(user.id)
+        if len(users) < _USER_LOOKUP_PAGE_SIZE:
+            break
+    return None
+
+
+def _recreate_deleted_member_or_conflict(
+    admin_client: Client,
+    data: MemberCreateSchema,
+    tenant_id: str,
+    original_error: Exception,
+) -> MemberResponse:
+    """メールが auth.users に残っている場合の再作成分岐。
+
+    delete_member はテナント紐付け(organization_members)のみ解除し auth.users /
+    profiles を残すため、削除済みメンバーと同じメールで再作成しようとすると
+    create_user が 'already registered' を返す。どのテナントにも所属していない
+    「孤児」ユーザーであれば、パスワードを再設定してこのテナントに再紐付けする。
+    別テナントで使用中・既に所属済みの場合は従来どおり 409。
+    """
+    existing_user_id = _find_auth_user_id_by_email(admin_client, str(data.email))
+    if existing_user_id is None:
+        # id を特定できない場合は安全側に倒して従来どおり 409
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="このメールアドレスはすでに登録されています",
+        ) from original_error
+
+    membership_res = (
+        admin_client.table("organization_members")
+        .select("tenant_id")
+        .eq("user_id", existing_user_id)
+        .execute()
+    )
+    memberships = cast(list[dict[str, Any]], membership_res.data or [])
+    if any(m["tenant_id"] == tenant_id for m in memberships):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="このメールアドレスはすでにこのテナントに登録されています",
+        ) from original_error
+    if memberships:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="このメールアドレスは別のテナントで使用されています",
+        ) from original_error
+
+    # 孤児ユーザー → 指定パスワードを再設定してこのテナントへ再紐付け
+    admin_client.auth.admin.update_user_by_id(
+        existing_user_id, {"password": data.password, "email_confirm": True}
+    )
+    _attach_member_to_tenant(admin_client, existing_user_id, tenant_id, data)
+    logger.info(
+        f"member: relinked orphaned auth user {existing_user_id} to tenant {tenant_id}"
+    )
+    return MemberResponse(
+        user_id=existing_user_id,
+        email=str(data.email),
+        full_name=data.full_name,
+        role=data.role,
+    )
+
+
 @member_router.post(
     "", response_model=MemberResponse, status_code=status.HTTP_201_CREATED
 )
@@ -161,7 +271,12 @@ def create_member(
     client: Client = Depends(get_supabase_client),
     admin_client: Client = Depends(get_supabase_admin_client),
 ):
-    """新規メンバーをアカウント発行して追加する（president / platform_admin のみ）"""
+    """新規メンバーをアカウント発行して追加する（president / platform_admin のみ）
+
+    削除済みメンバーと同じメールアドレスの場合、auth.users にレコードが残っている
+    ため create_user は失敗する。どのテナントにも所属していない孤児ユーザーであれば
+    パスワードを再設定してこのテナントへ再紐付けする（`_recreate_deleted_member_or_conflict`）。
+    """
     _require_member_admin(current_user_id, tenant_id, client)
 
     # Supabase Admin API でユーザーを作成
@@ -175,15 +290,20 @@ def create_member(
         )
     except Exception as e:
         error_msg = str(e)
+        error_lower = error_msg.lower()
+        # GoTrue のバージョンによりメッセージが揺れる
+        # ("User already registered" / "...has already been registered" / "email_exists")
         if (
-            "already registered" in error_msg
-            or "duplicate" in error_msg.lower()
-            or "23505" in error_msg
+            "already registered" in error_lower
+            or "already been registered" in error_lower
+            or "already exists" in error_lower
+            or "email_exists" in error_lower
+            or "duplicate" in error_lower
+            or "23505" in error_lower
         ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="このメールアドレスはすでに登録されています",
-            ) from e
+            return _recreate_deleted_member_or_conflict(
+                admin_client, data, tenant_id, e
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"ユーザー作成に失敗しました: {error_msg}",
@@ -197,16 +317,7 @@ def create_member(
         )
 
     new_user_id = str(new_user.id)
-
-    # profiles に氏名とメールアドレスを登録
-    admin_client.table("profiles").upsert(
-        {"id": new_user_id, "full_name": data.full_name, "email": data.email}
-    ).execute()
-
-    # organization_members にテナント紐付けと権限を登録
-    admin_client.table("organization_members").insert(
-        {"user_id": new_user_id, "tenant_id": tenant_id, "role": data.role}
-    ).execute()
+    _attach_member_to_tenant(admin_client, new_user_id, tenant_id, data)
 
     return MemberResponse(
         user_id=new_user_id,
