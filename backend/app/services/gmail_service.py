@@ -139,28 +139,40 @@ def _get_attachments(service, msg_id: str, payload: dict) -> list[dict[str, Any]
     """
     Gmail メッセージの parts から添付ファイル情報を収集し、バイナリデータと共に返す。
     返り値: [{"filename": str, "content_type": str, "data": bytes}, ...]
+
+    転送メールが message/rfc822 として添付されたり multipart/mixed が入れ子になる
+    構造では添付が2階層目以降に現れるため、ネストした parts も再帰的に探索する
+    （本文抽出の `_find_part_data` と同じ理由。Issue #384）。
     """
     results: list[dict[str, Any]] = []
-    parts = payload.get("parts", [])
+    _collect_attachments(service, msg_id, payload.get("parts", []), results)
+    return results
+
+
+def _collect_attachments(
+    service, msg_id: str, parts: list[dict], results: list[dict[str, Any]]
+) -> None:
+    """parts を再帰的に走査し、添付ファイルを results に追加する。"""
     for part in parts:
         attachment_id = part.get("body", {}).get("attachmentId")
         filename = part.get("filename", "")
-        if not attachment_id or not filename:
-            continue
-        content_type = part.get("mimeType", "application/octet-stream")
-        attachment = (
-            service.users()
-            .messages()
-            .attachments()
-            .get(userId="me", messageId=msg_id, id=attachment_id)
-            .execute()
-        )
-        raw = attachment.get("data", "")
-        data = _b64url_decode(raw)
-        results.append(
-            {"filename": filename, "content_type": content_type, "data": data}
-        )
-    return results
+        if attachment_id and filename:
+            content_type = part.get("mimeType", "application/octet-stream")
+            attachment = (
+                service.users()
+                .messages()
+                .attachments()
+                .get(userId="me", messageId=msg_id, id=attachment_id)
+                .execute()
+            )
+            raw = attachment.get("data", "")
+            data = _b64url_decode(raw)
+            results.append(
+                {"filename": filename, "content_type": content_type, "data": data}
+            )
+        nested = part.get("parts")
+        if nested:
+            _collect_attachments(service, msg_id, nested, results)
 
 
 def _move_label(
@@ -174,6 +186,38 @@ def _move_label(
         userId="me",
         id=msg_id,
         body={"addLabelIds": add_ids, "removeLabelIds": remove_ids},
+    ).execute()
+
+
+def _insert_staging_row(
+    db: Client,
+    *,
+    tenant_id: str,
+    customer_id: int | None,
+    msg_id: str,
+    body: str,
+    storage_path: str,
+    original_filename: str,
+    content_type: str | None,
+    size_bytes: int | None,
+) -> None:
+    """order_attachments に order_id=NULL のステージング行を1件 INSERT する。
+
+    1通のメールに複数のPDF添付がある場合は添付ごとに呼ばれる（Issue #384）。
+    """
+    db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+        {
+            "order_id": None,
+            "tenant_id": tenant_id,
+            "customer_id": customer_id,
+            "gmail_message_id": msg_id,
+            "source_raw": body,
+            "storage_path": storage_path,
+            "original_filename": original_filename,
+            "content_type": content_type,
+            "size_bytes": size_bytes,
+            "parse_status": "pending",
+        }
     ).execute()
 
 
@@ -213,13 +257,20 @@ def _process_message(
         if not tenant_id:
             raise ValueError(f"tenant not found for label: {tenant_name}")
 
-        # 4. 添付ファイル取得。PDFがあれば優先し、無ければ最初の添付を使う
-        #    （複数添付の個別処理は本Issueのスコープ外。1メール1添付を前提とする）
+        # 4. 添付ファイル取得。PDF添付は「1顧客の注文書 = 1ファイル」で送られてくる
+        #    ため、複数あればそれぞれを個別のステージング行にする（Issue #384）。
+        #    PDFが1件も無い場合のみ、従来どおり最初の添付（または添付なし）を
+        #    単一のステージング行として扱う（挙動維持）。
         attachments = _get_attachments(service, msg_id, msg.get("payload", {}))
-        pdf_attachment = next(
-            (a for a in attachments if a["content_type"] == "application/pdf"), None
-        )
-        staged_attachment = pdf_attachment or (attachments[0] if attachments else None)
+        pdf_attachments = [
+            a for a in attachments if a["content_type"] == "application/pdf"
+        ]
+        if pdf_attachments:
+            staged_attachments = pdf_attachments
+        elif attachments:
+            staged_attachments = [attachments[0]]
+        else:
+            staged_attachments = []
 
         # 5. 顧客マッチング（メールの受注可否に関わらず、ソース単位で1回解決する）
         #    転送ヘッダーが本文に無い場合、実際のGmail Fromヘッダーを最優先シグナルとして使う
@@ -240,44 +291,52 @@ def _process_message(
 
         # 6. 添付ファイル（あれば）をStorageにステージング保存し、
         #    order_attachments に order_id=NULL のステージング行として保存する。
+        #    PDF添付が複数ある場合は添付ごとに1行ずつ INSERT する（Issue #384）。
         #    実際のパース（本文/PDFからの line_items 抽出・複数order生成）は
         #    parse_pending_order_pdfs（cron）が非同期に行う（Issue #248, #280）。
-        if staged_attachment is not None:
-            storage_path = upload_staged_attachment(
-                db,
-                tenant_id,
-                msg_id,
-                staged_attachment["filename"],
-                staged_attachment["data"],
-                staged_attachment["content_type"],
+        #    各PDF（＝各顧客）ごとの顧客解決は Issue #385 で対応予定で、現時点では
+        #    全ステージング行にメール単位で解決した同じ customer_id を入れる。
+        if staged_attachments:
+            for att in staged_attachments:
+                storage_path = upload_staged_attachment(
+                    db,
+                    tenant_id,
+                    msg_id,
+                    att["filename"],
+                    att["data"],
+                    att["content_type"],
+                )
+                _insert_staging_row(
+                    db,
+                    tenant_id=tenant_id,
+                    customer_id=customer_id,
+                    msg_id=msg_id,
+                    body=body,
+                    storage_path=storage_path,
+                    original_filename=att["filename"],
+                    content_type=att["content_type"],
+                    size_bytes=len(att["data"]),
+                )
+            logger.info(
+                f"msg {msg_id}: staged {len(staged_attachments)} attachment(s) "
+                f"for deferred parsing (tenant={tenant_id})"
             )
-            original_filename = staged_attachment["filename"]
-            content_type = staged_attachment["content_type"]
-            size_bytes = len(staged_attachment["data"])
         else:
-            storage_path = ""
-            original_filename = ""
-            content_type = None
-            size_bytes = None
-
-        db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
-            {
-                "order_id": None,
-                "tenant_id": tenant_id,
-                "customer_id": customer_id,
-                "gmail_message_id": msg_id,
-                "source_raw": body,
-                "storage_path": storage_path,
-                "original_filename": original_filename,
-                "content_type": content_type,
-                "size_bytes": size_bytes,
-                "parse_status": "pending",
-            }
-        ).execute()
-        logger.info(
-            f"msg {msg_id}: staged for deferred parsing "
-            f"(tenant={tenant_id}, attachment={'yes' if staged_attachment else 'no'})"
-        )
+            _insert_staging_row(
+                db,
+                tenant_id=tenant_id,
+                customer_id=customer_id,
+                msg_id=msg_id,
+                body=body,
+                storage_path="",
+                original_filename="",
+                content_type=None,
+                size_bytes=None,
+            )
+            logger.info(
+                f"msg {msg_id}: staged for deferred parsing "
+                f"(tenant={tenant_id}, attachment=no)"
+            )
 
         # 7. 処理中 → 処理済み
         _move_label(service, msg_id, done_id, processing_id)

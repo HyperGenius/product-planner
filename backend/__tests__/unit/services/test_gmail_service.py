@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from app.services.gmail_service import (
     _b64url_decode,
+    _get_attachments,
     _get_message_body,
     _get_real_from_email,
     _process_message,
@@ -169,6 +170,67 @@ class TestGetMessageBody:
         }
 
         assert _get_message_body(msg) == html
+
+
+@pytest.mark.unit
+class TestGetAttachments:
+    """添付ファイル収集がネストした parts も再帰的に探索することの回帰テスト
+    （Issue #384: 転送メールが message/rfc822 として添付される等、添付が
+    2階層目以降に現れる構造で1つも取得できない不具合）。"""
+
+    @staticmethod
+    def _mock_service(payload_b64: str) -> MagicMock:
+        mock_service = MagicMock()
+        (mock_service.users().messages().attachments().get().execute.return_value) = {
+            "data": payload_b64
+        }
+        return mock_service
+
+    def test_collects_attachments_nested_below_top_level_parts(self):
+        b64 = base64.urlsafe_b64encode(b"%PDF-1.4").decode().rstrip("=")
+        payload = {
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {
+                    "mimeType": "multipart/alternative",
+                    "parts": [
+                        {"mimeType": "text/plain", "body": {"data": ""}},
+                    ],
+                },
+                {
+                    "mimeType": "application/pdf",
+                    "filename": "top_level.pdf",
+                    "body": {"attachmentId": "att-top"},
+                },
+                {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "mimeType": "application/pdf",
+                            "filename": "nested.pdf",
+                            "body": {"attachmentId": "att-nested"},
+                        },
+                    ],
+                },
+            ],
+        }
+
+        results = _get_attachments(self._mock_service(b64), "msg-1", payload)
+
+        assert [r["filename"] for r in results] == ["top_level.pdf", "nested.pdf"]
+        assert all(r["data"] == b"%PDF-1.4" for r in results)
+
+    def test_ignores_parts_without_attachment_id_or_filename(self):
+        b64 = base64.urlsafe_b64encode(b"x").decode().rstrip("=")
+        payload = {
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": "abc"}},
+                {"mimeType": "application/pdf", "body": {"attachmentId": "no-name"}},
+                {"mimeType": "image/png", "filename": "inline.png", "body": {}},
+            ]
+        }
+
+        assert _get_attachments(self._mock_service(b64), "msg-1", payload) == []
 
 
 @pytest.mark.unit
@@ -374,6 +436,134 @@ class TestProcessMessagePdfStaging:
         assert inserted_row["original_filename"] == ""
         assert inserted_row["content_type"] is None
         assert inserted_row["parse_status"] == "pending"
+
+    def test_multiple_pdf_attachments_are_each_staged_as_separate_row(self):
+        """複数顧客の注文書PDFを1通にまとめて添付したメールで、PDFごとに
+        order_attachments のステージング行が作られること（Issue #384）。"""
+        mock_service = self._mock_gmail_service()
+        mock_db = MagicMock()
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[
+                    {
+                        "filename": "customer_a.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-A",
+                    },
+                    {
+                        "filename": "customer_b.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-BB",
+                    },
+                    {
+                        "filename": "customer_c.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-CCC",
+                    },
+                ],
+            ),
+            patch(
+                "app.services.gmail_service.extract_effective_sender_email",
+                return_value="boss@example.com",
+            ),
+            patch(
+                "app.services.gmail_service.resolve_or_create_customer",
+                return_value=(42, False),
+            ),
+            patch(
+                "app.services.gmail_service.upload_staged_attachment",
+                side_effect=lambda _db, _t, _m, filename, *_a: (
+                    f"tenant-1/inbox/msg-1/{filename}"
+                ),
+            ) as mock_upload_staged,
+        ):
+            _process_message(mock_service, mock_db, "msg-1", "tenantA", {})
+
+        assert mock_upload_staged.call_count == 3
+        inserted_rows = [
+            call.args[0]
+            for call in mock_db.table("order_attachments").insert.call_args_list
+        ]
+        assert len(inserted_rows) == 3
+        assert {row["storage_path"] for row in inserted_rows} == {
+            "tenant-1/inbox/msg-1/customer_a.pdf",
+            "tenant-1/inbox/msg-1/customer_b.pdf",
+            "tenant-1/inbox/msg-1/customer_c.pdf",
+        }
+        assert {row["original_filename"] for row in inserted_rows} == {
+            "customer_a.pdf",
+            "customer_b.pdf",
+            "customer_c.pdf",
+        }
+        assert {row["size_bytes"] for row in inserted_rows} == {6, 7, 8}
+        for row in inserted_rows:
+            assert row["order_id"] is None
+            assert row["customer_id"] == 42
+            assert row["gmail_message_id"] == "msg-1"
+            assert row["parse_status"] == "pending"
+
+    def test_non_pdf_attachments_are_ignored_when_a_pdf_is_present(self):
+        """PDFと非PDFが混在する場合、PDFのみをステージングし非PDFは無視すること
+        （Issue #384。従来の「PDFがあれば優先」を複数PDFへ拡張）。"""
+        mock_service = self._mock_gmail_service()
+        mock_db = MagicMock()
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[
+                    {
+                        "filename": "note.txt",
+                        "content_type": "text/plain",
+                        "data": b"hello",
+                    },
+                    {
+                        "filename": "order_1.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-1",
+                    },
+                    {
+                        "filename": "order_2.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-2",
+                    },
+                ],
+            ),
+            patch(
+                "app.services.gmail_service.extract_effective_sender_email",
+                return_value=None,
+            ),
+            patch(
+                "app.services.gmail_service.resolve_or_create_customer",
+                return_value=(1, False),
+            ),
+            patch(
+                "app.services.gmail_service.upload_staged_attachment",
+                side_effect=lambda _db, _t, _m, filename, *_a: f"path/{filename}",
+            ) as mock_upload_staged,
+        ):
+            _process_message(mock_service, mock_db, "msg-1", "tenantA", {})
+
+        staged_filenames = [c.args[3] for c in mock_upload_staged.call_args_list]
+        assert staged_filenames == ["order_1.pdf", "order_2.pdf"]
+        inserted_rows = [
+            call.args[0]
+            for call in mock_db.table("order_attachments").insert.call_args_list
+        ]
+        assert {row["original_filename"] for row in inserted_rows} == {
+            "order_1.pdf",
+            "order_2.pdf",
+        }
 
     def test_real_from_header_is_passed_to_customer_matching(self):
         """実際のGmail `From` ヘッダーが resolve_or_create_customer に渡されること

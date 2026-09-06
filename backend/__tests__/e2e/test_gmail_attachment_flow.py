@@ -98,6 +98,78 @@ class TestGmailAttachmentFlow:
             f"Expected '{stored_name}', found: {stored_filenames}"
         )
 
+    def test_multiple_pdf_attachments_are_each_staged(
+        self,
+        inject_email_with_multiple_pdfs: dict[str, Any],
+        admin_db,
+    ) -> None:
+        """
+        複数のPDFを添付したメールを受信したとき (Issue #384):
+        - 添付したPDFの数だけ order_attachments のステージング行
+          (order_id=NULL, parse_status='pending') が作成される
+        - 各ステージング行の storage_path が {tenant_id}/inbox/{message_id}/ 配下で
+          互いに異なり、Storage 上にもその数だけファイルが保存される
+        """
+        run_id = inject_email_with_multiple_pdfs["run_id"]
+        message_id = inject_email_with_multiple_pdfs["message_id"]
+        pdf_filenames = inject_email_with_multiple_pdfs["pdf_filenames"]
+
+        result = poll_unread_emails(admin_db)
+        assert result["errors"] == 0, f"poll_unread_emails returned errors: {result}"
+        assert result["processed"] >= 1
+
+        time.sleep(1)
+
+        # --- orders レコードが作成されないことの検証 ---
+        order_result = (
+            admin_db.table("orders")
+            .select("id")
+            .like("source_raw", f"%run_id={run_id}%")
+            .execute()
+        )
+        assert not (order_result.data or []), (
+            f"Expected no order for multi-PDF email, got {order_result.data}"
+        )
+
+        # --- 添付数ぶんのステージング行が作られることの検証 ---
+        att_result = (
+            admin_db.table("order_attachments")
+            .select("*")
+            .is_("order_id", "null")
+            .like("source_raw", f"%run_id={run_id}%")
+            .execute()
+        )
+        attachments = att_result.data or []
+        assert len(attachments) == len(pdf_filenames), (
+            f"Expected {len(pdf_filenames)} staged rows, got {len(attachments)}. "
+            f"run_id={run_id}"
+        )
+
+        for attachment in attachments:
+            assert attachment["order_id"] is None
+            assert attachment["gmail_message_id"] == message_id
+            assert attachment["parse_status"] == "pending"
+            assert attachment["content_type"] == "application/pdf"
+            assert attachment["size_bytes"] and attachment["size_bytes"] > 0
+
+        tenant_id = attachments[0]["tenant_id"]
+        storage_paths = {a["storage_path"] for a in attachments}
+        assert len(storage_paths) == len(attachments), (
+            f"storage_path collision across staged rows: {storage_paths}"
+        )
+        assert {a["original_filename"] for a in attachments} == set(pdf_filenames)
+        for path in storage_paths:
+            assert path.startswith(f"{tenant_id}/inbox/{message_id}/")
+            assert path.endswith(".pdf")
+
+        # --- Storage に添付数ぶんのファイルが存在することを検証 ---
+        storage_list = admin_db.storage.from_("order-attachments").list(
+            f"{tenant_id}/inbox/{message_id}"
+        )
+        stored_filenames = {f["name"] for f in (storage_list or [])}
+        for path in storage_paths:
+            assert path.rsplit("/", 1)[-1] in stored_filenames
+
     def test_email_without_attachment_is_handled_gracefully(
         self,
         inject_email_without_attachment: dict[str, Any],
