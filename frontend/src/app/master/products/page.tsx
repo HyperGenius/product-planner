@@ -383,11 +383,14 @@ export default function ProductsPage() {
                       className={cn(highlightId === product.id && "ring-2 ring-inset ring-primary bg-primary/5")}
                     >
                       <TableCell>
-                        <div className="text-xs text-muted-foreground">{displayCode}</div>
+                        {/* 図番（code）は実質的な識別子のため主テキストで表示し、
+                            品名（name）を副次テキストにする（列見出し「図番 / 品名」・
+                            product-selector の表示順とも整合。Issue #382） */}
+                        <div className="text-sm font-medium">{displayCode}</div>
                         {displayName ? (
-                          <div className="text-sm">{displayName}</div>
+                          <div className="text-xs text-muted-foreground">{displayName}</div>
                         ) : (
-                          <div className="text-sm text-muted-foreground">品名未設定</div>
+                          <div className="text-xs text-muted-foreground">品名未設定</div>
                         )}
                       </TableCell>
                       <TableCell>
