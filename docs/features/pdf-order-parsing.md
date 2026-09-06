@@ -140,6 +140,27 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
   参照するN件の下書きを生成する機能）は `POST /orders/{order_id}/split` として実装済み。
   詳細は本ファイル末尾の「手動分割UI（Issue #280 Phase3）」を参照
 
+### 複数PDF添付の分割ステージング（Issue #384）
+
+社長（社内の共通メールアカウント）が、FAX / セキュアファイル共有サイト由来の
+受注PDFを **複数顧客ぶんまとめて1通のメールに添付** して転送する運用がある。
+
+- 以前の `gmail_service._process_message()` は「1メール1添付」前提で、最初の
+  `application/pdf` 添付（無ければ先頭の添付）1件だけを Storage 保存・ステージング
+  していたため、2つ目以降のPDFは Storage にも `order_attachments` にも残らず、
+  通知もされないまま **サイレントに起票漏れ** していた
+- Issue #384 で、PDF添付が複数ある場合は **添付ごとに Storage 保存 + `order_attachments`
+  ステージング行を1件ずつ INSERT** するよう変更（`_insert_staging_row()`）。以降は
+  各ステージング行が独立して `parse_pending_order_pdfs()` に拾われ、それぞれ
+  「1ソース:N受注」モデルで処理される
+- あわせて `_get_attachments()` を **ネストした `parts` の再帰探索** に変更
+  （転送メールが `message/rfc822` として添付される等、添付が2階層目以降に現れる
+  構造で1つも取得できなかった問題への防御。本文抽出の `_find_part_data` と同じ理由）
+- PDFが1件も無いメール（非PDF添付のみ・添付なし）は従来どおり単一ステージング行
+- 顧客解決は引き続き **メール単位で1回**。複数PDFのステージング行はすべて同じ
+  `customer_id`（社長の実 From ヘッダー由来 or「不明な顧客」下書き）を持つため、
+  各PDFを正しい顧客へ紐づけるPDF単位の顧客解決は **Issue #385** に切り出している
+
 ### 複数受注の疑いの検知（Issue #280）
 
 `line_items` 配列形式への統一により「1通のメールに複数月分の数量が含まれる」
@@ -732,7 +753,8 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
 ## スコープ外
 
 - PPAP（パスワード付きPDF）の自動復号
-- 複数添付ファイルへの対応（1メール1添付の前提を維持）
+- ~~複数添付ファイルへの対応（1メール1添付の前提を維持）~~ → Issue #384 で対応（1メール = N添付。下記「複数PDF添付の分割ステージング」参照）
+- 束ね添付メールでのPDF単位の顧客解決（Issue #385。現状は全ステージング行がメール単位で解決した同じ `customer_id` を持つ）
 - 重複スキップ・照合失敗の通知UI（[notifications.md](notifications.md) Issue #254 で対応）
 - ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 - `customer_certainty`（`forecast`/`forecast_tentative`）のUIフィルタータブ追加（別途検討）

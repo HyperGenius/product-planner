@@ -267,6 +267,25 @@ def _build_raw_email(
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
 
+def _build_raw_email_with_pdfs(
+    subject: str,
+    body: str,
+    sender: str,
+    pdfs: list[tuple[str, bytes]],
+) -> str:
+    """複数のPDFを添付した RFC 2822 メールを base64url エンコードして返す（Issue #384）。"""
+    msg = email.mime.multipart.MIMEMultipart()
+    msg["To"] = "me"
+    msg["From"] = sender
+    msg["Subject"] = subject
+    msg.attach(email.mime.text.MIMEText(body, "plain", "utf-8"))
+    for filename, pdf_bytes in pdfs:
+        attachment = email.mime.application.MIMEApplication(pdf_bytes, _subtype="pdf")
+        attachment.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(attachment)
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
 @pytest.fixture()
 def inject_email_with_pdf(
     gmail_service,
@@ -320,6 +339,62 @@ def inject_email_with_pdf(
         pass  # already deleted or label moved — ignore
 
     # --- teardown: Supabase の order / order_attachments / Storage を削除 ---
+    _cleanup_supabase(admin_db, e2e_config, run_id)
+
+
+@pytest.fixture()
+def inject_email_with_multiple_pdfs(
+    gmail_service,
+    pending_label_id: str,
+    e2e_config: dict[str, str],
+    admin_db: Client,
+) -> Generator[dict[str, Any], None, None]:
+    """
+    PDFを2つ添付したテストメールを Gmail に注入し、テスト後にクリーンアップする
+    （Issue #384: 社長が複数顧客の注文書PDFを1通にまとめて転送する運用）。
+
+    yield するdict:
+        message_id:     Gmail メッセージ ID
+        run_id:         このテスト実行を識別するユニーク文字列（件名・本文に埋め込み済み）
+        sender:         送信者メールアドレス
+        pdf_filenames:  添付したPDFのファイル名リスト
+    """
+    run_id = uuid.uuid4().hex[:8]
+    sender = f"e2e-test-{run_id}@example.com"
+    subject = f"【E2Eテスト】複数注文書 {run_id}"
+    body = f"E2Eテストメール（複数PDF添付）。run_id={run_id}\n"
+    pdf_filenames = [f"order_{run_id}_a.pdf", f"order_{run_id}_b.pdf"]
+
+    raw = _build_raw_email_with_pdfs(
+        subject,
+        body,
+        sender,
+        [(name, _MINIMAL_PDF) for name in pdf_filenames],
+    )
+    response = (
+        gmail_service.users()
+        .messages()
+        .insert(
+            userId="me",
+            body={"raw": raw, "labelIds": [pending_label_id]},
+        )
+        .execute()
+    )
+    message_id = response["id"]
+
+    context: dict[str, Any] = {
+        "message_id": message_id,
+        "run_id": run_id,
+        "sender": sender,
+        "pdf_filenames": pdf_filenames,
+    }
+    yield context
+
+    try:
+        gmail_service.users().messages().delete(userId="me", id=message_id).execute()
+    except Exception:
+        pass
+
     _cleanup_supabase(admin_db, e2e_config, run_id)
 
 

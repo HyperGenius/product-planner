@@ -178,16 +178,20 @@ interface OrderCreate {
       │
       ├─ 3. テナント解決（`gmail_label_tenants` テーブルからテナント ID 取得）
       │
-      ├─ 4. 添付ファイル取得。PDFがあれば優先し、無ければ最初の添付を使う
-      │      （複数添付の個別処理は対象外。1メール1添付が前提）
+      ├─ 4. 添付ファイル取得（ネストした parts も再帰探索）。PDF添付が
+      │      あれば **その全件** を対象にし、PDFが無ければ最初の添付を使う
+      │      （Issue #384。社長が複数顧客の注文書PDFを1通にまとめて転送する運用に対応）
       │
       ├─ 5. 顧客マッチング [customer_matching_service.py]
       │      送信者メールアドレスで検索 → 未登録の場合は draft 顧客を自動作成
-      │      （受注メールか否かに関わらず、ソース単位で1回だけ解決する）
+      │      （受注メールか否かに関わらず、メール単位で1回だけ解決する。
+      │       複数PDF添付時も現時点では全ステージング行に同じ customer_id を入れる。
+      │       PDF単位の顧客解決は Issue #385）
       │
-      ├─ 6. 添付ファイル（あれば）を Storage にステージング保存し、
-      │      `order_attachments` に order_id=NULL のステージング行を1件INSERT
-      │      （storage_path は添付が無ければ空文字）
+      ├─ 6. 添付ファイルを Storage にステージング保存し、`order_attachments` に
+      │      order_id=NULL のステージング行をINSERT。**PDF添付が複数ある場合は
+      │      添付ごとに1行ずつ**（Issue #384）。PDFが無い/添付なしの場合は
+      │      従来どおり1行のみ（storage_path は添付が無ければ空文字）
       │
       └─ 7. ラベルを `pp-done/{テナント名}` に移動
              （失敗時は `pp-error/{テナント名}` に移動）
@@ -442,3 +446,5 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | パース成功・起票0件の可視化（`no_order_created` 通知） | ✅ #357 |
 | 受信受注メールの処理結果一覧（`GET /orders/email-intake-results` + `/orders/email-intake`） | ✅ #357 |
 | 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
+| 複数PDF添付メールの添付ごとステージング（1メール:N添付）＋ 添付収集のネスト再帰化（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#複数pdf添付の分割ステージングissue-384)） | ✅ #384 |
+| 束ね添付メールでのPDF単位の顧客解決 | ⬜ #385 |
