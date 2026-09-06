@@ -30,9 +30,10 @@ if (colEndIdx <= colStartIdx) colEndIdx = colStartIdx + 1  // 2. 最小幅保証
 
 検査・承認・出荷判定など `start_datetime == end_datetime` の工程は、幅を持つバーではなく**ひし形マーカー**で描画する（#379）。
 
-- `getMilestoneGridColumn(taskStart, config)`: マーカーを配置する 1 列分のグリッド位置（1 始まり）を返す。通常バーの `getTaskGridColumns()` は「開始 < 終了」を前提に最小幅を保証するため、`start == end` では幅が 0/負になり得る。マーカー専用にガード付きで開始時刻を含む列を算出する。
+- `getMilestoneGridColumn(taskStart, config)`: マーカーを配置する 1 列分のグリッド位置（1 始まり）を返す。通常バーの `getTaskGridColumns()` は `colEnd = Math.max(colStart + 1, ...)` で最小 1 列幅を保証するため、`start == end` の工程も「幅 1 列のバー」になり、マイルストーンとして視認できない。そのためマーカー専用に開始列だけを算出する。
+  - 開始列の丸めは `getTaskGridColumns()` の `colStart`（切り上げ）および稼働時間スロット側（`binarySearchFirstGe` = 開始以降の最初のスロット）と揃える。
   - 稼働時間スロットモード: `binarySearchFirstGe(slots, taskStartMs)` のインデックス（範囲外は端にクランプ）+ 1。
-  - 均一グリッド: `floor((taskStart - rangeStart) / unitDurationMs) + 1` を `[1, totalUnits]` にクランプ。
+  - 均一グリッド: `ceil((taskStart - rangeStart) / unitDurationMs) + 1` を `[1, totalUnits]` にクランプ。
 - 描画側（`GanttChart` / `TaskBar`）は `GanttTask.isMilestone === true` のとき `getMilestoneGridColumn()` の結果で `colStart` / `colEnd = colStart + 1` を与え、`TaskBar` がアウトラインのひし形マーカー＋右側ラベルを表示する。
 
 ## 変更履歴

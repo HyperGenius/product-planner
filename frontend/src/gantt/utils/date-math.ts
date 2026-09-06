@@ -146,9 +146,13 @@ export function getTaskGridColumns(
 /**
  * マイルストーン工程（所要時間 0）のマーカーを描画するグリッド列位置（1始まり）を返す。
  *
- * 通常バーの colStart/colEnd は「開始 < 終了」を前提に幅を持たせるため、
- * start == end のタスクでは幅が 0/負になり得る。マーカーは幅を持たず
- * 開始時刻を含む 1 列に配置するため、専用にガード付きで算出する。
+ * 通常バーの `getTaskGridColumns()` は `colEnd = Math.max(colStart + 1, ...)` で
+ * 最小 1 列幅を保証するため、start == end のタスクも「幅 1 列のバー」になってしまい
+ * マイルストーンとして視認できない。この関数は開始列だけを算出し、呼び出し側で
+ * 幅を持たない◇マーカーとして描画するために使う。
+ *
+ * 開始列の丸めは `getTaskGridColumns()` の colStart（切り上げ）および
+ * 稼働時間スロット側（`binarySearchFirstGe` = 開始以降の最初のスロット）と揃える。
  */
 export function getMilestoneGridColumn(
   taskStart: Date,
@@ -166,7 +170,7 @@ export function getMilestoneGridColumn(
 
   const { rangeStart, unitDurationMs, totalUnits } = config
   const rawCol =
-    Math.floor((taskStart.getTime() - rangeStart.getTime()) / unitDurationMs) + 1
+    Math.ceil((taskStart.getTime() - rangeStart.getTime()) / unitDurationMs) + 1
   return Math.max(1, Math.min(rawCol, totalUnits))
 }
 

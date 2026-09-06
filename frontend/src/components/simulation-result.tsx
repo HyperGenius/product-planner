@@ -118,7 +118,7 @@ export function SimulationResult({
                   )}
                   {isMilestone ? (
                     <p className="text-sm text-muted-foreground mt-1">
-                      時刻: {startFormatted}（所要時間: 0）
+                      日時: {startFormatted}（所要時間: 0）
                     </p>
                   ) : (
                     <p className="text-sm text-muted-foreground mt-1">
