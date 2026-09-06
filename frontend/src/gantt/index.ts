@@ -9,5 +9,10 @@
 export { GanttChart } from './components/gantt-chart'
 export type { GanttChartProps } from './components/gantt-chart'
 export type { GanttTask, GanttViewMode } from './types'
-export { buildTimelineConfig, getTaskGridColumns, getNowFractionalColumn } from './utils/date-math'
+export {
+  buildTimelineConfig,
+  getTaskGridColumns,
+  getMilestoneGridColumn,
+  getNowFractionalColumn,
+} from './utils/date-math'
 export type { TimelineConfig, WorkHoursConfig } from './utils/date-math'

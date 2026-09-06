@@ -91,6 +91,9 @@ export function SimulationResult({
             const startFormatted = format(startDate, "MM/dd HH:mm", { locale: ja })
             const endFormatted = format(endDate, "MM/dd HH:mm", { locale: ja })
 
+            // 所要時間 0 の工程（マイルストーン: 検査・承認・出荷判定など）
+            const isMilestone = startDate.getTime() === endDate.getTime()
+
             return (
               <div
                 key={index}
@@ -100,15 +103,28 @@ export function SimulationResult({
                   {index + 1}
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium">{schedule.process_name}</p>
+                  <p className="font-medium">
+                    {schedule.process_name}
+                    {isMilestone && (
+                      <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                        マイルストーン
+                      </span>
+                    )}
+                  </p>
                   {schedule.equipment_name && (
                     <p className="text-sm text-muted-foreground">
                       設備: {schedule.equipment_name}
                     </p>
                   )}
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {startFormatted} → {endFormatted}
-                  </p>
+                  {isMilestone ? (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      日時: {startFormatted}（所要時間: 0）
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {startFormatted} → {endFormatted}
+                    </p>
+                  )}
                 </div>
               </div>
             )

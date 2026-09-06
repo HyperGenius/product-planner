@@ -19,6 +19,11 @@ export interface GanttTask {
   tooltip?: ReactNode
   /** グループヘッダー行として表示する場合 true */
   isGroupHeader?: boolean
+  /**
+   * 所要時間 0（start と end が同一時刻）のマイルストーン工程として
+   * 幅0のバーではなくひし形マーカーで描画する場合 true
+   */
+  isMilestone?: boolean
 }
 
 /**
