@@ -144,6 +144,57 @@ Issue #328 は、上記の本Issue（#323）実装により大部分の要件が
 
 ### スコープ外（後続Issue）
 
-- パスワードリセット機能（president / platform_admin がフロントから対象メンバーのパスワードを
-  再発行）: Issue #386-B
 - 対象メンバー本人へのアプリ内通知（`notifications.user_id` 追加）: Issue #388
+
+## メンバーのパスワードリセット（Issue #386-B）
+
+パスワードを失念したメンバーの復旧経路。初期パスワードは president がその場で発行して
+口頭／紙で共有する運用（[Issue #328](#メンバー招待フローの新ロール対応issue-328)）だが、
+失念時に再発行する手段が PIN リセットしかなく、パスワード自体を出し直せなかった。
+メール送信基盤がない（`supabase/config.toml` の SMTP はコメントアウト）ため、
+リセット結果はメール通知ではなく **president の画面表示 → 本人へ口頭／紙で共有** で完結させる。
+
+### エンドポイント
+
+`POST /tenant/members/{user_id}/password/reset`（`reset_member_password`,
+`backend/app/routers/tenant/members.py`）
+
+- `_require_member_admin` で `president` / `platform_admin` に限定（それ以外は 403）
+- 対象ユーザーが同一テナントに所属しているか確認（未所属なら 404。テナント越えの操作を防ぐ）
+- リクエストボディの新パスワード（`MemberPasswordResetSchema.password`, `min_length=8`）で
+  `admin.auth.admin.update_user_by_id(user_id, {"password": ...})` を実行
+- レスポンス `MemberPasswordResetResponse`（`user_id` / `new_password`）で新パスワードを
+  そのまま返し、フロントで一度だけ表示する
+- **PIN（`member_pins`）は変更しない**（PIN リセットは既存の
+  `POST /tenant/members/{user_id}/pin/reset` で別操作）
+
+### スキーマ
+
+`backend/app/models/tenant/member_schemas.py` に `MemberPasswordResetSchema` /
+`MemberPasswordResetResponse` を追加。
+
+### フロントエンド
+
+- `frontend/src/types/member.ts`: `MemberPasswordResetResponse` 型
+- `frontend/src/hooks/use-tenant-members.ts`: `useResetMemberPassword()`（`{ userId, password }` を
+  受け取り `new_password` を返す `useMutation`）
+- `frontend/src/app/settings/members/page.tsx`: メンバー行に「パスワードをリセット」ボタン（`Lock`
+  アイコン。`KeyRound` は PIN リセットで使用済み）。`Dialog` で新パスワード（`generatePassword()` で
+  生成、編集・再生成可）を確認 → リセット実行 → 完了後に新パスワードをコピーボタン付きで一度だけ表示
+  （新規追加時の初期パスワード表示 UI と同じパターン）
+
+### テスト
+
+`backend/__tests__/api/routers/tenant/test_members.py`:
+
+- `test_reset_member_password_forbidden_for_non_admin` — `order_handler` / `iso_officer` は 403
+- `test_reset_member_password_allowed_for_admin` — `president` / `platform_admin` は 200、
+  レスポンスに `new_password` が返り、`update_user_by_id` がそのパスワードで呼ばれ、
+  `member_pins` には触れない
+- `test_reset_member_password_rejects_short_password` — 8文字未満は 422
+
+### スコープ外（後続Issue）
+
+- 対象メンバー本人へのアプリ内通知（`notifications.user_id` 追加）: Issue #388
+- パスワードリセット時に PIN も同時に無効化するオプション（要検討事項として残存）
+- 初回ログイン時のパスワード変更強制（#328 からの継続検討事項）

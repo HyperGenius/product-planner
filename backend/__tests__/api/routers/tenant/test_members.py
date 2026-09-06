@@ -389,3 +389,61 @@ class TestMembersRouter:
 
         assert response.status_code == 409
         mock_admin_client.auth.admin.update_user_by_id.assert_not_called()
+
+    # --- パスワードリセット (Issue #386-B) ---
+
+    @pytest.mark.parametrize("role", ["order_handler", "iso_officer"])
+    def test_reset_member_password_forbidden_for_non_admin(
+        self, headers, mock_client, role
+    ):
+        """POST /{user_id}/password/reset: president / platform_admin 以外は403"""
+        _set_role(mock_client, role)
+
+        response = client.post(
+            "/tenant/members/other-user-id/password/reset",
+            json={"password": "newStrongPass1"},
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.parametrize("role", ["president", "platform_admin"])
+    def test_reset_member_password_allowed_for_admin(
+        self, headers, mock_client, mock_admin_client, role
+    ):
+        """POST /{user_id}/password/reset: president / platform_admin は再設定でき、
+        新パスワードがレスポンスで返る（本人共有用）"""
+        _set_role(mock_client, role)
+
+        response = client.post(
+            "/tenant/members/other-user-id/password/reset",
+            json={"password": "newStrongPass1"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {
+            "user_id": "other-user-id",
+            "new_password": "newStrongPass1",
+        }
+        (uid, attrs), _ = mock_admin_client.auth.admin.update_user_by_id.call_args
+        assert uid == "other-user-id"
+        assert attrs["password"] == "newStrongPass1"
+        # PIN(member_pins)には触れないこと
+        touched_tables = [
+            c.args[0] for c in mock_admin_client.table.call_args_list if c.args
+        ]
+        assert "member_pins" not in touched_tables
+
+    def test_reset_member_password_rejects_short_password(self, headers, mock_client):
+        """POST /{user_id}/password/reset: 8文字未満は422"""
+        _set_role(mock_client, "president")
+
+        response = client.post(
+            "/tenant/members/other-user-id/password/reset",
+            json={"password": "short"},
+            headers=headers,
+        )
+
+        assert response.status_code == 422

@@ -32,3 +32,8 @@ export interface MemberUpdate {
   full_name?: string
   role?: MemberRole
 }
+
+export interface MemberPasswordResetResponse {
+  user_id: string
+  new_password: string
+}

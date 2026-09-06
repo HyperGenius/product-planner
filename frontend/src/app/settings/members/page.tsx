@@ -1,13 +1,22 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Pencil, Trash2, Copy, RefreshCw, KeyRound } from "lucide-react"
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Copy,
+  RefreshCw,
+  KeyRound,
+  Lock,
+} from "lucide-react"
 import { toast } from "sonner"
 import {
   useTenantMembers,
   useCreateTenantMember,
   useUpdateTenantMember,
   useDeleteTenantMember,
+  useResetMemberPassword,
 } from "@/hooks/use-tenant-members"
 import { useResetMemberPin } from "@/hooks/use-member-pin"
 import type { TenantMember, MemberRole } from "@/types/member"
@@ -103,8 +112,13 @@ export default function MembersPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isPinResetDialogOpen, setIsPinResetDialogOpen] = useState(false)
+  const [isPasswordResetDialogOpen, setIsPasswordResetDialogOpen] =
+    useState(false)
   const [selectedMember, setSelectedMember] = useState<TenantMember | null>(null)
   const [createdPassword, setCreatedPassword] = useState<string | null>(null)
+  // パスワードリセット用: 送信する新パスワードと、リセット完了後に表示する値
+  const [pwResetNewPassword, setPwResetNewPassword] = useState("")
+  const [pwResetResult, setPwResetResult] = useState<string | null>(null)
 
   // 追加フォームの状態
   const [newEmail, setNewEmail] = useState("")
@@ -121,6 +135,7 @@ export default function MembersPage() {
   const updateMutation = useUpdateTenantMember()
   const deleteMutation = useDeleteTenantMember()
   const resetPinMutation = useResetMemberPin()
+  const resetPasswordMutation = useResetMemberPassword()
 
   // 追加ダイアログを開く
   const handleOpenCreateDialog = () => {
@@ -150,6 +165,14 @@ export default function MembersPage() {
   const handleOpenPinResetDialog = (member: TenantMember) => {
     setSelectedMember(member)
     setIsPinResetDialogOpen(true)
+  }
+
+  // パスワードリセットダイアログを開く
+  const handleOpenPasswordResetDialog = (member: TenantMember) => {
+    setSelectedMember(member)
+    setPwResetNewPassword(generatePassword())
+    setPwResetResult(null)
+    setIsPasswordResetDialogOpen(true)
   }
 
   // メンバー追加
@@ -220,6 +243,23 @@ export default function MembersPage() {
     })
   }
 
+  // パスワードリセット（新パスワードを再設定し、本人へ共有するため一度だけ表示する）
+  const handleResetPassword = () => {
+    if (!selectedMember || !pwResetNewPassword) return
+    resetPasswordMutation.mutate(
+      { userId: selectedMember.user_id, password: pwResetNewPassword },
+      {
+        onSuccess: (data) => {
+          setPwResetResult(data.new_password)
+          toast.success("パスワードをリセットしました")
+        },
+        onError: (err) => {
+          toast.error(err.message || "パスワードのリセットに失敗しました")
+        },
+      }
+    )
+  }
+
   // クリップボードにコピー
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -277,9 +317,18 @@ export default function MembersPage() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          title="編集"
                           onClick={() => handleOpenEditDialog(member)}
                         >
                           <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="パスワードをリセット"
+                          onClick={() => handleOpenPasswordResetDialog(member)}
+                        >
+                          <Lock className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -507,6 +556,111 @@ export default function MembersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* パスワードリセットダイアログ */}
+      <Dialog
+        open={isPasswordResetDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsPasswordResetDialogOpen(false)
+            setPwResetResult(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>パスワードをリセット</DialogTitle>
+            <DialogDescription>
+              {selectedMember?.full_name ?? selectedMember?.email} の新しいパスワードを発行します
+            </DialogDescription>
+          </DialogHeader>
+
+          {pwResetResult ? (
+            /* リセット完了後に新パスワードを表示 */
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                パスワードをリセットしました。以下の新しいパスワードを対象者に共有してください（この画面を閉じると確認できなくなります）。
+              </p>
+              <div className="flex items-center gap-2 rounded-md border bg-muted p-3">
+                <code className="flex-1 text-sm font-mono break-all">
+                  {pwResetResult}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleCopy(pwResetResult)}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={() => {
+                    setIsPasswordResetDialogOpen(false)
+                    setPwResetResult(null)
+                  }}
+                >
+                  閉じる
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                対象メンバーのパスワードを下記に置き換えます。PINは変更されません。
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="pw-reset-password">新しいパスワード</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="pw-reset-password"
+                    value={pwResetNewPassword}
+                    onChange={(e) => setPwResetNewPassword(e.target.value)}
+                    className="font-mono"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setPwResetNewPassword(generatePassword())}
+                    title="パスワードを再生成"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleCopy(pwResetNewPassword)}
+                    title="コピー"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsPasswordResetDialogOpen(false)}
+                >
+                  キャンセル
+                </Button>
+                <Button
+                  onClick={handleResetPassword}
+                  disabled={
+                    resetPasswordMutation.isPending ||
+                    pwResetNewPassword.length < 8
+                  }
+                >
+                  {resetPasswordMutation.isPending
+                    ? "リセット中..."
+                    : "リセット"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* PINリセット確認ダイアログ */}
       <AlertDialog open={isPinResetDialogOpen} onOpenChange={setIsPinResetDialogOpen}>

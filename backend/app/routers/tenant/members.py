@@ -11,6 +11,8 @@ from app.dependencies import (
 )
 from app.models.tenant import (
     MemberCreateSchema,
+    MemberPasswordResetResponse,
+    MemberPasswordResetSchema,
     MemberResponse,
     MemberUpdateSchema,
     PinSetSchema,
@@ -516,3 +518,52 @@ def reset_member_pin(
     admin_client.table("member_pins").delete().eq("tenant_id", tenant_id).eq(
         "user_id", user_id
     ).execute()
+
+
+@member_router.post(
+    "/{user_id}/password/reset", response_model=MemberPasswordResetResponse
+)
+def reset_member_password(
+    user_id: str,
+    data: MemberPasswordResetSchema,
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    admin_client: Client = Depends(get_supabase_admin_client),
+):
+    """対象メンバーのパスワードを再設定する（president / platform_admin のみ）。
+
+    パスワードを失念したメンバーの復旧経路。メール送信基盤がないため、
+    新パスワードはレスポンスで返し、フロントで一度だけ表示して president が
+    本人へ共有する運用とする（新規メンバー追加時の初期パスワード共有と同じ）。
+    PIN（member_pins）は変更しない（PINリセットは別操作）。
+    """
+    _require_member_admin(current_user_id, tenant_id, client)
+
+    # 対象ユーザーが同テナントに所属しているか確認（テナント越えの操作を防ぐ）
+    member_res = (
+        client.table("organization_members")
+        .select("user_id")
+        .eq("user_id", user_id)
+        .eq("tenant_id", tenant_id)
+        .single()
+        .execute()
+    )
+    if not member_res.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="メンバーが見つかりません"
+        )
+
+    try:
+        admin_client.auth.admin.update_user_by_id(user_id, {"password": data.password})
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"パスワードの再設定に失敗しました: {e}",
+        ) from e
+
+    logger.info(
+        f"member: password reset for user {user_id} in tenant {tenant_id} "
+        f"by {current_user_id}"
+    )
+    return MemberPasswordResetResponse(user_id=user_id, new_password=data.password)

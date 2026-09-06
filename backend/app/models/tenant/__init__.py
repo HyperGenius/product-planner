@@ -1,5 +1,7 @@
 from app.models.tenant.member_schemas import (
     MemberCreateSchema,
+    MemberPasswordResetResponse,
+    MemberPasswordResetSchema,
     MemberResponse,
     MemberUpdateSchema,
 )
@@ -9,5 +11,7 @@ __all__ = [
     "MemberCreateSchema",
     "MemberUpdateSchema",
     "MemberResponse",
+    "MemberPasswordResetSchema",
+    "MemberPasswordResetResponse",
     "PinSetSchema",
 ]
