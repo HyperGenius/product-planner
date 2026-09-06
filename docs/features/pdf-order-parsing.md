@@ -42,8 +42,22 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
      `parse_status='failed_encrypted'` とする（Issue #304、詳細後述）
    - テキストが1文字も取れない (画像PDF等) → 同様に下書き order を1件起票し
      `parse_status='failed_image'` とする（Issue #304）
+   - テキスト抽出成功時、続けて **PDF文面から顧客を解決し直す**
+     (`customer_matching_service.match_customer_by_pdf_text`、Issue #385)。
+     束ね添付メール（1通にN顧客の注文書PDF）では全ステージング行がメール単位で
+     解決した同じ `customer_id` を持つため、`customers.name` / `customers.alias` を
+     法人格・記号・空白を無視して正規化し、抽出テキストに部分一致する顧客が
+     **一意に定まった場合のみ** その添付の `customer_id` を上書きする
+     （上書き値は「PDF明細から起票する order」にだけ適用し、メール本文へ
+     フォールバックする経路ではメール単位の `customer_id` を維持する。後述）。
+     0件・複数件（判定不能）はメール単位の `customer_id` のまま
+     （解決できないPDFは「不明な顧客」下書きに紐づく: Issue #263 の挙動を踏襲）。
+     新規の下書き顧客はここでは作らない（作成はメール単位で1回のまま）
 3. 抽出成功時、Claude tool-use (pdf_order_extraction_service.py) で明細行の配列を取得
    { product_name_raw, product_number_raw, quantity, delivery_date, certainty }
+   - 顧客固有の抽出プロンプト断片（`customers.order_extraction_prompt`）は、
+     PDF明細抽出時は上記で解決し直した `customer_id`、本文フォールバック時は
+     メール単位の `customer_id` から引く（Issue #385）
 4. 明細ごとに (pdf_order_parsing_service._process_line_item):
    a. 製品照合は3段階のフォールバックで行う:
       1. `products.code` の完全一致 (match_product_by_code)
@@ -61,7 +75,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
       下書きを起票する（Issue #296、詳細後述）
    c. certainty はそのまま orders.customer_certainty に保存する（confirmed/forecast/
       forecast_tentative）。orders.status には反映しない（Issue #267）
-   d. customer_id はステージング行のものをそのまま使用（再照合しない）
+   d. customer_id は、手順2でPDF文面から解決し直した値（解決できなければ
+      ステージング行の値）を明細共通で使う（Issue #385）
    e. SQL RPC upsert_order_by_dedupe_key で orders に INSERT/UPDATE。INSERT時は
       customer_certainty の値に関わらず常に status='draft' で作成する。
       (tenant_id, customer_id, product_id, deadline_date) の重複時は既存orderの
@@ -157,9 +172,55 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
   （転送メールが `message/rfc822` として添付される等、添付が2階層目以降に現れる
   構造で1つも取得できなかった問題への防御。本文抽出の `_find_part_data` と同じ理由）
 - PDFが1件も無いメール（非PDF添付のみ・添付なし）は従来どおり単一ステージング行
-- 顧客解決は引き続き **メール単位で1回**。複数PDFのステージング行はすべて同じ
-  `customer_id`（社長の実 From ヘッダー由来 or「不明な顧客」下書き）を持つため、
-  各PDFを正しい顧客へ紐づけるPDF単位の顧客解決は **Issue #385** に切り出している
+- **ステージング時の顧客解決は引き続きメール単位で1回**（`gmail_service._process_message()`）。
+  束ね添付では全ステージング行がこの同じ `customer_id`（社長の実 From ヘッダー由来 or
+  「不明な顧客」下書き）を持つ。各PDFを正しい顧客へ紐づけ直す処理は
+  **パース時（`parse_pending_order_pdfs`）に移した**（Issue #385、次項）
+
+### 束ね添付での PDF 単位の顧客解決（Issue #385）
+
+束ね添付メール（#384）は「1メールの中に複数顧客の注文書PDF」が入るため、
+メール単位で1回だけ解決した `customer_id` を全PDFに使うと、各PDF（＝各顧客）の
+受注がすべて同じ（多くの場合は誤った）顧客に起票されてしまう。
+
+- **解決タイミング**: ステージング行の `customer_id` は変えず（`gmail_service` 側は
+  無改修）、`pdf_order_parsing_service._parse_one()` が **PDFテキスト抽出後・
+  Claude明細抽出前** に顧客を解決し直す。`order_attachments.customer_id` は
+  nullable のままで、`_require_customer_id()`（NULL を不整合として弾く）とも整合する
+  （NULL にはしない）
+- **解決ロジック**: `customer_matching_service.match_customer_by_pdf_text(db, tenant_id, pdf_text)`。
+  メールアドレスはPDF文面から安定して取れないため、既存の email 突合とは別経路で
+  **企業名のみ**で突合する:
+  - `customers.name` / `customers.alias` と PDF テキストの双方を
+    `_normalize_company_name()` で正規化する。まず **NFKC 正規化**で全角/半角・
+    互換文字を統一（`ＡＢＣ`→`ABC`、`㈱`→`(株)`、全角数字→半角、半角カナ→全角カナ）し、
+    その上で `株式会社`・`(株)` 等の法人格、空白・中黒・ハイフン等の区切りを除去して
+    英字を小文字化する。DB 側が半角・PDF側が全角（またはその逆）でも一致させるため
+  - 正規化後の顧客名が正規化後のPDFテキストに **部分一致** する顧客を集め、
+    **ちょうど1件**なら採用。0件（該当なし）・複数件（判定不能）は `None`
+  - 正規化後2文字以下の顧客名は誤マッチしやすいため突合対象から除外
+    （`_MIN_COMPANY_CORE_LEN`）
+  - cron は管理者クライアント（RLSバイパス）で走るため `tenant_id` で明示的に絞る
+- **フォールバック**: 解決できなければステージング行の `customer_id`（メール単位で
+  解決済み。「不明な顧客」下書きを含む）をそのまま使う → 解決できないPDFは
+  従来どおり下書き顧客に紐づく（#263 の挙動を踏襲）
+- **再解決の適用範囲は「PDF明細から起票する order」に限定する**。`_parse_one()` は
+  再解決した `customer_id` を反映した `pdf_row` を別に持ち、`_process_line_item()` へは
+  これを渡す。PDFから明細が0件で **メール本文へフォールバックする経路**
+  （`_process_email_body()`、Issue #278）は、本文がメール全体の内容であり特定PDFの
+  顧客に帰属しないため、**元の row（メール単位の `customer_id`）** で処理する
+  （PDF文面由来の顧客解決を本文由来の受注へ波及させない）
+- **顧客固有プロンプト**: PDF明細抽出時は再解決後の `customer_id`、本文フォールバック時は
+  メール単位の `customer_id` で `_get_customer_extraction_prompt()` を引く
+- **下書き顧客の新規作成はしない**: 既存顧客への突合のみ。`customer_draft_created`
+  通知は従来どおりメール単位で1回（`gmail_service`）
+- **既存経路への影響なし**: 単一PDF添付・非PDF添付・添付なしメールは、解決結果が
+  一意に定まらなければメール単位の `customer_id` のまま。テキスト抽出に失敗した
+  PDF（暗号化・画像）も文面が無いため再解決せずメール単位の値を使う（挙動不変）
+- 実装: `backend/app/services/customer_matching_service.py`（`match_customer_by_pdf_text`）、
+  `backend/app/services/pdf_order_parsing_service.py`（`_parse_one`）、
+  テスト: `__tests__/unit/services/test_customer_matching_service.py::TestMatchCustomerByPdfText`、
+  `test_pdf_order_parsing_service.py::TestPerPdfCustomerResolution`
 
 ### 複数受注の疑いの検知（Issue #280）
 
@@ -754,7 +815,9 @@ MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを�
 
 - PPAP（パスワード付きPDF）の自動復号
 - ~~複数添付ファイルへの対応（1メール1添付の前提を維持）~~ → Issue #384 で対応（1メール = N添付。下記「複数PDF添付の分割ステージング」参照）
-- 束ね添付メールでのPDF単位の顧客解決（Issue #385。現状は全ステージング行がメール単位で解決した同じ `customer_id` を持つ）
+- ~~束ね添付メールでのPDF単位の顧客解決（現状は全ステージング行がメール単位で解決した同じ `customer_id` を持つ）~~ → Issue #385 で対応（パース時に `match_customer_by_pdf_text` で企業名突合。上記「束ね添付での PDF 単位の顧客解決」参照）
+- PDF文面の顧客突合を **企業名の部分一致以外**（住所・電話番号・エイリアス辞書の拡充、Claude抽出による発注元名の構造化等）へ広げること。まずは企業名の正規化＋部分一致で運用し、精度を見て判断する
+- テキスト抽出に失敗したPDF（暗号化・画像）を束ね添付で受けた場合の顧客解決（文面が無いためメール単位の値のまま。OCR前提の別Issue）
 - 重複スキップ・照合失敗の通知UI（[notifications.md](notifications.md) Issue #254 で対応）
 - ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 - `customer_certainty`（`forecast`/`forecast_tentative`）のUIフィルタータブ追加（別途検討）

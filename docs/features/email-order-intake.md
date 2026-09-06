@@ -185,8 +185,9 @@ interface OrderCreate {
       ├─ 5. 顧客マッチング [customer_matching_service.py]
       │      送信者メールアドレスで検索 → 未登録の場合は draft 顧客を自動作成
       │      （受注メールか否かに関わらず、メール単位で1回だけ解決する。
-      │       複数PDF添付時も現時点では全ステージング行に同じ customer_id を入れる。
-      │       PDF単位の顧客解決は Issue #385）
+      │       束ね添付メールでは全ステージング行にこの customer_id が入るが、
+      │       各PDFを正しい顧客へ紐づけ直す処理はパース時に行う。Issue #385。
+      │       詳細は [pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)）
       │
       ├─ 6. 添付ファイルを Storage にステージング保存し、`order_attachments` に
       │      order_id=NULL のステージング行をINSERT。**PDF添付が複数ある場合は
@@ -447,4 +448,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 受信受注メールの処理結果一覧（`GET /orders/email-intake-results` + `/orders/email-intake`） | ✅ #357 |
 | 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
 | 複数PDF添付メールの添付ごとステージング（1メール:N添付）＋ 添付収集のネスト再帰化（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#複数pdf添付の分割ステージングissue-384)） | ✅ #384 |
-| 束ね添付メールでのPDF単位の顧客解決 | ⬜ #385 |
+| 束ね添付メールでのPDF単位の顧客解決（パース時に PDF 文面の企業名で `customers` を突合し、一意なら添付ごとに `customer_id` を再解決。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)） | ✅ #385 |

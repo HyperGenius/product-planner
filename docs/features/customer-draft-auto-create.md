@@ -266,6 +266,11 @@ Issue #265 の前提「ユーザが intake 用 Gmail アドレスへ**転送す�
 - （#265）積集合が2件以上の場合のタイブレーク方法の改善（現状は最後に出現した候補への
   フォールバックのみ）
 - （#265）同一会社の別担当者アドレスをドメイン単位でマッチさせる拡張
+- （#385）束ね添付メールのPDF単位の顧客解決では、**既存顧客への企業名突合のみ**行い、
+  下書き顧客の新規作成はしない（作成は従来どおり `_process_message` でメール単位に1回）。
+  一意に解決できないPDFはメール単位で解決済みの `customer_id`（「不明な顧客」下書きを
+  含む）にフォールバックする＝ #263 の挙動を踏襲する。`customer_draft_created` 通知も
+  メール単位で1回のまま（添付単位では出さない）
 
 ---
 
@@ -279,3 +284,6 @@ Issue #265 の前提「ユーザが intake 用 Gmail アドレスへ**転送す�
 - Issue #298: 直接転送メールでヘッダー行が本文化されず顧客特定に失敗する不具合の修正
 - Issue #311: 転送を介さず顧客から直接届くメールで、実際の Gmail `From` ヘッダーを
   最優先の突合シグナルとして使うようにした改善（[customer-matching-real-from-priority.md](customer-matching-real-from-priority.md)）
+- Issue #385: 束ね添付メールで、パース時にPDF文面の企業名から `customers` を突合し
+  添付ごとに `customer_id` を再解決する（`match_customer_by_pdf_text`。
+  詳細は [pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)）
