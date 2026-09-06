@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from app.scheduler_logic import (
+    InvalidRoutingDurationError,
     RoutingUnconfirmedError,
     routings_are_confirmed,
     schedule_order,
@@ -229,6 +230,38 @@ class TestScheduleOrder:
                 schedule_repo=mock_schedule_repo,
                 tenant_id="test-tenant-id",
             )
+
+    def test_schedule_with_zero_duration_routing(self) -> None:
+        """工程の所要時間が0（標準時間・段取り時間とも未設定）の場合、
+        カレンダーロジックの ValueError ではなく InvalidRoutingDurationError を投げる（Issue #374）。"""
+        mock_product_repo = MagicMock()
+        mock_schedule_repo = MagicMock()
+
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 42,
+                "equipment_group_id": None,
+                "setup_time_seconds": 0,
+                "unit_time_seconds": 0,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+
+        with pytest.raises(InvalidRoutingDurationError) as exc_info:
+            schedule_order(
+                order_id=5,
+                product_id=5,
+                quantity=10,
+                product_repo=mock_product_repo,
+                schedule_repo=mock_schedule_repo,
+                tenant_id="test-tenant-id",
+                start_time=datetime(2025, 1, 6, 9, 0, tzinfo=JST),
+            )
+
+        assert exc_info.value.routing_id == 42
+        # ValueError のサブクラスであること（既存の except ValueError 経路を壊さない）
+        assert isinstance(exc_info.value, ValueError)
 
     def test_schedule_with_no_equipment_in_group(self) -> None:
         """設備グループに設備が存在しない場合、設備なし（equipment_id=None）でスケジュールを作成する"""

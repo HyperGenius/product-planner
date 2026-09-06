@@ -92,6 +92,7 @@ if not dry_run and not routings_are_confirmed(routings):
 
    a. 所要時間の計算
       duration_sec = setup_time_seconds + (unit_time_seconds × quantity)
+      duration <= 0 なら InvalidRoutingDurationError（→ HTTP 422 invalid_routing_duration）
 
    b. 設備の選択（equipment_group_id が NULL の場合は設備不要）
       equipment_group_members から設備 ID 一覧を取得
@@ -273,14 +274,21 @@ class CalendarConfig:
 | 422 | 工程未登録 | by-id: `{"detail": {"error": "no_routing"}}` / without-id: HTTP 200 + `routing_status: "no_routing"` |
 | 422 | 未確定工程あり（by-id のみ。without-id は通過） | `{"detail": {"error": "routing_unconfirmed"}}` |
 | 422 | 作業開始日の形式が不正（保存済み・上書き指定いずれも） | `{"detail": {"error": "invalid_scheduling_start_date"}}` |
+| 422 | 工程の所要時間が0（`unit_time_seconds` / `setup_time_seconds` 未設定、または数量0） | `{"detail": {"error": "invalid_routing_duration", "routing_id": <id>}}` |
 | 403 | 非権限ロールが過去日の作業開始日を上書き指定 | `{"detail": "..."}` |
 | 500 | スケジューラ内部の想定外状態（開始時刻を算出できない・スケジュールが空 等） | `{"detail": "シミュレーションの計算に失敗しました"}` |
 
 Issue #374 以前は、スケジューラ内部の `ValueError` やパース失敗をすべて `400 Bad Request` に丸めており、
 本番のアクセスログに `400 Bad Request` だけが残って原因を追えなかった。現在は:
 
-- ユーザー入力・受注データ起因（作業開始日の形式不正・工程未確定・未マッチ）→ `422` に統一し、`{"error": "..."}` コードで返す
+- ユーザー入力・受注データ起因（作業開始日の形式不正・工程未確定・未マッチ・工程の所要時間0）→ `422` に統一し、`{"error": "..."}` コードで返す
 - スケジューラ内部の不整合（クライアント側では対処不能）→ `500` とし、`logger.exception` で `order_id` / `scheduling_start_date` と traceback を出力する
+
+`invalid_routing_duration` は、工程マスタの標準時間（`process_routings.unit_time_seconds`）と
+段取り時間（`setup_time_seconds`）がともに 0 で `total_duration = 0` になり、
+`split_work_across_days()` が「所要時間は正の値である必要があります」で落ちるケース。
+`schedule_order()` が `InvalidRoutingDurationError`（`ValueError` サブクラス）を送出し、
+シミュレーション／確定エンドポイントが 422 に変換する。`confirm` / `approve-bulk` も同じ `error` コードを返す。
 
 ---
 
@@ -304,7 +312,10 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 |---|---|---|
 | 404 | 受注が見つからない | `{"detail": "Order not found"}` |
 | 422 | 未確定工程あり | `{"detail": {"error": "routing_unconfirmed", "desired_deadline": "YYYY-MM-DD"}}` |
+| 422 | 工程の所要時間が0 | `{"detail": {"error": "invalid_routing_duration", "routing_id": <id>}}` |
 | 400 | 工程なし・その他 ValueError | `{"detail": "<メッセージ>"}` |
+
+`approve-bulk` は 1 件ごとに `{"order_id", "status": "error", "detail": {"error": "invalid_routing_duration", ...}}` を返す。
 
 未確定工程エラー（422）はシミュレーション自体はできても「ガントへ登録できない」状態を示す。  
 フロントエンドはこの `error: "routing_unconfirmed"` を判定し、工程確定を促すメッセージを表示する（✅ #199 にて実装済み）。
