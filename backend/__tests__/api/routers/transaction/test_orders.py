@@ -711,7 +711,7 @@ class TestOrderRouter:
 
         assert response.status_code == 500
 
-    def test_simulate_by_id_zero_duration_routing_returns_422(
+    def test_simulate_by_id_zero_duration_routing_returns_200(
         self,
         headers,
         mock_repo,
@@ -719,8 +719,8 @@ class TestOrderRouter:
         mock_equipment_repo,
         mock_schedule_repo,
     ):
-        """POST /{id}/simulate: 工程の標準時間が0（工程マスタ未設定）なら、
-        500 ではなく 422 invalid_routing_duration を返す（Issue #374）。"""
+        """POST /{id}/simulate: 工程の合計所要時間が0（マイルストーン工程）でも、
+        エラーにせず 200 を返し、ゼロ長エントリを process_schedules に含める（Issue #378）。"""
         mock_repo.get_by_id.return_value = {
             "id": 1000051,
             "product_id": 100,
@@ -732,6 +732,46 @@ class TestOrderRouter:
                 "id": 7,
                 "equipment_group_id": None,
                 "setup_time_seconds": 0,
+                "unit_time_seconds": 0,
+                "sequence_order": 1,
+                "is_confirmed": True,
+            }
+        ]
+        mock_product_repo.get_process_name.return_value = "出荷判定"
+        mock_equipment_repo.get_equipment_name.return_value = None
+
+        response = client.post("/orders/1000051/simulate", headers=headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["calculated_deadline"] is not None
+        assert len(result["process_schedules"]) == 1
+        entry = result["process_schedules"][0]
+        assert entry["start_time"] == entry["end_time"]
+        assert entry["equipment_name"] is None
+        mock_schedule_repo.create.assert_not_called()
+
+    def test_simulate_by_id_negative_duration_routing_returns_422(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /{id}/simulate: 合計所要時間が負（データ不正）なら
+        422 invalid_routing_duration を返す（Issue #378）。"""
+        mock_repo.get_by_id.return_value = {
+            "id": 1000051,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-1000051",
+        }
+        mock_product_repo.get_routings_by_product.return_value = [
+            {
+                "id": 7,
+                "equipment_group_id": None,
+                "setup_time_seconds": -600,
                 "unit_time_seconds": 0,
                 "sequence_order": 1,
                 "is_confirmed": True,

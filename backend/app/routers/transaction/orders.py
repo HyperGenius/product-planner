@@ -978,7 +978,8 @@ def simulate_schedule_without_id(
             "process_schedules": [],
         }
     except InvalidRoutingDurationError as e:
-        # 工程マスタの標準時間未設定・数量0 等。ユーザーが修正すれば解消するため 422。
+        # 工程の合計所要時間が負（データ不正）。ユーザーが修正すれば解消するため 422。
+        # 所要時間 0 の工程はマイルストーン工程として正常処理される（Issue #378）。
         logger.warning(
             "simulate: invalid routing duration product_id=%s routing_id=%s",
             order_data.product_id,
@@ -1076,7 +1077,8 @@ def simulate_schedule(
             },
         ) from None
     except InvalidRoutingDurationError as e:
-        # 工程マスタの標準時間未設定・数量0 等。ユーザーが修正すれば解消するため 422。
+        # 工程の合計所要時間が負（データ不正）。ユーザーが修正すれば解消するため 422。
+        # 所要時間 0 の工程はマイルストーン工程として正常処理される（Issue #378）。
         logger.warning(
             "simulate_schedule: invalid routing duration order_id=%s routing_id=%s",
             order_id,

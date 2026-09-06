@@ -41,17 +41,20 @@ class RoutingUnconfirmedError(ValueError):
 
 
 class InvalidRoutingDurationError(ValueError):
-    """工程の所要時間が 0 以下でスケジュールを作成できない場合に送出する例外。
+    """工程の合計所要時間が負でスケジュールを作成できない場合に送出する例外。
 
-    `setup_time_seconds` / `unit_time_seconds` が未設定（0）の工程マスタや、
-    数量 0 の受注が原因。ユーザーが工程マスタ・受注を修正すれば解消するため、
-    呼び出し側はこれを HTTP 422 に変換する（Issue #374）。
+    `setup_time_seconds` / `unit_time_seconds` / 受注数量のいずれかが負値という
+    データ不正が原因。ユーザーが工程マスタ・受注を修正すれば解消するため、
+    呼び出し側はこれを HTTP 422 に変換する（Issue #374 / #378）。
+
+    所要時間 0 の工程は「マイルストーン工程」として正当に受け入れるため、
+    この例外は送出しない（Issue #378）。
     """
 
     def __init__(self, routing_id: int | None = None):
         super().__init__(
-            "工程の所要時間が0です。工程マスタの標準時間（unit_time_seconds）を"
-            "設定してください"
+            "工程の合計所要時間が負です。工程マスタの標準時間・段取り時間・"
+            "受注数量を確認してください"
         )
         self.routing_id = routing_id
 
@@ -122,41 +125,39 @@ def schedule_order(
         total_duration_sec = setup_time_sec + (unit_time_sec * quantity)
         total_duration_min = total_duration_sec / 60
 
-        # 所要時間 0 以下（工程マスタの標準時間未設定・数量0 等）は
-        # カレンダーロジックが ValueError を送出するため、手前で明示的な例外に変換する。
-        if total_duration_min <= 0:
+        # 合計所要時間が負（工程マスタ・受注数量のデータ不正）は明示的な例外に変換する。
+        if total_duration_min < 0:
             raise InvalidRoutingDurationError(routing.get("id"))
 
-        if equipment_group_id is None:
-            actual_start = get_next_available_start_time(
-                current_process_start, total_duration_min, calendar_config
-            )
-            best = {
-                "machine_id": None,
-                "start": actual_start,
-                "duration_sec": total_duration_sec,
-                "segments": None,
-            }
-        else:
-            best = _select_best_machine(
-                equipment_group_id=equipment_group_id,
-                current_process_start=current_process_start,
-                total_duration_sec=total_duration_sec,
-                total_duration_min=total_duration_min,
+        # 合計所要時間 0 の工程は「マイルストーン工程」（検査・承認・出荷判定など
+        # 作業時間を持たない工程）として受け入れる（Issue #378）。
+        if total_duration_min == 0:
+            schedule_data, current_process_start = _build_milestone_schedule(
+                routing=routing,
+                order_id=order_id,
                 tenant_id=tenant_id,
-                settings_repo=settings_repo,
-                product_repo=product_repo,
-                schedule_repo=schedule_repo,
+                current_process_start=current_process_start,
                 calendar_config=calendar_config,
-                standalone=standalone,
             )
+            if not dry_run:
+                schedule_repo.create(schedule_data)
+            created_schedules.append(schedule_data)
+            continue
 
-        chosen_start = best["start"]
+        best = _resolve_placement(
+            equipment_group_id=equipment_group_id,
+            current_process_start=current_process_start,
+            total_duration_sec=total_duration_sec,
+            total_duration_min=total_duration_min,
+            tenant_id=tenant_id,
+            settings_repo=settings_repo,
+            product_repo=product_repo,
+            schedule_repo=schedule_repo,
+            calendar_config=calendar_config,
+            standalone=standalone,
+        )
 
-        if chosen_start is None:
-            raise ValueError("開始時刻が取得できません")
-        if not isinstance(chosen_start, datetime):
-            raise ValueError("開始時刻の型が正しくありません")
+        chosen_start = _require_start_datetime(best["start"])
 
         # セグメントが確定済みならそのまま使用、未確定なら split_work_across_days で計算
         raw_segs: list[tuple[datetime, datetime]] | None = best.get("segments")  # type: ignore[assignment]
@@ -186,6 +187,89 @@ def schedule_order(
         current_process_start = schedule_segments[-1][1]
 
     return created_schedules
+
+
+def _require_start_datetime(chosen_start: Any) -> datetime:
+    """スケジューラ候補の開始時刻が有効な datetime であることを検証して返す。"""
+    if chosen_start is None:
+        raise ValueError("開始時刻が取得できません")
+    if not isinstance(chosen_start, datetime):
+        raise ValueError("開始時刻の型が正しくありません")
+    return chosen_start
+
+
+def _resolve_placement(
+    equipment_group_id: int | None,
+    current_process_start: datetime,
+    total_duration_sec: float,
+    total_duration_min: float,
+    tenant_id: str,
+    settings_repo: SchedulingSettingsRepository | None,
+    product_repo: ProductRepository,
+    schedule_repo: ScheduleRepository,
+    calendar_config: CalendarConfig | None,
+    standalone: bool,
+) -> dict:
+    """工程の配置候補（設備・開始時刻・セグメント）を解決する。
+
+    設備グループ未指定（``equipment_group_id is None``）の工程は設備なしで
+    ``current_process_start`` を稼働時間内に正規化した時刻から配置し、
+    それ以外は ``_select_best_machine`` で最も早く完了できる設備を選定する。
+    """
+    if equipment_group_id is None:
+        actual_start = get_next_available_start_time(
+            current_process_start, total_duration_min, calendar_config
+        )
+        return {
+            "machine_id": None,
+            "start": actual_start,
+            "duration_sec": total_duration_sec,
+            "segments": None,
+        }
+    return _select_best_machine(
+        equipment_group_id=equipment_group_id,
+        current_process_start=current_process_start,
+        total_duration_sec=total_duration_sec,
+        total_duration_min=total_duration_min,
+        tenant_id=tenant_id,
+        settings_repo=settings_repo,
+        product_repo=product_repo,
+        schedule_repo=schedule_repo,
+        calendar_config=calendar_config,
+        standalone=standalone,
+    )
+
+
+def _build_milestone_schedule(
+    routing: dict[str, Any],
+    order_id: int | None,
+    tenant_id: str,
+    current_process_start: datetime,
+    calendar_config: CalendarConfig | None,
+) -> tuple[dict[str, Any], datetime]:
+    """合計所要時間 0 の「マイルストーン工程」のスケジュールデータを組み立てる。
+
+    直前工程の終了時刻（``current_process_start``）を稼働時間内に正規化した時刻を
+    ``start`` とし、``start == end`` のゼロ長セグメントを1件生成する。マイルストーン
+    工程は設備を占有しないため ``equipment_id`` は ``None``（設備選定・ギャップ詰め
+    込みは行わない）。
+
+    Returns:
+        (スケジュールデータ, 次工程の起点となる ``current_process_start``)。
+        起点は ``start`` へ進め、単調増加を維持する。
+    """
+    milestone_start = get_next_available_start_time(
+        current_process_start, 0, calendar_config
+    )
+    schedule_data = {
+        "tenant_id": tenant_id,
+        "order_id": order_id,
+        "process_routing_id": routing["id"],
+        "equipment_id": None,
+        "start_datetime": milestone_start.isoformat(),
+        "end_datetime": milestone_start.isoformat(),
+    }
+    return schedule_data, milestone_start
 
 
 def _select_best_machine(
