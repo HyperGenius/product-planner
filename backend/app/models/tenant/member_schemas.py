@@ -21,6 +21,23 @@ class MemberUpdateSchema(BaseModel):
     role: MemberRole | None = Field(default=None, description="権限")
 
 
+class MemberPasswordResetSchema(BaseModel):
+    """メンバーのパスワードリセットリクエストのスキーマ"""
+
+    password: str = Field(min_length=8, description="新しいパスワード")
+
+
+class MemberPasswordResetResponse(BaseModel):
+    """パスワードリセットのレスポンス。
+
+    設定した新パスワードをそのまま返し、フロントで一度だけ表示して
+    president が本人へ共有する運用（メール送信基盤がないため）。
+    """
+
+    user_id: str = Field(description="対象ユーザーID")
+    new_password: str = Field(description="新しいパスワード")
+
+
 class MemberResponse(BaseModel):
     """メンバー情報レスポンスのスキーマ"""
 

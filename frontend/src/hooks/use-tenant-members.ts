@@ -2,7 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
-import type { TenantMember, MemberCreate, MemberUpdate } from "@/types/member"
+import type {
+  TenantMember,
+  MemberCreate,
+  MemberUpdate,
+  MemberPasswordResetResponse,
+} from "@/types/member"
 
 const MEMBERS_QUERY_KEY = ["tenant-members"]
 
@@ -63,6 +68,24 @@ export function useCurrentMember() {
   return useQuery<TenantMember | null>({
     queryKey: ["current-member"],
     queryFn: () => apiClient<TenantMember>("/tenant/members/me"),
+  })
+}
+
+/**
+ * 対象メンバーのパスワードを再設定するフック（president / platform_admin のみ）。
+ * 新パスワードはフロントで生成して送信し、レスポンスの `new_password` を
+ * 一度だけ表示して president が本人へ共有する（メール送信基盤がないため）。
+ */
+export function useResetMemberPassword() {
+  return useMutation({
+    mutationFn: ({ userId, password }: { userId: string; password: string }) =>
+      apiClient<MemberPasswordResetResponse>(
+        `/tenant/members/${userId}/password/reset`,
+        {
+          method: "POST",
+          body: JSON.stringify({ password }),
+        }
+      ),
   })
 }
 
