@@ -325,6 +325,7 @@ export default function MembersPage() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label="パスワードをリセット"
                           title="パスワードをリセット"
                           onClick={() => handleOpenPasswordResetDialog(member)}
                         >
@@ -588,6 +589,8 @@ export default function MembersPage() {
                 <Button
                   variant="ghost"
                   size="icon"
+                  aria-label="コピー"
+                  title="コピー"
                   onClick={() => handleCopy(pwResetResult)}
                 >
                   <Copy className="h-4 w-4" />
@@ -623,6 +626,7 @@ export default function MembersPage() {
                     variant="outline"
                     size="icon"
                     onClick={() => setPwResetNewPassword(generatePassword())}
+                    aria-label="パスワードを再生成"
                     title="パスワードを再生成"
                   >
                     <RefreshCw className="h-4 w-4" />
@@ -632,6 +636,7 @@ export default function MembersPage() {
                     variant="outline"
                     size="icon"
                     onClick={() => handleCopy(pwResetNewPassword)}
+                    aria-label="コピー"
                     title="コピー"
                   >
                     <Copy className="h-4 w-4" />

@@ -191,7 +191,13 @@ Issue #328 は、上記の本Issue（#323）実装により大部分の要件が
 - `test_reset_member_password_allowed_for_admin` — `president` / `platform_admin` は 200、
   レスポンスに `new_password` が返り、`update_user_by_id` がそのパスワードで呼ばれ、
   `member_pins` には触れない
+- `test_reset_member_password_404_when_target_not_in_tenant` — 呼び出し元は管理者だが
+  対象メンバーが同テナントに存在しない場合は 404、`update_user_by_id` は呼ばれない
+  （`single().execute()` の連続呼び出しを `_set_single_execute_sequence` で分けて所属確認を担保）
 - `test_reset_member_password_rejects_short_password` — 8文字未満は 422
+
+Auth 更新に失敗した場合の 500 レスポンスは固定文言（`パスワードの再設定に失敗しました`）とし、
+例外詳細は `logger.exception` でサーバーログにのみ残す（Copilot レビュー指摘。内部情報の漏えい防止）。
 
 ### スコープ外（後続Issue）
 

@@ -557,9 +557,15 @@ def reset_member_password(
     try:
         admin_client.auth.admin.update_user_by_id(user_id, {"password": data.password})
     except Exception as e:
+        # 例外詳細（Supabase 側のメッセージ等）はクライアントに返さずログにのみ残す
+        logger.exception(
+            "member: password reset failed for user %s in tenant %s",
+            user_id,
+            tenant_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"パスワードの再設定に失敗しました: {e}",
+            detail="パスワードの再設定に失敗しました",
         ) from e
 
     logger.info(
