@@ -62,6 +62,13 @@ cd backend && pytest __tests__/integration/    # Integration (Supabase必要)
 cd backend && ruff check . && mypy .
 ```
 
+- `ruff` / `mypy` / `pytest` は venv 前提。PATH に無い環境（新規 worktree 等）では
+  `cd backend && uv pip install -q -r requirements-dev.txt` 後に `uv run --no-sync <cmd>` で実行する
+- `ruff check .` はリポジトリ全体だと既存の未修正エラーが多数ある（主に `scripts/`）。
+  自分の変更が増やしていないかは変更ファイルを指定して確認する（例: `uv run --no-sync ruff check path/to/file.py`）
+- コミット時に pre-commit（`ruff` / `ruff-format` / `mypy`）が走り、`ruff-format` は自動整形して
+  コミットを一旦中断する。整形後に `git add` して再コミットする
+
 ---
 
 ## 重要な実装ルール
@@ -72,6 +79,7 @@ cd backend && ruff check . && mypy .
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること
+- **受注の納期フィールド**: `orders` には完成見込み日が2本ある。`confirmed_deadline`（承認確定時＝`dry_run=False` に書き込み）と `simulated_deadline`（`POST /orders/{id}/simulate` ＝ `dry_run=True` に書き込み、承認前の「シミュ納期」表示用。Issue #394）。両者は `_deadline_from_schedules()`（`routers/transaction/orders.py`）で同一ロジック（最終工程終了日時 → date）で算出する。`PATCH /orders/{id}` で `product_id` / `quantity` / `deadline_date` / `scheduling_start_date` が変わると `simulated_deadline` と `is_scheduled` はクリアされる（`reject` / `withdraw` は据え置き）。詳細は [docs/features/simulation-engine.md](docs/features/simulation-engine.md)
 - **メンバーロール**: `organization_members.role` は `president`（社長）/ `iso_officer`（ISO担当）/ `order_handler`（受注担当）/ `platform_admin`（プラットフォーム管理者）の四値（Issue #323）。旧 `admin`/`member` は廃止済み。メンバー管理系エンドポイントは `president`/`platform_admin` に開放し、承認操作（工程確定 `is_confirmed` 等）は `platform_admin` を含めず `president` 限定とする方針。詳細は [docs/features/member-roles.md](docs/features/member-roles.md) 参照
 
 ## 本番 Supabase への接続（マイグレーション適用・一時的なSQL実行）

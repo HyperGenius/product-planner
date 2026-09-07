@@ -1,5 +1,6 @@
 # __tests__/api/routers/transaction/test_orders.py
 import json
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -272,6 +273,7 @@ class TestOrderRouter:
         payload = {"quantity": 60}
         updated_data = {"id": order_id, "quantity": 60, "order_number": "ORD-001"}
 
+        mock_repo.get_by_id.return_value = {"id": order_id, "quantity": 50}
         mock_repo.update.return_value = updated_data
 
         response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
@@ -344,6 +346,80 @@ class TestOrderRouter:
         assert response.status_code == 200
         _, called_data = mock_repo.update.call_args[0]
         assert "product_id_manually_corrected" not in called_data
+
+    def test_update_order_clears_simulated_deadline_on_quantity_change(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: 数量などスケジュール条件が変わったら simulated_deadline と
+        is_scheduled を無効化する（Issue #394-A）。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "quantity": 10,
+            "simulated_deadline": "2026-09-20",
+            "is_scheduled": True,
+        }
+        mock_repo.update.return_value = {"id": order_id, "quantity": 25}
+
+        response = client.patch(
+            f"/orders/{order_id}", json={"quantity": 25}, headers=headers
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert called_data["quantity"] == 25
+        assert called_data["simulated_deadline"] is None
+        assert called_data["is_scheduled"] is False
+
+    def test_update_order_clears_simulated_deadline_on_desired_deadline_change(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: 希望納期（desired_deadline / deadline_date）の変更でも無効化する。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "deadline_date": "2026-10-01",
+            "simulated_deadline": "2026-09-20",
+            "is_scheduled": True,
+        }
+        mock_repo.update.return_value = {"id": order_id}
+
+        response = client.patch(
+            f"/orders/{order_id}",
+            json={"desired_deadline": "2026-11-01"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert called_data["simulated_deadline"] is None
+        assert called_data["is_scheduled"] is False
+
+    def test_update_order_keeps_simulated_deadline_when_condition_unchanged(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: スケジュール条件に影響しない項目のみの更新／同値更新では
+        simulated_deadline・is_scheduled に触れない（Issue #394-A）。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "quantity": 10,
+            "customer_id": 3,
+            "simulated_deadline": "2026-09-20",
+            "is_scheduled": True,
+        }
+        mock_repo.update.return_value = {"id": order_id}
+
+        response = client.patch(
+            f"/orders/{order_id}",
+            json={"quantity": 10, "customer_id": 7},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert "simulated_deadline" not in called_data
+        assert "is_scheduled" not in called_data
 
     def test_request_order_approval_records_auto_match_alias(
         self, headers, mock_repo, mock_supabase_client, monkeypatch
@@ -458,6 +534,13 @@ class TestOrderRouter:
         assert "process_schedules" in result
         # dry_run=True のため、schedule_repo.create は呼ばれない
         mock_schedule_repo.create.assert_not_called()
+        # シミュ納期（simulated_deadline）が confirmed_deadline と同一ロジックで
+        # 永続化される（Issue #394-A）。
+        mark_args = mock_repo.mark_as_scheduled.call_args
+        assert mark_args[0][0] == order_id
+        simulated_deadline = mark_args[0][1]
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", simulated_deadline)
+        assert simulated_deadline == result["calculated_deadline"][:10]
 
     def test_simulate_schedule_not_found(self, headers, mock_repo):
         """POST /{order_id}/simulate: 注文が存在しない場合の404エラーテスト"""

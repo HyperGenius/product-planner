@@ -105,6 +105,34 @@ def _map_order_response(order: dict) -> dict:
     return mapped
 
 
+def _deadline_from_schedules(schedules: list[dict]) -> str:
+    """スケジュール（工程セグメント）群の最終終了日時から完成見込み日を算出する。
+
+    承認確定の confirmed_deadline とシミュレーションの simulated_deadline で
+    同一ロジックを共有するための共通ヘルパー（Issue #394-A）。
+    end_datetime はタイムゾーン表記（`Z` / `+09:00` 等）が混在しても実時刻で
+    比較できるよう datetime にパースしてから最大値を取る。
+    戻り値は YYYY-MM-DD 形式の文字列。
+    """
+    last_end = max(
+        datetime.fromisoformat(s["end_datetime"].replace("Z", "+00:00"))
+        for s in schedules
+    )
+    return last_end.date().isoformat()
+
+
+# product_id / 数量 / 希望納期 / 作業開始日 のいずれかが変わると、実行済みの
+# シミュレーション結果（simulated_deadline）と is_scheduled は陳腐化するため、
+# PATCH /orders/{id} でこれらが変化したら両方を無効化する（Issue #394-A / #392 統合）。
+# キー名は OrderUpdate のフィールド名（エイリアスではない）に合わせる。
+_SIM_INVALIDATING_ORDER_FIELDS = (
+    "product_id",
+    "quantity",
+    "deadline_date",
+    "scheduling_start_date",
+)
+
+
 def _assert_scheduling_start_date_allowed(
     raw: str | None, tenant_id: str, user_id: str, client: Client
 ) -> bool:
@@ -595,6 +623,18 @@ def update_order(
         # 一度 true になったら false へは戻さない（Issue #350）
         update_dict["product_id_manually_corrected"] = True
 
+    # スケジュール条件（製品・数量・希望納期・作業開始日）が実質変化したら、
+    # 実行済みのシミュレーション結果を無効化する（Issue #394-A / #392 統合）。
+    # 既に無効な項目は書き込まず、余計な UPDATE を避ける。
+    if order_before is not None and any(
+        field in update_dict and update_dict[field] != order_before.get(field)
+        for field in _SIM_INVALIDATING_ORDER_FIELDS
+    ):
+        if order_before.get("simulated_deadline") is not None:
+            update_dict["simulated_deadline"] = None
+        if order_before.get("is_scheduled"):
+            update_dict["is_scheduled"] = False
+
     result = repo.update(order_id, update_dict)
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
@@ -1065,7 +1105,9 @@ def simulate_schedule(
             dry_run=True,
             settings_repo=settings_repo,
         )
-        order_repo.mark_as_scheduled(order_id)
+        # dry_run のため実スケジュールは保存されないが、完成見込み日（シミュ納期）は
+        # confirmed_deadline と同一ロジックで算出し、承認前の表示用に永続化する（Issue #394-A）。
+        order_repo.mark_as_scheduled(order_id, _deadline_from_schedules(result))
         return build_simulate_response(
             result, order.get("deadline_date"), product_repo, equipment_repo
         )
@@ -1216,8 +1258,7 @@ def _confirm_single_order(
     )
 
     # 2. ステータス更新 & is_scheduled フラグ更新
-    last_end = max(s["end_datetime"] for s in result)
-    confirmed_deadline = datetime.fromisoformat(last_end).date().isoformat()
+    confirmed_deadline = _deadline_from_schedules(result)
     order_repo.update(
         order_id,
         {

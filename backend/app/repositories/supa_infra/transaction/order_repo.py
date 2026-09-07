@@ -96,16 +96,22 @@ class OrderRepository(BaseRepository):
         )
         return cast(list[dict[str, Any]], res.data or [])
 
-    def mark_as_scheduled(self, order_id: int) -> None:
+    def mark_as_scheduled(
+        self, order_id: int, simulated_deadline: str | None = None
+    ) -> None:
         """
-        注文をスケジュール済みとしてマークする。
+        注文をスケジュール済み（is_scheduled=True）としてマークする。
 
         Args:
             order_id (int): スケジュール済みとしてマークする注文の一意の識別子。
+            simulated_deadline (str | None): シミュレーションが算出した完成見込み日
+                （YYYY-MM-DD）。指定時は同一 UPDATE で simulated_deadline も保存する
+                （Issue #394-A）。None のときは is_scheduled のみ更新する。
 
         Raises:
             APIError: Supabase APIリクエストが失敗した場合。
         """
-        self.client.table(self.table_name).update({"is_scheduled": True}).eq(
-            "id", order_id
-        ).execute()
+        payload: dict[str, Any] = {"is_scheduled": True}
+        if simulated_deadline is not None:
+            payload["simulated_deadline"] = simulated_deadline
+        self.client.table(self.table_name).update(payload).eq("id", order_id).execute()

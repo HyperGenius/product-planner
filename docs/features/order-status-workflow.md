@@ -102,9 +102,13 @@ draft ──────────▶ pending_approval ───────�
   フィルタ・ページングはクライアント側（[use-orders-page.ts](../../frontend/src/hooks/use-orders-page.ts)）
   のため API 追加は不要。
 - **「未確定」通知カード**: `draftCount` もシミュ済を除外し、「下書き」タブと件数を揃える。
-- **既知の制約**: `is_scheduled` は一度立つと戻らない（工程変更後も立ったまま陳腐化しうる）。
-  シミュレーション実施日時は保持していない。厳密な状態管理・日時表示が必要になった場合は
-  `orders.simulated_at` 追加を別途検討する。
+- **編集時の無効化 (Issue #394-A)**: `PATCH /orders/{id}` で `product_id` / `quantity` /
+  `desired_deadline` / `scheduling_start_date` が変わると、`is_scheduled` は `false` に、
+  `simulated_deadline` は `NULL` に戻る。これにより「工程・数量変更後も `is_scheduled` が
+  立ったまま陳腐化する」問題は解消済み（PR #393 が課題として挙げていたもの）。
+- **残る制約**: マスタ（工程・カレンダー・設備）側の変更では `simulated_deadline` /
+  `is_scheduled` は自動更新されない（受注自体の編集時クリアのみで対応）。運用で不都合が
+  出たら別 Issue で対応する。シミュレーション実施日時は保持していない。
 
 ## 自動処理（メール/PDF取込）との整合
 
