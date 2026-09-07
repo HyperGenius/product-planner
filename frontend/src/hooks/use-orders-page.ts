@@ -95,8 +95,10 @@ export function useOrdersPage() {
     router.push(`?${params.toString()}`)
   }
 
+  // 「未確定」通知カード用。「下書き」タブ（filterOrder）と揃え、シミュレーション済
+  // (is_scheduled) は除外する。シミュ済は専用タブ「シミュ済」で確認する。
   const draftCount = useMemo(
-    () => orders?.filter((o) => o.status === "draft").length ?? 0,
+    () => orders?.filter((o) => o.status === "draft" && !o.is_scheduled).length ?? 0,
     [orders]
   )
   const incompleteCount = useMemo(

@@ -20,6 +20,7 @@ import {
 import {
   getProductName,
   getCustomerName,
+  getEffectiveOrderStatus,
   getStatusLabel,
   getStatusBadgeClass,
   getCertaintyLabel,
@@ -83,6 +84,7 @@ export function OrderTableRow({
 }: OrderTableRowProps) {
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
+  const effectiveStatus = getEffectiveOrderStatus(order)
 
   let rowClassName: string | undefined
   if (hasBulkSimFailed) {
@@ -163,9 +165,20 @@ export function OrderTableRow({
         <TableCell>
           <div className="flex flex-col items-start gap-1">
             <div className="flex items-center gap-1.5">
-              <Badge className={getStatusBadgeClass(order.status)}>
-                {getStatusLabel(order.status)}
-              </Badge>
+              {effectiveStatus === "simulated" ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge className={getStatusBadgeClass(effectiveStatus)}>
+                      {getStatusLabel(effectiveStatus)}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>シミュレーション完了（未確定）</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Badge className={getStatusBadgeClass(effectiveStatus)}>
+                  {getStatusLabel(effectiveStatus)}
+                </Badge>
+              )}
               {order.status === "draft" && order.rejection_reason && (
                 <Tooltip>
                   <TooltipTrigger asChild>
