@@ -36,6 +36,9 @@ export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (!statusFilter) return true
   // 「シミュ済」= status='draft' かつ is_scheduled（シミュレーション完了・未確定）。
   // 「下書き」タブは未シミュレーションの下書きのみに絞り、両タブを排他にする。
+  // Issue #394-A 以降、is_scheduled はスケジュール条件の編集で simulated_deadline とともに
+  // クリアされるため、`is_scheduled` と `simulated_deadline != null` は draft では実質同値
+  // （表示値は simulated_deadline を使う。getDeadlineForTab / usesSimulatedDeadline 参照）。
   if (statusFilter === "simulated") {
     return order.status === "draft" && !!order.is_scheduled
   }
@@ -113,6 +116,57 @@ export function isOverdueDraft(order: Order, todayIso: string = localTodayIso())
   const deadline = order.desired_deadline.slice(0, 10)
   if (!isValidIsoDate(deadline)) return false
   return deadline < todayIso
+}
+
+/**
+ * 「確定納期」を出す（＝確定以降の）ステータス。これ以外は「シミュ納期」を出す（Issue #394）。
+ * `confirmed_deadline` は承認確定時にしか書き込まれないため、承認前は常に空になる。
+ * そのフェーズの関心事（＝シミュレーション上いつ完成するか）に合わせてカラムを出し分ける。
+ */
+const CONFIRMED_DEADLINE_STATUSES: readonly Order["status"][] = [
+  "confirmed",
+  "shipped",
+  "completed",
+]
+
+/** 一覧タブ（StatusFilter）が「シミュ納期」を表示すべきか。false なら「確定納期」。 */
+export function usesSimulatedDeadline(statusFilter: StatusFilter): boolean {
+  // 「すべて」(="") は確定納期。下書き / シミュ済 / 承認待ち / キャンセルはシミュ納期。
+  if (!statusFilter) return false
+  return !(CONFIRMED_DEADLINE_STATUSES as string[]).includes(statusFilter)
+}
+
+/** 受注単体（タブ文脈なし。受注詳細・承認モーダル）で「シミュ納期」を表示すべきか。 */
+export function usesSimulatedDeadlineForOrder(order: Order): boolean {
+  return !CONFIRMED_DEADLINE_STATUSES.includes(order.status)
+}
+
+/** 一覧カラムのヘッダ文言。 */
+export function getDeadlineColumnLabel(statusFilter: StatusFilter): string {
+  return usesSimulatedDeadline(statusFilter) ? "シミュ納期" : "確定納期"
+}
+
+/** そのタブで表示すべき納期値（未設定なら null）。 */
+export function getDeadlineForTab(order: Order, statusFilter: StatusFilter): string | null {
+  const raw = usesSimulatedDeadline(statusFilter)
+    ? order.simulated_deadline
+    : order.confirmed_deadline
+  return raw ?? null
+}
+
+/**
+ * 表示中の納期（シミュ納期 or 確定納期）が希望納期より後（遅延）か。
+ * どちらかが未設定、または不正な日付文字列なら false（強調しない）。
+ */
+export function isDeadlineOverdue(
+  order: Order,
+  deadline: string | null | undefined
+): boolean {
+  if (!deadline || !order.desired_deadline) return false
+  const actual = deadline.slice(0, 10)
+  const desired = order.desired_deadline.slice(0, 10)
+  if (!isValidIsoDate(actual) || !isValidIsoDate(desired)) return false
+  return actual > desired
 }
 
 export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {

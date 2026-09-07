@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getProductName, formatDeadlineDate } from "@/lib/order-utils"
+import { getProductName, formatDeadlineDate, isDeadlineOverdue } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -54,6 +54,7 @@ export function BulkApproveConfirmDialog({
                 <TableHead>注文番号</TableHead>
                 <TableHead>品名</TableHead>
                 <TableHead>希望納期</TableHead>
+                <TableHead>シミュ納期</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -63,6 +64,17 @@ export function BulkApproveConfirmDialog({
                   <TableCell className="text-sm">{getProductName(order.product_id, products, order.extracted_product_name)}</TableCell>
                   <TableCell className="text-sm">
                     {formatDeadlineDate(order.desired_deadline) ?? "未設定"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <span
+                      className={
+                        isDeadlineOverdue(order, order.simulated_deadline)
+                          ? "font-semibold text-destructive"
+                          : undefined
+                      }
+                    >
+                      {formatDeadlineDate(order.simulated_deadline) ?? "-"}
+                    </span>
                   </TableCell>
                 </TableRow>
               ))}
