@@ -110,10 +110,15 @@ def _deadline_from_schedules(schedules: list[dict]) -> str:
 
     承認確定の confirmed_deadline とシミュレーションの simulated_deadline で
     同一ロジックを共有するための共通ヘルパー（Issue #394-A）。
+    end_datetime はタイムゾーン表記（`Z` / `+09:00` 等）が混在しても実時刻で
+    比較できるよう datetime にパースしてから最大値を取る。
     戻り値は YYYY-MM-DD 形式の文字列。
     """
-    last_end = max(s["end_datetime"] for s in schedules)
-    return datetime.fromisoformat(last_end).date().isoformat()
+    last_end = max(
+        datetime.fromisoformat(s["end_datetime"].replace("Z", "+00:00"))
+        for s in schedules
+    )
+    return last_end.date().isoformat()
 
 
 # product_id / 数量 / 希望納期 / 作業開始日 のいずれかが変わると、実行済みの

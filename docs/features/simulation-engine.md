@@ -431,7 +431,7 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 
 | カラム | 型 | 説明 |
 |---|---|---|
-| `status` | `text` | `draft \| confirmed \| completed \| canceled` |
+| `status` | `text` | `draft \| pending_approval \| confirmed \| completed \| canceled \| shipped` |
 | `is_scheduled` | `bool` | スケジュール算出済みかどうか（simulate / confirm で `true`。編集で `false` に戻る。Issue #394-A） |
 | `simulated_deadline` | `date \| NULL` | `POST /orders/{id}/simulate` が算出した完成見込み日（シミュ納期）。承認前の一覧・承認モーダルで表示。スケジュール条件の編集で `NULL` クリア（Issue #394-A） |
 | `confirmed_deadline` | `date` | 確定時に算出された生産完了予定日 |
