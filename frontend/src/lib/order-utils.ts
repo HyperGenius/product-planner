@@ -5,6 +5,7 @@ import type { Customer } from "@/types/customer"
 export type StatusFilter =
   | ""
   | "draft"
+  | "simulated"
   | "pending_approval"
   | "confirmed"
   | "shipped"
@@ -15,6 +16,7 @@ export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_a
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "すべて", value: "" },
   { label: "下書き", value: "draft" },
+  { label: "シミュ済", value: "simulated" },
   { label: "承認待ち", value: "pending_approval" },
   { label: "確定済", value: "confirmed" },
   { label: "送品済み", value: "shipped" },
@@ -31,8 +33,16 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
 ]
 
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
-  if (statusFilter) return order.status === statusFilter
-  return true
+  if (!statusFilter) return true
+  // 「シミュ済」= status='draft' かつ is_scheduled（シミュレーション完了・未確定）。
+  // 「下書き」タブは未シミュレーションの下書きのみに絞り、両タブを排他にする。
+  if (statusFilter === "simulated") {
+    return order.status === "draft" && !!order.is_scheduled
+  }
+  if (statusFilter === "draft") {
+    return order.status === "draft" && !order.is_scheduled
+  }
+  return order.status === statusFilter
 }
 
 /**
@@ -147,11 +157,30 @@ export function getCustomerName(customerId: number | undefined, customers?: Cust
 }
 
 /**
+ * 表示用の実効ステータス。
+ * `orders.status` の値そのものではなく、「シミュレーション完了・未確定」
+ * (status='draft' かつ is_scheduled) を `simulated` として区別するための
+ * フロントエンド専用の派生値。DB スキーマ・API・`Order["status"]` 型は変更しない。
+ */
+export type EffectiveOrderStatus = Order["status"] | "simulated"
+
+/**
+ * 注文の実効ステータスを算出する。
+ * status='draft' かつ is_scheduled（`POST /orders/{id}/simulate` 成功後に立つ）なら
+ * `simulated`。それ以外は元の status をそのまま返す。
+ */
+export function getEffectiveOrderStatus(order: Order): EffectiveOrderStatus {
+  if (order.status === "draft" && order.is_scheduled) return "simulated"
+  return order.status
+}
+
+/**
  * ステータスの日本語ラベルを取得
  */
-export function getStatusLabel(status: Order["status"]): string {
-  const statusLabels: Record<Order["status"], string> = {
+export function getStatusLabel(status: EffectiveOrderStatus): string {
+  const statusLabels: Record<EffectiveOrderStatus, string> = {
     draft: "下書き",
+    simulated: "シミュ済",
     pending_approval: "承認待ち",
     confirmed: "確定",
     shipped: "送品済み",
@@ -164,9 +193,10 @@ export function getStatusLabel(status: Order["status"]): string {
 /**
  * ステータスバッジの Tailwind クラスを取得
  */
-export function getStatusBadgeClass(status: Order["status"]): string {
-  const classes: Record<Order["status"], string> = {
+export function getStatusBadgeClass(status: EffectiveOrderStatus): string {
+  const classes: Record<EffectiveOrderStatus, string> = {
     draft:             "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
+    simulated:         "bg-indigo-100 text-indigo-800 hover:bg-indigo-100",
     pending_approval:  "bg-orange-100 text-orange-800 hover:bg-orange-100",
     confirmed:         "bg-green-100 text-green-800 hover:bg-green-100",
     shipped:           "bg-teal-100 text-teal-800 hover:bg-teal-100",

@@ -82,6 +82,30 @@ draft ──────────▶ pending_approval ───────�
   `useShipOverdueDrafts`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)）。
   行チェックボックスによる個別選択は用いない。
 
+## フロントエンド表示: 「シミュ済」派生ステータス (Issue #392)
+
+「シミュレーション完了・未確定」は `orders.status` の値**ではない**。`draft` のまま
+`POST /orders/{id}/simulate`（dry-run。`schedules` テーブルへは保存しない）が成功すると
+`orders.is_scheduled = true` が立つ（[orders.py](../../backend/app/routers/transaction/orders.py) の
+`mark_as_scheduled()`）。これを**フロントエンドだけで** `status='draft' && is_scheduled` として
+判定し、一覧上の表示ステータスを分ける。DB スキーマ・API・`Order["status"]` 型は変更しない。
+
+- **派生ロジック**: [order-utils.ts](../../frontend/src/lib/order-utils.ts) の
+  `getEffectiveOrderStatus(order)` が `EffectiveOrderStatus`（`Order["status"] | "simulated"`）を返す。
+  `getStatusLabel` / `getStatusBadgeClass` はこの派生型を受け取る。
+- **バッジ**: ラベルは「シミュ済」（正式名称「シミュレーション完了（未確定）」はレイアウト崩れ防止のため
+  バッジには出さず、ツールチップで表示）。配色は indigo（`confirmed` の緑・確度バッジ `forecast_tentative`
+  の purple と区別）。描画は [order-table-row.tsx](../../frontend/src/components/orders/order-table-row.tsx)。
+  受注一覧のみが対象で、受注詳細画面は従来どおり「下書き」表示。
+- **フィルタタブ**: `STATUS_TABS` に「シミュ済」(`value: "simulated"`) を追加。`filterOrder()` で
+  `simulated` = `draft && is_scheduled`、`draft` タブは `draft && !is_scheduled` として両者を排他にする。
+  フィルタ・ページングはクライアント側（[use-orders-page.ts](../../frontend/src/hooks/use-orders-page.ts)）
+  のため API 追加は不要。
+- **「未確定」通知カード**: `draftCount` もシミュ済を除外し、「下書き」タブと件数を揃える。
+- **既知の制約**: `is_scheduled` は一度立つと戻らない（工程変更後も立ったまま陳腐化しうる）。
+  シミュレーション実施日時は保持していない。厳密な状態管理・日時表示が必要になった場合は
+  `orders.simulated_at` 追加を別途検討する。
+
 ## 自動処理（メール/PDF取込）との整合
 
 `upsert_order_by_dedupe_key`（[20260830150000_add_shipped_order_status.sql](../../supabase/migrations/20260830150000_add_shipped_order_status.sql)）
