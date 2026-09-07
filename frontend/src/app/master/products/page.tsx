@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { AlertTriangle, Circle, MoreHorizontal, Plus, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { splitProductCodeName } from "@/lib/order-utils"
 import { toast } from "sonner"
 import {
   useProducts,
@@ -62,10 +63,8 @@ function resolveProductDisplay(p: Pick<Product, "code" | "name">): {
   displayCode: string
   displayName: string | null
 } {
-  return {
-    displayCode: p.code || p.name,
-    displayName: p.code ? p.name : null,
-  }
+  const { primary, secondary } = splitProductCodeName(p.code, p.name)
+  return { displayCode: primary, displayName: secondary }
 }
 
 type StatusFilter = "all" | "active" | "inactive" | "no_process"

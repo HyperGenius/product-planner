@@ -229,13 +229,23 @@ export default function OrdersPage() {
                       )}
                     </div>
                   </TableHead>
-                  <TableHead>注文番号</TableHead>
-                  <TableHead>顧客注文番号</TableHead>
+                  <TableHead>
+                    <div className="flex flex-col leading-tight">
+                      <span>注文番号</span>
+                      <span className="text-xs font-normal text-muted-foreground">顧客注番</span>
+                    </div>
+                  </TableHead>
                   <TableHead>製品</TableHead>
-                  <TableHead>顧客</TableHead>
+                  <TableHead>通称</TableHead>
                   <TableHead className="text-right">数量</TableHead>
-                  <TableHead>希望納期</TableHead>
-                  <TableHead>{getDeadlineColumnLabel(statusFilter)}</TableHead>
+                  <TableHead>
+                    <div className="flex flex-col leading-tight">
+                      <span>希望納期</span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {getDeadlineColumnLabel(statusFilter)}
+                      </span>
+                    </div>
+                  </TableHead>
                   <TableHead>ステータス</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>

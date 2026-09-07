@@ -85,15 +85,17 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 ### テーブル設計
 
+横に長く冗長だったため、Issue #397 で関連情報を2行表示に畳んで列数を減らし、視認性を上げた。
+
 | 列 | 表示内容 | 補足 |
 |---|---|---|
-| 注文番号 | order_no | |
-| 製品 | 製品コード - 製品名 | |
-| 顧客 | 顧客名 / ⚠ 未設定 | 未設定時は警告アイコン + `text-muted-foreground` |
-| 数量 | quantity | |
-| 希望納期 | desired_deadline の日付 / ⚠ 未設定 | 未設定時は警告アイコン |
-| シミュ納期 / 確定納期 | タブ依存で出し分け（Issue #394-B） | 下記参照 |
-| ステータス | バッジ（色分け） | 下記参照 |
+| 注文番号<br>顧客注番 | 1行目 order_no（+ 自動起票アイコン）<br>2行目 customer_order_no（`text-xs text-muted-foreground`。無ければ `-`） | 旧「注文番号」列と「顧客注文番号」列を統合（Issue #397） |
+| 製品 | 1行目 図番（code）<br>2行目 品名（name、`text-xs text-muted-foreground`） | 製品マスタ一覧と同じ2行表示。`getProductDisplayParts()` / `splitProductCodeName()`。未移行データ（code=NULL）は品名を1行目へ繰り上げ |
+| 通称 | 顧客の通称（`customer.alias`）/ ⚠ 未設定 | 旧「顧客」列。`alias` 未設定時は正式名（`customer.name`）にフォールバック（`getCustomerDisplayName()`）。顧客未設定時は警告アイコン |
+| 数量 | quantity（3桁カンマ区切り、`toLocaleString("ja-JP")`） | |
+| 希望納期<br>シミュ納期 / 確定納期 | 1行目 desired_deadline / ⚠ 未設定<br>2行目 タブ依存の納期（Issue #394-B）/ `-` | 旧「希望納期」列と「シミュ納期 / 確定納期」列を統合（Issue #397）。日付は当年 `M/D`・他年 `YY/M/D` に短縮（`formatDeadlineShort()`。`title` 属性でフル日付）。遅延強調は2行目（実績側）にのみ適用 |
+| ステータス | バッジ（色分け）+ 顧客側の確度バッジ | 下記参照。確度が「顧客確定」(`customer_certainty === "confirmed"`) の行は確度バッジを非表示にしノイズを減らす（Issue #397） |
+| 自動起票 | メール受信で起票された行はメールアイコンのみ（旧: アイコン + 「自動起票」ラベル）+ 行背景 `bg-blue-50/60`。意味は Tooltip「自動起票（メール受信）」で担保（Issue #397） | 注文番号セルの1行目に表示 |
 
 **シミュ納期 / 確定納期カラムのタブ依存出し分け（Issue #394-B）**
 
@@ -124,15 +126,20 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 ### アクション体系
 
-注文の状態によってプライマリアクションを切り替える。
+注文の状態・ロールによってプライマリアクションを切り替える。操作カラムを圧縮するため、
+主要アクション以外（取り下げ・差し戻し・送品済みにする・再シミュレーション・編集）は
+ケバブメニューへ寄せ、常時表示するボタンは最大1個に抑える（Issue #397）。
 
-| 状態 | プライマリボタン | ケバブメニュー |
+| 状態 / ロール | プライマリボタン | ケバブメニュー |
 |---|---|---|
-| `draft` かつ `is_scheduled=false` | シミュレーション実行 | 編集 / 削除 |
-| `draft` かつ `is_scheduled=true` | 確定 | 再シミュレーション / 編集 / 削除 |
-| `confirmed` | (なし) | 詳細確認 / 削除 |
-| `completed` | (なし) | 詳細確認 |
-| `canceled` | (なし) | 削除 |
+| `draft` かつ `is_scheduled=false`（メール起票） | 確認 | 編集 / 削除 |
+| `draft` かつ `is_scheduled=false`（手動起票） | シミュレーション実行 | 編集 / 削除 |
+| `draft` かつ `is_scheduled=true` / `order_handler` | 承認依頼を送信 | 再シミュレーション / 編集 / 削除 |
+| `pending_approval` / `order_handler` | (なし) | 取り下げ / 削除 |
+| `pending_approval` / `president` | 承認 | 差し戻し / 削除 |
+| `confirmed` / `president`・`order_handler` | (なし) | 送品済みにする / 削除 |
+| `completed` | (なし) | (メニューなし) |
+| その他 | (なし) | 削除 |
 
 **シミュレーション実行**（`POST /orders/{order_id}/simulate`）の結果は、画面右からスライドインするサイドシート（shadcn/ui `Sheet`）で表示する。Sheet フッターに「閉じる」「この内容で確定」ボタンを固定表示し、シミュレーション結果を確認後に confirm へ移行する。同時に開けるシートは 1 件のみで、別の注文のシミュレーション実行で自動的に切り替わる。
 

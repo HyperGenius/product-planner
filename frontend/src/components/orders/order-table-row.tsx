@@ -9,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TableCell, TableRow } from "@/components/ui/table"
@@ -18,14 +19,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
-  getProductName,
-  getCustomerName,
+  getProductDisplayParts,
+  getCustomerDisplayName,
   getEffectiveOrderStatus,
   getStatusLabel,
   getStatusBadgeClass,
   getCertaintyLabel,
   getCertaintyBadgeClass,
   formatDeadlineDate,
+  formatDeadlineShort,
   getDeadlineForTab,
   isDeadlineOverdue,
   type StatusFilter,
@@ -93,6 +95,18 @@ export function OrderTableRow({
   const effectiveStatus = getEffectiveOrderStatus(order)
   const tabDeadline = getDeadlineForTab(order, statusFilter)
   const tabDeadlineLabel = formatDeadlineDate(tabDeadline)
+  const product = getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+
+  // 操作カラムを圧縮するため、主要アクション以外はケバブメニューへ寄せる（Issue #397）
+  const canWithdraw = order.status === "pending_approval" && currentUserRole === "order_handler"
+  const canReject = order.status === "pending_approval" && currentUserRole === "president"
+  const canShip =
+    order.status === "confirmed" &&
+    (currentUserRole === "president" || currentUserRole === "order_handler")
+  const canResimulate = order.status === "draft" && order.is_scheduled
+  const canEditOrder = order.status === "draft"
+  const hasMenuActionGroup =
+    canWithdraw || canReject || canShip || canResimulate || canEditOrder
 
   let rowClassName: string | undefined
   if (hasBulkSimFailed) {
@@ -122,20 +136,34 @@ export function OrderTableRow({
           ) : null}
         </TableCell>
         <TableCell className="font-medium">
-          <div className="flex flex-col gap-1">
-            {order.order_no}
-            {isEmailOrder && (
-              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-blue-100 text-blue-700 w-fit">
-                <Mail className="h-3 w-3" />
-                自動起票
-              </span>
+          <div className="flex flex-col gap-0.5 leading-tight">
+            <span className="inline-flex items-center gap-1">
+              {order.order_no}
+              {isEmailOrder && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Mail
+                      className="h-3.5 w-3.5 shrink-0 text-blue-600"
+                      aria-label="自動起票（メール受信）"
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent>自動起票（メール受信）</TooltipContent>
+                </Tooltip>
+              )}
+            </span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {order.customer_order_no ?? "-"}
+            </span>
+          </div>
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm">{product.primary}</span>
+            {product.secondary && (
+              <span className="text-xs text-muted-foreground">{product.secondary}</span>
             )}
           </div>
         </TableCell>
-        <TableCell className="text-sm text-muted-foreground">
-          {order.customer_order_no ?? "-"}
-        </TableCell>
-        <TableCell>{getProductName(order.product_id, products, order.extracted_product_name)}</TableCell>
         <TableCell>
           {order.customer_id == null ? (
             <Tooltip>
@@ -148,39 +176,45 @@ export function OrderTableRow({
               <TooltipContent>顧客が設定されていません</TooltipContent>
             </Tooltip>
           ) : (
-            getCustomerName(order.customer_id, customers)
+            getCustomerDisplayName(order.customer_id, customers)
           )}
         </TableCell>
-        <TableCell className="text-right">{order.quantity}</TableCell>
+        <TableCell className="text-right">{order.quantity.toLocaleString("ja-JP")}</TableCell>
         <TableCell>
-          {order.desired_deadline ? (
-            formatDeadlineDate(order.desired_deadline)
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="flex items-center gap-1 text-yellow-500 text-sm cursor-default">
-                  <AlertCircle className="h-4 w-4" />
-                  未設定
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>希望納期が設定されていません</TooltipContent>
-            </Tooltip>
-          )}
-        </TableCell>
-        <TableCell>
-          {tabDeadlineLabel ? (
-            <span
-              className={
-                isDeadlineOverdue(order, tabDeadline)
-                  ? "font-semibold text-destructive"
-                  : undefined
-              }
-            >
-              {tabDeadlineLabel}
-            </span>
-          ) : (
-            "-"
-          )}
+          <div className="flex flex-col leading-tight text-sm">
+            {order.desired_deadline ? (
+              <span
+                className="text-muted-foreground"
+                title={formatDeadlineDate(order.desired_deadline) ?? undefined}
+              >
+                {formatDeadlineShort(order.desired_deadline)}
+              </span>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center gap-1 text-yellow-500 cursor-default">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    未設定
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>希望納期が設定されていません</TooltipContent>
+              </Tooltip>
+            )}
+            {tabDeadlineLabel ? (
+              <span
+                className={
+                  isDeadlineOverdue(order, tabDeadline)
+                    ? "font-semibold text-destructive"
+                    : undefined
+                }
+                title={tabDeadlineLabel ?? undefined}
+              >
+                {formatDeadlineShort(tabDeadline)}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">-</span>
+            )}
+          </div>
         </TableCell>
         <TableCell>
           <div className="flex flex-col items-start gap-1">
@@ -210,7 +244,7 @@ export function OrderTableRow({
                 </Tooltip>
               )}
             </div>
-            {order.customer_certainty && (
+            {order.customer_certainty && order.customer_certainty !== "confirmed" && (
               <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
                 {getCertaintyLabel(order.customer_certainty)}
               </Badge>
@@ -234,7 +268,7 @@ export function OrderTableRow({
                   variant="outline"
                   onClick={() => router.push(`/orders/${order.id}`)}
                 >
-                  確認する
+                  確認
                 </Button>
               ) : (
                 <Button
@@ -264,48 +298,15 @@ export function OrderTableRow({
                 承認依頼を送信
               </Button>
             )}
-            {order.status === "pending_approval" && currentUserRole === "order_handler" && (
+            {order.status === "pending_approval" && currentUserRole === "president" && (
               <Button
                 size="sm"
-                variant="outline"
-                onClick={() => onWithdraw(order.id, order.order_no ?? "")}
-                disabled={withdrawIsPending || isBulkOperationInProgress}
+                onClick={() => onApprove(order)}
+                disabled={approveIsPending || isBulkOperationInProgress}
               >
-                <Undo2 className="mr-1.5 h-3.5 w-3.5" />
-                取り下げ
+                承認
               </Button>
             )}
-            {order.status === "pending_approval" && currentUserRole === "president" && (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() => onApprove(order)}
-                  disabled={approveIsPending || isBulkOperationInProgress}
-                >
-                  承認
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onReject(order)}
-                  disabled={isBulkOperationInProgress}
-                >
-                  差し戻し
-                </Button>
-              </>
-            )}
-            {order.status === "confirmed" &&
-              (currentUserRole === "president" || currentUserRole === "order_handler") && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onShip(order.id, order.order_no ?? "")}
-                  disabled={shipIsPending || isBulkOperationInProgress}
-                >
-                  <Truck className="mr-1.5 h-3.5 w-3.5" />
-                  送品済みにする
-                </Button>
-              )}
             {order.status !== "completed" && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -315,16 +316,44 @@ export function OrderTableRow({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  {order.status === "draft" && order.is_scheduled && (
+                  {canWithdraw && (
+                    <DropdownMenuItem
+                      onClick={() => onWithdraw(order.id, order.order_no ?? "")}
+                      disabled={withdrawIsPending || isBulkOperationInProgress}
+                    >
+                      <Undo2 className="mr-2 h-3.5 w-3.5" />
+                      取り下げ
+                    </DropdownMenuItem>
+                  )}
+                  {canReject && (
+                    <DropdownMenuItem
+                      onClick={() => onReject(order)}
+                      disabled={isBulkOperationInProgress}
+                    >
+                      <MessageSquareWarning className="mr-2 h-3.5 w-3.5" />
+                      差し戻し
+                    </DropdownMenuItem>
+                  )}
+                  {canShip && (
+                    <DropdownMenuItem
+                      onClick={() => onShip(order.id, order.order_no ?? "")}
+                      disabled={shipIsPending || isBulkOperationInProgress}
+                    >
+                      <Truck className="mr-2 h-3.5 w-3.5" />
+                      送品済みにする
+                    </DropdownMenuItem>
+                  )}
+                  {canResimulate && (
                     <DropdownMenuItem onClick={() => onSimulate(order)}>
                       再シミュレーション
                     </DropdownMenuItem>
                   )}
-                  {order.status === "draft" && (
+                  {canEditOrder && (
                     <DropdownMenuItem onClick={() => onEdit(order)}>
                       編集
                     </DropdownMenuItem>
                   )}
+                  {hasMenuActionGroup && <DropdownMenuSeparator />}
                   <DropdownMenuItem
                     className="text-destructive"
                     onClick={() => onDelete(order)}
