@@ -34,6 +34,7 @@ import { OrderNotificationCards } from "@/components/orders/order-notification-c
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
 import { OrderTableRow } from "@/components/orders/order-table-row"
 import { SimulationSideSheet } from "@/components/orders/simulation-side-sheet"
+import { getDeadlineColumnLabel } from "@/lib/order-utils"
 import { useOrdersPage, PAGE_SIZE } from "@/hooks/use-orders-page"
 
 export default function OrdersPage() {
@@ -234,7 +235,7 @@ export default function OrdersPage() {
                   <TableHead>顧客</TableHead>
                   <TableHead className="text-right">数量</TableHead>
                   <TableHead>希望納期</TableHead>
-                  <TableHead>確定納期</TableHead>
+                  <TableHead>{getDeadlineColumnLabel(statusFilter)}</TableHead>
                   <TableHead>ステータス</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
@@ -244,6 +245,7 @@ export default function OrdersPage() {
                   <OrderTableRow
                     key={order.id}
                     order={order}
+                    statusFilter={statusFilter}
                     products={products}
                     customers={customers}
                     isSimulating={simulatingOrderId === order.id}

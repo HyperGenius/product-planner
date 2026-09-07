@@ -47,6 +47,8 @@ import {
   getCertaintyLabel,
   getCertaintyBadgeClass,
   formatDeadlineDate,
+  usesSimulatedDeadlineForOrder,
+  isDeadlineOverdue,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import { ApiError } from "@/lib/api-client"
@@ -287,10 +289,33 @@ export default function OrderDetailPage() {
                 <dt className="text-muted-foreground">希望納期</dt>
                 <dd>{formatDate(order.desired_deadline)}</dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-muted-foreground">確定納期</dt>
-                <dd>{formatDate(order.confirmed_deadline)}</dd>
-              </div>
+              {usesSimulatedDeadlineForOrder(order) ? (
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">シミュ納期</dt>
+                  <dd
+                    className={
+                      isDeadlineOverdue(order, order.simulated_deadline)
+                        ? "font-semibold text-destructive"
+                        : undefined
+                    }
+                  >
+                    {formatDeadlineDate(order.simulated_deadline) ?? "-"}
+                  </dd>
+                </div>
+              ) : (
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">確定納期</dt>
+                  <dd
+                    className={
+                      isDeadlineOverdue(order, order.confirmed_deadline)
+                        ? "font-semibold text-destructive"
+                        : undefined
+                    }
+                  >
+                    {formatDate(order.confirmed_deadline)}
+                  </dd>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <dt className="text-muted-foreground">ステータス</dt>
                 <dd>

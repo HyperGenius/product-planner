@@ -92,8 +92,21 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 | 顧客 | 顧客名 / ⚠ 未設定 | 未設定時は警告アイコン + `text-muted-foreground` |
 | 数量 | quantity | |
 | 希望納期 | desired_deadline の日付 / ⚠ 未設定 | 未設定時は警告アイコン |
-| 確定納期 | confirmed_deadline の日付 / — | 確定前は `—` |
+| シミュ納期 / 確定納期 | タブ依存で出し分け（Issue #394-B） | 下記参照 |
 | ステータス | バッジ（色分け） | 下記参照 |
+
+**シミュ納期 / 確定納期カラムのタブ依存出し分け（Issue #394-B）**
+
+`confirmed_deadline` は承認確定時（`POST /orders/{id}/confirm`）にしか書き込まれないため、承認前（下書き・シミュ済・承認待ち）の行では常に空になる。そのフェーズで社長が知りたいのは「シミュレーション上いつ完成する見込みか（＝希望納期に間に合うか）」なので、タブに応じてこのカラムを出し分ける。
+
+| タブ（`StatusFilter`） | ヘッダ | 値 |
+|---|---|---|
+| 下書き / シミュ済 / 承認待ち / キャンセル | 「シミュ納期」 | `simulated_deadline`（Issue #394-A で永続化） |
+| すべて / 確定済 / 送品済み / 完了 | 「確定納期」 | `confirmed_deadline` |
+
+- 判定は `lib/order-utils.ts` の `usesSimulatedDeadline(statusFilter)` / `getDeadlineColumnLabel` / `getDeadlineForTab`。受注詳細・承認モーダルなどタブ文脈のない画面は `usesSimulatedDeadlineForOrder(order)`（`confirmed` / `shipped` / `completed` 以外はシミュ納期）で出し分ける。
+- 表示中の納期（シミュ納期・確定納期のどちらでも）が `desired_deadline` より後の行は、その値を**赤字（`text-destructive` + 太字）**で表示する（`isDeadlineOverdue(order, deadline)`。クライアント側の日付文字列比較、不正日付は非強調）。
+- 承認確認モーダル（単体 `approve-confirm-dialog.tsx` / 一括 `bulk-approve-confirm-dialog.tsx`）・受注詳細（`orders/[id]/page.tsx`）・新規作成のシミュ結果プレビュー（`orders/new/page.tsx`）も「シミュ納期」表記に統一。
 | 操作 | プライマリボタン + ケバブメニュー | 下記参照 |
 
 **ステータスバッジ配色**

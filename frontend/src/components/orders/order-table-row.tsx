@@ -26,6 +26,9 @@ import {
   getCertaintyLabel,
   getCertaintyBadgeClass,
   formatDeadlineDate,
+  getDeadlineForTab,
+  isDeadlineOverdue,
+  type StatusFilter,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -33,6 +36,8 @@ import type { Customer } from "@/types/customer"
 
 interface OrderTableRowProps {
   order: Order
+  /** 現在の一覧タブ。納期カラムを「シミュ納期」/「確定納期」で出し分けるのに使う（Issue #394-B） */
+  statusFilter: StatusFilter
   products?: Product[]
   customers?: Customer[]
   isSimulating: boolean
@@ -59,6 +64,7 @@ interface OrderTableRowProps {
 
 export function OrderTableRow({
   order,
+  statusFilter,
   products,
   customers,
   isSimulating,
@@ -85,6 +91,8 @@ export function OrderTableRow({
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
   const effectiveStatus = getEffectiveOrderStatus(order)
+  const tabDeadline = getDeadlineForTab(order, statusFilter)
+  const tabDeadlineLabel = formatDeadlineDate(tabDeadline)
 
   let rowClassName: string | undefined
   if (hasBulkSimFailed) {
@@ -160,7 +168,19 @@ export function OrderTableRow({
           )}
         </TableCell>
         <TableCell>
-          {formatDeadlineDate(order.confirmed_deadline) ?? "-"}
+          {tabDeadlineLabel ? (
+            <span
+              className={
+                isDeadlineOverdue(order, tabDeadline)
+                  ? "font-semibold text-destructive"
+                  : undefined
+              }
+            >
+              {tabDeadlineLabel}
+            </span>
+          ) : (
+            "-"
+          )}
         </TableCell>
         <TableCell>
           <div className="flex flex-col items-start gap-1">

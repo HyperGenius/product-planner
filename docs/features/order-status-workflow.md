@@ -102,6 +102,12 @@ draft ──────────▶ pending_approval ───────�
   フィルタ・ページングはクライアント側（[use-orders-page.ts](../../frontend/src/hooks/use-orders-page.ts)）
   のため API 追加は不要。
 - **「未確定」通知カード**: `draftCount` もシミュ済を除外し、「下書き」タブと件数を揃える。
+- **「シミュ納期」カラム (Issue #394-B)**: 一覧の納期カラムはタブ依存で「シミュ納期」
+  (`simulated_deadline`) と「確定納期」(`confirmed_deadline`) を出し分ける。`is_scheduled` と
+  `simulated_deadline` は #394-A 以降スケジュール条件の編集で一緒にクリアされるため、
+  `filterOrder()` の `simulated` 判定（`is_scheduled` ベース）と表示値（`simulated_deadline`）は
+  draft では整合が取れる。詳細は
+  [order-management-ui-design.md](order-management-ui-design.md#テーブル設計)。
 - **編集時の無効化 (Issue #394-A)**: `PATCH /orders/{id}` で `product_id` / `quantity` /
   `desired_deadline` / `scheduling_start_date` が変わると、`is_scheduled` は `false` に、
   `simulated_deadline` は `NULL` に戻る。これにより「工程・数量変更後も `is_scheduled` が

@@ -11,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { getProductName, formatDeadlineDate } from "@/lib/order-utils"
+import { getProductName, formatDeadlineDate, isDeadlineOverdue } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -60,8 +60,16 @@ export function ApproveConfirmDialog({
                     <span>{formatDeadlineDate(order.desired_deadline) ?? "未設定"}</span>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">確定納期</span>
-                    <span>{formatDeadlineDate(order.confirmed_deadline) ?? "-"}</span>
+                    <span className="text-muted-foreground">シミュ納期</span>
+                    <span
+                      className={
+                        isDeadlineOverdue(order, order.simulated_deadline)
+                          ? "font-semibold text-destructive"
+                          : undefined
+                      }
+                    >
+                      {formatDeadlineDate(order.simulated_deadline) ?? "-"}
+                    </span>
                   </div>
                 </div>
               )}

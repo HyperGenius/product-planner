@@ -11,7 +11,12 @@ export interface Order {
   customer_id?: number
   quantity: number
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
-  confirmed_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
+  confirmed_deadline?: string // 承認確定時に算出される完成予定日 (YYYY-MM-DD)。承認前は未設定
+  /**
+   * `POST /orders/{id}/simulate` が算出した完成見込み日 (YYYY-MM-DD)。承認前の「シミュ納期」表示に使う。
+   * product_id / quantity / desired_deadline / scheduling_start_date の編集で is_scheduled とともにクリアされる（Issue #394）
+   */
+  simulated_deadline?: string
   /** 受注起票日（システムに受注が登録された日時）。作業開始日とは別物（Issue #372） */
   order_date?: string | null
   /** 作業開始日（工場が着手する日、YYYY-MM-DD）。未設定なら実行日時から着手。過去日は president / platform_admin のみ設定可（Issue #372） */

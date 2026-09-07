@@ -720,7 +720,7 @@ export default function NewOrderPage() {
                     </dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-muted-foreground">確定納期</dt>
+                    <dt className="text-muted-foreground">シミュ納期</dt>
                     <dd className={!simulationResult.is_feasible ? "text-red-600 font-medium" : ""}>
                       {format(new Date(simulationResult.calculated_deadline), "yyyy/MM/dd HH:mm", { locale: ja })}
                     </dd>
