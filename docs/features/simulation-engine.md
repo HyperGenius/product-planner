@@ -264,6 +264,17 @@ class CalendarConfig:
 パスパラメータで受注を特定し、その `product_id`・`quantity`・`desired_deadline` を使ってシミュレーション。  
 レスポンス形式は上記と同じ。
 
+`POST /orders/simulate`（without-id）と違い、**受注に副作用がある**:
+
+| フィールド | 値 | 備考 |
+|---|---|---|
+| `is_scheduled` | `true` | 「シミュ済」派生ステータスの判定に使う（Issue #392） |
+| `simulated_deadline` | 算出された最終工程終了日（`date` 型） | 承認前の「シミュ納期」表示用。`confirmed_deadline` と同一ロジック（`_deadline_from_schedules()`）で算出する（Issue #394-A） |
+
+`production_schedules` への保存は行わない（`dry_run=True` のまま）。`product_id` /
+`quantity` / `desired_deadline` / `scheduling_start_date` を `PATCH /orders/{id}` で
+変更すると、`simulated_deadline` と `is_scheduled` は無効化される（下記「編集時の無効化」）。
+
 作業開始日は次の順で解決する（Issue #372）:
 
 1. リクエストボディ `{ "scheduling_start_date": "YYYY-MM-DD" }`（上書き指定。過去日は `president` / `platform_admin` のみ）
@@ -338,6 +349,20 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 
 ---
 
+### PATCH `/orders/{order_id}` — スケジュール条件の編集時の無効化（Issue #394-A）
+
+`product_id` / `quantity` / `deadline_date`（`desired_deadline`）/ `scheduling_start_date`
+のいずれかが**実質的に変化**した場合、直前のシミュレーション結果は陳腐化するため:
+
+- `simulated_deadline` → `NULL`
+- `is_scheduled` → `false`
+
+にリセットする（既に無効な項目は書き込まずに UPDATE のペイロードを最小化する）。
+これにより PR #393 が課題として挙げていた「`is_scheduled` が編集後も立ったまま陳腐化する」
+問題を解消する。差し戻し（`reject`）・取り下げ（`withdraw`）では**リセットしない**（据え置き）。
+
+---
+
 ### GET `/production-schedules` — スケジュール一覧取得
 
 **クエリパラメータ**
@@ -407,7 +432,8 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 | カラム | 型 | 説明 |
 |---|---|---|
 | `status` | `text` | `draft \| confirmed \| completed \| canceled` |
-| `is_scheduled` | `bool` | スケジュール確定済みかどうか |
+| `is_scheduled` | `bool` | スケジュール算出済みかどうか（simulate / confirm で `true`。編集で `false` に戻る。Issue #394-A） |
+| `simulated_deadline` | `date \| NULL` | `POST /orders/{id}/simulate` が算出した完成見込み日（シミュ納期）。承認前の一覧・承認モーダルで表示。スケジュール条件の編集で `NULL` クリア（Issue #394-A） |
 | `confirmed_deadline` | `date` | 確定時に算出された生産完了予定日 |
 | `confirmed_at` | `timestamptz` | 確定操作のタイムスタンプ |
 | `order_date` | `timestamptz` | 受注起票日（システムに受注が登録された日時）。作業開始日とは別物（Issue #372） |
