@@ -59,6 +59,23 @@ export function formatDeadlineDate(dateStr: string | null | undefined): string |
 }
 
 /**
+ * 納期日付を一覧向けに短縮表示する（Issue #397）。
+ * 当年（JST基準）は "M/D"、それ以外の年は "YY/M/D"。
+ * 日付として解釈できない文字列は `formatDeadlineDate` の結果にフォールバックする。
+ */
+export function formatDeadlineShort(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null
+  const iso = dateStr.slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return formatDeadlineDate(dateStr)
+  const [, year, month, day] = m
+  const mm = String(Number(month))
+  const dd = String(Number(day))
+  const currentYear = jstTodayIso().slice(0, 4)
+  return year === currentYear ? `${mm}/${dd}` : `${year.slice(2)}/${mm}/${dd}`
+}
+
+/**
  * 日付のみを表す文字列を `<input type="date">` が要求する "YYYY-MM-DD" 形式に整形する。
  */
 export function toDateInputValue(dateStr: string | null | undefined): string {
@@ -185,6 +202,22 @@ export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
 }
 
 /**
+ * 図番（code）と品名（name）を「1行目＝図番／2行目＝品名」の2段表示用に分解する。
+ * 未移行データ（`code` が NULL で `name` に図番が入っている行）は name を1行目へ繰り上げ、
+ * 2行目は null にする。製品マスタ一覧（`master/products` の `resolveProductDisplay`）と
+ * 表示ヒューリスティックを共通化する（全テナントの図番が揃ったら撤去予定）。
+ */
+export function splitProductCodeName(
+  code: string | null | undefined,
+  name: string
+): { primary: string; secondary: string | null } {
+  return {
+    primary: code || name,
+    secondary: code ? name : null,
+  }
+}
+
+/**
  * 製品IDから製品名を取得。productIdがnull（自動起票時に製品未マッチ）の場合は、
  * 抽出済みの生テキスト（extractedProductName）があればそれをフォールバック表示する。
  */
@@ -198,7 +231,41 @@ export function getProductName(
   }
   const product = products?.find((p) => p.id === productId)
   if (!product) return "不明"
-  return product.code ? `${product.code} - ${product.name}` : product.name
+  const { primary, secondary } = splitProductCodeName(product.code, product.name)
+  return secondary ? `${primary} - ${secondary}` : primary
+}
+
+export interface ProductDisplayParts {
+  /** 1行目に出す文字列（図番。未移行データ・製品未確定時は品名／生テキスト） */
+  primary: string
+  /** 2行目に出す品名。1行目に品名を繰り上げた場合や未設定なら null */
+  secondary: string | null
+  /** 製品マスタと未突合（product_id が null／マスタに存在しない） */
+  unresolved: boolean
+}
+
+/**
+ * 注文一覧の製品セルを「図番／品名」の2行で表示するための分解済みデータを返す（Issue #397）。
+ * productId が null（自動起票で製品未マッチ）の場合は extractedProductName をフォールバック表示する。
+ */
+export function getProductDisplayParts(
+  productId: number | null,
+  products?: Product[],
+  extractedProductName?: string | null
+): ProductDisplayParts {
+  if (productId == null) {
+    return {
+      primary: extractedProductName ? `${extractedProductName}（製品未確定）` : "不明",
+      secondary: null,
+      unresolved: true,
+    }
+  }
+  const product = products?.find((p) => p.id === productId)
+  if (!product) {
+    return { primary: "不明", secondary: null, unresolved: true }
+  }
+  const { primary, secondary } = splitProductCodeName(product.code, product.name)
+  return { primary, secondary, unresolved: false }
 }
 
 /**
@@ -208,6 +275,20 @@ export function getCustomerName(customerId: number | undefined, customers?: Cust
   if (!customerId) return "-"
   const customer = customers?.find((c) => c.id === customerId)
   return customer ? customer.name : "不明"
+}
+
+/**
+ * 顧客IDから「通称（alias）」を優先して表示名を取得する（Issue #397）。
+ * alias 未設定なら正式名（name）にフォールバックする。注文一覧の「通称」カラム用。
+ */
+export function getCustomerDisplayName(
+  customerId: number | undefined,
+  customers?: Customer[]
+): string {
+  if (!customerId) return "-"
+  const customer = customers?.find((c) => c.id === customerId)
+  if (!customer) return "不明"
+  return customer.alias?.trim() || customer.name
 }
 
 /**
