@@ -33,6 +33,13 @@ Gmail/Claude API を経由させて検証するとテストが不必要に重く
   （`yield` フィクスチャ + `finally`、または明示的な `.delete()`）。
   他のテストや開発中のデータと衝突しないよう、識別用の一意な値
   （`uuid.uuid4()` 等）をテナントID・注文番号等に含める
+- **teardown の削除順は外部キーの向きに合わせる**。`orders` は複数の子テーブルから参照され、
+  中には `ON DELETE CASCADE` でないもの（例: `orders.source_attachment_id → order_attachments(id)`
+  は `NO ACTION`）がある。子を先に消すと `23503` で teardown が ERROR になる。
+  基本は「参照している側（子）→ 参照される側（親）」の順で、`orders` は `order_attachments`
+  より**先**に消す（`order_attachments.order_id` の `ON DELETE CASCADE` が実添付行を巻き取り、
+  残る `order_id IS NULL` のステージング行を後から消す）。teardown 内の例外は
+  テスト本体が pass していても ERROR 扱いになるので、削除順は実DBで一度確認すること
 
 ## 現状の制約
 

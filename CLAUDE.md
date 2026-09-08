@@ -66,6 +66,11 @@ cd backend && ruff check . && mypy .
   `cd backend && uv pip install -q -r requirements-dev.txt` 後に `uv run --no-sync <cmd>` で実行する
 - `ruff check .` はリポジトリ全体だと既存の未修正エラーが多数ある（主に `scripts/`）。
   自分の変更が増やしていないかは変更ファイルを指定して確認する（例: `uv run --no-sync ruff check path/to/file.py`）
+- **ruff の実行はリポジトリルートから行う**: `cd backend` して `ruff check` すると isort の
+  first-party 判定が変わり、`app` / サードパーティのインポートグループ分けが pre-commit / CI
+  （どちらもルートから `ruff check --config=backend/pyproject.toml backend/` で実行）と食い違う。
+  自分の変更が I001 を増やしていないかは
+  `ruff check --config=backend/pyproject.toml backend/path/to/file.py` で確認する
 - コミット時に pre-commit（`ruff` / `ruff-format` / `mypy`）が走り、`ruff-format` は自動整形して
   コミットを一旦中断する。整形後に `git add` して再コミットする
 
@@ -76,6 +81,20 @@ cd backend && ruff check . && mypy .
 - **RLS 必須**: 新規テーブルには必ず `ENABLE ROW LEVEL SECURITY` と `is_tenant_member(tenant_id)` ポリシーを設定
 - **Service Role Key 禁止**: アプリコード内で `SUPABASE_SERVICE_ROLE_KEY` を使用しない。必ずユーザー JWT を使用
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
+- **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
+  DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
+  （現在は `20260902000000_add_customer_order_extraction_prompt.sql` の11引数版＝`p_customer_order_no` 付き）。
+  古いマイグレーションの本文をコピーすると廃止済みの引数少ないオーバーロードが復活し、アプリが実際に
+  呼ぶ関数に変更が入らない。旧シグネチャは冒頭で `DROP FUNCTION IF EXISTS upsert_order_by_dedupe_key(...)`
+  してから作り直す。ローカルで `supabase db reset` 後に `pg_proc` のオーバーロードが1つだけか確認すること
+- **受注ステータス (`orders.status`)**: 取り得る値は `draft` / `pending_approval` / `confirmed` /
+  `in_progress`（生産中）/ `shipped` / `completed` / `canceled`。遷移バリデーションは
+  `services/order_status_service.py` の `ORDER_STATUS_TRANSITIONS`。`in_progress` は着手日
+  （`scheduling_start_date` → 無ければ最早工程の `production_schedules.start_datetime`）の到来で
+  cron が `confirmed ⇄ in_progress` を自動遷移させる（`GET /api/cron/advance-order-status`、
+  Issue #400）。フロントの取り得る値は `frontend/src/types/order.ts` の `Order["status"]` と
+  `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。詳細は
+  [docs/features/order-status-workflow.md](docs/features/order-status-workflow.md)
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること
@@ -95,6 +114,13 @@ cd backend && ruff check . && mypy .
   supabase db query --db-url "postgresql://postgres.<project-ref>:<url-encoded-password>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" "SELECT ..."
   ```
 - 本番への `db push` / 直接SQL実行は不可逆な操作のため、必ず `--dry-run`（push の場合）や `SELECT` での事前確認を行い、ユーザーの明示的な承認を得てから実行すること
+
+## 定期実行（cron）
+
+- 経路は3段: **pg_cron（Supabase、手動登録）→ Edge Function `supabase/functions/parse-order-pdfs-trigger/index.ts` → バックエンドの `GET /api/cron/*`**（`CRON_SECRET` の Bearer 認証、`routers/cron/_auth.py` の `validate_cron_secret`）。Edge Function は1回の起動で全 `/api/cron/*` を順に叩く薄いプロキシ。詳細は [docs/infra/supabase-pgcron-parse-order-pdfs.md](docs/infra/supabase-pgcron-parse-order-pdfs.md)
+- **新しい定期処理を足すとき**: (1) `backend/app/routers/cron/` にルーターを追加し `cron/__init__.py` と `app/main.py` に登録、(2) `parse-order-pdfs-trigger/index.ts` に `callCronEndpoint(...)` 呼び出しを1行追加。**新しい pg_cron ジョブの登録は不要**（既存トリガーに相乗りする）
+- cron は高頻度（10〜15分間隔）で回るため、処理は**冪等**に作る。全テナント横断で動くので `get_supabase_admin_client()` を使う（権限チェックは `CRON_SECRET` で代替）
+- エラー時のレスポンスに例外メッセージ（`{exc}`）をそのまま入れない。詳細は `logger.error(..., exc_info=True)` でログにのみ残し、レスポンスは固定文言にする
 
 ## Git ワークフロー
 
