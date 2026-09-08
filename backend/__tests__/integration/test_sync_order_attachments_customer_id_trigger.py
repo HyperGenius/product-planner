@@ -28,8 +28,8 @@ _FUTURE_DEADLINE_2 = (datetime.now(UTC).date() + timedelta(days=90)).isoformat()
 @pytest.fixture()
 def sync_trigger_fixture(admin_db):
     """このテスト専用の tenant / customer 2件 / product を作成し、
-    テスト後に order_attachments → orders → customers/products/tenants の
-    順で削除する。"""
+    テスト後に orders → order_attachments → products → customers → tenants の
+    順で削除する（削除順の理由は teardown 部のコメントを参照）。"""
     tenant = (
         admin_db.table("tenants")
         .insert({"name": "integration test tenant (order_attachments sync)"})
