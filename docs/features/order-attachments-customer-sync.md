@@ -59,6 +59,12 @@
 - [x] 顧客がまだ揃っていない場合、ステージング行は更新されない
 - [x] 既存のテストをパスすること（`__tests__/integration/test_sync_order_attachments_customer_id_trigger.py`
       でトリガーの分岐を実DBに対して検証）
+    - このテストの `sync_trigger_fixture` は teardown で `orders` を `order_attachments` より
+      **先**に削除する。`orders.source_attachment_id → order_attachments(id)` の FK は
+      `ON DELETE NO ACTION` のため、参照元の `orders` を残したまま `order_attachments` を消すと
+      `23503` で teardown が ERROR になる（Issue #407）。`order_attachments.order_id` の
+      `ON DELETE CASCADE` が実添付行を巻き取り、残る `order_id IS NULL` のステージング行を
+      後から削除する
 - [x] 型・Lint エラーが出ていないこと
 
 ## 関連
@@ -66,3 +72,5 @@
 - Issue #315: 注文の顧客変更時にorder_attachments.customer_idが更新されず不明な顧客を削除できない
 - Issue #312 / [customer-delete-error-handling.md](customer-delete-error-handling.md):
   外部キー制約エラーの理由表示
+- Issue #407: 上記 integration テストのフィクスチャ teardown が FK 制約違反（23503）で
+  ERROR になっていた問題を修正（削除順を `orders` → `order_attachments` に）

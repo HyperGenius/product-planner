@@ -71,8 +71,13 @@ def sync_trigger_fixture(admin_db):
         "product_id": product_id,
     }
 
-    admin_db.table("order_attachments").delete().eq("tenant_id", tenant_id).execute()
+    # orders を先に削除する。orders.source_attachment_id → order_attachments(id) の FK は
+    # ON DELETE NO ACTION のため、参照元の orders が残ったまま order_attachments を消すと
+    # 23503 で teardown が ERROR になる。orders を先に消せば order_attachments.order_id の
+    # ON DELETE CASCADE で実添付行も巻き取られ、残る order_id IS NULL のステージング行を
+    # 後から削除できる。
     admin_db.table("orders").delete().eq("tenant_id", tenant_id).execute()
+    admin_db.table("order_attachments").delete().eq("tenant_id", tenant_id).execute()
     admin_db.table("products").delete().eq("id", product_id).execute()
     admin_db.table("customers").delete().eq("id", old_customer_id).execute()
     admin_db.table("customers").delete().eq("id", new_customer_id).execute()
