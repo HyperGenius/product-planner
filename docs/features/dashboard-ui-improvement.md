@@ -188,10 +188,10 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 | `app/page.tsx` | `<DashboardRouter />` を描画するだけ |
 | `components/dashboard/DashboardRouter.tsx` | `useCurrentMember().role` で分岐。`"president"` → `PresidentDashboard`、それ以外・ロール未取得（ローディング）中は `DefaultDashboard` をフォールバック。`useOrders()` / `useProducts()` / `useDashboardMetrics()` はここで1回だけ呼び、結果を props で各ダッシュボードへ渡す（ロール判明時の再マウントで再フェッチさせないため） |
 | `components/dashboard/DefaultDashboard.tsx` | 現行ダッシュボードそのまま（承認待ちバナーは非表示）。表示専用 |
-| `components/dashboard/PresidentDashboard.tsx` | president 向けの器。初期実装は `DefaultDashboard` と同じ要素＋承認待ちバナー。表示専用 |
+| `components/dashboard/PresidentDashboard.tsx` | president 向けの器。承認待ちキューカード＋KPI＋クイックアクション＋最新の注文。表示専用 |
 | `components/dashboard/DashboardHeader.tsx` | ページヘッダー（タイトル＋当日日付）。両ダッシュボード共通 |
 | `components/dashboard/KpiCards.tsx` | KPI カード 4 枚のグリッド。`buildKpiCards()` で定義を組み立て |
-| `components/dashboard/PendingApprovalBanner.tsx` | 承認待ちバナー。表示制御（president 限定）は呼び出し側に委譲。`ordersLoading` 中・件数 0 では何も描画しない |
+| `components/dashboard/ApprovalQueueCard.tsx` | 承認待ちキューカード（Issue #402）。旧 `PendingApprovalBanner`（件数のみ）を置換。`PresidentDashboard` のみで使用 |
 | `components/dashboard/QuickActions.tsx` | クイックアクション 2 ボタン |
 | `components/dashboard/RecentOrders.tsx` | 最新の注文リスト（最大 5 件） |
 | `hooks/use-dashboard-metrics.ts` | `useDashboardMetrics(orders)` で集計値（`todayDueCount` / `draftOrdersCount` / `pendingApprovalCount` / `confirmedOrdersCount` / `weeklyOrdersCount` / `recentOrders`）を導出 |
@@ -199,14 +199,66 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 ### 後続 Issue との関係
 
 - KPI の中身の差し替え → #ISSUE_D
-- 承認待ちのキュー化 → #ISSUE_B
+- 承認待ちのキュー化 → #402（実装済み。下記「4.」参照）
 - リスクカード → #ISSUE_C
 
 いずれも `PresidentDashboard` および `components/dashboard/` 配下のパーツに差し込む。
 
 ### 検証方法（追加分）
 
-1. `president` でログインし `PresidentDashboard`（承認待ちバナーあり）が描画されること
+1. `president` でログインし `PresidentDashboard`（承認待ちキューカードあり）が描画されること
 2. `president` 以外でログイン、およびロール取得中は `DefaultDashboard` が描画されること
 3. KPI・クイックアクション・最新の注文の表示・遷移が従来と変わらないこと
 4. `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
+
+---
+
+## 4. 承認待ちキューカード（Issue #402）
+
+`PresidentDashboard` の「承認待ちバナー」（件数のみ表示）を、承認待ち注文の
+**実リストを出すキューカード**へ置き換えた。社長がログイン直後に「誰から・いつ・
+何の承認を頼まれているか」を把握し、そのまま承認へ進めるようにする。
+
+### Frontend
+
+| ファイル | 変更内容 |
+|---|---|
+| `components/dashboard/ApprovalQueueCard.tsx` | 新規。`orders` prop（`DashboardRouter` が 1 回だけ取得した全ステータスの注文一覧）を `status === "pending_approval"` で絞り込んで描画。0 件・ロード中は何も描画しない（旧バナー踏襲） |
+| `components/dashboard/PresidentDashboard.tsx` | `PendingApprovalBanner` を `ApprovalQueueCard` へ差し替え。`orders` prop を追加 |
+| `components/dashboard/DashboardRouter.tsx` | `PresidentDashboard` へ `orders` を渡す |
+| `components/dashboard/PendingApprovalBanner.tsx` | 削除（唯一の利用箇所だった `PresidentDashboard` から外れたため） |
+| `types/order.ts` | `Order` に `approval_requested_at` / `approval_requested_by` / `approval_requested_by_name` を追加 |
+
+各行の表示: 注文番号 / 製品名 × 数量 / 希望納期（`desired_deadline`）/ シミュ納期
+（`simulated_deadline`、Issue #394）/ 依頼者 / 依頼からの経過時間
+（`formatDistanceToNow`）。`simulated_deadline > desired_deadline` の行は
+`isDeadlineOverdue()`（`lib/order-utils.ts`、#394-B と同じ判定）で「納期遅延」を
+強調する。`simulated_deadline` 未算出の行は「シミュ納期なし」表示・遅延判定なし。
+依頼者・依頼日時が NULL（既存の pending_approval 注文）の行は「依頼者不明」/
+「依頼時刻不明」でフォールバックする。
+
+導線: 行クリック → `/orders/{id}`、見出し／フッターボタン →
+`/orders?status=pending_approval`（既存の一括承認画面）。
+
+### Backend
+
+| ファイル | 変更内容 |
+|---|---|
+| `supabase/migrations/20260909000000_add_approval_requested_to_orders.sql` | `orders.approval_requested_at timestamptz` / `orders.approval_requested_by uuid REFERENCES auth.users(id)` を追加。既存の `pending_approval` 注文は `order_approval_log` の最新 `request_approval` 行からバックフィル |
+| `routers/transaction/orders.py` `request_order_approval` | `orders` の上記 2 カラムを `request-approval` 実行時に更新（監査ログ `order_approval_log` とは別に非正規化） |
+| `routers/transaction/orders.py` `reject_order` / `withdraw_order_approval` | `draft` へ戻す際に 2 カラムを NULL クリア |
+| `routers/transaction/orders.py` `get_orders` | `_attach_approval_requester_names()` で `approval_requested_by`（auth.users.id）から `profiles` を 1 クエリで引き、`full_name` → なければ `email` を `approval_requested_by_name` として付与。依頼者のいない注文は `null` |
+
+依頼者名は `order_approval_log` 経由でも取得できるが、ダッシュボード表示のたびに
+ログテーブルを join するのを避けるため `orders` へ非正規化する方針。
+
+### 検証方法（追加分）
+
+1. `order_handler` で下書き注文の承認依頼を送信 → `orders.approval_requested_at` /
+   `approval_requested_by` が更新されること
+2. `president` のダッシュボードに承認待ちキューカードが表示され、各行に依頼者・
+   経過時間・シミュ納期・遅延強調（`simulated_deadline > desired_deadline` の行）が出ること
+3. 行クリックで注文詳細、見出しから一括承認画面へ遷移できること
+4. 承認待ち 0 件のときカードが非表示になること
+5. `president` が差し戻し（reject）／`order_handler` が取り下げ（withdraw）すると
+   2 カラムが NULL に戻ること

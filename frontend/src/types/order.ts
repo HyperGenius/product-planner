@@ -22,6 +22,12 @@ export interface Order {
   /** 作業開始日（工場が着手する日、YYYY-MM-DD）。未設定なら実行日時から着手。過去日は president / platform_admin のみ設定可（Issue #372） */
   scheduling_start_date?: string | null
   status: 'draft' | 'pending_approval' | 'confirmed' | 'in_progress' | 'shipped' | 'completed' | 'canceled'
+  /** 承認依頼を送信した日時 (ISO 8601 / timestamptz)。pending_approval 以外・既存データでは未設定（Issue #402） */
+  approval_requested_at?: string | null
+  /** 承認依頼者の auth.users.id（非正規化。Issue #402） */
+  approval_requested_by?: string | null
+  /** 承認依頼者の表示名（profiles.full_name、なければ email）。不明時は null（Issue #402） */
+  approval_requested_by_name?: string | null
   rejection_reason?: string | null
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean

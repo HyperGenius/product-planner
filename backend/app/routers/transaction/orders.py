@@ -105,6 +105,36 @@ def _map_order_response(order: dict) -> dict:
     return mapped
 
 
+def _attach_approval_requester_names(client: Client, orders: list[dict]) -> None:
+    """承認依頼者（approval_requested_by）の表示名を各注文へ付与する（Issue #402）。
+
+    承認待ちキューカードが「依頼者」列を出すための補完。`approval_requested_by`
+    （非正規化した auth.users.id）から profiles を1クエリで引き、`full_name`
+    → なければ `email` を `approval_requested_by_name` として詰める。依頼者が
+    いない（＝pending_approval 以外の）注文には None を入れる。profiles は
+    「同一テナントのメンバーなら参照可」の RLS を持つため、閲覧者自身の
+    ユーザー JWT クライアントで取得する。
+    """
+    requester_ids = list(
+        {o["approval_requested_by"] for o in orders if o.get("approval_requested_by")}
+    )
+    name_map: dict[str, str | None] = {}
+    if requester_ids:
+        res = (
+            client.table("profiles")
+            .select("id, full_name, email")
+            .in_("id", requester_ids)
+            .execute()
+        )
+        name_map = {
+            p["id"]: (p.get("full_name") or p.get("email"))
+            for p in cast(list[dict[str, Any]], res.data or [])
+        }
+    for order in orders:
+        rid = order.get("approval_requested_by")
+        order["approval_requested_by_name"] = name_map.get(rid) if rid else None
+
+
 def _deadline_from_schedules(schedules: list[dict]) -> str:
     """スケジュール（工程セグメント）群の最終終了日時から完成見込み日を算出する。
 
@@ -219,11 +249,21 @@ def create_order(
 
 
 @orders_router.get("")
-def get_orders(repo: OrderRepository = Depends(get_order_repo)):
-    """注文を全件取得（has_no_routings / has_unconfirmed_routings フラグ付き）"""
+def get_orders(
+    repo: OrderRepository = Depends(get_order_repo),
+    client: Client = Depends(get_supabase_client),
+):
+    """注文を全件取得（has_no_routings / has_unconfirmed_routings フラグ付き）
+
+    承認待ち（pending_approval）注文には承認依頼者名（approval_requested_by_name）と
+    依頼日時（approval_requested_at）を付与する。承認待ちキューカード（Issue #402）が
+    「誰から・いつ」承認を頼まれたかを一覧表示するために使う。
+    """
     logger.info("Fetching all orders")
     results = repo.get_all_with_routing_status()
-    return [_map_order_response(order) for order in results]
+    mapped = [_map_order_response(order) for order in results]
+    _attach_approval_requester_names(client, mapped)
+    return mapped
 
 
 @orders_router.get("/unconfirmed-routing-queue")
@@ -1305,7 +1345,15 @@ def request_order_approval(
         raise HTTPException(status_code=400, detail=str(e)) from None
 
     result = order_repo.update(
-        order_id, {"status": "pending_approval", "rejection_reason": None}
+        order_id,
+        {
+            "status": "pending_approval",
+            "rejection_reason": None,
+            # 承認待ちキューカード（Issue #402）の「依頼者 / 経過時間」表示用に非正規化する。
+            # 監査ログ（order_approval_log）とは別に orders 側へも直接書き込む。
+            "approval_requested_at": datetime.now(UTC).isoformat(),
+            "approval_requested_by": user_id,
+        },
     )
     _log_approval_action_safely(
         approval_log_repo, tenant_id, order_id, "request_approval", user_id
@@ -1463,7 +1511,14 @@ def reject_order(
         raise HTTPException(status_code=400, detail=str(e)) from None
 
     result = order_repo.update(
-        order_id, {"status": "draft", "rejection_reason": reject_data.reason}
+        order_id,
+        {
+            "status": "draft",
+            "rejection_reason": reject_data.reason,
+            # draft へ戻った注文に古い依頼者・依頼日時を残さない（Issue #402）。
+            "approval_requested_at": None,
+            "approval_requested_by": None,
+        },
     )
     _log_approval_action_safely(
         approval_log_repo, tenant_id, order_id, "reject", user_id, reject_data.reason
@@ -1501,7 +1556,15 @@ def withdraw_order_approval(
     except InvalidOrderStatusTransitionError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
-    result = order_repo.update(order_id, {"status": "draft"})
+    result = order_repo.update(
+        order_id,
+        {
+            "status": "draft",
+            # draft へ戻った注文に古い依頼者・依頼日時を残さない（Issue #402）。
+            "approval_requested_at": None,
+            "approval_requested_by": None,
+        },
+    )
     _log_approval_action_safely(
         approval_log_repo, tenant_id, order_id, "withdraw", user_id
     )
