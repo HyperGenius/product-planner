@@ -172,3 +172,41 @@ const statusBadgeClass: Record<string, string> = {
 5. ダッシュボードの 4 枚の KPI カードが正しい件数を表示していることを確認（注文データが存在する状態で）
 6. 注文リストのステータスバッジが色分けされていることを確認
 7. クイックアクションの 2 ボタンがそれぞれ正しいページへ遷移することを確認
+
+---
+
+## 3. ロール別ダッシュボードへの分割（Issue #401）
+
+Epic #399 の一環として、巨大化した `app/page.tsx` を `components/dashboard/` 配下の
+ロール別コンポーネントに分割し、`president` だけ別レイアウトへ段階的に切り替えられる
+フックポイントを用意した。**このリファクタでは表示・挙動を変えていない。**
+
+### コンポーネント構成
+
+| ファイル | 役割 |
+|---|---|
+| `app/page.tsx` | `<DashboardRouter />` を描画するだけ |
+| `components/dashboard/DashboardRouter.tsx` | `useCurrentMember().role` で分岐。`"president"` → `PresidentDashboard`、それ以外・ロール未取得（ローディング）中は `DefaultDashboard` をフォールバック |
+| `components/dashboard/DefaultDashboard.tsx` | 現行ダッシュボードそのまま（承認待ちバナーは非表示） |
+| `components/dashboard/PresidentDashboard.tsx` | president 向けの器。初期実装は `DefaultDashboard` と同じ要素＋承認待ちバナー |
+| `components/dashboard/DashboardHeader.tsx` | ページヘッダー（タイトル＋当日日付）。両ダッシュボード共通 |
+| `components/dashboard/KpiCards.tsx` | KPI カード 4 枚のグリッド。`buildKpiCards()` で定義を組み立て |
+| `components/dashboard/PendingApprovalBanner.tsx` | 承認待ちバナー。表示制御（president 限定）は呼び出し側に委譲。`ordersLoading` 中・件数 0 では何も描画しない |
+| `components/dashboard/QuickActions.tsx` | クイックアクション 2 ボタン |
+| `components/dashboard/RecentOrders.tsx` | 最新の注文リスト（最大 5 件） |
+| `hooks/use-dashboard-metrics.ts` | `useDashboardMetrics(orders)` で集計値（`todayDueCount` / `draftOrdersCount` / `pendingApprovalCount` / `confirmedOrdersCount` / `weeklyOrdersCount` / `recentOrders`）を導出 |
+
+### 後続 Issue との関係
+
+- KPI の中身の差し替え → #ISSUE_D
+- 承認待ちのキュー化 → #ISSUE_B
+- リスクカード → #ISSUE_C
+
+いずれも `PresidentDashboard` および `components/dashboard/` 配下のパーツに差し込む。
+
+### 検証方法（追加分）
+
+1. `president` でログインし `PresidentDashboard`（承認待ちバナーあり）が描画されること
+2. `president` 以外でログイン、およびロール取得中は `DefaultDashboard` が描画されること
+3. KPI・クイックアクション・最新の注文の表示・遷移が従来と変わらないこと
+4. `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
