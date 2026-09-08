@@ -96,8 +96,23 @@ cd backend && ruff check . && mypy .
   `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。詳細は
   [docs/features/order-status-workflow.md](docs/features/order-status-workflow.md)
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
+- **ダッシュボード**: `app/page.tsx` は `components/dashboard/DashboardRouter` を描画するだけ。`DashboardRouter` が
+  `useCurrentMember().role` で `PresidentDashboard`（`president`）／`DefaultDashboard`（それ以外・ロール未取得中の
+  フォールバック）を出し分ける。`useOrders()` / `useProducts()` / `useDashboardMetrics()` は **`DashboardRouter` で
+  1回だけ**呼び、各ダッシュボードには props で渡す（ロール判明時の再マウントで再フェッチさせないため）。
+  各ダッシュボード・配下のパーツ（`KpiCards` 等）は表示専用。集計は `hooks/use-dashboard-metrics.ts`。
+  Epic #399（Issue #401 が基盤、KPI 差し替え #ISSUE_D／承認待ちキュー #ISSUE_B／リスクカード #ISSUE_C）。
+  詳細は [docs/features/dashboard-ui-improvement.md](docs/features/dashboard-ui-improvement.md)
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること
+  - Union 文字列型（`Order["status"]` 等）でルックアップテーブルを引くときは `Record<string, T>` ではなく
+    `Record<Order["status"], T>` で全ケースを明示する。値が増えたときに型エラーで気づける（PR #409）
+- **日付文字列のパース（Frontend）**: `orders` の `confirmed_deadline` / `simulated_deadline` /
+  `desired_deadline` / `scheduling_start_date` / `order_date` 等は**日付のみ（`"YYYY-MM-DD"`、時刻を持たない）**。
+  `new Date("2026-09-08")` は **UTC 深夜**として解釈されるため、端末のタイムゾーン次第で日付が前日にズレる
+  （「今日の納期」カウントや一覧の表示日付が1日ずれる）。日付のみのフィールドは必ず
+  `parseISO()`（`date-fns`、ローカル深夜として解釈）でパースする。`created_at` 等の**タイムスタンプ**
+  （時刻・TZ 付き）は `new Date()` で可（PR #409）
 - **受注の納期フィールド**: `orders` には完成見込み日が2本ある。`confirmed_deadline`（承認確定時＝`dry_run=False` に書き込み）と `simulated_deadline`（`POST /orders/{id}/simulate` ＝ `dry_run=True` に書き込み、承認前の「シミュ納期」表示用。Issue #394）。両者は `_deadline_from_schedules()`（`routers/transaction/orders.py`）で同一ロジック（最終工程終了日時 → date）で算出する。`PATCH /orders/{id}` で `product_id` / `quantity` / `deadline_date` / `scheduling_start_date` が変わると `simulated_deadline` と `is_scheduled` はクリアされる（`reject` / `withdraw` は据え置き）。詳細は [docs/features/simulation-engine.md](docs/features/simulation-engine.md)
 - **メンバーロール**: `organization_members.role` は `president`（社長）/ `iso_officer`（ISO担当）/ `order_handler`（受注担当）/ `platform_admin`（プラットフォーム管理者）の四値（Issue #323）。旧 `admin`/`member` は廃止済み。メンバー管理系エンドポイントは `president`/`platform_admin` に開放し、承認操作（工程確定 `is_confirmed` 等）は `platform_admin` を含めず `president` 限定とする方針。詳細は [docs/features/member-roles.md](docs/features/member-roles.md) 参照
 
