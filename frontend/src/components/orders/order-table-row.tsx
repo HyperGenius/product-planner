@@ -101,7 +101,7 @@ export function OrderTableRow({
   const canWithdraw = order.status === "pending_approval" && currentUserRole === "order_handler"
   const canReject = order.status === "pending_approval" && currentUserRole === "president"
   const canShip =
-    order.status === "confirmed" &&
+    (order.status === "confirmed" || order.status === "in_progress") &&
     (currentUserRole === "president" || currentUserRole === "order_handler")
   const canResimulate = order.status === "draft" && order.is_scheduled
   const canEditOrder = order.status === "draft"

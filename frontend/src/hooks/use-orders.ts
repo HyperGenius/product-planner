@@ -234,8 +234,8 @@ export function useWithdrawApproval() {
 }
 
 /**
- * 確定済の注文を送品済みにするフック（president / order_handler）
- * 注文ステータスを confirmed -> shipped にする
+ * 確定済 / 生産中の注文を送品済みにするフック（president / order_handler）
+ * 注文ステータスを confirmed / in_progress -> shipped にする
  */
 export function useShipOrder() {
   const queryClient = useQueryClient()

@@ -1517,9 +1517,9 @@ def ship_order(
     order_repo: OrderRepository = Depends(get_order_repo),
 ):
     """
-    確定済の注文を送品済み (shipped) にする（president / order_handler）。
+    確定済 / 生産中の注文を送品済み (shipped) にする（president / order_handler）。
 
-    confirmed からのみ遷移でき、shipped は実質的な終端状態。
+    confirmed / in_progress から遷移でき、shipped は実質的な終端状態。
     """
     logger.info(f"Marking order {order_id} as shipped")
     _require_any_role(

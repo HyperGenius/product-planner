@@ -5,8 +5,11 @@ draft -> pending_approval -> confirmed -> completed / canceled の順方向の�
 許可する。差し戻し pending_approval -> draft のみ例外的に許可する
 （実際の却下APIは別Issueで実装）。
 
-confirmed からは shipped (送品済み) へも遷移できる。shipped は実質的な終端で、
-以降の順方向遷移は無い。
+confirmed からは in_progress (生産中) と shipped (送品済み) へ遷移できる。
+in_progress は着手日（scheduling_start_date、無ければ最早工程の start_datetime）
+の到来に応じて cron が自動で付与し、着手日が未来へ戻ると in_progress -> confirmed
+の巻き戻しも cron が行う（Issue #400）。shipped は実質的な終端で、以降の順方向
+遷移は無い。
 
 例外として、トライアル運用中に溜まった「納期超過の下書き」を後片付けする
 管理者操作（Issue #367）だけは draft -> shipped の遷移を行う。これは通常の
@@ -19,7 +22,8 @@ from datetime import date
 ORDER_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"pending_approval"},
     "pending_approval": {"draft", "confirmed"},
-    "confirmed": {"completed", "canceled", "shipped"},
+    "confirmed": {"in_progress", "completed", "canceled", "shipped"},
+    "in_progress": {"confirmed", "completed", "canceled", "shipped"},
     "shipped": set(),
     "completed": set(),
     "canceled": set(),

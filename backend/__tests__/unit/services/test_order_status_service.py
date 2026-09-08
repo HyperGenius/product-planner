@@ -22,10 +22,16 @@ class TestOrderStatusService:
             ("confirmed", "completed"),
             ("confirmed", "canceled"),
             ("confirmed", "shipped"),
+            # in_progress (生産中) 関連 (Issue #400)
+            ("confirmed", "in_progress"),
+            ("in_progress", "confirmed"),
+            ("in_progress", "shipped"),
+            ("in_progress", "completed"),
+            ("in_progress", "canceled"),
         ],
     )
     def test_allowed_transitions(self, current_status, new_status):
-        """順方向遷移および差し戻し(pending_approval->draft)は許可される"""
+        """順方向遷移および差し戻し(pending_approval->draft, in_progress->confirmed)は許可される"""
         validate_order_status_transition(current_status, new_status)
 
     @pytest.mark.parametrize(
@@ -45,6 +51,13 @@ class TestOrderStatusService:
             ("pending_approval", "shipped"),
             ("shipped", "completed"),
             ("shipped", "confirmed"),
+            # in_progress は draft/pending_approval からは飛べず、逆行もしない (Issue #400)
+            ("draft", "in_progress"),
+            ("pending_approval", "in_progress"),
+            ("in_progress", "draft"),
+            ("in_progress", "pending_approval"),
+            ("completed", "in_progress"),
+            ("shipped", "in_progress"),
         ],
     )
     def test_disallowed_transitions(self, current_status, new_status):

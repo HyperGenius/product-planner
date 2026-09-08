@@ -39,6 +39,24 @@ class ScheduleRepository(BaseRepository):
             return []
         return cast(list[dict[str, Any]], res.data)
 
+    def get_start_datetimes_by_order_ids(
+        self, order_ids: list[int]
+    ) -> list[dict[str, Any]]:
+        """指定注文群に紐づく工程スケジュールの (order_id, start_datetime) を返す。
+
+        着手日ベースの自動遷移（Issue #400）で、注文ごとの最早 start_datetime を
+        求めるために使う。最小値の算出は呼び出し側で行う。
+        """
+        if not order_ids:
+            return []
+        res = (
+            self.client.table(self.table_name)
+            .select("order_id, start_datetime")
+            .in_("order_id", order_ids)
+            .execute()
+        )
+        return cast(list[dict[str, Any]], res.data or [])
+
     def get_last_end_time(self, equipment_id: int) -> datetime | None:
         """指定された設備IDに関連する最後のスケジュールの終了日時を取得する。
 

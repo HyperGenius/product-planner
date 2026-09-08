@@ -16,9 +16,13 @@
 ## ステータス遷移
 
 ```
-draft ──────────▶ pending_approval ──────────▶ confirmed ──┬──▶ completed
-                        │                                    ├──▶ canceled
-                        │                                    └──▶ shipped
+draft ──────────▶ pending_approval ──────────▶ confirmed ◀──(巻き戻し)──┐
+                        │                          │ │ │               │
+                        │           (着手日到来)   │ │ └──▶ in_progress ─┘
+                        │                          │ │         │ │ │
+                        │                          │ ├─────────┘ │ ├──▶ completed
+                        │                          │ └───────────┼──▶ canceled
+                        │                          └─────────────┴──▶ shipped
                         └──(差し戻し)──▶ draft
 ```
 
@@ -27,6 +31,7 @@ draft ──────────▶ pending_approval ───────�
 | `draft` | 下書き（メール自動作成 or 手動作成） |
 | `pending_approval` | 受注担当者による修正完了、社長承認待ち |
 | `confirmed` | 社長による承認済み（`POST /orders/{id}/confirm` 実行済み） |
+| `in_progress` | 生産中（着手日が到来。cron が自動付与。詳細は下記「着手日到来による生産中への自動遷移」） |
 | `shipped` | 送品済み（出荷・納品済み。`POST /orders/{id}/ship` 実行済み、実質的な終端） |
 | `completed` | 完了 |
 | `canceled` | キャンセル |
@@ -46,13 +51,44 @@ draft ──────────▶ pending_approval ───────�
 実行するAPIエンドポイントは Issue #325 で実装した。詳細は
 [approval-workflow.md](approval-workflow.md) を参照。
 
+### 着手日到来による生産中への自動遷移 (`confirmed ⇄ in_progress`、Issue #400)
+
+現場メンバーはアプリを操作する余裕がないため、「生産に着手した」ことを手動で
+記録できない。そこで**着手日**を基準に cron が `confirmed ⇄ in_progress` を
+自動遷移させる。ダッシュボードの「納期リスク注文」カード（Epic #399）が
+「生産中の注文」を対象にできるようにするための土台でもある。
+
+- **着手日の解決順**: `orders.scheduling_start_date`（明示指定の作業開始日、Issue #372）
+  → 未指定なら紐づく `production_schedules.start_datetime` の最小値の日付。どちらも
+  無ければ対象外（動かさない）。
+- **遷移ルール**（双方向・冪等）:
+  - `status == 'confirmed'` かつ 着手日 ≤ today → `in_progress`
+  - `status == 'in_progress'` かつ 着手日 > today → `confirmed`（着手日が未来へ
+    戻った／スケジュール再生成で開始日がずれたケースの巻き戻し）
+- **エンドポイント**: `GET /api/cron/advance-order-status`
+  （[advance_order_status.py](../../backend/app/routers/cron/advance_order_status.py)、
+  `CRON_SECRET` 認証、`get_supabase_admin_client()` で全テナント横断バルク更新）。
+  ロジックは [order_auto_transition_service.py](../../backend/app/services/order_auto_transition_service.py)。
+- **スケジューリング**: 既存の Supabase Edge Function `parse-order-pdfs-trigger` に
+  3本目の呼び出しとして相乗り（[supabase-pgcron-parse-order-pdfs.md](../infra/supabase-pgcron-parse-order-pdfs.md)）。
+  着手日は date 粒度のため日次相当で十分だが、冪等なので高頻度で叩いても副作用はない。
+- **証跡ログ**: 残さない（承認ワークフローではないため `order_approval_log` には
+  混ぜない。必要になったら専用テーブルを追加する）。
+- **自動処理との整合**: `upsert_order_by_dedupe_key`
+  （[20260908000000_add_in_progress_order_status.sql](../../supabase/migrations/20260908000000_add_in_progress_order_status.sql)）
+  の保護対象 status に `in_progress` を追加し、メール/PDF自動取込が生産中の受注を
+  上書き・降格しないようにしている。
+- **フロントエンド**: `Order["status"]` に `in_progress` を追加。ラベル「生産中」・
+  バッジ配色 sky、受注一覧のフィルタタブ「生産中」を追加
+  （[order-utils.ts](../../frontend/src/lib/order-utils.ts)）。
+
 ### 送品済み (`shipped`)
 
-`confirmed → shipped` の遷移は `POST /orders/{id}/ship` が担う。ロールは
-`president` / `order_handler` に開放している（出荷実務は受注担当も行うため）。
+`confirmed → shipped` / `in_progress → shipped` の遷移は `POST /orders/{id}/ship` が担う。
+ロールは `president` / `order_handler` に開放している（出荷実務は受注担当も行うため）。
 `shipped` は実質的な終端状態で、以降の順方向遷移は無い。フロントエンドでは
 受注一覧・受注詳細に「送品済みにする」ボタンを表示する
-（`confirmed` かつ上記ロールのときのみ。[order-table-row.tsx](../../frontend/src/components/orders/order-table-row.tsx) /
+（`confirmed` / `in_progress` かつ上記ロールのときのみ。[order-table-row.tsx](../../frontend/src/components/orders/order-table-row.tsx) /
 [orders/[id]/page.tsx](../../frontend/src/app/orders/[id]/page.tsx)、フックは
 `useShipOrder`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)））。
 
@@ -118,7 +154,8 @@ draft ──────────▶ pending_approval ───────�
 
 ## 自動処理（メール/PDF取込）との整合
 
-`upsert_order_by_dedupe_key`（[20260830150000_add_shipped_order_status.sql](../../supabase/migrations/20260830150000_add_shipped_order_status.sql)）
-は、既存の `confirmed`/`completed`/`canceled`/`pending_approval` 保護に加えて `shipped` 状態の
-受注も自動処理から保護し、誤って上書き・降格させないようにしている。
+`upsert_order_by_dedupe_key`（[20260908000000_add_in_progress_order_status.sql](../../supabase/migrations/20260908000000_add_in_progress_order_status.sql)）
+は、既存の `pending_approval`/`confirmed`/`shipped`/`completed`/`canceled` 保護に加えて
+`in_progress`（生産中）状態の受注も自動処理から保護し、誤って上書き・降格させないように
+している。
 
