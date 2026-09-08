@@ -28,17 +28,26 @@ COMMENT ON COLUMN orders.status IS
   'draft -> pending_approval -> confirmed -> completed/canceled の順方向にのみ'
   '遷移する（差し戻し pending_approval -> draft のみ例外）。confirmed <-> in_progress は'
   '着手日の到来/巻き戻しに応じて cron (GET /api/cron/advance-order-status) が自動遷移させる。'
-  'confirmed / in_progress からは shipped へも遷移できる。confirmed へは'
-  'ユーザーの確定操作(/orders/{id}/confirm)でのみ遷移する。顧客側の確度は'
+  'confirmed / in_progress からは shipped へも遷移できる。pending_approval -> confirmed は'
+  'ユーザーの確定操作(/orders/{id}/confirm)でのみ発生し、confirmed へはこの確定操作か'
+  '上記 cron の巻き戻し(in_progress -> confirmed)でのみ到達する。顧客側の確度は'
   'customer_certainty を参照。';
 
 -- ==========================================
 -- upsert_order_by_dedupe_key: in_progress も自動処理からの保護対象に追加
 --
--- 20260830150000_add_shipped_order_status.sql 時点の最新定義をベースに、
--- 保護対象の status へ in_progress を追加するのみの差分を適用する。
+-- 20260902000000_add_customer_order_extraction_prompt.sql 時点の最新定義
+-- （11引数・p_customer_order_no 付き）をベースに、自動取込の保護対象 status へ
+-- in_progress を追加するのみの差分。dedupe キー・優先順位判定は一切変更しない。
 -- 生産中の受注をメール/PDF自動処理が誤って上書き・降格させないようにする。
+--
+-- 念のため、過去に一時的に存在した 10引数シグネチャが残っている環境向けに
+-- 先に DROP しておく（20260902000000 で既に DROP 済みだが冪等性のため）。
 -- ==========================================
+DROP FUNCTION IF EXISTS upsert_order_by_dedupe_key(
+  uuid, bigint, bigint, int, date, text, text, text, text, uuid
+);
+
 CREATE OR REPLACE FUNCTION upsert_order_by_dedupe_key(
   p_tenant_id              uuid,
   p_customer_id            bigint,
@@ -49,7 +58,8 @@ CREATE OR REPLACE FUNCTION upsert_order_by_dedupe_key(
   p_source_type            text,
   p_source_raw             text,
   p_extracted_product_name text,
-  p_source_attachment_id   uuid DEFAULT NULL
+  p_source_attachment_id   uuid DEFAULT NULL,
+  p_customer_order_no      text DEFAULT NULL
 )
 RETURNS TABLE (order_id bigint, action text)
 LANGUAGE plpgsql
@@ -61,6 +71,7 @@ DECLARE
   v_existing_priority int;
   v_new_priority      int;
   v_extracted_name    text := NULLIF(TRIM(p_extracted_product_name), '');
+  v_customer_order_no text := NULLIF(TRIM(p_customer_order_no), '');
 BEGIN
   IF p_product_id IS NULL THEN
     IF v_extracted_name IS NULL OR p_deadline_date IS NULL THEN
@@ -69,12 +80,12 @@ BEGIN
       INSERT INTO orders (
         tenant_id, customer_id, product_id, quantity, deadline_date,
         status, customer_certainty, source_type, source_raw, extracted_product_name,
-        source_attachment_id
+        source_attachment_id, customer_order_no
       )
       VALUES (
         p_tenant_id, p_customer_id, NULL, p_quantity, p_deadline_date,
         'draft', p_customer_certainty, p_source_type, p_source_raw, v_extracted_name,
-        p_source_attachment_id
+        p_source_attachment_id, v_customer_order_no
       )
       RETURNING orders.id INTO v_new_id;
 
@@ -85,12 +96,12 @@ BEGIN
     INSERT INTO orders (
       tenant_id, customer_id, product_id, quantity, deadline_date,
       status, customer_certainty, source_type, source_raw, extracted_product_name,
-      source_attachment_id
+      source_attachment_id, customer_order_no
     )
     VALUES (
       p_tenant_id, p_customer_id, NULL, p_quantity, p_deadline_date,
       'draft', p_customer_certainty, p_source_type, p_source_raw, v_extracted_name,
-      p_source_attachment_id
+      p_source_attachment_id, v_customer_order_no
     )
     ON CONFLICT (tenant_id, customer_id, deadline_date, extracted_product_name)
       WHERE product_id IS NULL
@@ -120,12 +131,12 @@ BEGIN
     INSERT INTO orders (
       tenant_id, customer_id, product_id, quantity, deadline_date,
       status, customer_certainty, source_type, source_raw, extracted_product_name,
-      source_attachment_id
+      source_attachment_id, customer_order_no
     )
     VALUES (
       p_tenant_id, p_customer_id, p_product_id, p_quantity, p_deadline_date,
       'draft', p_customer_certainty, p_source_type, p_source_raw, v_extracted_name,
-      p_source_attachment_id
+      p_source_attachment_id, v_customer_order_no
     )
     ON CONFLICT ON CONSTRAINT orders_dedupe_key DO NOTHING
     RETURNING orders.id INTO v_new_id;
@@ -192,7 +203,8 @@ BEGIN
       quantity                = p_quantity,
       source_type             = p_source_type,
       source_raw              = p_source_raw,
-      extracted_product_name  = v_extracted_name
+      extracted_product_name  = v_extracted_name,
+      customer_order_no       = COALESCE(v_customer_order_no, customer_order_no)
   WHERE id = v_existing.id;
 
   RETURN QUERY SELECT v_existing.id, 'updated'::text;

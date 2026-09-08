@@ -8,9 +8,11 @@
 * `confirmed`   かつ 着手日 <= today  -> `in_progress`
 * `in_progress` かつ 着手日 >  today  -> `confirmed`   （着手日が未来へ戻ったときの巻き戻し）
 
-着手日が解決できない（`scheduling_start_date` も紐づくスケジュールも無い）受注は
-対象外。証跡ログは残さない（承認ワークフローではないため `order_approval_log` には
-混ぜない。必要になったら別テーブルを追加する）。
+日付境界は JST で判定する（`scheduling_start_date` は JST 基準で運用されており、
+`scheduling_start_service` も JST を使うため）。着手日が解決できない
+（`scheduling_start_date` も紐づくスケジュールも無い）受注は対象外。証跡ログは
+残さない（承認ワークフローではないため `order_approval_log` には混ぜない。必要に
+なったら別テーブルを追加する）。
 """
 
 from datetime import date, datetime
@@ -19,6 +21,7 @@ from typing import Any
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.services.scheduling_start_service import parse_scheduling_start_date
+from app.utils.calendar import JST
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
 
@@ -28,22 +31,55 @@ logger = get_logger(__name__)
 _TARGET_STATUSES = ("confirmed", "in_progress")
 
 
-def _parse_schedule_start_date(value: str | datetime | None) -> date | None:
-    """`production_schedules.start_datetime`（timestamptz）を date へ変換する。"""
+def _parse_schedule_start_datetime(value: str | datetime | None) -> datetime | None:
+    """`production_schedules.start_datetime` を tz-aware datetime へ正規化する。
+
+    naive な値は JST の壁時計時刻とみなす（`utils.calendar._to_business_tz` と同じ方針）。
+    パースできない値は None を返す。
+    """
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value.date()
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
-    except ValueError:
-        logger.warning("invalid schedule start_datetime value=%r", value)
-        return None
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning("invalid schedule start_datetime value=%r", value)
+            return None
+    return dt.replace(tzinfo=JST) if dt.tzinfo is None else dt
+
+
+def _to_jst_date(value: str | datetime | None) -> date | None:
+    """`production_schedules.start_datetime` を JST の暦日へ変換する。"""
+    dt = _parse_schedule_start_datetime(value)
+    return dt.astimezone(JST).date() if dt is not None else None
+
+
+def earliest_start_date_by_order(
+    rows: list[dict[str, Any]],
+) -> dict[int, date]:
+    """`(order_id, start_datetime)` 行群から order_id ごとの最早着手日（JST暦日）を求める。
+
+    ISO 文字列の辞書順は時刻順と一致しない（UTC の `Z` とオフセット付きが混在し得る）ため、
+    必ず tz-aware datetime へパースしてから最小値を取り、JST の暦日へ落とす。パース
+    できない行はスキップする。
+    """
+    earliest_dt: dict[int, datetime] = {}
+    for row in rows:
+        oid = row.get("order_id")
+        dt = _parse_schedule_start_datetime(row.get("start_datetime"))
+        if oid is None or dt is None:
+            continue
+        current = earliest_dt.get(oid)
+        if current is None or dt < current:
+            earliest_dt[oid] = dt
+    return {oid: dt.astimezone(JST).date() for oid, dt in earliest_dt.items()}
 
 
 def resolve_effective_start_date(
     scheduling_start_date: str | date | None,
-    earliest_schedule_start: str | datetime | None,
+    earliest_schedule_start: str | datetime | date | None,
 ) -> date | None:
     """着手日を解決する。
 
@@ -57,12 +93,16 @@ def resolve_effective_start_date(
         explicit = None
     if explicit is not None:
         return explicit
-    return _parse_schedule_start_date(earliest_schedule_start)
+    if isinstance(earliest_schedule_start, date) and not isinstance(
+        earliest_schedule_start, datetime
+    ):
+        return earliest_schedule_start
+    return _to_jst_date(earliest_schedule_start)
 
 
 def classify_status_transitions(
     candidates: list[dict[str, Any]],
-    earliest_start_by_order: dict[int, str],
+    earliest_start_by_order: dict[int, date],
     today: date,
 ) -> tuple[list[int], list[int]]:
     """遷移対象の受注IDを (in_progress にする, confirmed に戻す) に振り分ける。
@@ -70,8 +110,8 @@ def classify_status_transitions(
     Args:
         candidates: `id` / `status` / `scheduling_start_date` を持つ受注の一覧
             （status は `confirmed` / `in_progress` のいずれか）。
-        earliest_start_by_order: order_id -> 最早工程の start_datetime（ISO文字列）。
-        today: 判定基準日。
+        earliest_start_by_order: order_id -> 最早工程の着手日（JST暦日）。
+        today: 判定基準日（JST）。
 
     Returns:
         (to_in_progress, to_confirmed): それぞれ更新対象の order_id リスト。
@@ -102,29 +142,12 @@ def classify_status_transitions(
     return to_in_progress, to_confirmed
 
 
-def _earliest_start_by_order(
-    schedule_repo: ScheduleRepository, order_ids: list[int]
-) -> dict[int, str]:
-    """order_id ごとの最早 start_datetime を返す。"""
-    rows = schedule_repo.get_start_datetimes_by_order_ids(order_ids)
-    earliest: dict[int, str] = {}
-    for row in rows:
-        oid = row.get("order_id")
-        start = row.get("start_datetime")
-        if oid is None or start is None:
-            continue
-        current = earliest.get(oid)
-        if current is None or str(start) < current:
-            earliest[oid] = str(start)
-    return earliest
-
-
 def advance_order_statuses(db: Client, today: date | None = None) -> dict[str, Any]:
     """着手日を過ぎた受注を in_progress へ、未来へ戻ったものを confirmed へ遷移させる。
 
     全テナント横断でバルク更新する（cron から admin クライアントで呼ばれる）。冪等。
     """
-    today = today or datetime.now().date()
+    today = today or datetime.now(JST).date()
 
     order_repo = OrderRepository(db)
     schedule_repo = ScheduleRepository(db)
@@ -140,7 +163,9 @@ def advance_order_statuses(db: Client, today: date | None = None) -> dict[str, A
         }
 
     order_ids = [o["id"] for o in candidates if o.get("id") is not None]
-    earliest_start_by_order = _earliest_start_by_order(schedule_repo, order_ids)
+    earliest_start_by_order = earliest_start_date_by_order(
+        schedule_repo.get_start_datetimes_by_order_ids(order_ids)
+    )
 
     to_in_progress, to_confirmed = classify_status_transitions(
         candidates, earliest_start_by_order, today

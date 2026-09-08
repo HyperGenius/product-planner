@@ -24,7 +24,8 @@ def advance_order_status(request: Request):
         db_client = get_supabase_admin_client()
         return advance_order_statuses(db_client)
     except Exception as exc:
+        # 例外の詳細はログにのみ残し、レスポンスは固定文言にする（内部情報の露出防止）。
         logger.error(f"advance-order-status failed: {exc}", exc_info=True)
         raise HTTPException(
-            status_code=502, detail=f"advance-order-status error: {exc}"
+            status_code=502, detail="advance-order-status failed"
         ) from exc
