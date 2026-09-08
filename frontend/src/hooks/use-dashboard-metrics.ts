@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { addDays, startOfDay, startOfWeek } from "date-fns"
+import { addDays, parseISO, startOfDay, startOfWeek } from "date-fns"
 import { ja } from "date-fns/locale"
 import type { Order } from "@/types/order"
 
@@ -37,7 +37,9 @@ export function useDashboardMetrics(orders: Order[] | undefined): DashboardMetri
     return (
       orders?.filter((order) => {
         if (!order.confirmed_deadline) return false
-        const deadline = new Date(order.confirmed_deadline)
+        // confirmed_deadline は "YYYY-MM-DD"。new Date() だと UTC 解釈になり
+        // 端末のタイムゾーン次第で判定が1日ズレるため parseISO でローカル日付として解釈する
+        const deadline = parseISO(order.confirmed_deadline)
         return deadline >= today && deadline < tomorrow
       }).length ?? 0
     )

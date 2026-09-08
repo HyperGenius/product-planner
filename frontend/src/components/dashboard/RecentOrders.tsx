@@ -2,18 +2,25 @@
 
 import { useRouter } from "next/navigation"
 import { ArrowRight, PackageSearch, Plus } from "lucide-react"
-import { format } from "date-fns"
+import { format, parseISO } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
 import { getProductName, getStatusLabel } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
-const statusBadgeClass: Record<string, string> = {
+const DEFAULT_STATUS_BADGE_CLASS = "bg-gray-100 text-gray-600"
+
+// Order["status"] の全値を明示し、値が増えたら型エラーで気づけるようにする。
+// 現行で色指定のなかったステータスはデフォルトと同じグレーにして見た目を変えない。
+const statusBadgeClass: Record<Order["status"], string> = {
   draft: "bg-yellow-100 text-yellow-800 border border-yellow-200",
+  pending_approval: DEFAULT_STATUS_BADGE_CLASS,
   confirmed: "bg-green-100 text-green-800 border border-green-200",
   in_progress: "bg-blue-100 text-blue-800 border border-blue-200",
+  shipped: DEFAULT_STATUS_BADGE_CLASS,
   completed: "bg-gray-100 text-gray-600 border border-gray-200",
+  canceled: DEFAULT_STATUS_BADGE_CLASS,
 }
 
 interface RecentOrdersProps {
@@ -66,7 +73,7 @@ export function RecentOrders({
                   <span className="font-medium text-sm">{order.order_no}</span>
                   <span
                     className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      statusBadgeClass[order.status] ?? "bg-gray-100 text-gray-600"
+                      statusBadgeClass[order.status] ?? DEFAULT_STATUS_BADGE_CLASS
                     }`}
                   >
                     {getStatusLabel(order.status)}
@@ -79,7 +86,7 @@ export function RecentOrders({
               </div>
               <div className="text-right text-sm text-muted-foreground ml-4 shrink-0">
                 {order.confirmed_deadline
-                  ? format(new Date(order.confirmed_deadline), "yyyy/MM/dd", { locale: ja })
+                  ? format(parseISO(order.confirmed_deadline), "yyyy/MM/dd", { locale: ja })
                   : "納期未確定"}
               </div>
             </div>

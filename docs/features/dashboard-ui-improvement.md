@@ -186,9 +186,9 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 | ファイル | 役割 |
 |---|---|
 | `app/page.tsx` | `<DashboardRouter />` を描画するだけ |
-| `components/dashboard/DashboardRouter.tsx` | `useCurrentMember().role` で分岐。`"president"` → `PresidentDashboard`、それ以外・ロール未取得（ローディング）中は `DefaultDashboard` をフォールバック |
-| `components/dashboard/DefaultDashboard.tsx` | 現行ダッシュボードそのまま（承認待ちバナーは非表示） |
-| `components/dashboard/PresidentDashboard.tsx` | president 向けの器。初期実装は `DefaultDashboard` と同じ要素＋承認待ちバナー |
+| `components/dashboard/DashboardRouter.tsx` | `useCurrentMember().role` で分岐。`"president"` → `PresidentDashboard`、それ以外・ロール未取得（ローディング）中は `DefaultDashboard` をフォールバック。`useOrders()` / `useProducts()` / `useDashboardMetrics()` はここで1回だけ呼び、結果を props で各ダッシュボードへ渡す（ロール判明時の再マウントで再フェッチさせないため） |
+| `components/dashboard/DefaultDashboard.tsx` | 現行ダッシュボードそのまま（承認待ちバナーは非表示）。表示専用 |
+| `components/dashboard/PresidentDashboard.tsx` | president 向けの器。初期実装は `DefaultDashboard` と同じ要素＋承認待ちバナー。表示専用 |
 | `components/dashboard/DashboardHeader.tsx` | ページヘッダー（タイトル＋当日日付）。両ダッシュボード共通 |
 | `components/dashboard/KpiCards.tsx` | KPI カード 4 枚のグリッド。`buildKpiCards()` で定義を組み立て |
 | `components/dashboard/PendingApprovalBanner.tsx` | 承認待ちバナー。表示制御（president 限定）は呼び出し側に委譲。`ordersLoading` 中・件数 0 では何も描画しない |
