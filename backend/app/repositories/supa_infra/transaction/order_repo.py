@@ -80,6 +80,24 @@ class OrderRepository(BaseRepository):
             "has_unconfirmed_routings": has_unconfirmed,
         }
 
+    def get_status_transition_candidates(self, statuses: list[str]) -> list[dict]:
+        """着手日ベースの自動遷移（Issue #400）の候補受注を取得する。
+
+        指定ステータス（`confirmed` / `in_progress`）かつ superseded でない受注の
+        `id` / `status` / `scheduling_start_date` のみを返す。cron から admin
+        クライアントで呼ばれ、全テナント横断で取得する。
+        """
+        if not statuses:
+            return []
+        res = (
+            self.client.table(self.table_name)
+            .select("id, status, scheduling_start_date")
+            .in_("status", statuses)
+            .is_("superseded_at", "null")
+            .execute()
+        )
+        return cast(list[dict[str, Any]], res.data or [])
+
     def bulk_update_status(self, order_ids: list[int], status: str) -> list[dict]:
         """複数注文のステータスを1リクエストでまとめて更新し、更新後の行を返す。
 

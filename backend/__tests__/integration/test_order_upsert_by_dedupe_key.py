@@ -240,6 +240,46 @@ class TestUpsertOrderByDedupeKey:
         assert order["status"] == "confirmed"
         assert order["quantity"] == 10
 
+    def test_in_progress_existing_rejects_any_update(self, admin_db, dedupe_fixture):
+        """着手日到来で cron が status='in_progress' にした注文 (Issue #400) は
+        PDF自動処理から完全に保護され、再取込でも上書きされない。"""
+        first = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="confirmed",
+        )
+        admin_db.table("orders").update({"status": "in_progress"}).eq(
+            "id", first["order_id"]
+        ).execute()
+
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=999,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="confirmed",
+        )
+
+        assert second["action"] == "skipped_downgrade"
+        assert second["order_id"] == first["order_id"]
+
+        order = (
+            admin_db.table("orders")
+            .select("status, quantity")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["status"] == "in_progress"
+        assert order["quantity"] == 10
+
     def test_completed_existing_rejects_same_priority_quantity_change(
         self, admin_db, dedupe_fixture
     ):

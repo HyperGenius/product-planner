@@ -21,7 +21,7 @@ export interface Order {
   order_date?: string | null
   /** 作業開始日（工場が着手する日、YYYY-MM-DD）。未設定なら実行日時から着手。過去日は president / platform_admin のみ設定可（Issue #372） */
   scheduling_start_date?: string | null
-  status: 'draft' | 'pending_approval' | 'confirmed' | 'shipped' | 'completed' | 'canceled'
+  status: 'draft' | 'pending_approval' | 'confirmed' | 'in_progress' | 'shipped' | 'completed' | 'canceled'
   rejection_reason?: string | null
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean

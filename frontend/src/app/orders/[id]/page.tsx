@@ -218,7 +218,7 @@ export default function OrderDetailPage() {
   const isDraft = order.status === "draft"
   const isPendingApproval = order.status === "pending_approval"
   const canShip =
-    order.status === "confirmed" &&
+    (order.status === "confirmed" || order.status === "in_progress") &&
     (currentUserRole === "president" || currentUserRole === "order_handler")
   const canDelete = order.status === "draft" || order.status === "canceled"
   // 自動起票で製品を識別できなかった明細（product_id === null）は、

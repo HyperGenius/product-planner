@@ -8,6 +8,7 @@ export type StatusFilter =
   | "simulated"
   | "pending_approval"
   | "confirmed"
+  | "in_progress"
   | "shipped"
   | "completed"
   | "canceled"
@@ -19,6 +20,7 @@ export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "シミュ済", value: "simulated" },
   { label: "承認待ち", value: "pending_approval" },
   { label: "確定済", value: "confirmed" },
+  { label: "生産中", value: "in_progress" },
   { label: "送品済み", value: "shipped" },
   { label: "完了", value: "completed" },
   { label: "キャンセル", value: "canceled" },
@@ -142,6 +144,7 @@ export function isOverdueDraft(order: Order, todayIso: string = localTodayIso())
  */
 const CONFIRMED_DEADLINE_STATUSES: readonly Order["status"][] = [
   "confirmed",
+  "in_progress",
   "shipped",
   "completed",
 ]
@@ -318,6 +321,7 @@ export function getStatusLabel(status: EffectiveOrderStatus): string {
     simulated: "シミュ済",
     pending_approval: "承認待ち",
     confirmed: "確定",
+    in_progress: "生産中",
     shipped: "送品済み",
     completed: "完了",
     canceled: "キャンセル",
@@ -334,6 +338,7 @@ export function getStatusBadgeClass(status: EffectiveOrderStatus): string {
     simulated:         "bg-indigo-100 text-indigo-800 hover:bg-indigo-100",
     pending_approval:  "bg-orange-100 text-orange-800 hover:bg-orange-100",
     confirmed:         "bg-green-100 text-green-800 hover:bg-green-100",
+    in_progress:       "bg-sky-100 text-sky-800 hover:bg-sky-100",
     shipped:           "bg-teal-100 text-teal-800 hover:bg-teal-100",
     completed:         "bg-blue-100 text-blue-800 hover:bg-blue-100",
     canceled:          "bg-gray-100 text-gray-500 hover:bg-gray-100",
