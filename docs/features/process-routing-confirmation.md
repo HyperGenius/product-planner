@@ -253,3 +253,7 @@ Issue #197 / #199 / #200 で実装。
 ### 設計上の判断
 
 Issue #406 の要件3は「工程未入力だけを絞り込むフィルタタブの追加」を挙げていたが、フィルタータブを `orders.status` の値のみに限定する設計方針（[order-management-ui-design.md](order-management-ui-design.md) の「フィルタータブは `orders.status` のみに限定する (#215)」）と衝突するため、**専用タブは追加しない**。直交する概念（情報不足・工程未入力）は通知カード＋一覧行のバッジ／インジケーターで認知させる方針に揃えた。
+
+### 併せて修正: 「情報不足」導線の不具合（Copilot レビュー指摘）
+
+通知カード「情報不足の注文を確認する →」は `?status=incomplete` を設定するが、`filterOrder()` に `incomplete` 分岐が無く、未知値は `order.status === "incomplete"` と評価され常に 0 件になっていた。`StatusFilter` に `incomplete`（タブには出さない派生フィルタ）を追加し、`filterOrder()` で `!customer_id || !desired_deadline`（`incompleteCount` と同条件）を返すよう修正。

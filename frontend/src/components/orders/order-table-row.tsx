@@ -305,9 +305,15 @@ export function OrderTableRow({
               ) : noRouting ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    {/* disabled な Button は pointer イベントを出さないので span で受ける */}
-                    <span tabIndex={0}>
-                      <Button size="sm" variant="outline" disabled>
+                    {/* disabled な Button は pointer/フォーカスイベントを出さないので span で受ける。
+                        スクリーンリーダーにも「無効・理由付き」が伝わるよう role/aria を付ける */}
+                    <span
+                      tabIndex={0}
+                      role="button"
+                      aria-disabled="true"
+                      aria-label="シミュレーション実行（製品に工程が登録されていないため実行できません）"
+                    >
+                      <Button size="sm" variant="outline" disabled tabIndex={-1}>
                         シミュレーション実行
                       </Button>
                     </span>

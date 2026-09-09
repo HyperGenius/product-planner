@@ -12,6 +12,9 @@ export type StatusFilter =
   | "shipped"
   | "completed"
   | "canceled"
+  // status タブとしては出さないが、通知カード「情報不足の注文を確認する →」の
+  // 導線が URL の ?status= に入れる派生フィルタ（顧客・希望納期の未設定）
+  | "incomplete"
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
@@ -58,6 +61,11 @@ export function isNoRoutingOrder(order: Order): boolean {
 
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (!statusFilter) return true
+  // 「情報不足」= 顧客または希望納期が未設定（ステータス問わず）。フィルタタブには出さず、
+  // 通知カードの導線からのみ ?status=incomplete で絞り込む（use-orders-page の incompleteCount と同条件）。
+  if (statusFilter === "incomplete") {
+    return !order.customer_id || !order.desired_deadline
+  }
   // 「シミュ済」= status='draft' かつ is_scheduled（シミュレーション完了・未確定）。
   // 「下書き」タブは未シミュレーションの下書きのみに絞り、両タブを排他にする。
   // Issue #394-A 以降、is_scheduled はスケジュール条件の編集で simulated_deadline とともに

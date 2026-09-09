@@ -114,8 +114,8 @@ export function useOrdersPage() {
     () => orders?.filter((o) => !o.desired_deadline).length ?? 0,
     [orders]
   )
-  // 製品はマッチ済みだが工程が無く起票できない下書き（Issue #406）。「工程未入力」タブ・
-  // 通知カードで次アクション（製品マスタへの工程登録）に気付けるようにする。
+  // 製品はマッチ済みだが工程が無く起票できない下書き（Issue #406）。専用タブは設けず、
+  // 一覧行のバッジと通知カードで次アクション（製品マスタへの工程登録）に気付けるようにする。
   const noRoutingCount = useMemo(
     () => orders?.filter((o) => isNoRoutingOrder(o)).length ?? 0,
     [orders]

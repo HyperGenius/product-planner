@@ -55,4 +55,15 @@ describe("filterOrder", () => {
     const noRouting = makeOrder({ has_no_routings: true })
     expect(filterOrder(noRouting, "draft")).toBe(true)
   })
+
+  it("incomplete は顧客または希望納期が未設定の注文を通す（通知カード導線）", () => {
+    expect(filterOrder(makeOrder({ customer_id: undefined }), "incomplete")).toBe(true)
+    expect(filterOrder(makeOrder({ desired_deadline: undefined }), "incomplete")).toBe(true)
+    expect(
+      filterOrder(
+        makeOrder({ customer_id: 1, desired_deadline: "2026-09-30" }),
+        "incomplete",
+      ),
+    ).toBe(false)
+  })
 })
