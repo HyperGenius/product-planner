@@ -49,7 +49,9 @@ frontend/
 ### `vitest.setup.ts`
 
 - `@testing-library/jest-dom/vitest` を読み込み、`afterEach` で `cleanup()`。
-- `process.env.NEXT_PUBLIC_API_URL` にダミー値をセット（`apiClient` が参照）。
+- `process.env.NEXT_PUBLIC_API_URL` に `.env.local.sample` / CI と同じ値（`http://localhost:8000`、
+  `/api` は付けない）をセット（`apiClient` が `NEXT_PUBLIC_API_URL + endpoint` で組み立てるため）。
+  MSW ハンドラの `API_BASE`（`handlers.ts`）もこの値と揃える。
 - **認証の thin wrapper（`@/utils/supabase/client`）を全テスト共通でモック**する。
   `apiClient` は `createClient().auth.getSession()` の `access_token` を `Authorization`
   ヘッダに載せるだけなので、`src/test-utils/supabase.ts` の状態を返す最小スタブに差し替える。

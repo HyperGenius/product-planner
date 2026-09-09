@@ -1,8 +1,8 @@
 import { http, HttpResponse } from "msw"
 import type { Product } from "@/types/product"
 
-/** apiClient のベース URL（vitest.setup.ts で設定するものと揃える）。 */
-export const API_BASE = "http://localhost:8000/api"
+/** apiClient のベース URL（vitest.setup.ts の NEXT_PUBLIC_API_URL と揃える）。 */
+export const API_BASE = "http://localhost:8000"
 
 export const sampleProducts: Product[] = [
   {
