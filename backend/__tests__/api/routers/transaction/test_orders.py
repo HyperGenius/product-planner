@@ -137,6 +137,48 @@ class TestOrderRouter:
         assert result[1]["order_no"] == "ORD-002"
         mock_repo.get_all_with_routing_status.assert_called_once()
 
+    def test_get_orders_attaches_approval_requester_name(
+        self, mock_repo, mock_supabase_client
+    ):
+        """GET /: pending_approval 注文に依頼者名（profiles.full_name）を付与する（Issue #402）"""
+        db_data = [
+            {
+                "id": 1,
+                "order_number": "ORD-001",
+                "status": "pending_approval",
+                "approval_requested_at": "2026-09-07T00:00:00+00:00",
+                "approval_requested_by": "user-abc",
+            },
+            {"id": 2, "order_number": "ORD-002", "status": "draft"},
+        ]
+        mock_repo.get_all_with_routing_status.return_value = db_data
+        (
+            mock_supabase_client.table.return_value.select.return_value.in_.return_value.execute.return_value.data
+        ) = [{"id": "user-abc", "full_name": "受注 太郎", "email": "t@example.com"}]
+
+        response = client.get("/orders")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result[0]["approval_requested_by_name"] == "受注 太郎"
+        assert result[0]["approval_requested_at"] == "2026-09-07T00:00:00+00:00"
+        # 依頼者のいない注文は None
+        assert result[1]["approval_requested_by_name"] is None
+
+    def test_get_orders_skips_profiles_query_when_no_requester(
+        self, mock_repo, mock_supabase_client
+    ):
+        """GET /: approval_requested_by が無ければ profiles を引かない（Issue #402）"""
+        mock_repo.get_all_with_routing_status.return_value = [
+            {"id": 1, "order_number": "ORD-001", "status": "draft"},
+        ]
+
+        response = client.get("/orders")
+
+        assert response.status_code == 200
+        assert response.json()[0]["approval_requested_by_name"] is None
+        mock_supabase_client.table.assert_not_called()
+
     def test_get_order_by_id(self, mock_repo):
         """GET /{id}: 1件取得のテスト"""
         order_id = 1
@@ -1098,9 +1140,14 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         assert response.json()["status"] == "pending_approval"
-        mock_repo.update.assert_called_once_with(
-            order_id, {"status": "pending_approval", "rejection_reason": None}
-        )
+        mock_repo.update.assert_called_once()
+        called_id, called_payload = mock_repo.update.call_args[0]
+        assert called_id == order_id
+        assert called_payload["status"] == "pending_approval"
+        assert called_payload["rejection_reason"] is None
+        # 承認待ちキューカード用の非正規化カラムが書き込まれる（Issue #402）
+        assert called_payload["approval_requested_by"] == "test-user-id"
+        assert isinstance(called_payload["approval_requested_at"], str)
 
     def test_request_order_approval_forbidden_for_non_order_handler(
         self, headers, mock_repo, mock_supabase_client
@@ -1173,7 +1220,12 @@ class TestOrderRouter:
         assert response.json()["status"] == "draft"
         mock_repo.update.assert_called_once_with(
             order_id,
-            {"status": "draft", "rejection_reason": "表記揺れを修正してください"},
+            {
+                "status": "draft",
+                "rejection_reason": "表記揺れを修正してください",
+                "approval_requested_at": None,
+                "approval_requested_by": None,
+            },
         )
 
     def test_reject_order_reason_optional(
@@ -1193,7 +1245,13 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         mock_repo.update.assert_called_once_with(
-            order_id, {"status": "draft", "rejection_reason": None}
+            order_id,
+            {
+                "status": "draft",
+                "rejection_reason": None,
+                "approval_requested_at": None,
+                "approval_requested_by": None,
+            },
         )
 
     def test_reject_order_forbidden_for_non_president(
@@ -1238,7 +1296,14 @@ class TestOrderRouter:
 
         assert response.status_code == 200
         assert response.json()["status"] == "draft"
-        mock_repo.update.assert_called_once_with(order_id, {"status": "draft"})
+        mock_repo.update.assert_called_once_with(
+            order_id,
+            {
+                "status": "draft",
+                "approval_requested_at": None,
+                "approval_requested_by": None,
+            },
+        )
         mock_approval_log_repo.log_action.assert_called_once_with(
             headers["x-tenant-id"], order_id, "withdraw", "test-user-id", None
         )

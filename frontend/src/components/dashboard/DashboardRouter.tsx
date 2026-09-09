@@ -33,7 +33,7 @@ export function DashboardRouter() {
   }
 
   if (currentMember?.role === "president") {
-    return <PresidentDashboard {...dashboardProps} />
+    return <PresidentDashboard {...dashboardProps} orders={orders} />
   }
 
   return <DefaultDashboard {...dashboardProps} />
