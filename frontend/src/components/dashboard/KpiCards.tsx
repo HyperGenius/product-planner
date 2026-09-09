@@ -5,6 +5,8 @@ import {
   FileText,
   CheckCircle2,
   TrendingUp,
+  CalendarRange,
+  Factory,
   type LucideIcon,
 } from "lucide-react"
 import type { DashboardMetrics } from "@/hooks/use-dashboard-metrics"
@@ -68,16 +70,81 @@ export function buildKpiCards(metrics: DashboardMetrics, ordersLoading: boolean)
   ]
 }
 
+/**
+ * president 向け KPI 定義（Issue #404）。
+ *
+ * テナント全体の汎用集計ではなく、社長が気にする粒度（納期の逼迫度・生産中の規模・
+ * 今週の確定ペース）に寄せた仮の4指標。承認待ち・納期リスクは専用のキューカード
+ * （ApprovalQueueCard / DeadlineRiskCard）で表示するため、ここでは扱わない。
+ * この4指標は暫定で、現場フィードバック後に別Issueで見直す想定。
+ */
+export function buildPresidentKpiCards(
+  metrics: DashboardMetrics,
+  ordersLoading: boolean,
+): KpiCard[] {
+  return [
+    {
+      label: "今日納期の注文",
+      value: ordersLoading ? "…" : metrics.todayDueCount,
+      unit: "件",
+      icon: Clock,
+      accent: "border-t-blue-500",
+      iconBg: "bg-blue-50",
+      iconColor: "text-blue-600",
+      sub: null,
+    },
+    {
+      label: "今週納期の注文",
+      value: ordersLoading ? "…" : metrics.thisWeekDueCount,
+      unit: "件",
+      icon: CalendarRange,
+      accent: "border-t-orange-400",
+      iconBg: "bg-orange-50",
+      iconColor: "text-orange-500",
+      sub: null,
+    },
+    {
+      label: "生産中の注文",
+      value: ordersLoading ? "…" : metrics.inProductionCount,
+      unit: "件",
+      icon: Factory,
+      accent: "border-t-sky-500",
+      iconBg: "bg-sky-50",
+      iconColor: "text-sky-600",
+      sub: null,
+    },
+    {
+      label: "今週確定した注文",
+      value: ordersLoading ? "…" : metrics.weeklyConfirmedCount,
+      unit: "件",
+      icon: CheckCircle2,
+      accent: "border-t-green-500",
+      iconBg: "bg-green-50",
+      iconColor: "text-green-600",
+      sub: null,
+    },
+  ]
+}
+
 interface KpiCardsProps {
   metrics: DashboardMetrics
   ordersLoading: boolean
+  /**
+   * 表示する KPI セット。`"default"`（既定）は現行の汎用4指標、
+   * `"president"` は社長向けに差し替えた4指標（Issue #404）。
+   */
+  variant?: "default" | "president"
 }
 
 /**
  * KPI カード 4 枚のグリッド。現行 `app/page.tsx` のマークアップをそのまま移植。
+ * `variant` で default（現行）／president 向けの指標セットを出し分ける（Issue #404）。
  */
-export function KpiCards({ metrics, ordersLoading }: KpiCardsProps) {
-  const cards = buildKpiCards(metrics, ordersLoading)
+export function KpiCards({ metrics, ordersLoading, variant = "default" }: KpiCardsProps) {
+  const cards =
+    variant === "president"
+      ? buildPresidentKpiCards(metrics, ordersLoading)
+      : buildKpiCards(metrics, ordersLoading)
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">

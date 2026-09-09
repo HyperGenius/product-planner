@@ -23,7 +23,8 @@ interface PresidentDashboardProps {
  * president 向けダッシュボードの器（Issue #401）。
  *
  * 承認待ちバナー（件数のみ）は承認待ちキューカード（実リスト表示・Issue #402）へ置換済み。
- * 納期リスク注文カード（Issue #403）を承認待ちキューの直下に配置。KPI の差し替えは #ISSUE_D。
+ * 納期リスク注文カード（Issue #403）を承認待ちキューの直下に配置。
+ * KPI 4枚は president 向けの指標に差し替え済み（`KpiCards` の `variant="president"`・Issue #404）。
  * データ取得は `DashboardRouter` に集約し、本コンポーネントは表示専用。
  */
 export function PresidentDashboard({
@@ -46,7 +47,7 @@ export function PresidentDashboard({
         products={products}
         ordersLoading={ordersLoading}
       />
-      <KpiCards metrics={metrics} ordersLoading={ordersLoading} />
+      <KpiCards metrics={metrics} ordersLoading={ordersLoading} variant="president" />
       <QuickActions />
       <RecentOrders
         recentOrders={metrics.recentOrders}

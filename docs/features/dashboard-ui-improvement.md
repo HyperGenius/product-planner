@@ -190,16 +190,16 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 | `components/dashboard/DefaultDashboard.tsx` | 現行ダッシュボードそのまま（承認待ちバナーは非表示）。表示専用 |
 | `components/dashboard/PresidentDashboard.tsx` | president 向けの器。承認待ちキューカード＋KPI＋クイックアクション＋最新の注文。表示専用 |
 | `components/dashboard/DashboardHeader.tsx` | ページヘッダー（タイトル＋当日日付）。両ダッシュボード共通 |
-| `components/dashboard/KpiCards.tsx` | KPI カード 4 枚のグリッド。`buildKpiCards()` で定義を組み立て |
+| `components/dashboard/KpiCards.tsx` | KPI カード 4 枚のグリッド。`variant` prop で `buildKpiCards()`（default）／`buildPresidentKpiCards()`（president・Issue #404）を出し分け |
 | `components/dashboard/ApprovalQueueCard.tsx` | 承認待ちキューカード（Issue #402）。旧 `PendingApprovalBanner`（件数のみ）を置換。`PresidentDashboard` のみで使用 |
 | `components/dashboard/DeadlineRiskCard.tsx` | 納期リスク注文カード（Issue #403）。`PresidentDashboard` のみで使用。判定・整列は `lib/deadline-risk.ts` の純粋関数に委譲 |
 | `components/dashboard/QuickActions.tsx` | クイックアクション 2 ボタン |
 | `components/dashboard/RecentOrders.tsx` | 最新の注文リスト（最大 5 件） |
-| `hooks/use-dashboard-metrics.ts` | `useDashboardMetrics(orders)` で集計値（`todayDueCount` / `draftOrdersCount` / `pendingApprovalCount` / `confirmedOrdersCount` / `weeklyOrdersCount` / `recentOrders`）を導出 |
+| `hooks/use-dashboard-metrics.ts` | `useDashboardMetrics(orders)` で集計値（`todayDueCount` / `draftOrdersCount` / `pendingApprovalCount` / `confirmedOrdersCount` / `weeklyOrdersCount` / `recentOrders` ＋ Issue #404 で追加した `thisWeekDueCount` / `inProductionCount` / `weeklyConfirmedCount`）を導出 |
 
 ### 後続 Issue との関係
 
-- KPI の中身の差し替え → #ISSUE_D
+- KPI の中身の差し替え → #404（実装済み。下記「6.」参照）
 - 承認待ちのキュー化 → #402（実装済み。下記「4.」参照）
 - リスクカード → #403（実装済み。下記「5.」参照）
 
@@ -310,3 +310,47 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 4. 行クリックで注文詳細へ遷移できること
 5. リスク対象が 0 件のときカードが非表示になること
 6. `cd frontend && npm run test` で `deadline-risk.test.ts` がパスすること
+
+---
+
+## 6. president 向け KPI カードの差し替え（Issue #404）
+
+`PresidentDashboard` の KPI カード 4 枚を、テナント全体の汎用集計から社長が気にする
+粒度に寄せた指標へ差し替えた。承認待ち・納期リスクは専用のキューカード
+（`ApprovalQueueCard` / `DeadlineRiskCard`）で表示するため、KPI 側は
+「キューに出ない全体感」を担う。**この 4 指標は暫定で、現場フィードバック後に
+別 Issue で見直す前提。**
+
+### president 向け KPI（`buildPresidentKpiCards()`）
+
+| # | ラベル | 集計 | メトリクス |
+|---|---|---|---|
+| 1 | 今日納期の注文 | `confirmed_deadline` が今日 | `todayDueCount`（既存） |
+| 2 | 今週納期の注文 | `confirmed_deadline` が今週（`startOfWeek` 〜 +7 日、上限は排他） | `thisWeekDueCount`（新規） |
+| 3 | 生産中の注文 | `status` が `confirmed` / `in_progress` | `inProductionCount`（新規） |
+| 4 | 今週確定した注文 | `confirmed_at` が今週（`startOfWeek` 〜 +7 日、上限は排他） | `weeklyConfirmedCount`（新規） |
+
+`DefaultDashboard`（president 以外・ロール取得中のフォールバック）の KPI 4 枚は
+現行のまま（`buildKpiCards()`）。
+
+### 変更ファイル
+
+| ファイル | 変更内容 |
+|---|---|
+| `hooks/use-dashboard-metrics.ts` | `DashboardMetrics` に `thisWeekDueCount` / `inProductionCount` / `weeklyConfirmedCount` を追加。`confirmed_deadline`（日付のみ）は `parseISO` でローカル日付として解釈、`confirmed_at`（timestamptz）は `new Date()` で可 |
+| `hooks/use-dashboard-metrics.test.ts` | 新規。追加集計のユニットテスト（Vitest、Issue #340 基盤）。システム時刻を固定し端末 TZ 非依存に検証 |
+| `components/dashboard/KpiCards.tsx` | `buildPresidentKpiCards()` を追加。`KpiCards` に `variant?: "default" \| "president"` prop を追加し指標セットを出し分け |
+| `components/dashboard/PresidentDashboard.tsx` | `<KpiCards … variant="president" />` を指定 |
+| `types/order.ts` | `Order` に `confirmed_at?: string \| null` を追加（`GET /orders` は `select("*")` で既に返しており、Backend 側の変更は不要） |
+
+バックエンド変更なし（`orders` テーブルの `confirmed_at` 列は既存。`GET /orders`
+は Pydantic レスポンスモデルを持たず `select("*")` の結果をそのまま返すため、
+フロントの型定義追加のみで整合する）。
+
+### 検証方法（追加分）
+
+1. `president` のダッシュボードで KPI が「今日納期の注文 / 今週納期の注文 / 生産中の注文 / 今週確定した注文」に差し替わっていること
+2. `president` 以外の KPI は現行（今日の納期 / 未確定注文 / 確定済み注文 / 今週の受注）のままであること
+3. 「生産中の注文」が `confirmed` + `in_progress` の合計になっていること
+4. `cd frontend && npm run test` で `use-dashboard-metrics.test.ts` がパスすること
+5. `npx tsc --noEmit` / `npm run lint` がエラーなく通ること

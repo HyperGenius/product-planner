@@ -153,6 +153,21 @@ interface OrderCreate {
 <dd>{order.order_no ?? <span className="text-muted-foreground">未設定</span>}</dd>
 ```
 
+### 数量 null 時の表示フォールバック（Issue #414）
+
+メール起票で数量を抽出できなかった場合、`orders.quantity` は `0` ではなく `null` で
+保存される（migration `20260618000000_gmail_intake_v2.sql` で `NOT NULL` を解除。
+担当者が後から確認する運用）。この状態の受注は基本的に `status='draft'`。
+
+- フロントの型 `Order["quantity"]` は `number | null`。
+- 表示側は必ず null セーフに扱う。注文一覧の数量セル（`order-table-row.tsx`）は
+  顧客・希望納期セルと同じ `AlertCircle + 未設定` のプレースホルダにフォールバックする
+  （`null` のまま `.toLocaleString()` を呼ぶとページ全体が client-side exception でクラッシュする）。
+
+```tsx
+{order.quantity != null ? order.quantity.toLocaleString("ja-JP") : /* 未設定バッジ */}
+```
+
 ---
 
 ## メール解析パイプライン（実装済み）

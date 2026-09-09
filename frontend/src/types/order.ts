@@ -9,7 +9,12 @@ export interface Order {
   product_id: number | null
   extracted_product_name?: string | null
   customer_id?: number
-  quantity: number
+  /**
+   * 数量。メール起票（source_type='email'）で数量を抽出できなかった場合は `null`（0 ではない）で
+   * 保存され、担当者が後から確認する運用（migration 20260618000000_gmail_intake_v2.sql で
+   * NOT NULL を解除）。この状態の受注は基本的に status='draft'。表示側は null セーフに扱うこと（Issue #414）
+   */
+  quantity: number | null
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   confirmed_deadline?: string // 承認確定時に算出される完成予定日 (YYYY-MM-DD)。承認前は未設定
   /**
@@ -28,6 +33,8 @@ export interface Order {
   approval_requested_by?: string | null
   /** 承認依頼者の表示名（profiles.full_name、なければ email）。不明時は null（Issue #402） */
   approval_requested_by_name?: string | null
+  /** 承認確定（confirm 操作）を行った日時 (ISO 8601 / timestamptz)。承認前・既存データでは未設定 */
+  confirmed_at?: string | null
   rejection_reason?: string | null
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean
