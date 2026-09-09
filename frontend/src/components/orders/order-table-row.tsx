@@ -179,7 +179,21 @@ export function OrderTableRow({
             getCustomerDisplayName(order.customer_id, customers)
           )}
         </TableCell>
-        <TableCell className="text-right">{order.quantity.toLocaleString("ja-JP")}</TableCell>
+        <TableCell className="text-right">
+          {order.quantity != null ? (
+            order.quantity.toLocaleString("ja-JP")
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center justify-end gap-1 text-yellow-500 cursor-default">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  未設定
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>数量が設定されていません</TooltipContent>
+            </Tooltip>
+          )}
+        </TableCell>
         <TableCell>
           <div className="flex flex-col leading-tight text-sm">
             {order.desired_deadline ? (

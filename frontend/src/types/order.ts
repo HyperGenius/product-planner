@@ -9,7 +9,12 @@ export interface Order {
   product_id: number | null
   extracted_product_name?: string | null
   customer_id?: number
-  quantity: number
+  /**
+   * 数量。メール起票（source_type='email'）で数量を抽出できなかった場合は `null`（0 ではない）で
+   * 保存され、担当者が後から確認する運用（migration 20260618000000_gmail_intake_v2.sql で
+   * NOT NULL を解除）。この状態の受注は基本的に status='draft'。表示側は null セーフに扱うこと（Issue #414）
+   */
+  quantity: number | null
   desired_deadline?: string // 日付のみ (YYYY-MM-DD)、時刻情報は持たない
   confirmed_deadline?: string // 承認確定時に算出される完成予定日 (YYYY-MM-DD)。承認前は未設定
   /**
