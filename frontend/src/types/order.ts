@@ -28,6 +28,8 @@ export interface Order {
   approval_requested_by?: string | null
   /** 承認依頼者の表示名（profiles.full_name、なければ email）。不明時は null（Issue #402） */
   approval_requested_by_name?: string | null
+  /** 承認確定（confirm 操作）を行った日時 (ISO 8601 / timestamptz)。承認前・既存データでは未設定 */
+  confirmed_at?: string | null
   rejection_reason?: string | null
   customer_certainty: 'confirmed' | 'forecast' | 'forecast_tentative' | null
   is_scheduled: boolean
