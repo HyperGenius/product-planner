@@ -1,6 +1,7 @@
 "use client"
 
 import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Truck, Undo2 } from "lucide-react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -30,6 +31,7 @@ import {
   formatDeadlineShort,
   getDeadlineForTab,
   isDeadlineOverdue,
+  isNoRoutingOrder,
   type StatusFilter,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
@@ -92,6 +94,8 @@ export function OrderTableRow({
 }: OrderTableRowProps) {
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
+  // 製品はマッチ済みだが工程が無く起票できない下書き（Issue #406）
+  const noRouting = isNoRoutingOrder(order)
   const effectiveStatus = getEffectiveOrderStatus(order)
   const tabDeadline = getDeadlineForTab(order, statusFilter)
   const tabDeadlineLabel = formatDeadlineDate(tabDeadline)
@@ -263,6 +267,20 @@ export function OrderTableRow({
                 {getCertaintyLabel(order.customer_certainty)}
               </Badge>
             )}
+            {noRouting && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link href={`/master/products?highlight=${order.product_id}`}>
+                    <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200">
+                      工程未入力・起票不可
+                    </Badge>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent>
+                  製品に工程が登録されていないため起票できません。クリックで製品マスタを開きます。
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </TableCell>
         <TableCell className="text-right">
@@ -284,6 +302,26 @@ export function OrderTableRow({
                 >
                   確認
                 </Button>
+              ) : noRouting ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {/* disabled な Button は pointer/フォーカスイベントを出さないので span で受ける。
+                        スクリーンリーダーにも「無効・理由付き」が伝わるよう role/aria を付ける */}
+                    <span
+                      tabIndex={0}
+                      role="button"
+                      aria-disabled="true"
+                      aria-label="シミュレーション実行（製品に工程が登録されていないため実行できません）"
+                    >
+                      <Button size="sm" variant="outline" disabled tabIndex={-1}>
+                        シミュレーション実行
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    製品に工程が登録されていません。製品マスタから工程を設定してください。
+                  </TooltipContent>
+                </Tooltip>
               ) : (
                 <Button
                   size="sm"

@@ -12,6 +12,9 @@ export type StatusFilter =
   | "shipped"
   | "completed"
   | "canceled"
+  // status タブとしては出さないが、通知カード「情報不足の注文を確認する →」の
+  // 導線が URL の ?status= に入れる派生フィルタ（顧客・希望納期の未設定）
+  | "incomplete"
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
@@ -34,8 +37,35 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "希望納期（近い順）", value: "desired_deadline_asc" },
 ]
 
+/**
+ * 「製品はマッチ済みだが工程（process_routings）が1件も無いため起票（シミュレーション／承認）
+ * できない」下書き受注か（Issue #406）。バックエンドの `has_no_routings` 集約をそのまま使う。
+ *
+ * 受注詳細ページ（`orders/[id]/page.tsx` の `hasNoRouting`）と判定を揃える:
+ *  - `product_id` 未マッチの受注も `has_no_routings` が true になるが、それは「製品未確定」
+ *    バッジ側で扱うため除外する（バッジの二重表示を防ぐ）
+ *  - すでに `is_scheduled`／確定以降のステータスは「過去に工程があった」等でノイズになるため対象外
+ *    （＝未シミュレーションの draft のみを対象にする）
+ *
+ * フィルタータブは追加しない（`orders.status` のみに限定する設計方針 #215）。
+ * この状態は一覧行のバッジ・通知カードで認知させる。
+ */
+export function isNoRoutingOrder(order: Order): boolean {
+  return (
+    order.has_no_routings === true &&
+    order.product_id !== null &&
+    order.status === "draft" &&
+    !order.is_scheduled
+  )
+}
+
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (!statusFilter) return true
+  // 「情報不足」= 顧客または希望納期が未設定（ステータス問わず）。フィルタタブには出さず、
+  // 通知カードの導線からのみ ?status=incomplete で絞り込む（use-orders-page の incompleteCount と同条件）。
+  if (statusFilter === "incomplete") {
+    return !order.customer_id || !order.desired_deadline
+  }
   // 「シミュ済」= status='draft' かつ is_scheduled（シミュレーション完了・未確定）。
   // 「下書き」タブは未シミュレーションの下書きのみに絞り、両タブを排他にする。
   // Issue #394-A 以降、is_scheduled はスケジュール条件の編集で simulated_deadline とともに

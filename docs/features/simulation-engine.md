@@ -347,6 +347,8 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 未確定工程エラー（422）はシミュレーション自体はできても「ガントへ登録できない」状態を示す。  
 フロントエンドはこの `error: "routing_unconfirmed"` を判定し、工程確定を促すメッセージを表示する（✅ #199 にて実装済み）。
 
+**注文一覧での事前ブロック（Issue #406）**: `GET /orders` が返す `has_no_routings`（製品に工程が1件も無い）を使い、注文一覧（`/orders`）でも該当 draft 行に「工程未入力・起票不可」バッジを表示し、シミュレーション実行ボタンを `disabled` にする。無効な操作でエラーになる導線を事前に潰す狙い。判定は `lib/order-utils.ts` の `isNoRoutingOrder()`（`has_no_routings && product_id != null && status === "draft" && !is_scheduled`）。詳細は [process-routing-confirmation.md](process-routing-confirmation.md)。
+
 ---
 
 ### PATCH `/orders/{order_id}` — スケジュール条件の編集時の無効化（Issue #394-A）
