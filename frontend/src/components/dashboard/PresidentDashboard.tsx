@@ -5,6 +5,7 @@ import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import { ApprovalQueueCard } from "./ApprovalQueueCard"
 import { DashboardHeader } from "./DashboardHeader"
+import { DeadlineRiskCard } from "./DeadlineRiskCard"
 import { KpiCards } from "./KpiCards"
 import { QuickActions } from "./QuickActions"
 import { RecentOrders } from "./RecentOrders"
@@ -22,7 +23,7 @@ interface PresidentDashboardProps {
  * president 向けダッシュボードの器（Issue #401）。
  *
  * 承認待ちバナー（件数のみ）は承認待ちキューカード（実リスト表示・Issue #402）へ置換済み。
- * KPI の差し替えは #ISSUE_D、リスクカードは #ISSUE_C で本コンポーネントに差し込む。
+ * 納期リスク注文カード（Issue #403）を承認待ちキューの直下に配置。KPI の差し替えは #ISSUE_D。
  * データ取得は `DashboardRouter` に集約し、本コンポーネントは表示専用。
  */
 export function PresidentDashboard({
@@ -36,6 +37,11 @@ export function PresidentDashboard({
     <div className="container mx-auto py-6 px-4 max-w-6xl">
       <DashboardHeader />
       <ApprovalQueueCard
+        orders={orders}
+        products={products}
+        ordersLoading={ordersLoading}
+      />
+      <DeadlineRiskCard
         orders={orders}
         products={products}
         ordersLoading={ordersLoading}

@@ -192,6 +192,7 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 | `components/dashboard/DashboardHeader.tsx` | ページヘッダー（タイトル＋当日日付）。両ダッシュボード共通 |
 | `components/dashboard/KpiCards.tsx` | KPI カード 4 枚のグリッド。`buildKpiCards()` で定義を組み立て |
 | `components/dashboard/ApprovalQueueCard.tsx` | 承認待ちキューカード（Issue #402）。旧 `PendingApprovalBanner`（件数のみ）を置換。`PresidentDashboard` のみで使用 |
+| `components/dashboard/DeadlineRiskCard.tsx` | 納期リスク注文カード（Issue #403）。`PresidentDashboard` のみで使用。判定・整列は `lib/deadline-risk.ts` の純粋関数に委譲 |
 | `components/dashboard/QuickActions.tsx` | クイックアクション 2 ボタン |
 | `components/dashboard/RecentOrders.tsx` | 最新の注文リスト（最大 5 件） |
 | `hooks/use-dashboard-metrics.ts` | `useDashboardMetrics(orders)` で集計値（`todayDueCount` / `draftOrdersCount` / `pendingApprovalCount` / `confirmedOrdersCount` / `weeklyOrdersCount` / `recentOrders`）を導出 |
@@ -200,7 +201,7 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 
 - KPI の中身の差し替え → #ISSUE_D
 - 承認待ちのキュー化 → #402（実装済み。下記「4.」参照）
-- リスクカード → #ISSUE_C
+- リスクカード → #403（実装済み。下記「5.」参照）
 
 いずれも `PresidentDashboard` および `components/dashboard/` 配下のパーツに差し込む。
 
@@ -262,3 +263,50 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 4. 承認待ち 0 件のときカードが非表示になること
 5. `president` が差し戻し（reject）／`order_handler` が取り下げ（withdraw）すると
    2 カラムが NULL に戻ること
+
+---
+
+## 5. 納期リスク注文カード（Issue #403）
+
+`PresidentDashboard` の承認待ちキューカード直下に、**生産中の注文のうち納期リスクの
+高いもの**を一覧するカードを追加した。実績進捗データが無い現状でも、「計画上すでに
+顧客希望納期を割っている／目前」の注文を社長が即座に把握できるようにする。
+
+### 対象・リスク判定
+
+- 対象ステータス: `confirmed` / `in_progress`（`in_progress` は Issue #400 で新設）
+- 前提: `confirmed_deadline`（確定納期）と `desired_deadline`（顧客希望納期。DB では
+  `deadline_date`）がともに有効な日付。いずれか NULL・不正日付の注文は対象外
+- リスク条件（**OR**）:
+  - `confirmed_deadline > desired_deadline`（計画納期が顧客希望納期を超過）
+  - `desired_deadline - today <= RISK_DEADLINE_BUFFER_DAYS`（顧客希望納期までの残日数が閾値以内）
+- `RISK_DEADLINE_BUFFER_DAYS`（`lib/deadline-risk.ts`、**仮値 0**）を 1 箇所で定義。
+  `0` は「顧客希望納期が今日または過去」を意味する。値を変えると閾値が変わる
+- ソート: 超過日数（`confirmed_deadline - desired_deadline`）の降順 → 顧客希望納期の昇順
+- 「超過日数」セルは、残日数条件だけで入った行（超過日数 0 以下）では負値を出さず
+  「あと N 日」「本日が希望納期」「希望納期が N 日前」に切り替える（`describeDeadlineRisk`）
+- 導線: 行クリック → `/orders/{id}`
+- リスク 0 件・ロード中はカードごと非表示
+
+### Frontend
+
+| ファイル | 変更内容 |
+|---|---|
+| `lib/deadline-risk.ts` | 新規。`RISK_DEADLINE_BUFFER_DAYS` 定数、`getDeadlineRiskOrders(orders, todayIso?, bufferDays?)`（フィルタ＋ソート済みの純粋関数）、`describeDeadlineRisk(row)`（表示文言）。日付差は UTC 深夜基準で端末 TZ 非依存に計算 |
+| `lib/deadline-risk.test.ts` | 新規。リスク判定・ソート・文言の純粋関数ユニットテスト（Vitest、Issue #340 基盤） |
+| `components/dashboard/DeadlineRiskCard.tsx` | 新規。`orders` prop（`DashboardRouter` が 1 回だけ取得した全ステータスの注文一覧）を `getDeadlineRiskOrders()` で絞り込んで描画。表示専用 |
+| `components/dashboard/PresidentDashboard.tsx` | `ApprovalQueueCard` の直下に `DeadlineRiskCard` を追加（`orders` / `products` / `ordersLoading` を渡す。新規フェッチはしない） |
+
+バックエンド変更なし（`GET /orders` の全件取得をクライアント側でフィルタ）。件数が
+増えて重くなったら `GET /orders?risk=true` 相当をバックエンドに追加する（別 Issue）。
+
+### 検証方法（追加分）
+
+1. `president` のダッシュボードで、承認待ちキューカードの下に納期リスク注文カードが
+   表示されること（`confirmed` / `in_progress` で `confirmed_deadline > desired_deadline`
+   または `desired_deadline <= today` の注文がある状態）
+2. 各行に 注文番号 / 製品名 × 数量 / 希望納期 / 確定納期 / 超過日数 / ステータス が出ること
+3. 超過日数降順 → 希望納期昇順でソートされること
+4. 行クリックで注文詳細へ遷移できること
+5. リスク対象が 0 件のときカードが非表示になること
+6. `cd frontend && npm run test` で `deadline-risk.test.ts` がパスすること
