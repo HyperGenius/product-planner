@@ -101,3 +101,21 @@ CI（`.github/workflows/ci-frontend.yml`）にも `Unit tests (Vitest)` ステ�
 - **認証状態は `src/test-utils/supabase.ts`** で制御。`createClient` を各テストで
   `vi.mock` し直さない。
 - 日付ロジックのテストは端末タイムゾーン非依存に書く（ローカル深夜の `new Date(y, m, d)` を使う等）。
+
+## テスト基盤をメンテナンスするときの注意（Issue #340 の構築時にハマった点）
+
+- **`@testing-library/dom` は明示的に devDependencies へ入れる**。`@testing-library/react` v16 の
+  peer dependency だが npm では自動インストールされず、`Cannot find module '@testing-library/dom'`
+  で全テストスイートが起動失敗する。
+- **`vite-tsconfig-paths` は使わない**。ESM-only パッケージで、`vitest.config.ts` が CJS として
+  ロードされる（`frontend/package.json` に `"type": "module"` が無い）ため
+  `ESM file cannot be loaded by require` で設定ロード自体が落ちる。`@/*` エイリアスは
+  `resolve.alias` に `"@": resolve(__dirname, "./src")` を1行書けば足りる。
+- **`src/test-utils/render.tsx` で `export * from "@testing-library/react"` を書かない**。
+  esbuild 変換下では star re-export が同ファイルで定義した `render` / `renderHook` を
+  上書きしてしまい、custom wrapper（`QueryClientProvider`）が効かず
+  `No QueryClient set` になる。`screen` / `waitFor` / `within` などは名前を挙げて re-export する。
+- **jsdom 未実装の DOM API は `vitest.setup.ts` でスタブ**する。Radix UI（Select / Tabs 等）は
+  `matchMedia` / `ResizeObserver` / `scrollIntoView` / `*PointerCapture` を参照する。
+- **CI は `.github/workflows/ci-frontend.yml` の `Unit tests (Vitest)` ステップ**で
+  `npm run test` を実行する（lint → tsc → **test** → build の順）。
