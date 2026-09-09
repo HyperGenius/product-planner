@@ -226,6 +226,13 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 エンドポイント: `PATCH /orders/{order_id}`（実装済み）
 
+**保存時の重複（dedupe_key 衝突）ハンドリング (#415 PR1)**
+`orders_dedupe_key = UNIQUE (tenant_id, customer_id, product_id, deadline_date)` に衝突する編集を保存した場合の挙動。
+
+- バックエンド: `BaseRepository.update()` が Postgres の unique_violation（`23505`）を `DuplicateRecordError` に変換し（`create()` と同じ方針）、`update_order` がそれを **409 Conflict** で返す。detail は生の DB 制約名・例外文言を含めず、`{"error": "duplicate_order", "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します"}` の固定・構造化レスポンス。以前は `BaseRepository.update()` が `APIError` を捕捉せず **500** になっていた。
+- フロントエンド: `EditOrderDialog` の `onError` は `error instanceof ApiError && error.errorCode === "duplicate_order"` で判定し、「同じ 顧客 × 製品 × 希望納期 の注文がすでに存在するため保存できませんでした」というトーストを出す。衝突キーは `(customer_id, product_id, deadline_date)` なので、注文番号欄の下に出していた「この注文番号はすでに使用されています」というインライン文言（`duplicateError` state）は実態と異なるため削除した。
+- 衝突先レコードの識別情報を載せた通知モーダル（`conflicting_order` の付与・4 経路への共通化）は #415 PR2 / PR3 で対応予定。
+
 **内部状態のリセット**
 `EditOrderDialog` は開くたびに `key` に `editDialogGeneration`（ダイアログを開く操作のたびにインクリメントするカウンタ）を含めて再マウントされる。同一注文を「未保存でキャンセル→再オープン」した場合でも、DB上の値で初期化し直される (#277)。
 一覧ページ (`orders/page.tsx`) は `key={`${selectedOrder.id}-${editDialogGeneration}`}`、注文詳細ページ (`orders/[id]/page.tsx`) は `key={editDialogGeneration}` を使用。

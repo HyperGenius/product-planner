@@ -37,6 +37,7 @@ from app.models.transaction.order_schema import (
     OrderUpdate,
     ShipOverdueDraftsResponse,
 )
+from app.repositories.supa_infra.common import DuplicateRecordError
 from app.repositories.supa_infra.common.scheduling_settings_repo import (
     SchedulingSettingsRepository,
 )
@@ -675,7 +676,19 @@ def update_order(
         if order_before.get("is_scheduled"):
             update_dict["is_scheduled"] = False
 
-    result = repo.update(order_id, update_dict)
+    try:
+        result = repo.update(order_id, update_dict)
+    except DuplicateRecordError:
+        # orders_dedupe_key = UNIQUE (tenant_id, customer_id, product_id, deadline_date)。
+        # 生の DB 制約名・例外文言はレスポンスに載せず、固定文言＋構造化 detail を返す
+        # （衝突先レコードの識別情報 conflicting_order は Issue #415 PR2 で付与予定）。
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "duplicate_order",
+                "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します",
+            },
+        ) from None
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
 

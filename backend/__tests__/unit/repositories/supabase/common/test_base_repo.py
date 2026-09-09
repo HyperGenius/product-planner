@@ -2,7 +2,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from app.repositories.supa_infra.common import BaseRepository
+from app.repositories.supa_infra.common import BaseRepository, DuplicateRecordError
 from postgrest.exceptions import APIError
 
 
@@ -72,6 +72,39 @@ class TestBaseRepository:
 
         # --- 検証 ---
         mock_client.table.return_value.update.assert_called_with(update_data)
+
+    def test_update_unique_violation_raises_duplicate_record_error(
+        self, base_repo, mock_client
+    ):
+        """一意制約違反(23505)時、DuplicateRecordError に変換されるテスト（Issue #415）"""
+
+        # --- モックのセットアップ ---
+        (
+            mock_client.table.return_value.update.return_value.eq.return_value.execute
+        ).side_effect = APIError(
+            {
+                "code": "23505",
+                "message": 'duplicate key value violates "orders_dedupe_key"',
+            }
+        )
+
+        # --- 実行, 検証 ---
+        with pytest.raises(
+            DuplicateRecordError, match="重複データにより更新できません"
+        ):
+            base_repo.update(1, {"customer_id": 2})
+
+    def test_update_other_api_error_reraised(self, base_repo, mock_client):
+        """一意制約違反以外のAPIErrorはそのまま再送出されるテスト（Issue #415）"""
+
+        # --- モックのセットアップ ---
+        (
+            mock_client.table.return_value.update.return_value.eq.return_value.execute
+        ).side_effect = APIError({"code": "99999", "message": "unexpected error"})
+
+        # --- 実行, 検証 ---
+        with pytest.raises(APIError):
+            base_repo.update(1, {"customer_id": 2})
 
     def test_delete_success(self, base_repo, mock_client):
         """削除成功時のテスト"""
