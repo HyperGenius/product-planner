@@ -93,13 +93,14 @@ describe("useDashboardMetrics", () => {
     expect(result.current.inProductionCount).toBe(3)
   })
 
-  it("weeklyConfirmedCount は confirmed_at が今週以降の注文だけを数える", () => {
+  it("weeklyConfirmedCount は confirmed_at が今週（weekStart 以上 weekEnd 未満）の注文だけを数える", () => {
     const orders: Order[] = [
       makeOrder({ id: 1, confirmed_at: new Date(2026, 8, 9, 10, 0, 0).toISOString() }), // 今日
       makeOrder({ id: 2, confirmed_at: new Date(2026, 8, 8, 23, 0, 0).toISOString() }), // 昨日（今週）
       makeOrder({ id: 3, confirmed_at: new Date(2026, 8, 1, 10, 0, 0).toISOString() }), // 先週以前
-      makeOrder({ id: 4, confirmed_at: null }), // 未確定
-      makeOrder({ id: 5 }), // confirmed_at フィールドなし
+      makeOrder({ id: 4, confirmed_at: new Date(2026, 8, 20, 10, 0, 0).toISOString() }), // 来週以降（上限で除外）
+      makeOrder({ id: 5, confirmed_at: null }), // 未確定
+      makeOrder({ id: 6 }), // confirmed_at フィールドなし
     ]
 
     const { result } = renderHook(() => useDashboardMetrics(orders))

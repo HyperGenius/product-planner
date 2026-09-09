@@ -328,7 +328,7 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 | 1 | 今日納期の注文 | `confirmed_deadline` が今日 | `todayDueCount`（既存） |
 | 2 | 今週納期の注文 | `confirmed_deadline` が今週（`startOfWeek` 〜 +7 日、上限は排他） | `thisWeekDueCount`（新規） |
 | 3 | 生産中の注文 | `status` が `confirmed` / `in_progress` | `inProductionCount`（新規） |
-| 4 | 今週確定した注文 | `confirmed_at` が今週（`startOfWeek` 以降） | `weeklyConfirmedCount`（新規） |
+| 4 | 今週確定した注文 | `confirmed_at` が今週（`startOfWeek` 〜 +7 日、上限は排他） | `weeklyConfirmedCount`（新規） |
 
 `DefaultDashboard`（president 以外・ロール取得中のフォールバック）の KPI 4 枚は
 現行のまま（`buildKpiCards()`）。

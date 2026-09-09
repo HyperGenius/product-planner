@@ -97,12 +97,17 @@ export function useDashboardMetrics(orders: Order[] | undefined): DashboardMetri
   }, [orders])
 
   const weeklyConfirmedCount = useMemo(() => {
-    // confirmed_at は時刻・TZ 付きタイムスタンプなので new Date() で可（created_at と同様）
+    // confirmed_at は時刻・TZ 付きタイムスタンプなので new Date() で可（created_at と同様）。
+    // 通常 confirm 時刻は現在時刻なので未来には入らないが、仕様（今週）に厳密に合わせ
+    // thisWeekDueCount と同様 weekEnd（上限排他）でも絞る。
     return (
-      orders?.filter((order) => order.confirmed_at && new Date(order.confirmed_at) >= weekStart)
-        .length ?? 0
+      orders?.filter((order) => {
+        if (!order.confirmed_at) return false
+        const confirmedAt = new Date(order.confirmed_at)
+        return confirmedAt >= weekStart && confirmedAt < weekEnd
+      }).length ?? 0
     )
-  }, [orders, weekStart])
+  }, [orders, weekStart, weekEnd])
 
   const recentOrders = useMemo(() => {
     if (!orders) return []
