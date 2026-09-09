@@ -90,9 +90,12 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
           onOpenChange(false)
         },
         onError: (error: Error) => {
-          // 衝突キーは (customer_id, product_id, deadline_date)。注文番号は dedupe 対象外
-          // なので「注文番号が重複」という旧文言は誤り（Issue #415）。
-          if (error instanceof ApiError && error.errorCode === "duplicate_order") {
+          // orders の UNIQUE は2本（dedupe_key = 顧客×製品×納期 / 注文番号）。
+          // バックエンドが errorCode で振り分けるので、それぞれ実態に合った文言を出す（Issue #415）。
+          const errorCode = error instanceof ApiError ? error.errorCode : undefined
+          if (errorCode === "duplicate_order_number") {
+            toast.error("この注文番号はすでに使用されています")
+          } else if (errorCode === "duplicate_order") {
             toast.error(
               "同じ 顧客 × 製品 × 希望納期 の注文がすでに存在するため保存できませんでした"
             )

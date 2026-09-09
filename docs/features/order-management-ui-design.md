@@ -226,11 +226,19 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 エンドポイント: `PATCH /orders/{order_id}`（実装済み）
 
-**保存時の重複（dedupe_key 衝突）ハンドリング (#415 PR1)**
-`orders_dedupe_key = UNIQUE (tenant_id, customer_id, product_id, deadline_date)` に衝突する編集を保存した場合の挙動。
+**保存時の重複（UNIQUE 衝突）ハンドリング (#415 PR1)**
+`orders` には UNIQUE が2本あり、編集ダイアログはどちらの列も変更できる:
 
-- バックエンド: `BaseRepository.update()` が Postgres の unique_violation（`23505`）を `DuplicateRecordError` に変換し（`create()` と同じ方針）、`update_order` がそれを **409 Conflict** で返す。detail は生の DB 制約名・例外文言を含めず、`{"error": "duplicate_order", "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します"}` の固定・構造化レスポンス。以前は `BaseRepository.update()` が `APIError` を捕捉せず **500** になっていた。
-- フロントエンド: `EditOrderDialog` の `onError` は `error instanceof ApiError && error.errorCode === "duplicate_order"` で判定し、「同じ 顧客 × 製品 × 希望納期 の注文がすでに存在するため保存できませんでした」というトーストを出す。衝突キーは `(customer_id, product_id, deadline_date)` なので、注文番号欄の下に出していた「この注文番号はすでに使用されています」というインライン文言（`duplicateError` state）は実態と異なるため削除した。
+| 制約 | キー | 発生条件 |
+|---|---|---|
+| `orders_dedupe_key` | `(tenant_id, customer_id, product_id, deadline_date)` | 顧客／製品／希望納期を既存注文と一致させた |
+| `orders_tenant_id_order_number_idx` | `(tenant_id, order_number)`（`order_number IS NOT NULL`） | 注文番号を既存注文と一致させた |
+
+- バックエンド: `BaseRepository.update()` が Postgres の unique_violation（`23505`）を `DuplicateRecordError`（`constraint` に元の例外文言＝制約名を保持）へ変換する。捕捉していなかったため以前は生の `APIError` が伝播して **500** になっていた。`update()` は `create()` と違い `ValueError` ではなく専用の `DuplicateRecordError` を投げる（ルーターが 409 に正規化しやすくするため）。
+- `update_order` は `DuplicateRecordError.constraint` に `order_number` が含まれるかで振り分け、いずれも **409 Conflict** で返す（`create()` の `order_number` 判定と同じ方針）。detail は生の DB 制約名・例外文言を含めない固定・構造化レスポンス:
+  - dedupe_key: `{"error": "duplicate_order", "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します"}`
+  - 注文番号: `{"error": "duplicate_order_number", "message": "この注文番号はすでに使用されています"}`
+- フロントエンド: `EditOrderDialog` の `onError` は `ApiError.errorCode` を `duplicate_order_number` / `duplicate_order` で分岐し、それぞれ実態に合ったトーストを出す。以前は注文番号欄の下に「この注文番号はすでに使用されています」というインライン文言（`duplicateError` state）を、`message` に `"400"` / `"duplicate"` / `"already"` を含むかどうかという曖昧な判定で出しており、dedupe_key 衝突でも「注文番号が重複」と誤表示していた。この分岐と state は削除した。
 - 衝突先レコードの識別情報を載せた通知モーダル（`conflicting_order` の付与・4 経路への共通化）は #415 PR2 / PR3 で対応予定。
 
 **内部状態のリセット**

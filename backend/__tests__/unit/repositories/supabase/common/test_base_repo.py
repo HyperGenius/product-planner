@@ -91,8 +91,11 @@ class TestBaseRepository:
         # --- 実行, 検証 ---
         with pytest.raises(
             DuplicateRecordError, match="重複データにより更新できません"
-        ):
+        ) as exc_info:
             base_repo.update(1, {"customer_id": 2})
+
+        # ルーターが制約名で dedupe / 注文番号 を振り分けられるよう、元の文言を保持する
+        assert "orders_dedupe_key" in (exc_info.value.constraint or "")
 
     def test_update_other_api_error_reraised(self, base_repo, mock_client):
         """一意制約違反以外のAPIErrorはそのまま再送出されるテスト（Issue #415）"""

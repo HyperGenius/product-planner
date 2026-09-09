@@ -354,6 +354,32 @@ class TestOrderRouter:
             response.json(), ensure_ascii=False
         )
 
+    def test_update_order_duplicate_order_number_returns_409(self, headers, mock_repo):
+        """PATCH /{id}: 注文番号 UNIQUE 衝突は dedupe とは別コード・別文言で 409（Issue #415）"""
+        from app.repositories.supa_infra.common import DuplicateRecordError
+
+        order_id = 1
+        mock_repo.get_by_id.return_value = {"id": order_id, "quantity": 50}
+        mock_repo.update.side_effect = DuplicateRecordError(
+            "重複データにより更新できません",
+            constraint=(
+                "duplicate key value violates unique constraint "
+                '"orders_tenant_id_order_number_idx"'
+            ),
+        )
+
+        response = client.patch(
+            f"/orders/{order_id}", json={"order_no": "ORD-001"}, headers=headers
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_order_number"
+        assert detail["message"] == "この注文番号はすでに使用されています"
+        assert "orders_tenant_id_order_number_idx" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
+
     def test_update_order_sets_manually_corrected_flag_on_product_id_change(
         self, headers, mock_repo
     ):

@@ -678,10 +678,21 @@ def update_order(
 
     try:
         result = repo.update(order_id, update_dict)
-    except DuplicateRecordError:
-        # orders_dedupe_key = UNIQUE (tenant_id, customer_id, product_id, deadline_date)。
+    except DuplicateRecordError as e:
+        # orders には UNIQUE が2本ある。編集ダイアログはどちらの列も変更できるため、
+        # 制約名で振り分けてエラーコード／文言を分ける（`create()` の order_number 判定と同じ方針）:
+        #   - orders_tenant_id_order_number_idx: (tenant_id, order_number)
+        #   - orders_dedupe_key: (tenant_id, customer_id, product_id, deadline_date)
         # 生の DB 制約名・例外文言はレスポンスに載せず、固定文言＋構造化 detail を返す
         # （衝突先レコードの識別情報 conflicting_order は Issue #415 PR2 で付与予定）。
+        if "order_number" in (e.constraint or ""):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "duplicate_order_number",
+                    "message": "この注文番号はすでに使用されています",
+                },
+            ) from None
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
