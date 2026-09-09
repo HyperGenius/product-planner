@@ -105,6 +105,15 @@ cd backend && ruff check . && mypy .
   各ダッシュボード・配下のパーツ（`KpiCards` 等）は表示専用。集計は `hooks/use-dashboard-metrics.ts`。
   Epic #399（Issue #401 が基盤、KPI 差し替え #ISSUE_D／承認待ちキュー #ISSUE_B／リスクカード #ISSUE_C）。
   詳細は [docs/features/dashboard-ui-improvement.md](docs/features/dashboard-ui-improvement.md)
+- **受注一覧のフィルタ／バッジ**: `frontend/src/lib/order-utils.ts` の `STATUS_TABS` に**表示するタブは
+  `orders.status`（＋ draft を分割した `simulated`）に限定する方針（#215）**。「情報不足」「工程未入力」など
+  `orders.status` と直交する概念は**タブを増やさず**、通知カード（`order-notification-cards.tsx`）＋一覧行の
+  バッジ（`order-table-row.tsx`）で認知させる。`filterOrder()` はタブ非表示の派生フィルタ（`incomplete` ＝
+  顧客/希望納期未設定、Issue #406 で導線復旧）も URL `?status=` から受けるので、`STATUS_TABS` に無い値でも
+  分岐を必ず用意する。「工程未入力・起票不可」（`has_no_routings`）判定は `isNoRoutingOrder()` に集約し、
+  受注詳細（`orders/[id]/page.tsx` の `hasNoRouting`）と条件を揃える。詳細は
+  [docs/features/order-management-ui-design.md](docs/features/order-management-ui-design.md) /
+  [docs/features/process-routing-confirmation.md](docs/features/process-routing-confirmation.md)
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
 - **フロントエンド単体テスト**: Vitest + React Testing Library + MSW（`frontend/vitest.config.ts`）。
   Playwright（`frontend/e2e/`）とは物理的に分離し、テストは対象コードにコロケーション配置（`Foo.tsx` の隣に `Foo.test.tsx`）。
