@@ -184,7 +184,7 @@ PR 作成時に GitHub Copilot が自動でレビューする。以下は過去�
   実在のメールアドレス、顧客企業名・担当者名・電話番号・住所、本番の `gmail_message_id` 等。
   → 役割で表現（「社長（社内の共通メールアカウント）」「顧客担当者」）、企業名は「顧客A社 / B社」、
   例示は `example.com` 等のダミー。
-- PR の説明・コメントは**日本語**で書く（[.github/copilot-instructions.md](../copilot-instructions.md)）。
+- PR の説明・コメントは**日本語**で書く（[.github/copilot-instructions.md](../../copilot-instructions.md)）。
 - 着手前にブランチを切る（`feature/issue-{番号}-{概要}` / `fix/issue-{番号}-{概要}`）。
 
 ---
