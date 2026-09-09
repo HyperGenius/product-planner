@@ -34,6 +34,28 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
   { label: "希望納期（近い順）", value: "desired_deadline_asc" },
 ]
 
+/**
+ * 「製品はマッチ済みだが工程（process_routings）が1件も無いため起票（シミュレーション／承認）
+ * できない」下書き受注か（Issue #406）。バックエンドの `has_no_routings` 集約をそのまま使う。
+ *
+ * 受注詳細ページ（`orders/[id]/page.tsx` の `hasNoRouting`）と判定を揃える:
+ *  - `product_id` 未マッチの受注も `has_no_routings` が true になるが、それは「製品未確定」
+ *    バッジ側で扱うため除外する（バッジの二重表示を防ぐ）
+ *  - すでに `is_scheduled`／確定以降のステータスは「過去に工程があった」等でノイズになるため対象外
+ *    （＝未シミュレーションの draft のみを対象にする）
+ *
+ * フィルタータブは追加しない（`orders.status` のみに限定する設計方針 #215）。
+ * この状態は一覧行のバッジ・通知カードで認知させる。
+ */
+export function isNoRoutingOrder(order: Order): boolean {
+  return (
+    order.has_no_routings === true &&
+    order.product_id !== null &&
+    order.status === "draft" &&
+    !order.is_scheduled
+  )
+}
+
 export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (!statusFilter) return true
   // 「シミュ済」= status='draft' かつ is_scheduled（シミュレーション完了・未確定）。

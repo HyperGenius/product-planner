@@ -82,4 +82,36 @@ describe("OrderTableRow", () => {
     // 数量セルの「未設定」プレースホルダ（顧客・希望納期セルと同じ表現）
     expect(screen.getByText("未設定")).toBeInTheDocument()
   })
+
+  describe("工程未入力（has_no_routings）— Issue #406", () => {
+    it("製品マッチ済み・工程なしの draft に「工程未入力・起票不可」バッジを出す", () => {
+      renderRow(makeOrder({ has_no_routings: true, source_type: "manual" }))
+
+      expect(screen.getByText("工程未入力・起票不可")).toBeInTheDocument()
+    })
+
+    it("製品未マッチ（product_id === null）ではバッジを出さない（二重表示を防ぐ）", () => {
+      renderRow(
+        makeOrder({ has_no_routings: true, product_id: null, source_type: "manual" }),
+      )
+
+      expect(screen.queryByText("工程未入力・起票不可")).not.toBeInTheDocument()
+    })
+
+    it("工程なしの手動 draft はシミュレーション実行ボタンを disabled にする", () => {
+      renderRow(makeOrder({ has_no_routings: true, source_type: "manual" }))
+
+      expect(
+        screen.getByRole("button", { name: "シミュレーション実行" }),
+      ).toBeDisabled()
+    })
+
+    it("工程がある手動 draft のシミュレーション実行ボタンは押下可能", () => {
+      renderRow(makeOrder({ has_no_routings: false, source_type: "manual" }))
+
+      expect(
+        screen.getByRole("button", { name: "シミュレーション実行" }),
+      ).toBeEnabled()
+    })
+  })
 })

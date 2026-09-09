@@ -227,3 +227,29 @@ Issue #197 / #199 / #200 で実装。
 ### 追加フォームの「追加」ボタン活性制御（同Issue内で追加対応）
 
 工程追加・編集フォームの「追加」（編集時は「更新」）ボタンが、工程名・設備グループ未入力でも常に活性化しており、押下後に初めてエラートーストで入力漏れが分かる状態だった。工程名が空、または設備グループ未選択（「設備なし」も選択肢に含む）の場合はボタン自体を非活性にするよう変更した。段取り時間・単位時間のバリデーションは従来通り `handleSave` 内のトースト表示のみで、ボタン活性制御の対象外。
+
+---
+
+## 注文一覧画面での「工程未入力・起票不可」表示（Issue #406）
+
+注文詳細画面（Issue #269）では `has_no_routings` を警告表示に使っていたが、**注文一覧（`/orders`）が未対応**で、一覧を見ただけでは「なぜこの受注を進められないか（＝製品に工程が未登録）」が分からなかった。既存の `has_no_routings` 集約（`OrderRepository.get_all_with_routing_status()`、2クエリ・N+1なし）をそのまま一覧UIに出すだけの対応で、**バックエンド／DBの変更はなし**。
+
+### 判定ロジック（`lib/order-utils.ts` の `isNoRoutingOrder()`）
+
+`has_no_routings === true` かつ以下をすべて満たす受注を「工程未入力・起票不可」とする。詳細画面の `hasNoRouting` 判定（`app/orders/[id]/page.tsx`）と揃える。
+
+- `product_id !== null`（製品未マッチの受注も `has_no_routings` は true になるが、それは「製品未確定」バッジ側で扱う。二重表示を防ぐ）
+- `status === "draft"` かつ `!is_scheduled`（シミュレーション済み・確定以降はノイズになるため対象外）
+
+### Frontend の変更
+
+| ファイル | 変更内容 |
+|---|---|
+| `lib/order-utils.ts` | `isNoRoutingOrder(order)` を追加 |
+| `components/orders/order-table-row.tsx` | 該当行のステータス列に amber 配色の「工程未入力・起票不可」バッジを表示（クリックで `/master/products?highlight={product_id}` へ遷移）。手動起票 draft の「シミュレーション実行」ボタンを `disabled` にし、ツールチップで理由を提示。メール起票行は従来どおり「確認」（詳細画面へ遷移）のまま |
+| `hooks/use-orders-page.ts` | `noRoutingCount`（`isNoRoutingOrder` 該当件数）を追加 |
+| `components/orders/order-notification-cards.tsx` | 件数 > 0 のとき amber の「工程未入力 / N件 起票不可」通知カードを表示（認知用。ナビゲーションは持たせない） |
+
+### 設計上の判断
+
+Issue #406 の要件3は「工程未入力だけを絞り込むフィルタタブの追加」を挙げていたが、フィルタータブを `orders.status` の値のみに限定する設計方針（[order-management-ui-design.md](order-management-ui-design.md) の「フィルタータブは `orders.status` のみに限定する (#215)」）と衝突するため、**専用タブは追加しない**。直交する概念（情報不足・工程未入力）は通知カード＋一覧行のバッジ／インジケーターで認知させる方針に揃えた。

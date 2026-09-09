@@ -22,6 +22,7 @@ import { useCustomers } from "@/hooks/use-customers"
 import {
   filterOrder,
   compareOrders,
+  isNoRoutingOrder,
   isOverdueDraft,
   DEFAULT_SORT,
   type StatusFilter,
@@ -111,6 +112,12 @@ export function useOrdersPage() {
   )
   const noDeadlineCount = useMemo(
     () => orders?.filter((o) => !o.desired_deadline).length ?? 0,
+    [orders]
+  )
+  // 製品はマッチ済みだが工程が無く起票できない下書き（Issue #406）。「工程未入力」タブ・
+  // 通知カードで次アクション（製品マスタへの工程登録）に気付けるようにする。
+  const noRoutingCount = useMemo(
+    () => orders?.filter((o) => isNoRoutingOrder(o)).length ?? 0,
     [orders]
   )
   // 納期を過ぎたまま残っている下書き（president / platform_admin が一括で送品済みにできる）
@@ -514,6 +521,7 @@ export function useOrdersPage() {
     incompleteCount,
     noCustomerCount,
     noDeadlineCount,
+    noRoutingCount,
     filteredOrders,
     pagedOrders,
     // Dialog state

@@ -50,6 +50,7 @@ export default function OrdersPage() {
     incompleteCount,
     noCustomerCount,
     noDeadlineCount,
+    noRoutingCount,
     filteredOrders,
     pagedOrders,
     isEditDialogOpen,
@@ -175,6 +176,7 @@ export default function OrdersPage() {
             incompleteCount={incompleteCount}
             noCustomerCount={noCustomerCount}
             noDeadlineCount={noDeadlineCount}
+            noRoutingCount={noRoutingCount}
             onDraftClick={() => setParam("status", "draft")}
             onIncompleteClick={() => setParam("status", "incomplete")}
           />

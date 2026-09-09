@@ -8,6 +8,8 @@ interface OrderNotificationCardsProps {
   incompleteCount: number
   noCustomerCount: number
   noDeadlineCount: number
+  /** 製品マッチ済みだが工程未登録で起票できない下書き件数（Issue #406） */
+  noRoutingCount: number
   onDraftClick: () => void
   onIncompleteClick: () => void
 }
@@ -17,10 +19,11 @@ export function OrderNotificationCards({
   incompleteCount,
   noCustomerCount,
   noDeadlineCount,
+  noRoutingCount,
   onDraftClick,
   onIncompleteClick,
 }: OrderNotificationCardsProps) {
-  if (draftCount === 0 && incompleteCount === 0) return null
+  if (draftCount === 0 && incompleteCount === 0 && noRoutingCount === 0) return null
 
   return (
     <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -40,6 +43,20 @@ export function OrderNotificationCards({
             >
               情報不足の注文を確認する →
             </Button>
+          </CardContent>
+        </Card>
+      )}
+      {noRoutingCount > 0 && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="pt-6">
+            <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-1">
+              工程未入力
+            </p>
+            <p className="text-2xl font-bold text-amber-800">{noRoutingCount}件 起票不可</p>
+            <p className="text-sm text-amber-600 mt-1">
+              製品に工程が未登録のためシミュレーションできません。
+              一覧で「工程未入力・起票不可」バッジが付いた行の製品に工程を登録してください。
+            </p>
           </CardContent>
         </Card>
       )}
