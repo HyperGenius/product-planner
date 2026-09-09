@@ -57,6 +57,8 @@ supabase start
 cd backend && pytest __tests__/unit/           # Unit (DB不要)
 cd backend && pytest __tests__/api/            # API Functional (DB不要)
 cd backend && pytest __tests__/integration/    # Integration (Supabase必要)
+cd frontend && npm run test                    # Frontend Unit (Vitest, DB/サーバー不要)
+cd frontend && npm run test:e2e                # Frontend E2E (Playwright, Supabase+両サーバー必要)
 
 # Lint / 型チェック
 cd backend && ruff check . && mypy .
@@ -104,6 +106,17 @@ cd backend && ruff check . && mypy .
   Epic #399（Issue #401 が基盤、KPI 差し替え #ISSUE_D／承認待ちキュー #ISSUE_B／リスクカード #ISSUE_C）。
   詳細は [docs/features/dashboard-ui-improvement.md](docs/features/dashboard-ui-improvement.md)
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
+- **フロントエンド単体テスト**: Vitest + React Testing Library + MSW（`frontend/vitest.config.ts`）。
+  Playwright（`frontend/e2e/`）とは物理的に分離し、テストは対象コードにコロケーション配置（`Foo.tsx` の隣に `Foo.test.tsx`）。
+  - HTTP は必ず MSW 経由。TanStack Query を使うフック／コンポーネントは `@/test-utils/render` の
+    `render` / `renderHook`（`retry: false` 済み。生 RTL を直接使うと失敗クエリでテストがハングする）を使う
+  - 認証（`@/utils/supabase/client`）は `vitest.setup.ts` で全テスト共通モック済み。セッション状態は
+    `@/test-utils/supabase` の `setSupabaseSession()` で制御する（各テストで `vi.mock` し直さない）
+  - `NEXT_PUBLIC_API_URL` / MSW の `API_BASE` は `.env.local.sample`・CI と同じ `http://localhost:8000`
+    （`/api` を付けない。`apiClient` が `NEXT_PUBLIC_API_URL + endpoint` で組む）
+  - 日付ロジックのテストは端末 TZ 非依存に書く（`new Date(y, m, d)` でローカル深夜を作る等）
+  - 詳細・基盤メンテ時の注意（`@testing-library/dom` を明示 devDep 化、`export *` 禁止、`vite-tsconfig-paths` 不使用の理由）は
+    [docs/features/frontend-unit-testing.md](docs/features/frontend-unit-testing.md)
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること
   - Union 文字列型（`Order["status"]` 等）でルックアップテーブルを引くときは `Record<string, T>` ではなく
     `Record<Order["status"], T>` で全ケースを明示する。値が増えたときに型エラーで気づける（PR #409）
