@@ -219,7 +219,7 @@ class TestOrderRouter:
                     "content_type": "application/pdf",
                     "size_bytes": 100,
                     "parse_status": "success",
-                    "gmail_message_id": "1a04679c33ae25b5",
+                    "gmail_message_id": "dummy_message_id_1",
                     "created_at": "2026-08-30T00:00:00+00:00",
                 },
                 {
@@ -236,7 +236,7 @@ class TestOrderRouter:
                 },
             ]
         )
-        customers_q = _q([{"id": 2, "name": "株式会社 飯野製作所"}])
+        customers_q = _q([{"id": 2, "name": "顧客A社"}])
         orders_q = _q([{"id": 1000062, "source_attachment_id": "att-2"}])
         logs_q = _q(
             [
@@ -273,9 +273,9 @@ class TestOrderRouter:
         assert deduped["parse_status"] == "success"
         assert deduped["created_order_count"] == 0
         assert deduped["parse_log_reasons"] == ["no_order_created"]
-        assert deduped["customer_name"] == "株式会社 飯野製作所"
+        assert deduped["customer_name"] == "顧客A社"
         assert deduped["signed_url"] == "https://signed/1"
-        assert deduped["gmail_url"].endswith("1a04679c33ae25b5")
+        assert deduped["gmail_url"].endswith("dummy_message_id_1")
         # parse_status='success' でも起票0件＋スキップ理由なら outcome は skipped（Issue #422）
         assert deduped["outcome"] == "skipped"
         assert deduped["needs_attention"] is False
