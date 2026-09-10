@@ -60,6 +60,8 @@ export function useOrdersPage() {
   const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
   const [rejectTargetOrder, setRejectTargetOrder] = useState<Order | null>(null)
   const [requestApprovalTargetOrder, setRequestApprovalTargetOrder] = useState<Order | null>(null)
+  // 承認依頼の送信に成功した注文。結果モーダル（RequestApprovalResultDialog）表示用（Issue #426）
+  const [requestApprovalResultOrder, setRequestApprovalResultOrder] = useState<Order | null>(null)
   const [approveTargetOrder, setApproveTargetOrder] = useState<Order | null>(null)
   const [isBulkRequestApprovalConfirmOpen, setIsBulkRequestApprovalConfirmOpen] = useState(false)
   const [isBulkApproveConfirmOpen, setIsBulkApproveConfirmOpen] = useState(false)
@@ -205,13 +207,14 @@ export function useOrdersPage() {
     })
   }
 
-  const submitRequestApproval = (orderId: number, orderNo: string) => {
-    requestApproval.mutate(orderId, {
+  const submitRequestApproval = (order: Order) => {
+    requestApproval.mutate(order.id, {
       onSuccess: () => {
-        toast.success(`注文「${orderNo}」の承認依頼を送信しました`)
         setExpandedOrderId(null)
         setExpandedSimResult(null)
         setRequestApprovalTargetOrder(null)
+        // トーストではなく結果モーダルで依頼内容（注文番号・顧客・製品・数量・希望納期）を見せる（Issue #426）
+        setRequestApprovalResultOrder(order)
       },
       onError: (error: Error) => {
         toast.error(`承認依頼の送信に失敗しました: ${error.message}`)
@@ -223,7 +226,7 @@ export function useOrdersPage() {
 
   const handleConfirmRequestApproval = () => {
     if (!requestApprovalTargetOrder) return
-    submitRequestApproval(requestApprovalTargetOrder.id, requestApprovalTargetOrder.order_no ?? "")
+    submitRequestApproval(requestApprovalTargetOrder)
   }
 
   const handleWithdrawFromRow = (orderId: number, orderNo: string) => {
@@ -566,6 +569,9 @@ export function useOrdersPage() {
     requestApprovalTargetOrder,
     setRequestApprovalTargetOrder,
     handleConfirmRequestApproval,
+    // 承認依頼 成功結果モーダル（Issue #426）
+    requestApprovalResultOrder,
+    setRequestApprovalResultOrder,
     // Approve confirmation dialog state（Issue #338）
     approveTargetOrder,
     setApproveTargetOrder,
