@@ -201,6 +201,27 @@ PostgRESTがINSERT結果を返す際にSELECT用RLSポリシー（`iso_officer`/
   ただし `BulkSimulateSummaryDialog` からの一括承認依頼（`handleBulkRequestApprovalFromSummary`）は、
   シミュレーション結果画面で既に対象一覧を確認済みの導線のため対象外とした。
 
+## 承認依頼 送信後の結果モーダル (Issue #426)
+
+一覧ページからの単発の承認依頼送信は、成功時に
+`注文「{order_no}」の承認依頼を送信しました` というトーストを出していた。`orders.order_number`
+（フロントの `Order["order_no"]`）は nullable で、手動作成の注文や注文番号を抽出できなかった
+メール起票の注文では `null` になる。トースト文言は `order_no ?? ""` で埋めていたため、その場合に
+`注文「」の承認依頼を送信しました` と「」内が空欄で表示されていた。
+
+- トーストをやめ、成功時は結果モーダル
+  `frontend/src/components/orders/request-approval-result-dialog.tsx`
+  （`RequestApprovalResultDialog`）を表示する。依頼した注文の主要項目（注文番号・顧客・製品・
+  数量・希望納期、`simulated_deadline` があればシミュ納期も）を一覧で見せ、`order_no` が `null` の
+  ときは空欄ではなく「未設定」と表示する（確認モーダル `RequestApprovalConfirmDialog` と同じ扱い）。
+- `use-orders-page.ts`: `submitRequestApproval` のシグネチャを `(orderId, orderNo)` から
+  `(order: Order)` に変更。成功コールバックで `toast.success` の代わりに
+  `setRequestApprovalResultOrder(order)` を呼ぶ。失敗時のエラートーストは従来どおり。
+  `requestApprovalResultOrder` / `setRequestApprovalResultOrder` を追加して `orders/page.tsx` に公開。
+- 対象は一覧ページの単発フロー（行内アクション・`SimulationSideSheet` からの依頼）のみ。一括承認依頼
+  （`handleBulkRequestApprovalConfirm` 等）と受注詳細ページ（`orders/[id]/page.tsx`）のトーストは
+  変更していない。
+
 ## 承認依頼のアプリ内通知 (Issue #327)
 
 `request-approval`（`draft → pending_approval`）成功時、president 向けに `notifications`

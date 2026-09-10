@@ -29,6 +29,7 @@ import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
+import { RequestApprovalResultDialog } from "@/components/orders/request-approval-result-dialog"
 import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
 import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
@@ -88,6 +89,8 @@ export default function OrdersPage() {
     requestApprovalTargetOrder,
     setRequestApprovalTargetOrder,
     handleConfirmRequestApproval,
+    requestApprovalResultOrder,
+    setRequestApprovalResultOrder,
     approveTargetOrder,
     setApproveTargetOrder,
     handleConfirmApprove,
@@ -340,6 +343,13 @@ export default function OrdersPage() {
           isPending={requestApproval.isPending}
           onConfirm={handleConfirmRequestApproval}
           onOpenChange={(open) => { if (!open) setRequestApprovalTargetOrder(null) }}
+        />
+
+        <RequestApprovalResultDialog
+          order={requestApprovalResultOrder}
+          products={products}
+          customers={customers}
+          onOpenChange={(open) => { if (!open) setRequestApprovalResultOrder(null) }}
         />
 
         <ApproveConfirmDialog
