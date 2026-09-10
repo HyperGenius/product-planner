@@ -53,7 +53,7 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
      0件・複数件（判定不能）はメール単位の `customer_id` のまま
      （解決できないPDFは「不明な顧客」下書きに紐づく: Issue #263 の挙動を踏襲）。
      新規の下書き顧客はここでは作らない（作成はメール単位で1回のまま）
-3. 抽出成功時、Claude tool-use (pdf_order_extraction_service.py) で明細行の配列を取得
+3. 抽出成功時、Claude 構造化出力 (`output_config.format`, pdf_order_extraction_service.py) で明細行の配列を取得
    { product_name_raw, product_number_raw, quantity, delivery_date, certainty }
    - 顧客固有の抽出プロンプト断片（`customers.order_extraction_prompt`）は、
      PDF明細抽出時は上記で解決し直した `customer_id`、本文フォールバック時は
@@ -235,7 +235,7 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
 - あくまで情報提供目的の通知であり、order自体の作成はブロックしない
 - 閾値・条件は本番データの精度を見ながら調整する前提（Issue #280 未解決の論点）
 
-また、`quantity` が本来のツールスキーマ（`int | null`）から外れた想定外の型で
+また、`quantity` が本来の抽出スキーマ（`int | null`）から外れた想定外の型で
 返ってきた場合（スキーマ変更・抽出結果の崩れ等への防御）は、不整合な `orders`
 行を作らないよう `reason='invalid_quantity'` で `order_parse_log` に記録した上で
 その明細をスキップする（PRレビュー指摘対応）。
@@ -419,8 +419,8 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   `_get_customer_extraction_prompt()` で引き、`extract_order_lines()` /
   `extract_email_order_lines()` の第2引数へ渡す
 - 抽出サービスは、断片が非NULLなら汎用プロンプトの末尾に「【この顧客固有の抽出指示】」
-  として**追記**する（汎用プロンプトは共通ベースとして維持）。ツールスキーマ
-  （フィールド定義）は変更せず、「どこを見てどう埋めるか」の自然言語指示のみ
+  として**追記**する（汎用プロンプトは共通ベースとして維持）。抽出スキーマ
+  （`output_config.format` のフィールド定義）は変更せず、「どこを見てどう埋めるか」の自然言語指示のみ
 - 断片が NULL の顧客は従来どおり汎用プロンプトのみで処理し、挙動は変わらない
 - RLS は `customers` の既存 tenant isolation ポリシーで自動的にカバーされる
 - 断片の投入は tenant_id / customer_id 特定が必要なため、マイグレーションの seed では
@@ -572,7 +572,7 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 - `backend/app/services/pdf_text_service.py`
   - `extract_text(content: bytes) -> PdfTextResult`
 - `backend/app/services/pdf_order_extraction_service.py`
-  - `extract_order_lines(pdf_text: str) -> list[dict]`（Claude tool-use、`PDF_EXTRACTION_MODEL`）
+  - `extract_order_lines(pdf_text: str) -> dict`（Claude 構造化出力 `output_config.format`、`PDF_EXTRACTION_MODEL`）
 - `backend/app/services/pdf_order_parsing_service.py`
   - `parse_pending_order_pdfs(db) -> dict[str, int]`
 - `backend/app/routers/cron/_auth.py`
@@ -616,6 +616,17 @@ Issue #267 での変更（顧客側の確度とProductPlannerステータスの�
   フィールド・表示用ラベル/バッジ関数を追加
 - `frontend/src/components/orders/order-table-row.tsx` /
   `frontend/src/app/orders/[id]/page.tsx`: 顧客側の確度バッジを追加表示
+
+Issue #420 での変更（抽出の実装方式のみ・挙動と戻り値の契約は不変）:
+
+- `backend/app/services/pdf_order_extraction_service.py` /
+  `backend/app/services/email_extraction_service.py`: 明細抽出を強制ツール呼び出し
+  （`tool_choice={"type": "tool"}`）から構造化出力（`output_config.format` の
+  `json_schema`）へ移行。旧世代モデル向けの JSON 整形手段で、Claude Fable/Mythos 5.1
+  では 400 になり将来のモデル移行のブロッカーになるため。抽出スキーマ・戻り値
+  （`{"document_order_no": str | None, "line_items": list}`）は変更なし
+- `backend/requirements.txt`: `anthropic` の下限を `>=0.40.0` → `>=1.0.0` に更新
+  （`output_config` サポート版）
 
 Issue #280 での変更（1ソース:N受注モデル・メール本文/非PDF添付の複数明細対応）:
 
