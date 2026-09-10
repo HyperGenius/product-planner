@@ -1,7 +1,16 @@
 "use client"
 
 import Link from "next/link"
-import { ExternalLink, FileText, Mail } from "lucide-react"
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  FileText,
+  type LucideIcon,
+  Mail,
+  MinusCircle,
+  XCircle,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -13,16 +22,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useEmailIntakeResults } from "@/hooks/use-orders"
-import type { EmailIntakeResult } from "@/types/order"
+import type { EmailIntakeOutcome, EmailIntakeResult } from "@/types/order"
 
-const PARSE_STATUS_LABELS: Record<string, string> = {
-  pending: "処理待ち",
-  success: "パース成功",
-  failed_encrypted: "読み取り不可（暗号化PDF）",
-  failed_image: "読み取り不可（画像PDF）",
-  failed_no_attachment: "添付なし",
-}
-
+/**
+ * `order_parse_log.reason` の日本語ラベル。処理結果の観点は `outcome`（起票/スキップ/失敗）に
+ * 固定したため一覧の主表示には使わないが、従属テキストで理由の内訳を出すのに使う（Issue #422）。
+ */
 const REASON_LABELS: Record<string, string> = {
   no_product_match: "品番照合失敗",
   downgrade_skipped: "格下げスキップ",
@@ -33,20 +38,57 @@ const REASON_LABELS: Record<string, string> = {
   invalid_quantity: "数量不正",
   failed_encrypted: "暗号化PDF",
   failed_image: "画像PDF",
+  failed_no_attachment: "添付なし",
+}
+
+interface OutcomeMeta {
+  label: string
+  icon: LucideIcon
+  badgeVariant: "secondary" | "outline" | "destructive"
+  iconClassName: string
+}
+
+/**
+ * 処理結果の3値（Issue #422）ごとの見た目。値が増えたら型エラーで気づけるよう
+ * `Record<EmailIntakeOutcome, T>` で全ケースを明示する（CLAUDE.md / PR #409）。
+ */
+const OUTCOME_META: Record<EmailIntakeOutcome, OutcomeMeta> = {
+  created: {
+    label: "起票",
+    icon: CheckCircle2,
+    badgeVariant: "secondary",
+    iconClassName: "text-emerald-600",
+  },
+  skipped: {
+    label: "スキップ",
+    icon: MinusCircle,
+    badgeVariant: "outline",
+    iconClassName: "text-muted-foreground",
+  },
+  failed: {
+    label: "失敗",
+    icon: XCircle,
+    badgeVariant: "destructive",
+    iconClassName: "text-destructive",
+  },
 }
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString("ja-JP")
 }
 
+function reasonLabel(reason: string): string {
+  return REASON_LABELS[reason] ?? reason
+}
+
 /**
  * 受信受注メールの処理結果一覧ページ
  * URL: /orders/email-intake
  *
- * 受信した受注メール（order_attachments のステージング行）ごとに、受信日時・顧客・
- * parse_status・そのメールから新規起票された注文件数・スキップ/失敗理由・
- * 元PDF/本文リンクを一覧で表示する（Issue #357）。
- * 「パース成功・起票0件」のケースを、メーラーを開かずに追跡できるようにするのが主目的。
+ * 受信した受注メール（order_attachments のステージング行）ごとに、処理結果を
+ * 「起票 / スキップ / 失敗」の3値（サーバー導出の `outcome`）に固定して1列で表示する
+ * （Issue #422）。件数・理由・元ファイルは従属情報として同じセル内に添える。
+ * 「パース成功なのにスキップ理由あり・起票0件」のような観点のブレをなくすのが主目的。
  */
 export default function EmailIntakeResultsPage() {
   const { data: results, isLoading, isError } = useEmailIntakeResults()
@@ -56,8 +98,11 @@ export default function EmailIntakeResultsPage() {
       <div>
         <h1 className="text-xl font-bold">受信受注メールの処理結果</h1>
         <p className="text-sm text-muted-foreground">
-          自動パースされた受注メールごとの起票件数・スキップ/失敗理由・元ファイルを一覧で確認できます。
-          「パース成功・起票0件」（全明細が既存注文と重複）のメールもここで追跡できます。
+          自動パースされた受注メールごとの結果を「起票 / スキップ / 失敗」で確認できます。
+          <span className="font-medium text-foreground">失敗</span>
+          は手動起票・再送などの対応が必要です。
+          <span className="font-medium text-foreground">スキップ</span>
+          （既存注文と重複・対象外メール）は基本的に対応不要です。
         </p>
       </div>
 
@@ -78,12 +123,10 @@ export default function EmailIntakeResultsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>結果</TableHead>
                 <TableHead>受信日時</TableHead>
                 <TableHead>顧客</TableHead>
                 <TableHead>ファイル</TableHead>
-                <TableHead>パース状態</TableHead>
-                <TableHead>起票件数</TableHead>
-                <TableHead>スキップ/失敗理由</TableHead>
                 <TableHead>元メール/PDF</TableHead>
               </TableRow>
             </TableHeader>
@@ -91,7 +134,7 @@ export default function EmailIntakeResultsPage() {
               {(results ?? []).length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={5}
                     className="text-center text-muted-foreground"
                   >
                     受信受注メールはまだありません
@@ -110,81 +153,114 @@ export default function EmailIntakeResultsPage() {
   )
 }
 
-function parseStatusVariant(
-  parseStatus: string,
-): "secondary" | "outline" | "destructive" {
-  if (parseStatus === "success") return "secondary"
-  if (parseStatus === "pending") return "outline"
-  return "destructive"
+function OutcomeCell({ row }: { row: EmailIntakeResult }) {
+  const meta = OUTCOME_META[row.outcome]
+  const Icon = meta.icon
+  const reasons = row.parse_log_reasons.map(reasonLabel)
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant={meta.badgeVariant} className="gap-1">
+          <Icon className={meta.iconClassName} aria-hidden />
+          {row.outcome === "created"
+            ? `${meta.label} ${row.created_order_count}件`
+            : meta.label}
+        </Badge>
+        {row.needs_attention && (
+          <Badge
+            variant="outline"
+            className="gap-1 border-amber-300 bg-amber-50 text-amber-700"
+          >
+            <AlertTriangle className="text-amber-600" aria-hidden />
+            要確認
+          </Badge>
+        )}
+      </div>
+
+      <OutcomeDetail row={row} reasons={reasons} />
+    </div>
+  )
+}
+
+/**
+ * バッジの下に添える従属テキスト。起票された注文へのリンク・スキップ/失敗理由の内訳・
+ * 空の下書きの注意書きなど、一覧のデフォルト表示では圧縮したい情報をここにまとめる。
+ */
+function OutcomeDetail({
+  row,
+  reasons,
+}: {
+  row: EmailIntakeResult
+  reasons: string[]
+}) {
+  const orderLinks =
+    row.created_order_ids.length > 0 ? (
+      <span className="text-xs text-muted-foreground">
+        {row.created_order_ids.map((id, i) => (
+          <span key={id}>
+            {i > 0 && ", "}
+            <Link
+              href={`/orders/${id}`}
+              className="underline hover:text-foreground"
+            >
+              #{id}
+            </Link>
+          </span>
+        ))}
+      </span>
+    ) : null
+
+  if (row.outcome === "created") {
+    return (
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {orderLinks}
+        {reasons.length > 0 && (
+          <span className="text-xs text-amber-700">{reasons.join(" / ")}</span>
+        )}
+      </div>
+    )
+  }
+
+  if (row.outcome === "failed") {
+    return (
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-xs text-destructive">
+          {reasons.length > 0 ? reasons.join(" / ") : "処理を完了できませんでした"}
+        </span>
+        {row.empty_draft && (
+          <span className="text-xs text-muted-foreground">
+            空の下書きを起票済み {orderLinks}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // skipped
+  return (
+    <span className="text-xs text-muted-foreground">
+      {reasons.length > 0
+        ? reasons.join(" / ")
+        : "新規起票なし（全明細が既存注文と重複、または既存注文の更新のみ）"}
+    </span>
+  )
 }
 
 function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
-  const zeroCreated = row.created_order_count === 0
-  const parseSucceeded = row.parse_status === "success"
-
   return (
     <TableRow>
-      <TableCell className="whitespace-nowrap">
+      <TableCell>
+        <OutcomeCell row={row} />
+      </TableCell>
+      <TableCell className="whitespace-nowrap align-top">
         {formatDateTime(row.received_at)}
       </TableCell>
-      <TableCell>{row.customer_name ?? "-"}</TableCell>
-      <TableCell className="max-w-48 truncate">
+      <TableCell className="align-top">{row.customer_name ?? "-"}</TableCell>
+      <TableCell className="max-w-48 truncate align-top">
         {row.has_attachment ? (row.original_filename ?? "PDF") : "（添付なし）"}
       </TableCell>
-      <TableCell>
-        <Badge variant={parseStatusVariant(row.parse_status)}>
-          {PARSE_STATUS_LABELS[row.parse_status] ?? row.parse_status}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        {zeroCreated ? (
-          <Badge
-            variant="outline"
-            className="border-orange-300 bg-orange-50 text-orange-700"
-          >
-            起票0件
-          </Badge>
-        ) : (
-          <span>
-            {row.created_order_count}件
-            {row.created_order_ids.length > 0 && (
-              <span className="ml-2 text-xs text-muted-foreground">
-                {row.created_order_ids.map((id, i) => (
-                  <span key={id}>
-                    {i > 0 && ", "}
-                    <Link
-                      href={`/orders/${id}`}
-                      className="underline hover:text-foreground"
-                    >
-                      #{id}
-                    </Link>
-                  </span>
-                ))}
-              </span>
-            )}
-          </span>
-        )}
-      </TableCell>
-      <TableCell>
-        {row.parse_log_reasons.length === 0 ? (
-          parseSucceeded && zeroCreated ? (
-            <span className="text-xs text-muted-foreground">
-              新規起票なし（全明細が既存注文と重複、または既存注文の更新のみ）
-            </span>
-          ) : (
-            "-"
-          )
-        ) : (
-          <div className="flex flex-wrap gap-1">
-            {row.parse_log_reasons.map((reason, i) => (
-              <Badge key={`${reason}-${i}`} variant="outline">
-                {REASON_LABELS[reason] ?? reason}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </TableCell>
-      <TableCell>
+      <TableCell className="align-top">
         <div className="flex items-center gap-3">
           {row.signed_url && (
             <a

@@ -384,7 +384,8 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 - **PR-1（実装済み）**: `outcome` / `needs_attention` / `empty_draft` を API に追加（非破壊）。
   `pending` は経過時間を問わず `failed`。パースキュー待ちの行が一時的に `failed` 表示に
   なり得るが、一覧は60秒ポーリングで次サイクルに `created` / `skipped` へ遷移する
-- **PR-2**: フロントの一覧を「結果」1列（アイコン＋バッジ）に再構成
+- **PR-2（実装済み）**: フロントの一覧を「結果」1列（アイコン＋バッジ）に再構成。
+  `parse_status` / 起票件数 / 理由 の3列を廃し、`outcome` バッジ＋従属テキストに集約
 - **PR-3（任意）**: `pending` の猶予時間 / 「処理待ち」を第4状態にするか、`empty_draft` を
   `failed` とするか `created（要確認）` とするか、部分成功時の優先度
 
@@ -396,13 +397,18 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ### フロントエンド
 
-- `frontend/src/types/order.ts`: `EmailIntakeResult` 型
+- `frontend/src/types/order.ts`: `EmailIntakeOutcome` 型 / `EmailIntakeResult` 型
 - `frontend/src/hooks/use-orders.ts`: `useEmailIntakeResults()`（60秒ポーリング）
-- `frontend/src/app/orders/email-intake/page.tsx`: 一覧テーブル。`created_order_count === 0`
-  の行は「起票0件」バッジで強調する。`parse_status='success'` かつ理由ログが無い場合は
-  「新規起票なし（全明細が既存注文と重複、または既存注文の更新のみ）」と中立的に補足表示する
-  （`created_order_count` は `updated` を含まないため、重複スキップと断定はしない）。
-  `parse_status` のバッジは `success`=中立 / `pending`=アウトライン / それ以外=エラー系で色分けする
+- `frontend/src/app/orders/email-intake/page.tsx`: 一覧テーブル（Issue #422 PR-2 で再構成）。
+  列は「結果 / 受信日時 / 顧客 / ファイル / 元メール・PDF」。「結果」列は `outcome`
+  （`created` / `skipped` / `failed`）ごとに固定した1つのアイコン＋バッジで表示し、
+  `created` は `起票 N件`、`needs_attention` の行は横に「要確認」バッジを添える。
+  起票された注文リンク・理由ラベル（`REASON_LABELS`）・`empty_draft` の注意書きは
+  バッジ下の従属テキストにまとめ、デフォルト表示を簡潔に保つ。`parse_status` を
+  「パース成功」バッジで出す旧仕様は撤去（`outcome` が観点を1軸に固定するため）
+- `frontend/src/app/orders/email-intake/page.test.tsx`: Vitest + MSW のコロケーションテスト。
+  矛盾していた組み合わせ（`success` ＋ `non_order_email` ＋ 起票0 → スキップ表示、
+  `no_product_match` ＋ 起票1 → 起票（要確認）、`failed_encrypted` → 失敗）を固定
 - `frontend/src/components/layout/app-sidebar.tsx`: 「受信メール処理結果」メニュー項目
   （`/orders/email-intake`、全メンバーに表示）
 - `notification-bell.tsx` / `types/notification.ts`: `no_order_created`（「起票0件（全明細が重複）」）
@@ -494,7 +500,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | パース成功・起票0件の可視化（`no_order_created` 通知） | ✅ #357 |
 | 受信受注メールの処理結果一覧（`GET /orders/email-intake-results` + `/orders/email-intake`） | ✅ #357 |
 | 処理結果の観点を「起票 / スキップ / 失敗」の3値に固定（API に `outcome` 導出を追加） | ✅ #422 PR-1 |
-| 一覧UIを「結果」1列（アイコン＋バッジ）に再構成 | ⬜ #422 PR-2 |
+| 一覧UIを「結果」1列（アイコン＋バッジ）に再構成 | ✅ #422 PR-2 |
 | 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
 | 複数PDF添付メールの添付ごとステージング（1メール:N添付）＋ 添付収集のネスト再帰化（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#複数pdf添付の分割ステージングissue-384)） | ✅ #384 |
 | 束ね添付メールでのPDF単位の顧客解決（パース時に PDF 文面の企業名で `customers` を突合し、一意なら添付ごとに `customer_id` を再解決。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)） | ✅ #385 |
