@@ -203,10 +203,22 @@ export interface OrderApprovalLog {
 }
 
 /**
+ * 受信受注メール1件の処理結果を固定した3値の観点（Issue #422）。
+ * サーバー側（`_derive_email_intake_outcome`）で導出される。フロントでは再計算しない。
+ *
+ * - `created`: 1件以上の注文が新規起票された（通常フロー。レビューして確定）
+ * - `skipped`: 正常に処理されたが意図的に起票しなかった（重複・対象外等。基本対応不要）
+ * - `failed`: 抽出・処理が完了できず起票に至らなかった（手動起票・再送など対応必須）
+ */
+export type EmailIntakeOutcome = 'created' | 'skipped' | 'failed'
+
+/**
  * 受信受注メール（order_attachments のステージング行）ごとの処理結果サマリ（Issue #357）
  *
  * 「パースは成功したが起票0件」（全明細が重複スキップ等）のケースを、
  * メーラーを開かずに追跡できるようにするための一覧用データ型。
+ * `outcome` は運用者が取るべきアクションを1つの軸に固定したもの（Issue #422）。
+ * `parse_status` 等の生フィールドは詳細（展開表示）用に残す。
  */
 export interface EmailIntakeResult {
   id: string
@@ -223,6 +235,12 @@ export interface EmailIntakeResult {
   created_order_count: number
   created_order_ids: number[]
   parse_log_reasons: string[]
+  /** parse_status / created_order_count / parse_log_reasons からの導出値（Issue #422） */
+  outcome: EmailIntakeOutcome
+  /** outcome='created' だが要確認（品番未照合・複数受注の疑い等） */
+  needs_attention: boolean
+  /** 読み取り不能PDF等で中身が空の下書きだけが起票された（outcome='failed'） */
+  empty_draft: boolean
 }
 
 /**
