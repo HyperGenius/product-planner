@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, cast
+from typing import Any
 
 import anthropic
 
@@ -121,9 +121,15 @@ def extract_order_lines(
         },
         messages=[{"role": "user", "content": prompt}],
     )
-    # output_config.format 指定時は最初の text ブロックに valid JSON が入る
+    # output_config.format 指定時は最初の text ブロックに valid JSON が入るが、
+    # モデル都合で非JSON／dict以外が返っても呼び出し側（dict/list 前提）が壊れないよう
+    # 空結果へフォールバックする（旧・強制ツール呼び出し時の未検出フォールバックと同じ挙動）
     text = next((b.text for b in response.content if b.type == "text"), None)
-    data = cast(dict[str, Any], json.loads(text)) if text else {}
+    try:
+        parsed = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        parsed = None
+    data: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     line_items = data.get("line_items")
     document_order_no = data.get("document_order_no")
     return {
