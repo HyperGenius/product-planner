@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { http, HttpResponse } from "msw"
 import { render, screen, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
+import type { MemberRole } from "@/types/member"
 import type { EmailIntakeResult } from "@/types/order"
 import EmailIntakeResultsPage from "./page"
 
@@ -44,11 +45,29 @@ function mockResults(rows: EmailIntakeResult[]): void {
   )
 }
 
+function mockCurrentMemberRole(role: MemberRole): void {
+  server.use(
+    http.get(`${API_BASE}/tenant/members/me`, () =>
+      HttpResponse.json({
+        user_id: "u-1",
+        email: "member@example.com",
+        full_name: "テスト メンバー",
+        role,
+      }),
+    ),
+  )
+}
+
 function getRow(name: string | RegExp): HTMLElement {
   return screen.getByRole("row", { name }).closest("tr") as HTMLElement
 }
 
 describe("EmailIntakeResultsPage", () => {
+  beforeEach(() => {
+    // 既定は platform_admin（元メールリンクの表示制御を別テストで検証する）
+    mockCurrentMemberRole("platform_admin")
+  })
+
   it("parse_status='success' でもスキップ理由あり・起票0件なら『スキップ』と表示する", async () => {
     mockResults([
       makeResult({
@@ -134,5 +153,48 @@ describe("EmailIntakeResultsPage", () => {
     expect(
       await screen.findByText("受信受注メールはまだありません"),
     ).toBeInTheDocument()
+  })
+
+  it("platform_admin は元メール（Gmail）リンクを表示する", async () => {
+    mockCurrentMemberRole("platform_admin")
+    mockResults([makeResult({})])
+
+    render(<EmailIntakeResultsPage />)
+
+    const row = await waitFor(() => getRow(/顧客A社/))
+    expect(within(row).getByRole("link", { name: /メール/ })).toHaveAttribute(
+      "href",
+      "https://mail.google.com/mail/u/0/#all/dummy_message_id_1",
+    )
+    // PDF（署名付きURL）は全ロールで表示する
+    expect(within(row).getByRole("link", { name: "PDF" })).toBeInTheDocument()
+  })
+
+  it("platform_admin 以外は元メールリンクを表示せず PDF リンクは残す", async () => {
+    mockCurrentMemberRole("order_handler")
+    mockResults([makeResult({})])
+
+    render(<EmailIntakeResultsPage />)
+
+    const row = await waitFor(() => getRow(/顧客A社/))
+    expect(
+      within(row).queryByRole("link", { name: /メール/ }),
+    ).not.toBeInTheDocument()
+    expect(within(row).getByRole("link", { name: "PDF" })).toBeInTheDocument()
+  })
+
+  it("platform_admin 以外で PDF も無ければセルは「-」表示になる", async () => {
+    mockCurrentMemberRole("president")
+    mockResults([
+      makeResult({ signed_url: null, has_attachment: false }),
+    ])
+
+    render(<EmailIntakeResultsPage />)
+
+    const row = await waitFor(() => getRow(/顧客A社/))
+    expect(
+      within(row).queryByRole("link", { name: /メール/ }),
+    ).not.toBeInTheDocument()
+    expect(within(row).queryByRole("link", { name: "PDF" })).not.toBeInTheDocument()
   })
 })

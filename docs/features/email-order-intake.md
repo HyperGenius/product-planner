@@ -405,7 +405,10 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
   `created` は `起票 N件`、`needs_attention` の行は横に「要確認」バッジを添える。
   起票された注文リンク・理由ラベル（`REASON_LABELS`）・`empty_draft` の注意書きは
   バッジ下の従属テキストにまとめ、デフォルト表示を簡潔に保つ。`parse_status` を
-  「パース成功」バッジで出す旧仕様は撤去（`outcome` が観点を1軸に固定するため）
+  「パース成功」バッジで出す旧仕様は撤去（`outcome` が観点を1軸に固定するため）。
+  「元メール・PDF」列のうち **元メール（Gmail）へのリンクは `platform_admin` にのみ表示**する
+  （`useCurrentMember().role` で判定）。Gmail のアクセス権を持つのは `platform_admin` だけで、
+  他ロールが開いても権限エラーになるため。PDF の署名付きURLは全メンバーに表示する
 - `frontend/src/app/orders/email-intake/page.test.tsx`: Vitest + MSW のコロケーションテスト。
   矛盾していた組み合わせ（`success` ＋ `non_order_email` ＋ 起票0 → スキップ表示、
   `no_product_match` ＋ 起票1 → 起票（要確認）、`failed_encrypted` → 失敗）を固定

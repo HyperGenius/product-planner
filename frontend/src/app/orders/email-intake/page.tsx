@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useEmailIntakeResults } from "@/hooks/use-orders"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import type { EmailIntakeOutcome, EmailIntakeResult } from "@/types/order"
 
 /**
@@ -92,6 +93,10 @@ function reasonLabel(reason: string): string {
  */
 export default function EmailIntakeResultsPage() {
   const { data: results, isLoading, isError } = useEmailIntakeResults()
+  const { data: currentMember } = useCurrentMember()
+  // Gmail へのアクセス権は platform_admin しか持たないため、元メールへのリンクは
+  // platform_admin にのみ表示する（PDF の署名付きURLは全メンバーに表示する）。
+  const canViewGmailLink = currentMember?.role === "platform_admin"
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -142,7 +147,11 @@ export default function EmailIntakeResultsPage() {
                 </TableRow>
               ) : (
                 (results ?? []).map((row) => (
-                  <EmailIntakeRow key={row.id} row={row} />
+                  <EmailIntakeRow
+                    key={row.id}
+                    row={row}
+                    showGmailLink={canViewGmailLink}
+                  />
                 ))
               )}
             </TableBody>
@@ -247,7 +256,14 @@ function OutcomeDetail({
   )
 }
 
-function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
+function EmailIntakeRow({
+  row,
+  showGmailLink,
+}: {
+  row: EmailIntakeResult
+  showGmailLink: boolean
+}) {
+  const gmailLinkVisible = showGmailLink && Boolean(row.gmail_url)
   return (
     <TableRow>
       <TableCell>
@@ -273,9 +289,9 @@ function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
               PDF
             </a>
           )}
-          {row.gmail_url && (
+          {gmailLinkVisible && (
             <a
-              href={row.gmail_url}
+              href={row.gmail_url ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
@@ -285,7 +301,7 @@ function EmailIntakeRow({ row }: { row: EmailIntakeResult }) {
               <ExternalLink className="h-3 w-3" />
             </a>
           )}
-          {!row.signed_url && !row.gmail_url && "-"}
+          {!row.signed_url && !gmailLinkVisible && "-"}
         </div>
       </TableCell>
     </TableRow>
