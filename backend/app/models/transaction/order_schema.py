@@ -169,11 +169,26 @@ class OrderAttachmentResponse(BaseModel):
     created_at: str
 
 
+EmailIntakeOutcome = Literal["created", "skipped", "failed"]
+"""受信受注メール1件の処理結果を固定した3値の観点（Issue #422）。
+
+- ``created``: 1件以上の注文が新規起票された（通常フロー。レビューして確定する）
+- ``skipped``: 正常に処理されたが意図的に起票しなかった（重複・対象外等。基本対応不要）
+- ``failed``: 抽出・処理が完了できず起票に至らなかった（手動起票・再送など対応必須）
+
+``parse_status`` / ``created_order_count`` / ``parse_log_reasons`` の組み合わせから
+サーバー側で導出する。フロントでの再計算は行わない。
+"""
+
+
 class EmailIntakeResultResponse(BaseModel):
     """受信受注メール（order_attachments のステージング行）ごとの処理結果サマリ
 
     「パースは成功したが起票0件」（全明細が重複スキップ等）のケースを運用側が
     メーラーを開かずに追跡できるようにするための一覧用スキーマ（Issue #357）。
+
+    ``outcome`` は運用者が取るべきアクションを1つの軸に固定したもの（Issue #422）。
+    ``parse_status`` 等の生フィールドは詳細（展開表示）用に残す。
     """
 
     id: str
@@ -190,3 +205,9 @@ class EmailIntakeResultResponse(BaseModel):
     created_order_count: int
     created_order_ids: list[int]
     parse_log_reasons: list[str]
+    # 以下は parse_status / created_order_count / parse_log_reasons からの導出値（Issue #422）
+    outcome: EmailIntakeOutcome
+    # outcome='created' だが要確認（品番未照合・複数受注の疑い等）
+    needs_attention: bool
+    # 読み取り不能PDF等で中身が空の下書きだけが起票された（outcome='failed'）
+    empty_draft: bool

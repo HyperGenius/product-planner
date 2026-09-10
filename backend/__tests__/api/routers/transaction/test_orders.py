@@ -219,7 +219,7 @@ class TestOrderRouter:
                     "content_type": "application/pdf",
                     "size_bytes": 100,
                     "parse_status": "success",
-                    "gmail_message_id": "1a04679c33ae25b5",
+                    "gmail_message_id": "dummy_message_id_1",
                     "created_at": "2026-08-30T00:00:00+00:00",
                 },
                 {
@@ -236,7 +236,7 @@ class TestOrderRouter:
                 },
             ]
         )
-        customers_q = _q([{"id": 2, "name": "株式会社 飯野製作所"}])
+        customers_q = _q([{"id": 2, "name": "顧客A社"}])
         orders_q = _q([{"id": 1000062, "source_attachment_id": "att-2"}])
         logs_q = _q(
             [
@@ -273,14 +273,60 @@ class TestOrderRouter:
         assert deduped["parse_status"] == "success"
         assert deduped["created_order_count"] == 0
         assert deduped["parse_log_reasons"] == ["no_order_created"]
-        assert deduped["customer_name"] == "株式会社 飯野製作所"
+        assert deduped["customer_name"] == "顧客A社"
         assert deduped["signed_url"] == "https://signed/1"
-        assert deduped["gmail_url"].endswith("1a04679c33ae25b5")
+        assert deduped["gmail_url"].endswith("dummy_message_id_1")
+        # parse_status='success' でも起票0件＋スキップ理由なら outcome は skipped（Issue #422）
+        assert deduped["outcome"] == "skipped"
+        assert deduped["needs_attention"] is False
+        assert deduped["empty_draft"] is False
 
         created = rows[1]
         assert created["created_order_count"] == 1
         assert created["created_order_ids"] == [1000062]
         assert created["parse_log_reasons"] == []
+        assert created["outcome"] == "created"
+        assert created["needs_attention"] is False
+        assert created["empty_draft"] is False
+
+    @pytest.mark.parametrize(
+        ("parse_status", "created_count", "reasons", "expected"),
+        [
+            # 起票あり（通常フロー）
+            ("success", 1, [], ("created", False, False)),
+            # 起票あり＋要確認（品番未照合でも下書きは起票される: Issue #296）
+            ("success", 1, ["no_product_match"], ("created", True, False)),
+            ("success", 2, ["multi_order_suspected"], ("created", True, False)),
+            # 起票あり＋一部明細が数量不正（他明細は起票済み）
+            ("success", 1, ["invalid_quantity"], ("created", True, False)),
+            # スキップ（正常に処理されたが意図的に起票しなかった）
+            ("success", 0, ["no_order_created"], ("skipped", False, False)),
+            ("success", 0, ["non_order_email"], ("skipped", False, False)),
+            ("success", 0, ["draft_conflict_skipped"], ("skipped", False, False)),
+            ("success", 0, ["downgrade_skipped"], ("skipped", False, False)),
+            ("success", 0, [], ("skipped", False, False)),
+            # 失敗（読み取り不能PDF。空の下書きが1件起票される: _process_unreadable_pdf）
+            ("success", 1, ["failed_encrypted"], ("failed", False, True)),
+            ("success", 1, ["failed_image"], ("failed", False, True)),
+            ("success", 0, ["failed_no_attachment"], ("failed", False, False)),
+            # 失敗（数量抽出不正で明細ドロップ、起票0件）
+            ("success", 0, ["invalid_quantity"], ("failed", False, False)),
+            # 失敗（パース未実行 / 中断。PR-1 では経過時間を問わない）
+            ("pending", 0, [], ("failed", False, False)),
+            # 分類外の理由は skipped にフォールバックする
+            ("success", 0, ["some_new_reason"], ("skipped", False, False)),
+        ],
+    )
+    def test_derive_email_intake_outcome_matrix(
+        self, parse_status, created_count, reasons, expected
+    ):
+        """受信受注メールの処理結果を「起票 / スキップ / 失敗」の3値に固定する（Issue #422）"""
+        from app.routers.transaction.orders import _derive_email_intake_outcome
+
+        assert (
+            _derive_email_intake_outcome(parse_status, created_count, reasons)
+            == expected
+        )
 
     def test_create_order(self, headers, mock_repo):
         """POST /: 新規作成のテスト"""

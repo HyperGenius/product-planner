@@ -352,8 +352,41 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | `parse_status` | `order_attachments.parse_status`。この一覧が対象にするステージング行（`order_id IS NULL`）では実質 `pending`（未処理）/ `success`（処理済み）の2値。`failed_*` は注文に紐づく実添付行（`order_id != NULL`）側で使われる値 |
 | `created_order_count` / `created_order_ids` | そのメールから**新規起票**された注文（`orders.source_attachment_id = staging.id`。`updated` は含まない） |
 | `parse_log_reasons` | その attachment に紐づく `order_parse_log.reason` の一覧（`no_order_created` / `no_product_match` / `draft_conflict_skipped` 等） |
+| `outcome` | 処理結果を固定した3値（`created` / `skipped` / `failed`）。下記「処理結果の観点を3値に固定する（Issue #422）」参照 |
+| `needs_attention` | `outcome='created'` かつ要確認理由（`no_product_match` / `multi_order_suspected` / `invalid_quantity`）を含む |
+| `empty_draft` | 読み取り不能PDF等で中身が空の下書きだけが起票された（`outcome='failed'`。`created_order_ids` に空下書きが入る） |
 | `signed_url` | 元PDFの署名付きURL（`create_signed_urls` バッチ生成、60分） |
 | `gmail_url` | `https://mail.google.com/mail/u/0/#all/{gmail_message_id}` |
+
+#### 処理結果の観点を3値に固定する（Issue #422）
+
+当初は `parse_status`（実質「未処理 / 処理済み」の2値）・`created_order_count`・`parse_log_reasons`
+の3つを一覧で並べていたが、これらは直交する軸であり「`parse_status='success'`（＝処理済み）
+なのにスキップ理由あり・起票0件」のように、行の結末を単一の軸で読めなかった。
+
+`GET /orders/email-intake-results` は上記3情報から `outcome` をサーバー側で導出して返す
+（フロントでの再計算は行わない）。導出は `_derive_email_intake_outcome()`
+（`backend/app/routers/transaction/orders.py`）。
+
+| `outcome` | 判定条件（上から評価） | 運用者のアクション |
+|---|---|---|
+| `failed` | `parse_status='pending'`（パース未実行 / 中断）／ `parse_log_reasons` に `failed_encrypted` `failed_image` `failed_no_attachment` を含む（空の下書きが起票されても `empty_draft=true` で失敗扱い）／ 起票0件かつ `invalid_quantity` を含む | 手動起票・再送など対応必須 |
+| `created` | `created_order_count >= 1` | レビューして確定（要確認理由を含めば `needs_attention=true`） |
+| `skipped` | 上記いずれにも該当しない（`non_order_email` / `draft_conflict_skipped` / `downgrade_skipped` / `no_order_created`、または理由ログなしで起票0件） | 基本対応不要 |
+
+理由文字列の分類集合（`_EMAIL_INTAKE_FAIL_REASONS` / `_EMAIL_INTAKE_ATTENTION_REASONS` /
+`_EMAIL_INTAKE_SKIP_REASONS`）は同ファイルに定数化。`order_parse_log.reason` は CHECK 制約の
+ない自由文字列のため、分類外の理由が来た場合は `skipped` にフォールバックしつつ
+`logger.warning` を出す（新しい `reason` を足したら分類集合にも登録する）。
+
+未確定の論点（PR で分割。Issue #422 のコメント参照）:
+
+- **PR-1（実装済み）**: `outcome` / `needs_attention` / `empty_draft` を API に追加（非破壊）。
+  `pending` は経過時間を問わず `failed`。パースキュー待ちの行が一時的に `failed` 表示に
+  なり得るが、一覧は60秒ポーリングで次サイクルに `created` / `skipped` へ遷移する
+- **PR-2**: フロントの一覧を「結果」1列（アイコン＋バッジ）に再構成
+- **PR-3（任意）**: `pending` の猶予時間 / 「処理待ち」を第4状態にするか、`empty_draft` を
+  `failed` とするか `created（要確認）` とするか、部分成功時の優先度
 
 - ステージング行・顧客・注文・parse_log はいずれも「同一テナントのメンバーなら参照可」
   のRLSを持つため、閲覧者自身のユーザーJWTクライアントで取得する。`admin_client` は
@@ -433,8 +466,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ### 最初のユースケース
 
-`gmail_message_id=1a04679c33ae25b5`（飯野製作所の分納注文書、自動抽出不可）を、本文＋
-添付PDF＋複数明細でこのフォームから起票する。
+顧客A社の分納注文書（自動抽出不可）を、本文＋添付PDF＋複数明細でこのフォームから起票する。
 
 ---
 
@@ -461,6 +493,8 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 表記ゆれ辞書の顧客単位スコープ化（`customer_id` 追加、他顧客へフォールバックしない） | ✅ #349 |
 | パース成功・起票0件の可視化（`no_order_created` 通知） | ✅ #357 |
 | 受信受注メールの処理結果一覧（`GET /orders/email-intake-results` + `/orders/email-intake`） | ✅ #357 |
+| 処理結果の観点を「起票 / スキップ / 失敗」の3値に固定（API に `outcome` 導出を追加） | ✅ #422 PR-1 |
+| 一覧UIを「結果」1列（アイコン＋バッジ）に再構成 | ⬜ #422 PR-2 |
 | 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
 | 複数PDF添付メールの添付ごとステージング（1メール:N添付）＋ 添付収集のネスト再帰化（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#複数pdf添付の分割ステージングissue-384)） | ✅ #384 |
 | 束ね添付メールでのPDF単位の顧客解決（パース時に PDF 文面の企業名で `customers` を突合し、一意なら添付ごとに `customer_id` を再解決。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)） | ✅ #385 |
