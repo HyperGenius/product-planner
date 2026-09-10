@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { SourceEmailPanel } from "@/components/orders/source-email-panel"
+import { ApiError } from "@/lib/api-client"
 import { useUpdateOrder } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { jstTodayIso, toDateInputValue } from "@/lib/order-utils"
@@ -40,7 +41,6 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   const [schedulingStartDate, setSchedulingStartDate] = useState(
     toDateInputValue(order?.scheduling_start_date)
   )
-  const [duplicateError, setDuplicateError] = useState("")
 
   if (!order) return null
 
@@ -61,7 +61,6 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
     schedulingStartDate !== toDateInputValue(order.scheduling_start_date)
 
   const handleSubmit = () => {
-    setDuplicateError("")
     const parsedQuantity = parseInt(quantity, 10)
     if (!productId || isNaN(parsedQuantity) || parsedQuantity <= 0) return
 
@@ -91,12 +90,15 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
           onOpenChange(false)
         },
         onError: (error: Error) => {
-          if (
-            error.message.includes("400") ||
-            error.message.toLowerCase().includes("duplicate") ||
-            error.message.includes("already")
-          ) {
-            setDuplicateError("この注文番号はすでに使用されています")
+          // orders の UNIQUE は2本（dedupe_key = 顧客×製品×納期 / 注文番号）。
+          // バックエンドが errorCode で振り分けるので、それぞれ実態に合った文言を出す（Issue #415）。
+          const errorCode = error instanceof ApiError ? error.errorCode : undefined
+          if (errorCode === "duplicate_order_number") {
+            toast.error("この注文番号はすでに使用されています")
+          } else if (errorCode === "duplicate_order") {
+            toast.error(
+              "同じ 顧客 × 製品 × 希望納期 の注文がすでに存在するため保存できませんでした"
+            )
           } else {
             toast.error(`更新に失敗しました: ${error.message}`)
           }
@@ -147,14 +149,8 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
               <Input
                 id="order-no"
                 value={orderNo}
-                onChange={(e) => {
-                  setOrderNo(e.target.value)
-                  setDuplicateError("")
-                }}
+                onChange={(e) => setOrderNo(e.target.value)}
               />
-              {duplicateError && (
-                <p className="text-sm text-destructive">{duplicateError}</p>
-              )}
             </div>
 
             <ProductSelector value={productId} onValueChange={setProductId} />

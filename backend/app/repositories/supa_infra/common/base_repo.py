@@ -11,6 +11,18 @@ logger = get_logger(__name__)
 T = TypeVar("T", bound=dict[str, Any])  # 型変数を定義
 
 
+class DuplicateRecordError(Exception):
+    """一意制約違反 (Postgres 23505) を表す。
+
+    呼び出し側（ルーター）で 409 Conflict へ変換する想定。生の DB 制約名・
+    例外文言はレスポンスに載せないため、ここでは保持のみ行う（Issue #415）。
+    """
+
+    def __init__(self, message: str, *, constraint: str | None = None) -> None:
+        super().__init__(message)
+        self.constraint = constraint
+
+
 class BaseRepository(Generic[T]):
     """基本的なCRUD操作を共通化するための抽象クラス。"""
 
@@ -70,7 +82,17 @@ class BaseRepository(Generic[T]):
         # エラーにならず「更新件数0」になることがあります。
         # 厳密にはここでも戻り値チェックが必要ですが、まずは今のままで十分動きます。
 
-        res = self.client.table(self.table_name).update(data).eq("id", id).execute()
+        try:
+            res = self.client.table(self.table_name).update(data).eq("id", id).execute()
+        except APIError as e:
+            # 一意制約違反は create() と同様に意味のある例外へ変換する（Issue #415）。
+            # ここで捕捉しないと生の APIError がルーターまで伝播し 500 になる。
+            if e.code == "23505":  # unique_violation
+                raise DuplicateRecordError(
+                    "重複データにより更新できません", constraint=e.message or None
+                ) from e
+            # その他のAPIエラーはそのまま再送出
+            raise
         # updateも配列を返すので、最初の要素を返す
         if res.data and len(res.data) > 0:
             return cast(T, res.data[0])

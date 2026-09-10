@@ -1,5 +1,5 @@
 # repositories/supa_infra/common/__init__.py
-from .base_repo import BaseRepository
+from .base_repo import BaseRepository, DuplicateRecordError
 from .calendar_repo import CalendarRepository
 from .scheduling_settings_repo import SchedulingSettingsRepository
 from .table_name import SupabaseTableName
@@ -7,6 +7,7 @@ from .table_name import SupabaseTableName
 __all__ = [
     "SupabaseTableName",
     "BaseRepository",
+    "DuplicateRecordError",
     "CalendarRepository",
     "SchedulingSettingsRepository",
 ]
