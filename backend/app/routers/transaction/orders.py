@@ -107,6 +107,103 @@ def _map_order_response(order: dict) -> dict:
     return mapped
 
 
+def _map_conflicting_order(conflict: dict[str, Any], client: Client) -> dict[str, Any]:
+    """衝突した既存注文の識別情報を組み立てる（Issue #415 PR2）。
+
+    重複通知モーダルの表示用に、生の DB 制約名・例外文言を含まない識別情報のみを
+    返す。customer_id / product_id は master テーブルから名前解決する
+    （RLS 下のユーザー JWT クライアントで参照するため、閲覧権限のない行は取れない）。
+    """
+    customer_name = None
+    customer_id = conflict.get("customer_id")
+    if customer_id is not None:
+        res = (
+            client.table("customers")
+            .select("name")
+            .eq("id", customer_id)
+            .maybe_single()
+            .execute()
+        )
+        if res and res.data:
+            customer_name = cast(dict[str, Any], res.data).get("name")
+
+    product_name = conflict.get("extracted_product_name")
+    product_id = conflict.get("product_id")
+    if product_id is not None:
+        res = (
+            client.table("products")
+            .select("name")
+            .eq("id", product_id)
+            .maybe_single()
+            .execute()
+        )
+        if res and res.data:
+            product_name = cast(dict[str, Any], res.data).get("name")
+
+    return {
+        "id": conflict.get("id"),
+        "order_no": conflict.get("order_number"),
+        "customer_name": customer_name,
+        "product_name": product_name,
+        "quantity": conflict.get("quantity"),
+        "deadline_date": conflict.get("deadline_date"),
+        "status": conflict.get("status"),
+    }
+
+
+def _duplicate_order_conflict_exception(
+    e: DuplicateRecordError,
+    *,
+    client: Client,
+    order_repo: OrderRepository,
+    tenant_id: str,
+    customer_id: int | None,
+    product_id: int | None,
+    deadline_date: str | None,
+    extracted_product_name: str | None,
+    exclude_order_id: int | None = None,
+    extra_detail: dict[str, Any] | None = None,
+) -> HTTPException:
+    """DuplicateRecordError を 409 Conflict の構造化 detail へ変換する（Issue #415 PR2）。
+
+    orders には UNIQUE が2本あり、どちらの列を変更しても衝突しうるため、制約名
+    （`e.constraint`）で振り分ける:
+      - `orders_tenant_id_order_number_idx`: (tenant_id, order_number)
+      - `orders_dedupe_key` / `orders_dedupe_key_unmatched_product`:
+        (tenant_id, customer_id, product_id, deadline_date) または
+        product_id IS NULL 時は extracted_product_name 込みのキー
+    dedupe 側は衝突先レコードを SELECT し直し、識別情報を `conflicting_order` として
+    付与する（取得できなければ固定文言のみ返す）。4経路（create/update/split/
+    email-intake）共通で使う。生の DB 制約名・例外文言はレスポンスに含めない。
+    """
+    if "order_number" in (e.constraint or ""):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "duplicate_order_number",
+                "message": "この注文番号はすでに使用されています",
+            },
+        )
+
+    detail: dict[str, Any] = {
+        "error": "duplicate_order",
+        "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します",
+    }
+    conflict = order_repo.find_dedupe_conflict(
+        tenant_id,
+        customer_id,
+        product_id,
+        deadline_date,
+        extracted_product_name,
+        exclude_order_id=exclude_order_id,
+    )
+    if conflict is not None:
+        detail["conflicting_order"] = _map_conflicting_order(conflict, client)
+    if extra_detail:
+        detail.update(extra_detail)
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
 def _attach_approval_requester_names(client: Client, orders: list[dict]) -> None:
     """承認依頼者（approval_requested_by）の表示名を各注文へ付与する（Issue #402）。
 
@@ -236,8 +333,17 @@ def create_order(
     )
     try:
         result = repo.create(order_data.with_tenant_id(tenant_id))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+    except DuplicateRecordError as e:
+        raise _duplicate_order_conflict_exception(
+            e,
+            client=client,
+            order_repo=repo,
+            tenant_id=tenant_id,
+            customer_id=order_data.customer_id,
+            product_id=order_data.product_id,
+            deadline_date=order_data.deadline_date,
+            extracted_product_name=order_data.extracted_product_name,
+        ) from None
     if backdated and order_data.scheduling_start_date:
         _log_scheduling_start_backdate_safely(
             backdate_log_repo,
@@ -759,25 +865,20 @@ def update_order(
         result = repo.update(order_id, update_dict)
     except DuplicateRecordError as e:
         # orders には UNIQUE が2本ある。編集ダイアログはどちらの列も変更できるため、
-        # 制約名で振り分けてエラーコード／文言を分ける（`create()` の order_number 判定と同じ方針）:
-        #   - orders_tenant_id_order_number_idx: (tenant_id, order_number)
-        #   - orders_dedupe_key: (tenant_id, customer_id, product_id, deadline_date)
-        # 生の DB 制約名・例外文言はレスポンスに載せず、固定文言＋構造化 detail を返す
-        # （衝突先レコードの識別情報 conflicting_order は Issue #415 PR2 で付与予定）。
-        if "order_number" in (e.constraint or ""):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "duplicate_order_number",
-                    "message": "この注文番号はすでに使用されています",
-                },
-            ) from None
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "duplicate_order",
-                "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します",
-            },
+        # 制約名で振り分ける（`_duplicate_order_conflict_exception` の判定ロジック参照）。
+        # 衝突判定には「変更後の値」を使う必要があるため、update_dict にない項目は
+        # order_before の値で補う。
+        before = order_before or {}
+        raise _duplicate_order_conflict_exception(
+            e,
+            client=client,
+            order_repo=repo,
+            tenant_id=tenant_id,
+            customer_id=update_dict.get("customer_id", before.get("customer_id")),
+            product_id=update_dict.get("product_id", before.get("product_id")),
+            deadline_date=update_dict.get("deadline_date", before.get("deadline_date")),
+            extracted_product_name=before.get("extracted_product_name"),
+            exclude_order_id=order_id,
         ) from None
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
@@ -805,6 +906,18 @@ def delete_order(order_id: int, repo: OrderRepository = Depends(get_order_repo))
     if not success:
         raise HTTPException(status_code=404, detail="Not found")
     return {"status": "deleted"}
+
+
+def _rollback_split_creations(
+    repo: OrderRepository,
+    created_orders: list[dict],
+    order_id: int,
+    original_deadline_date: str | None,
+) -> None:
+    """split_order の失敗時に、作成済みの明細を削除し元の注文の deadline_date を復元する。"""
+    for created in created_orders:
+        repo.delete(created["id"])
+    repo.update(order_id, {"deadline_date": original_deadline_date})
 
 
 @orders_router.post("/{order_id}/split")
@@ -903,11 +1016,28 @@ def split_order(
                     else "failed_no_attachment",
                 }
             ).execute()
+    except DuplicateRecordError as e:
+        _rollback_split_creations(
+            repo, created_orders, order_id, original_deadline_date
+        )
+        # `item` は例外を送出したループ回の明細（Python のループ変数はループ後も残る）
+        raise _duplicate_order_conflict_exception(
+            e,
+            client=client,
+            order_repo=repo,
+            tenant_id=tenant_id,
+            customer_id=item.customer_id
+            if item.customer_id is not None
+            else order.get("customer_id"),
+            product_id=item.product_id,
+            deadline_date=item.deadline_date,
+            extracted_product_name=item.extracted_product_name,
+            exclude_order_id=order_id,
+        ) from None
     except (ValueError, APIError) as e:
-        for created in created_orders:
-            repo.delete(created["id"])
-        # 元の注文のdeadline_dateを退避前の値に戻す（分割前の状態に復元）
-        repo.update(order_id, {"deadline_date": original_deadline_date})
+        _rollback_split_creations(
+            repo, created_orders, order_id, original_deadline_date
+        )
         detail = e.message if isinstance(e, APIError) else str(e)
         raise HTTPException(status_code=400, detail=detail) from None
 
@@ -925,6 +1055,20 @@ def split_order(
         "original_order_id": order_id,
         "created_orders": [_map_order_response(o) for o in created_orders],
     }
+
+
+def _rollback_email_intake_creations(
+    repo: OrderRepository,
+    client: Client,
+    created_orders: list[dict[str, Any]],
+    staging_id: Any,
+) -> None:
+    """create_email_order_intake の失敗時に、作成済みの注文と集約行を削除する。"""
+    for created in created_orders:
+        repo.delete(created["id"])
+    client.table(SupabaseTableName.ORDER_ATTACHMENTS.value).delete().eq(
+        "id", staging_id
+    ).execute()
 
 
 @orders_router.post("/email-intake")
@@ -1079,10 +1223,23 @@ async def create_email_order_intake(
                 ]
             )
             client.table(attachments_table).insert(attachment_rows).execute()
+    except DuplicateRecordError as e:
+        _rollback_email_intake_creations(repo, client, created_orders, staging_id)
+        # `index` / `item` は例外を送出したループ回の明細（Python のループ変数は
+        # ループ後も残る）。どの明細が重複したかをフロントで示せるよう index を返す。
+        raise _duplicate_order_conflict_exception(
+            e,
+            client=client,
+            order_repo=repo,
+            tenant_id=tenant_id,
+            customer_id=intake.customer_id,
+            product_id=item.product_id,
+            deadline_date=item.deadline_date,
+            extracted_product_name=item.extracted_product_name,
+            extra_detail={"line_item_index": index},
+        ) from None
     except (ValueError, APIError) as e:
-        for created in created_orders:
-            repo.delete(created["id"])
-        client.table(attachments_table).delete().eq("id", staging_id).execute()
+        _rollback_email_intake_creations(repo, client, created_orders, staging_id)
         detail = e.message if isinstance(e, APIError) else str(e)
         raise HTTPException(status_code=400, detail=detail) from None
 

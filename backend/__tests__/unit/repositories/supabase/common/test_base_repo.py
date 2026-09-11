@@ -57,6 +57,39 @@ class TestBaseRepository:
         assert result == expected
         mock_client.table.return_value.insert.assert_called_with(input_data)
 
+    def test_create_unique_violation_raises_duplicate_record_error(
+        self, base_repo, mock_client
+    ):
+        """一意制約違反(23505)時、DuplicateRecordError に変換されるテスト（Issue #415 PR2）。
+
+        従来は ValueError（生の制約文言込みのメッセージ）を投げていたが、update() と
+        同様に呼び出し側で 409 化・衝突先検索できるよう DuplicateRecordError に統一する。
+        """
+        (
+            mock_client.table.return_value.insert.return_value.execute
+        ).side_effect = APIError(
+            {
+                "code": "23505",
+                "message": 'duplicate key value violates "orders_dedupe_key"',
+            }
+        )
+
+        with pytest.raises(
+            DuplicateRecordError, match="重複データにより作成できません"
+        ) as exc_info:
+            base_repo.create({"customer_id": 2})
+
+        assert "orders_dedupe_key" in (exc_info.value.constraint or "")
+
+    def test_create_other_api_error_reraised(self, base_repo, mock_client):
+        """一意制約違反以外のAPIErrorはそのまま再送出されるテスト（Issue #415 PR2）"""
+        (
+            mock_client.table.return_value.insert.return_value.execute
+        ).side_effect = APIError({"code": "99999", "message": "unexpected error"})
+
+        with pytest.raises(APIError):
+            base_repo.create({"customer_id": 2})
+
     def test_update(self, base_repo, mock_client):
         """更新のテスト"""
         update_data = {"name": "Updated"}

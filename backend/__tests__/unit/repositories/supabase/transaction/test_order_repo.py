@@ -140,6 +140,107 @@ class TestOrderRepositoryRoutingStatus:
 
 
 @pytest.mark.unit
+class TestOrderRepositoryFindDedupeConflict:
+    """Issue #415 PR2: dedupe 用 UNIQUE 制約に該当する既存行の検索"""
+
+    def test_returns_none_when_customer_id_missing(self):
+        mock_client = MagicMock()
+        repo = OrderRepository(mock_client)
+
+        result = repo.find_dedupe_conflict("tenant-1", None, 1, "2026-10-01", None)
+
+        assert result is None
+        mock_client.table.assert_not_called()
+
+    def test_returns_none_when_deadline_date_missing(self):
+        mock_client = MagicMock()
+        repo = OrderRepository(mock_client)
+
+        result = repo.find_dedupe_conflict("tenant-1", 10, 1, None, None)
+
+        assert result is None
+        mock_client.table.assert_not_called()
+
+    def test_looks_up_by_product_id_when_product_matched(self):
+        """product_id あり: orders_dedupe_key (tenant_id, customer_id, product_id, deadline_date) で検索"""
+        mock_client = MagicMock()
+        conflict = {"id": 99, "customer_id": 10, "product_id": 1}
+        base_eq = mock_client.table.return_value.select.return_value.eq
+        (
+            base_eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data
+        ) = [conflict]
+        repo = OrderRepository(mock_client)
+
+        result = repo.find_dedupe_conflict("tenant-1", 10, 1, "2026-10-01", None)
+
+        assert result == conflict
+        base_eq.return_value.eq.return_value.eq.return_value.eq.assert_called_with(
+            "product_id", 1
+        )
+
+    def test_looks_up_by_extracted_product_name_when_product_unmatched(self):
+        """product_id なし: orders_dedupe_key_unmatched_product
+        (tenant_id, customer_id, deadline_date, extracted_product_name) で検索"""
+        mock_client = MagicMock()
+        conflict = {"id": 100, "customer_id": 10, "product_id": None}
+        base_eq = mock_client.table.return_value.select.return_value.eq
+        (
+            base_eq.return_value.eq.return_value.eq.return_value.is_.return_value.eq.return_value.limit.return_value.execute.return_value.data
+        ) = [conflict]
+        repo = OrderRepository(mock_client)
+
+        result = repo.find_dedupe_conflict(
+            "tenant-1", 10, None, "2026-10-01", "謎の部品"
+        )
+
+        assert result == conflict
+        base_eq.return_value.eq.return_value.eq.return_value.is_.assert_called_with(
+            "product_id", "null"
+        )
+        base_eq.return_value.eq.return_value.eq.return_value.is_.return_value.eq.assert_called_with(
+            "extracted_product_name", "謎の部品"
+        )
+
+    def test_returns_none_when_product_unmatched_and_no_extracted_name(self):
+        """product_id も extracted_product_name も無ければ衝突しようがなく検索しない"""
+        mock_client = MagicMock()
+        repo = OrderRepository(mock_client)
+
+        result = repo.find_dedupe_conflict("tenant-1", 10, None, "2026-10-01", None)
+
+        assert result is None
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.assert_not_called()
+
+    def test_returns_none_when_no_rows_found(self):
+        mock_client = MagicMock()
+        (
+            mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data
+        ) = []
+        repo = OrderRepository(mock_client)
+
+        result = repo.find_dedupe_conflict("tenant-1", 10, 1, "2026-10-01", None)
+
+        assert result is None
+
+    def test_excludes_given_order_id(self):
+        """更新時の自己衝突を避けるため exclude_order_id を neq で除外する"""
+        mock_client = MagicMock()
+        base_eq = mock_client.table.return_value.select.return_value.eq
+        (
+            base_eq.return_value.eq.return_value.eq.return_value.eq.return_value.neq.return_value.limit.return_value.execute.return_value.data
+        ) = []
+        repo = OrderRepository(mock_client)
+
+        repo.find_dedupe_conflict(
+            "tenant-1", 10, 1, "2026-10-01", None, exclude_order_id=5
+        )
+
+        base_eq.return_value.eq.return_value.eq.return_value.eq.return_value.neq.assert_called_with(
+            "id", 5
+        )
+
+
+@pytest.mark.unit
 class TestOrderRepositoryBulkUpdateStatus:
     def test_bulk_update_status_updates_in_single_request(self):
         """複数IDを in_ で1回のリクエストにまとめて更新し、更新後の行を返す"""

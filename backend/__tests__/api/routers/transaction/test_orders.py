@@ -355,6 +355,63 @@ class TestOrderRouter:
 
         mock_repo.create.assert_called_once()
 
+    def test_create_order_duplicate_returns_409(self, headers, mock_repo):
+        """POST /: dedupe_key 重複時は 409 + 構造化 detail を返す（Issue #415 PR2）。
+
+        従来は create() が ValueError を投げて 400 + 生の DB 制約文言になっていた。
+        """
+        from app.repositories.supa_infra.common import DuplicateRecordError
+
+        payload = {
+            "customer_id": 10,
+            "product_id": 1,
+            "quantity": 50,
+            "desired_deadline": "2026-10-01",
+        }
+        mock_repo.create.side_effect = DuplicateRecordError(
+            "重複データにより作成できません",
+            constraint='duplicate key value violates "orders_dedupe_key"',
+        )
+        mock_repo.find_dedupe_conflict.return_value = None
+
+        response = client.post("/orders", json=payload, headers=headers)
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_order"
+        assert "conflicting_order" not in detail
+        assert "orders_dedupe_key" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
+        mock_repo.find_dedupe_conflict.assert_called_once_with(
+            headers["x-tenant-id"], 10, 1, "2026-10-01", None, exclude_order_id=None
+        )
+
+    def test_create_order_duplicate_order_number_returns_409(self, headers, mock_repo):
+        """POST /: 注文番号 UNIQUE 衝突は dedupe とは別コード・別文言で 409（Issue #415 PR2）"""
+        from app.repositories.supa_infra.common import DuplicateRecordError
+
+        payload = {
+            "order_no": "ORD-001",
+            "product_id": 1,
+            "quantity": 50,
+            "desired_deadline": "2026-10-01",
+        }
+        mock_repo.create.side_effect = DuplicateRecordError(
+            "重複データにより作成できません",
+            constraint=(
+                "duplicate key value violates unique constraint "
+                '"orders_tenant_id_order_number_idx"'
+            ),
+        )
+
+        response = client.post("/orders", json=payload, headers=headers)
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_order_number"
+        mock_repo.find_dedupe_conflict.assert_not_called()
+
     def test_update_order(self, headers, mock_repo):
         """PATCH /{id}: 更新のテスト"""
         order_id = 1
@@ -386,6 +443,8 @@ class TestOrderRouter:
             "重複データにより更新できません",
             constraint='duplicate key value violates "orders_dedupe_key"',
         )
+        # 衝突先レコードが取得できないケース（PR2 では conflicting_order は best-effort）
+        mock_repo.find_dedupe_conflict.return_value = None
 
         response = client.patch(
             f"/orders/{order_id}", json={"quantity": 60}, headers=headers
@@ -395,9 +454,72 @@ class TestOrderRouter:
         detail = response.json()["detail"]
         assert detail["error"] == "duplicate_order"
         assert detail["message"] == "同じ 顧客 × 製品 × 納期 の注文がすでに存在します"
+        assert "conflicting_order" not in detail
         # 生の DB 制約名・例外文言をレスポンスに載せない
         assert "orders_dedupe_key" not in json.dumps(
             response.json(), ensure_ascii=False
+        )
+
+    def test_update_order_duplicate_returns_409_with_conflicting_order(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """PATCH /{id}: 衝突先レコードが取得できれば conflicting_order を付与する（Issue #415 PR2）"""
+        from app.repositories.supa_infra.common import DuplicateRecordError
+
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "customer_id": 10,
+            "product_id": 5,
+            "quantity": 50,
+        }
+        mock_repo.update.side_effect = DuplicateRecordError(
+            "重複データにより更新できません",
+            constraint='duplicate key value violates "orders_dedupe_key"',
+        )
+        mock_repo.find_dedupe_conflict.return_value = {
+            "id": 999,
+            "order_number": "PO-999",
+            "customer_id": 10,
+            "product_id": 5,
+            "quantity": 200,
+            "deadline_date": "2026-10-01",
+            "status": "confirmed",
+        }
+
+        def _table(name):
+            q = MagicMock()
+            if name == "customers":
+                q.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
+                    "name": "顧客A社"
+                }
+            elif name == "products":
+                q.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value.data = {
+                    "name": "製品X"
+                }
+            return q
+
+        mock_supabase_client.table.side_effect = _table
+
+        response = client.patch(
+            f"/orders/{order_id}",
+            json={"desired_deadline": "2026-10-01"},
+            headers=headers,
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_order"
+        conflicting = detail["conflicting_order"]
+        assert conflicting["id"] == 999
+        assert conflicting["order_no"] == "PO-999"
+        assert conflicting["customer_name"] == "顧客A社"
+        assert conflicting["product_name"] == "製品X"
+        assert conflicting["quantity"] == 200
+        assert conflicting["deadline_date"] == "2026-10-01"
+        assert conflicting["status"] == "confirmed"
+        mock_repo.find_dedupe_conflict.assert_called_once_with(
+            headers["x-tenant-id"], 10, 5, "2026-10-01", None, exclude_order_id=order_id
         )
 
     def test_update_order_duplicate_order_number_returns_409(self, headers, mock_repo):
@@ -1799,7 +1921,12 @@ class TestOrderRouter:
     def test_split_order_rolls_back_on_conflict(
         self, headers, mock_repo, mock_supabase_client
     ):
-        """POST /{order_id}/split: 2件目の作成が重複エラーの場合、既作成分をロールバックし元注文を復元する"""
+        """POST /{order_id}/split: 2件目の作成が重複エラーの場合、既作成分をロールバックし元注文を復元する。
+
+        重複時は 400 ではなく 409 + 構造化 detail を返す（Issue #415 PR2）。
+        """
+        from app.repositories.supa_infra.common import DuplicateRecordError
+
         order_id = 1
         original_order = {
             "id": order_id,
@@ -1818,8 +1945,12 @@ class TestOrderRouter:
 
         mock_repo.create.side_effect = [
             {"id": 101, "product_id": 1, "quantity": 10, "deadline_date": "2026-08-01"},
-            ValueError("重複データ: orders_dedupe_key"),
+            DuplicateRecordError(
+                "重複データにより作成できません",
+                constraint='duplicate key value violates "orders_dedupe_key"',
+            ),
         ]
+        mock_repo.find_dedupe_conflict.return_value = None
 
         response = client.post(
             f"/orders/{order_id}/split",
@@ -1832,7 +1963,12 @@ class TestOrderRouter:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_order"
+        assert "orders_dedupe_key" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
         # 失敗した明細（101）のみ削除する。元の注文は削除しない（deadline_date退避のみ）
         mock_repo.delete.assert_called_once_with(101)
         # 元の注文は退避 → 復元の2回 update される（削除・再作成は発生しない）
@@ -1842,6 +1978,15 @@ class TestOrderRouter:
             order_id, {"deadline_date": original_order["deadline_date"]}
         )
         assert mock_repo.create.call_count == 2
+        # 衝突判定は失敗した2件目の明細（product_id=2, 納期2026-09-01）で行う
+        mock_repo.find_dedupe_conflict.assert_called_once_with(
+            headers["x-tenant-id"],
+            10,
+            2,
+            "2026-09-01",
+            None,
+            exclude_order_id=order_id,
+        )
 
     def test_split_order_source_attachment_missing(
         self, headers, mock_repo, mock_supabase_client
@@ -2389,13 +2534,22 @@ class TestOrderRouter:
     def test_email_intake_rolls_back_created_orders_on_failure(
         self, headers, mock_repo, mock_supabase_client
     ):
-        """POST /email-intake: 2件目の作成失敗時は既作成分と集約行をロールバックする"""
+        """POST /email-intake: 2件目の作成失敗時は既作成分と集約行をロールバックする。
+
+        重複時は 400 ではなく 409 + 構造化 detail、かつどの明細が重複したか
+        （line_item_index）を返す（Issue #415 PR2）。
+        """
+        from app.repositories.supa_infra.common import DuplicateRecordError
 
         self._stub_attachment_insert(mock_supabase_client, "staging-3")
         mock_repo.create.side_effect = [
             {"id": 301, "order_number": None, "product_id": 1, "quantity": 10},
-            ValueError("重複データ"),
+            DuplicateRecordError(
+                "重複データにより作成できません",
+                constraint='duplicate key value violates "orders_dedupe_key"',
+            ),
         ]
+        mock_repo.find_dedupe_conflict.return_value = None
 
         payload = {
             "customer_id": 9,
@@ -2411,5 +2565,18 @@ class TestOrderRouter:
             headers=headers,
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_order"
+        assert detail["line_item_index"] == 1
+        assert "orders_dedupe_key" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
         mock_repo.delete.assert_any_call(301)
+        # 集約行（staging-3）もロールバックで削除する
+        mock_supabase_client.table.return_value.delete.return_value.eq.assert_any_call(
+            "id", "staging-3"
+        )
+        mock_repo.find_dedupe_conflict.assert_called_once_with(
+            headers["x-tenant-id"], 9, 1, "2026-10-01", None, exclude_order_id=None
+        )

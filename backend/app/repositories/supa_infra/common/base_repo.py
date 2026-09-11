@@ -64,13 +64,13 @@ class BaseRepository(Generic[T]):
                 return cast(T, res.data[0])
             raise ValueError("Failed to create record")
         except APIError as e:
-            # 一意制約違反の場合は分かりやすいエラーメッセージを投げる
+            # 一意制約違反は update() と同様に DuplicateRecordError へ変換する
+            # （呼び出し側で 409 Conflict へ変換する想定。Issue #415 PR2）。
+            # 生の DB 制約名・例外文言はレスポンスに載せないため、ここでは保持のみ行う。
             if e.code == "23505":  # unique_violation
-                # エラーメッセージから制約名を抽出
-                error_msg = e.message or ""
-                if "order_number" in error_msg:
-                    raise ValueError("この注文番号は既に使用されています") from e
-                raise ValueError(f"重複データ: {error_msg}") from e
+                raise DuplicateRecordError(
+                    "重複データにより作成できません", constraint=e.message or None
+                ) from e
             # その他のAPIエラーはそのまま再送出
             raise
 
