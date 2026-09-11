@@ -16,11 +16,12 @@ import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { SourceEmailPanel } from "@/components/orders/source-email-panel"
+import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
 import { ApiError } from "@/lib/api-client"
 import { useUpdateOrder } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { jstTodayIso, toDateInputValue } from "@/lib/order-utils"
-import type { Order } from "@/types/order"
+import type { ConflictingOrder, Order } from "@/types/order"
 
 interface EditOrderDialogProps {
   order: Order | null
@@ -41,6 +42,9 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   const [schedulingStartDate, setSchedulingStartDate] = useState(
     toDateInputValue(order?.scheduling_start_date)
   )
+  // 重複起票（顧客×製品×希望納期）を検知した際の通知モーダル状態（Issue #415 PR3）
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
+  const [conflictingOrder, setConflictingOrder] = useState<ConflictingOrder | undefined>()
 
   if (!order) return null
 
@@ -96,9 +100,8 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
           if (errorCode === "duplicate_order_number") {
             toast.error("この注文番号はすでに使用されています")
           } else if (errorCode === "duplicate_order") {
-            toast.error(
-              "同じ 顧客 × 製品 × 希望納期 の注文がすでに存在するため保存できませんでした"
-            )
+            setConflictingOrder(error instanceof ApiError ? error.conflictingOrder : undefined)
+            setDuplicateDialogOpen(true)
           } else {
             toast.error(`更新に失敗しました: ${error.message}`)
           }
@@ -108,6 +111,7 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={
@@ -209,5 +213,11 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <DuplicateOrderDialog
+      open={duplicateDialogOpen}
+      onOpenChange={setDuplicateDialogOpen}
+      conflictingOrder={conflictingOrder}
+    />
+    </>
   )
 }

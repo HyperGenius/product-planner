@@ -164,6 +164,20 @@ export interface OrderSplitResponse {
 }
 
 /**
+ * 重複起票（`errorCode === "duplicate_order"`）時にバックエンドが返す衝突先レコードの識別情報。
+ * 生の DB 制約名・例外文言は含まない（Issue #415 PR2）
+ */
+export interface ConflictingOrder {
+  id: number
+  order_no: string | null
+  customer_name: string | null
+  product_name: string | null
+  quantity: number | null
+  deadline_date: string | null
+  status: Order['status']
+}
+
+/**
  * 一括承認結果の1件分
  */
 export interface OrderBulkApproveResultItem {

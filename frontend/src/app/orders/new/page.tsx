@@ -34,6 +34,7 @@ import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { SimulationResult } from "@/components/simulation-result"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
+import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
 import {
   useSimulateOrder,
   useCreateOrder,
@@ -44,7 +45,8 @@ import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { getProductName, getCustomerName, formatDeadlineDate, jstTodayIso } from "@/lib/order-utils"
-import type { OrderSimulateResponse } from "@/types/order"
+import { ApiError } from "@/lib/api-client"
+import type { ConflictingOrder, OrderSimulateResponse } from "@/types/order"
 import type { Product } from "@/types/product"
 
 /**
@@ -64,6 +66,16 @@ export default function NewOrderPage() {
   const [hasAttemptedSimulation, setHasAttemptedSimulation] = useState(false)
   const [noRoutingDialogOpen, setNoRoutingDialogOpen] = useState(false)
   const [routingDialogOpen, setRoutingDialogOpen] = useState(false)
+  // 重複起票（顧客×製品×希望納期）を検知した際の通知モーダル状態（Issue #415 PR3）
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
+  const [conflictingOrder, setConflictingOrder] = useState<ConflictingOrder | undefined>()
+  const [duplicateLineItemIndex, setDuplicateLineItemIndex] = useState<number | undefined>()
+
+  const openDuplicateDialog = (error: unknown, lineItemIndex?: number) => {
+    setConflictingOrder(error instanceof ApiError ? error.conflictingOrder : undefined)
+    setDuplicateLineItemIndex(lineItemIndex)
+    setDuplicateDialogOpen(true)
+  }
 
   // 起票元モード（手動フォーム / メール起票）
   const [intakeMode, setIntakeMode] = useState<"manual" | "email">("manual")
@@ -169,6 +181,10 @@ export default function NewOrderPage() {
       toast.success("下書き保存しました。工程登録後に専門家キューから確定できます")
       router.push("/orders")
     } catch (error) {
+      if (error instanceof ApiError && error.errorCode === "duplicate_order") {
+        openDuplicateDialog(error)
+        return
+      }
       const message = error instanceof Error ? error.message : "下書き保存に失敗しました"
       console.error("Draft save error:", error)
       toast.error(message)
@@ -214,6 +230,10 @@ export default function NewOrderPage() {
       toast.success("注文を確定し、スケジュールを作成しました")
       router.push("/orders")
     } catch (error) {
+      if (error instanceof ApiError && error.errorCode === "duplicate_order") {
+        openDuplicateDialog(error)
+        return
+      }
       const message = error instanceof Error ? error.message : "注文の登録または確定に失敗しました"
       console.error("Create/Confirm order error:", error)
       toast.error(message)
@@ -293,6 +313,10 @@ export default function NewOrderPage() {
       )
       router.push("/orders")
     } catch (error) {
+      if (error instanceof ApiError && error.errorCode === "duplicate_order") {
+        openDuplicateDialog(error, error.lineItemIndex)
+        return
+      }
       const message =
         error instanceof Error ? error.message : "メール起票の登録に失敗しました"
       console.error("Email intake error:", error)
@@ -784,6 +808,13 @@ export default function NewOrderPage() {
           setRoutingDialogOpen(open)
           if (!open) handleSimulate()
         }}
+      />
+
+      <DuplicateOrderDialog
+        open={duplicateDialogOpen}
+        onOpenChange={setDuplicateDialogOpen}
+        conflictingOrder={conflictingOrder}
+        lineItemIndex={duplicateLineItemIndex}
       />
     </div>
   )

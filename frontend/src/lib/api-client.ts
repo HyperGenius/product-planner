@@ -1,5 +1,6 @@
 /* frontend/src/lib/api-client.ts */
 import { createClient } from '@/utils/supabase/client'
+import type { ConflictingOrder } from '@/types/order'
 
 type FetchOptions = RequestInit & {
     headers?: Record<string, string>
@@ -23,6 +24,34 @@ export class ApiError extends Error {
             return (detail as Record<string, unknown>).error as string
         }
         return undefined
+    }
+
+    // errorCode === "duplicate_order" のとき、衝突先レコードの識別情報が入る（Issue #415 PR3）。
+    // バックエンドの不具合等で想定外の形が返っても DuplicateOrderDialog を壊さないよう、
+    // 最低限 id / status が揃っているかを検証してから返す（それ以外は未取得扱い=固定文言のみ表示）
+    get conflictingOrder(): ConflictingOrder | undefined {
+        const detail = this.data.detail
+        if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined
+        const conflict = (detail as Record<string, unknown>).conflicting_order
+        if (
+            conflict &&
+            typeof conflict === 'object' &&
+            !Array.isArray(conflict) &&
+            typeof (conflict as Record<string, unknown>).id === 'number' &&
+            typeof (conflict as Record<string, unknown>).status === 'string'
+        ) {
+            return conflict as ConflictingOrder
+        }
+        return undefined
+    }
+
+    // email-intake の重複時のみ、どの明細（0-indexed）が重複したかが入る（Issue #415 PR2/PR3）。
+    // 整数でなければ明細番号の誤表示（例: "1" + 1 の文字列連結）につながるため検証する
+    get lineItemIndex(): number | undefined {
+        const detail = this.data.detail
+        if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined
+        const index = (detail as Record<string, unknown>).line_item_index
+        return typeof index === 'number' && Number.isInteger(index) ? index : undefined
     }
 }
 
