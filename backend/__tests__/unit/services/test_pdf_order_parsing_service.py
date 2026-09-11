@@ -57,7 +57,9 @@ class TestParsePendingOrderPdfs:
 
     def test_no_pending_rows_returns_zero_counts(self):
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(data=[])
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[])
+        )
 
         result = parse_pending_order_pdfs(mock_db)
 
@@ -68,8 +70,8 @@ class TestParsePendingOrderPdfs:
         product_id・quantity・deadline_dateがNULLの下書きorderを起票し、
         ユーザーによる手動修正の起点とすること（Issue #304）。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 99, "action": "inserted"}]
@@ -121,8 +123,8 @@ class TestParsePendingOrderPdfs:
         ステージング行に customer_id が無いのは不整合。customer_id=NULL の
         受注を静かに作らず、エラーとしてカウントされること（PRレビュー指摘対応）。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row(customer_id=None)]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row(customer_id=None)])
         )
 
         with (
@@ -146,8 +148,8 @@ class TestParsePendingOrderPdfs:
         """PDFの内容が注文と無関係で明細が0件の場合、メール本文から抽出した
         line_itemsを使ってorderが作成されること（Issue #278/#280）。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 42, "action": "inserted"}]
@@ -212,8 +214,8 @@ class TestParsePendingOrderPdfs:
         （Issue #280の実例）、line_items配列として複数明細を抽出し、
         それぞれ別のorderとして作成すること。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 1, "action": "inserted"}]
@@ -265,8 +267,8 @@ class TestParsePendingOrderPdfs:
         """PDFに明細がなく、メール本文からも注文情報が抽出できない場合、
         orderは作成せず non_order_email として通知のみ記録すること。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
 
         with (
@@ -318,8 +320,8 @@ class TestParsePendingOrderPdfs:
         skipped_no_change を返した場合、parse_status='success' だけで終わらず
         no_order_created の parse_log と通知を記録すること（Issue #357）。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": None, "action": "skipped_no_change"}]
@@ -381,15 +383,17 @@ class TestParsePendingOrderPdfs:
         """非PDF添付・添付なしメール由来のステージング行（Issue #280）は、
         PDFテキスト抽出を経由せず直接メール本文から抽出すること。"""
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[
-                self._staging_row(
-                    storage_path="",
-                    original_filename="",
-                    content_type=None,
-                    size_bytes=None,
-                )
-            ]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(
+                data=[
+                    self._staging_row(
+                        storage_path="",
+                        original_filename="",
+                        content_type=None,
+                        size_bytes=None,
+                    )
+                ]
+            )
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 9, "action": "inserted"}]
@@ -435,8 +439,8 @@ class TestParsePendingOrderPdfs:
 
     def test_exception_during_processing_counts_as_error(self):
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
 
         with patch(
@@ -1156,8 +1160,8 @@ class TestPerPdfCustomerResolution:
         _no_pdf_customer_match.return_value = 55
 
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 42, "action": "inserted"}]
@@ -1178,8 +1182,8 @@ class TestPerPdfCustomerResolution:
         _no_pdf_customer_match.return_value = None
 
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 42, "action": "inserted"}]
@@ -1199,8 +1203,8 @@ class TestPerPdfCustomerResolution:
         _no_pdf_customer_match.return_value = 55
 
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 42, "action": "inserted"}]
@@ -1222,8 +1226,8 @@ class TestPerPdfCustomerResolution:
         _no_pdf_customer_match.return_value = 55
 
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 42, "action": "inserted"}]
@@ -1278,8 +1282,8 @@ class TestPerPdfCustomerResolution:
         self, _no_pdf_customer_match
     ):
         mock_db = MagicMock()
-        mock_db.table().select().is_().eq().execute.return_value = MagicMock(
-            data=[self._staging_row()]
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
         )
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 99, "action": "inserted"}]

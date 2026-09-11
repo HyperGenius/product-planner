@@ -680,6 +680,44 @@ Issue #304 での変更（PDF解析失敗時の下書き起票）:
   `_process_unreadable_pdf()` による下書き order 起票に変更。
   `_parse_one()` は失敗時も最終的にステージング行を `parse_status='success'` に更新する
 
+Issue #425 での変更（本番 Render インスタンスの OOM 対策）:
+
+本番（Render, 512MBインスタンス）が OOM でクラッシュし、cron `parse-order-pdfs` が
+Webインスタンス自身に高負荷を掛ける構造・`pdf_text_service` のメモリスパイク・未使用の
+重量級依存が疑われた（調査の詳細は Issue #425 本文・コメント参照）。今回は下記3点の
+低リスクな対策のみ実施し、実行基盤の分離（cron を別サービスへ切り出す案）は見送った。
+
+- `pdf_order_parsing_service.parse_pending_order_pdfs()`: pending 添付の取得に
+  `.order("created_at").limit(PARSE_ORDER_PDFS_BATCH_LIMIT)`（デフォルト20件）を追加。
+  従来は無制限に全件取得し1リクエスト内で直列処理していたため、pending の滞留時に
+  複数PDFのダウンロード〜pdfplumber展開〜Anthropic呼び出しが積み重なりメモリスパイクが
+  拡大しうる問題があった。滞留分は次回以降のcron実行に持ち越す（冪等なので分割実行しても安全）
+- `pdf_text_service.extract_text()`: PDFのバイト数・ページ数に上限
+  （`PDF_TEXT_MAX_BYTES` デフォルト20MB・`PDF_TEXT_MAX_PAGES` デフォルト50ページ）を追加し、
+  超過時は `PdfTooLargeError` を送出して処理を拒否する。また、ページごとの
+  `extract_text()` 後に `page.flush_cache()` を呼び、pdfplumber の内部レイアウトキャッシュを
+  ページ単位で解放するようにした
+  - `PdfTooLargeError` は既存の1件ごとの例外ハンドラ（`parse_pending_order_pdfs()` の
+    `for row in staging_rows` ループ）でキャッチされ、当該添付は `parse_status='pending'`
+    のまま次回cronで再試行される（他の解析失敗ケースのような専用の
+    `failed_*` ステータス・通知は今回追加していない。サイズ超過は稀なケースという前提。
+    頻発するようであれば専用ステータスの追加を検討する）
+- `backend/requirements.txt`: アプリコードから参照のない `azure-functions`（Azure Functions
+  時代の残骸）・`pytest`／`pre_commit` とその専用依存（`virtualenv`/`distlib`/`filelock`/
+  `platformdirs`/`cfgv`/`identify`/`nodeenv`/`iniconfig`/`pluggy`、azure-functions専用の
+  `Werkzeug`、pre_commit専用の`PyYAML`）をruntime依存から除去した（`pytest` は
+  `requirements-dev.txt` へ移動）。**`pyiceberg`・`mmh3`・`pyroaring`・`sortedcontainers`・
+  `strictyaml`・`pyparsing`・`fsspec` は今回除去していない** — 一見未使用だが、
+  `supabase==2.26.0` が依存する `storage3==2.26.0`（Storageクライアント）が `pyiceberg` を
+  無条件・かつモジュール読み込み時に即時import（`storage3/_sync/client.py` →
+  `analytics.py` → `from pyiceberg.catalog.rest import RestCatalog`）するため、
+  `requirements.txt` から行を消しても pip 解決上は再インストールされ、起動のたびに
+  実測 約40MB RSS を消費し続ける。`storage3==2.31.0` でこの依存が `extra == 'iceberg'` の
+  任意依存・遅延import（`TYPE_CHECKING`／関数内import）に変更されているのを確認済みで、
+  正しい直し方は `supabase` 一式を 2.26.0 → 2.31.0 へ更新することだが、
+  auth/DB/Storage/Realtime全経路に影響するバージョンアップは本Issueのスコープ外として
+  見送った（別Issueで検証してから実施する）
+
 ---
 
 ## 環境変数
@@ -694,6 +732,11 @@ PRODUCT_MATCH_AUTO_CONFIRM_MARGIN=0.15     # 次点候補とのスコア差の�
 
 # 複数受注疑いの検知（Issue #280、粗いヒューリスティック）
 MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD=100000  # 1明細の数量がこれを超えると通知
+
+# OOM対策（Issue #425）
+PARSE_ORDER_PDFS_BATCH_LIMIT=20      # 1回のcron実行で処理するpending添付の上限件数
+PDF_TEXT_MAX_BYTES=20971520          # extract_text() が処理するPDFのバイト数上限（デフォルト20MB）
+PDF_TEXT_MAX_PAGES=50                # extract_text() が処理するPDFのページ数上限
 ```
 
 ---

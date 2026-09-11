@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import pytest
-from app.services.pdf_text_service import extract_text
+from app.services.pdf_text_service import PdfTooLargeError, extract_text
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfplumber.utils.exceptions import PdfminerException
 
@@ -77,3 +77,25 @@ class TestExtractText:
             result = extract_text(_BLANK_PDF)
         assert result.failure_reason == "failed_encrypted"
         assert result.text is None
+
+    def test_oversized_content_raises_before_opening(self):
+        with (
+            patch("app.services.pdf_text_service._MAX_PDF_BYTES", 10),
+            pytest.raises(PdfTooLargeError),
+        ):
+            extract_text(_build_text_pdf("Hello Order PDF"))
+
+    def test_too_many_pages_raises(self):
+        with (
+            patch("app.services.pdf_text_service._MAX_PDF_PAGES", 0),
+            pytest.raises(PdfTooLargeError),
+        ):
+            extract_text(_build_text_pdf("Hello Order PDF"))
+
+    def test_pages_are_flushed_after_extraction(self):
+        with patch("pdfplumber.page.Page.flush_cache", autospec=True) as mock_flush:
+            result = extract_text(_build_text_pdf("Hello Order PDF"))
+        assert result.failure_reason is None
+        # pdfplumber は with ブロック終了時にも内部で flush_cache するため、
+        # 少なくとも抽出直後の明示呼び出し分を含め複数回呼ばれる
+        assert mock_flush.call_count >= 1

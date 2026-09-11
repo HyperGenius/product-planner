@@ -37,6 +37,14 @@ _MULTI_ORDER_QUANTITY_THRESHOLD = int(
     os.environ.get("MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD", "100000")
 )
 
+# 1回の cron 実行で処理する pending 添付の上限件数。PDFダウンロード〜pdfplumber展開〜
+# Anthropic呼び出しを直列に積み重ねるため、pending が滞留すると1リクエスト内でメモリ
+# スパイクが積み重なる（Issue #425）。滞留分は次回以降の cron 実行に持ち越す
+# （冪等なので分割実行しても安全）。
+_PARSE_ORDER_PDFS_BATCH_LIMIT = int(
+    os.environ.get("PARSE_ORDER_PDFS_BATCH_LIMIT", "20")
+)
+
 
 def parse_pending_order_pdfs(db: Client) -> dict[str, int]:
     """
@@ -49,6 +57,8 @@ def parse_pending_order_pdfs(db: Client) -> dict[str, int]:
         .select("*")
         .is_("order_id", "null")
         .eq("parse_status", "pending")
+        .order("created_at")
+        .limit(_PARSE_ORDER_PDFS_BATCH_LIMIT)
         .execute()
     )
     staging_rows = cast(list[dict[str, Any]], result.data or [])
