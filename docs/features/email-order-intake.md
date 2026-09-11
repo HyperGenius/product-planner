@@ -341,7 +341,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ### API: `GET /orders/email-intake-results`
 
-`backend/app/routers/transaction/orders.py::list_email_intake_results`。
+`backend/app/routers/transaction/orders/email_intake.py::list_email_intake_results`。
 レスポンスは `EmailIntakeResultResponse`（`order_schema.py`）の配列（受信日時の新しい順）。
 
 | フィールド | 内容 |
@@ -366,7 +366,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 `GET /orders/email-intake-results` は上記3情報から `outcome` をサーバー側で導出して返す
 （フロントでの再計算は行わない）。導出は `_derive_email_intake_outcome()`
-（`backend/app/routers/transaction/orders.py`）。
+（`backend/app/routers/transaction/orders/email_intake.py`）。
 
 | `outcome` | 判定条件（上から評価） | 運用者のアクション |
 |---|---|---|
@@ -429,7 +429,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ### API: `POST /orders/email-intake`（multipart/form-data）
 
-`backend/app/routers/transaction/orders.py::create_email_order_intake`。
+`backend/app/routers/transaction/orders/email_intake.py::create_email_order_intake`。
 
 | パート | 内容 |
 |---|---|

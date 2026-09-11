@@ -479,7 +479,8 @@ INSERT RLS: `is_tenant_member(tenant_id)` かつ `actor_user_id = auth.uid()` �
 | `backend/app/services/scheduling_start_service.py` | 作業開始日（`scheduling_start_date`）の解決・過去日権限チェック（Issue #372） |
 | `backend/app/repositories/supa_infra/transaction/order_scheduling_start_backdate_log_repo.py` | 過去日設定の監査ログ `order_scheduling_start_backdate_log` への書き込み（Issue #372） |
 | `backend/app/services/calendar_service.py` | DB から `CalendarConfig` を構築 |
-| `backend/app/routers/transaction/orders.py` | `/orders/simulate`, `/orders/{id}/confirm` エンドポイント |
+| `backend/app/routers/transaction/orders/simulation.py` | `/orders/simulate`, `/orders/{id}/simulate` エンドポイント |
+| `backend/app/routers/transaction/orders/approval_workflow.py` | `/orders/{id}/confirm` エンドポイント |
 | `backend/app/routers/transaction/production_schedules.py` | スケジュール取得・更新エンドポイント |
 | `backend/app/repositories/supa_infra/transaction/schedule_repo.py` | `production_schedules` DB 操作 |
 | `backend/app/models/transaction/order_schema.py` | `OrderSimulateRequest`, `OrderSimulateResponse` Pydantic スキーマ |

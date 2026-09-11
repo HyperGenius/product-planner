@@ -36,6 +36,6 @@ SaaS管理者がテナント別の週次納期確認件数をグラフで確認�
 
 - `supabase/migrations/20260608000000_add_confirmed_at_to_orders.sql`
 - `backend/app/routers/admin/metrics.py`
-- `backend/app/routers/transaction/orders.py`（confirm エンドポイント）
+- `backend/app/routers/transaction/orders/approval_workflow.py`（confirm エンドポイント）
 - `frontend/src/app/admin/page.tsx`
 - `frontend/src/hooks/use-admin-metrics.ts`
