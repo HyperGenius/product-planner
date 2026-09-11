@@ -344,6 +344,12 @@ def create_order(
             deadline_date=order_data.deadline_date,
             extracted_product_name=order_data.extracted_product_name,
         ) from None
+    except ValueError as e:
+        # 重複（23505）以外で create() が投げる ValueError（例: insert が空配列を
+        # 返した場合の "Failed to create record"）。クライアント起因ではないが、
+        # 従来通り 400 に正規化する（Issue #415 PR2 で DuplicateRecordError 分岐を
+        # 追加した際に、この分岐が失われないよう明示的に残す）。
+        raise HTTPException(status_code=400, detail=str(e)) from None
     if backdated and order_data.scheduling_start_date:
         _log_scheduling_start_backdate_safely(
             backdate_log_repo,
@@ -1038,8 +1044,14 @@ def split_order(
         _rollback_split_creations(
             repo, created_orders, order_id, original_deadline_date
         )
-        detail = e.message if isinstance(e, APIError) else str(e)
-        raise HTTPException(status_code=400, detail=detail) from None
+        # Supabase の APIError には制約名等の内部情報が含まれ得るため、レスポンスは
+        # 固定文言にし詳細はログにのみ残す（cron エラー規約と同方針。Issue #415 PR2）。
+        logger.error(
+            f"split_order failed: order_id={order_id} error={e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=400, detail="注文の分割に失敗しました"
+        ) from None
 
     if not repo.delete(order_id):
         logger.error(
@@ -1161,7 +1173,11 @@ async def create_email_order_intake(
             .execute()
         )
     except APIError as e:
-        raise HTTPException(status_code=400, detail=e.message) from None
+        # APIError.message には内部情報が含まれ得るため固定文言にする（Issue #415 PR2）
+        logger.error(f"email-intake staging insert failed: error={e}", exc_info=True)
+        raise HTTPException(
+            status_code=400, detail="受信メール（集約行）の作成に失敗しました"
+        ) from None
     staging_rows = cast(list[dict[str, Any]], staging_res.data or [])
     if not staging_rows:
         raise HTTPException(
@@ -1240,8 +1256,12 @@ async def create_email_order_intake(
         ) from None
     except (ValueError, APIError) as e:
         _rollback_email_intake_creations(repo, client, created_orders, staging_id)
-        detail = e.message if isinstance(e, APIError) else str(e)
-        raise HTTPException(status_code=400, detail=detail) from None
+        # Supabase の APIError には制約名等の内部情報が含まれ得るため、レスポンスは
+        # 固定文言にし詳細はログにのみ残す（cron エラー規約と同方針。Issue #415 PR2）。
+        logger.error(f"create_email_order_intake failed: error={e}", exc_info=True)
+        raise HTTPException(
+            status_code=400, detail="受注メールの起票に失敗しました"
+        ) from None
 
     return {
         "staging_attachment_id": str(staging_id),

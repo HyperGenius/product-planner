@@ -136,9 +136,13 @@ class OrderRepository(BaseRepository):
         if customer_id is None or deadline_date is None:
             return None
 
+        # conflicting_order の組み立てに使う列のみ取得する（source_raw 等の大きい列を避ける）
         query = (
             self.client.table(self.table_name)
-            .select("*")
+            .select(
+                "id, order_number, customer_id, product_id, quantity,"
+                " deadline_date, status, extracted_product_name"
+            )
             .eq("tenant_id", tenant_id)
             .eq("customer_id", customer_id)
             .eq("deadline_date", deadline_date)

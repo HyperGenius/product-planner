@@ -355,6 +355,23 @@ class TestOrderRouter:
 
         mock_repo.create.assert_called_once()
 
+    def test_create_order_non_duplicate_value_error_returns_400(
+        self, headers, mock_repo
+    ):
+        """POST /: 重複（DuplicateRecordError）以外の ValueError は 400 に正規化される（Issue #415 PR2 で
+        DuplicateRecordError 分岐を追加した際に、既存の ValueError 分岐を失っていない回帰確認）"""
+        payload = {
+            "product_id": 1,
+            "quantity": 50,
+            "desired_deadline": "2026-10-01",
+        }
+        mock_repo.create.side_effect = ValueError("Failed to create record")
+
+        response = client.post("/orders", json=payload, headers=headers)
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Failed to create record"
+
     def test_create_order_duplicate_returns_409(self, headers, mock_repo):
         """POST /: dedupe_key 重複時は 409 + 構造化 detail を返す（Issue #415 PR2）。
 
@@ -1988,6 +2005,49 @@ class TestOrderRouter:
             exclude_order_id=order_id,
         )
 
+    def test_split_order_non_duplicate_api_error_returns_fixed_message(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/split: 重複以外の APIError は固定文言 400 で返し、生の例外文言を
+        レスポンスに含めない（Issue #415 PR2、情報漏えい対策）"""
+        from postgrest.exceptions import APIError
+
+        order_id = 1
+        original_order = {
+            "id": order_id,
+            "status": "draft",
+            "source_attachment_id": "att-1",
+            "customer_id": 10,
+            "customer_certainty": "forecast",
+            "source_type": "email",
+            "source_raw": "mail body",
+            "deadline_date": "2026-07-01",
+        }
+        mock_repo.get_by_id.return_value = original_order
+        (
+            mock_supabase_client.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data
+        ) = {"storage_path": "p", "original_filename": "f"}
+        mock_repo.create.side_effect = APIError(
+            {"code": "99999", "message": "internal constraint detail leak"}
+        )
+
+        response = client.post(
+            f"/orders/{order_id}/split",
+            json={
+                "line_items": [
+                    {"product_id": 1, "quantity": 10, "desired_deadline": "2026-08-01"},
+                    {"product_id": 2, "quantity": 20, "desired_deadline": "2026-09-01"},
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "注文の分割に失敗しました"
+        assert "internal constraint detail leak" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
+
     def test_split_order_source_attachment_missing(
         self, headers, mock_repo, mock_supabase_client
     ):
@@ -2506,7 +2566,11 @@ class TestOrderRouter:
     def test_email_intake_staging_insert_api_error_returns_400(
         self, headers, mock_repo, mock_supabase_client
     ):
-        """POST /email-intake: 集約行の INSERT が APIError なら 500 でなく 400 を返す"""
+        """POST /email-intake: 集約行の INSERT が APIError なら 500 でなく 400 を返す。
+
+        レスポンスには固定文言のみを返し、生の APIError.message（RLS 違反等の内部情報を
+        含み得る）は含めない（Issue #415 PR2、情報漏えい対策）。
+        """
         from postgrest.exceptions import APIError
 
         mock_supabase_client.table.return_value.insert.return_value.execute.side_effect = APIError(  # noqa: E501
@@ -2529,7 +2593,42 @@ class TestOrderRouter:
         )
 
         assert response.status_code == 400
+        assert response.json()["detail"] == "受信メール（集約行）の作成に失敗しました"
+        assert "row-level security" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
         mock_repo.create.assert_not_called()
+
+    def test_email_intake_non_duplicate_api_error_returns_fixed_message(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /email-intake: 明細作成時の重複以外の APIError は固定文言 400 で返し、
+        生の例外文言をレスポンスに含めない（Issue #415 PR2、情報漏えい対策）"""
+        from postgrest.exceptions import APIError
+
+        self._stub_attachment_insert(mock_supabase_client, "staging-9")
+        mock_repo.create.side_effect = APIError(
+            {"code": "99999", "message": "internal constraint detail leak"}
+        )
+
+        payload = {
+            "customer_id": 9,
+            "line_items": [
+                {"product_id": 1, "quantity": 10, "desired_deadline": "2026-09-01"},
+            ],
+        }
+
+        response = client.post(
+            "/orders/email-intake",
+            data={"payload": json.dumps(payload)},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "受注メールの起票に失敗しました"
+        assert "internal constraint detail leak" not in json.dumps(
+            response.json(), ensure_ascii=False
+        )
 
     def test_email_intake_rolls_back_created_orders_on_failure(
         self, headers, mock_repo, mock_supabase_client
