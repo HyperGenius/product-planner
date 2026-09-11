@@ -114,6 +114,54 @@ class OrderRepository(BaseRepository):
         )
         return cast(list[dict[str, Any]], res.data or [])
 
+    def find_dedupe_conflict(
+        self,
+        tenant_id: str,
+        customer_id: int | None,
+        product_id: int | None,
+        deadline_date: str | None,
+        extracted_product_name: str | None,
+        exclude_order_id: int | None = None,
+    ) -> dict | None:
+        """dedupe 用 UNIQUE 制約に該当する既存行を1件返す（Issue #415 PR2）。
+
+        23505 捕捉後、衝突先レコードをモーダルに表示するために呼ぶ想定。
+        `orders_dedupe_key = (tenant_id, customer_id, product_id, deadline_date)`
+        と、`product_id IS NULL` 用の部分 UNIQUE
+        `orders_dedupe_key_unmatched_product = (tenant_id, customer_id, deadline_date,
+        extracted_product_name)` のいずれの制約に該当するかを `product_id` の有無で
+        判定する。どちらの制約も `deadline_date IS NOT NULL` の行にしか効かないため、
+        `deadline_date` が None の場合は衝突しようがなく None を返す。
+        """
+        if customer_id is None or deadline_date is None:
+            return None
+
+        # conflicting_order の組み立てに使う列のみ取得する（source_raw 等の大きい列を避ける）
+        query = (
+            self.client.table(self.table_name)
+            .select(
+                "id, order_number, customer_id, product_id, quantity,"
+                " deadline_date, status, extracted_product_name"
+            )
+            .eq("tenant_id", tenant_id)
+            .eq("customer_id", customer_id)
+            .eq("deadline_date", deadline_date)
+        )
+        if product_id is not None:
+            query = query.eq("product_id", product_id)
+        else:
+            if extracted_product_name is None:
+                return None
+            query = query.is_("product_id", "null").eq(
+                "extracted_product_name", extracted_product_name
+            )
+        if exclude_order_id is not None:
+            query = query.neq("id", exclude_order_id)
+
+        res = query.limit(1).execute()
+        rows = cast(list[dict[str, Any]], res.data or [])
+        return rows[0] if rows else None
+
     def mark_as_scheduled(
         self, order_id: int, simulated_deadline: str | None = None
     ) -> None:

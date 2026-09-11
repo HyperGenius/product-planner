@@ -226,20 +226,24 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 エンドポイント: `PATCH /orders/{order_id}`（実装済み）
 
-**保存時の重複（UNIQUE 衝突）ハンドリング (#415 PR1)**
+**保存時の重複（UNIQUE 衝突）ハンドリング (#415 PR1 / PR2)**
 `orders` には UNIQUE が2本あり、編集ダイアログはどちらの列も変更できる:
 
 | 制約 | キー | 発生条件 |
 |---|---|---|
 | `orders_dedupe_key` | `(tenant_id, customer_id, product_id, deadline_date)` | 顧客／製品／希望納期を既存注文と一致させた |
+| `orders_dedupe_key_unmatched_product` | `(tenant_id, customer_id, deadline_date, extracted_product_name)`（`product_id IS NULL`） | 製品未マッチ注文で顧客／希望納期／抽出製品名を既存注文と一致させた |
 | `orders_tenant_id_order_number_idx` | `(tenant_id, order_number)`（`order_number IS NOT NULL`） | 注文番号を既存注文と一致させた |
 
-- バックエンド: `BaseRepository.update()` が Postgres の unique_violation（`23505`）を `DuplicateRecordError`（`constraint` に元の例外文言＝制約名を保持）へ変換する。捕捉していなかったため以前は生の `APIError` が伝播して **500** になっていた。`update()` は `create()` と違い `ValueError` ではなく専用の `DuplicateRecordError` を投げる（ルーターが 409 に正規化しやすくするため）。
-- `update_order` は `DuplicateRecordError.constraint` に `order_number` が含まれるかで振り分け、いずれも **409 Conflict** で返す（`create()` の `order_number` 判定と同じ方針）。detail は生の DB 制約名・例外文言を含めない固定・構造化レスポンス:
-  - dedupe_key: `{"error": "duplicate_order", "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します"}`
-  - 注文番号: `{"error": "duplicate_order_number", "message": "この注文番号はすでに使用されています"}`
+- バックエンド: `BaseRepository.update()` / `create()` はいずれも Postgres の unique_violation（`23505`）を `DuplicateRecordError`（`constraint` に元の例外文言＝制約名を保持）へ変換する（PR1 で `update()`、PR2 で `create()` を統一。`create()` は以前 `ValueError` を投げていたため、生の DB 制約文言を含んだメッセージがそのまま 400 detail に載っていた）。
+- 4 経路（`PATCH /orders/{id}` / `POST /orders` / `POST /orders/email-intake` / `POST /orders/{id}/split`）すべてで **409 Conflict** の構造化 detail を共通ヘルパー `_duplicate_order_conflict_exception()`（`routers/transaction/orders.py`）で組み立てる。`DuplicateRecordError.constraint` に `order_number` が含まれるかで振り分ける:
+  - dedupe_key 系: `{"error": "duplicate_order", "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します", "conflicting_order": {...}}`
+  - 注文番号: `{"error": "duplicate_order_number", "message": "この注文番号はすでに使用されています"}`（`conflicting_order` は付与しない）
+  - `conflicting_order`（`id` / `order_no` / `customer_name` / `product_name` / `quantity` / `deadline_date` / `status`）は `OrderRepository.find_dedupe_conflict()` で衝突先レコードを再検索して組み立てる（RLS 下のユーザー JWT クライアントで顧客名・製品名も解決）。衝突先が見つからない場合（同時更新等）は `conflicting_order` を省略し固定文言のみ返す。
+  - `POST /orders/email-intake` は明細単位で作成するため、`line_item_index`（0始まり）を detail に追加し、どの明細が重複したか判別できるようにしている。
+  - レスポンスに生の DB 制約名・例外文言は含めない。
 - フロントエンド: `EditOrderDialog` の `onError` は `ApiError.errorCode` を `duplicate_order_number` / `duplicate_order` で分岐し、それぞれ実態に合ったトーストを出す。以前は注文番号欄の下に「この注文番号はすでに使用されています」というインライン文言（`duplicateError` state）を、`message` に `"400"` / `"duplicate"` / `"already"` を含むかどうかという曖昧な判定で出しており、dedupe_key 衝突でも「注文番号が重複」と誤表示していた。この分岐と state は削除した。
-- 衝突先レコードの識別情報を載せた通知モーダル（`conflicting_order` の付与・4 経路への共通化）は #415 PR2 / PR3 で対応予定。
+- 衝突先レコードの識別情報を表示する通知モーダル（`conflicting_order` を使ったフロント実装）は #415 PR3 で対応予定。
 
 **内部状態のリセット**
 `EditOrderDialog` は開くたびに `key` に `editDialogGeneration`（ダイアログを開く操作のたびにインクリメントするカウンタ）を含めて再マウントされる。同一注文を「未保存でキャンセル→再オープン」した場合でも、DB上の値で初期化し直される (#277)。
