@@ -9,7 +9,7 @@ from app.services.customer_matching_service import match_customer_by_pdf_text
 from app.services.email_extraction_service import extract_email_order_lines
 from app.services.notification_service import create_notification
 from app.services.pdf_order_extraction_service import extract_order_lines
-from app.services.pdf_text_service import extract_text
+from app.services.pdf_text_service import MAX_PDF_BYTES, PdfTooLargeError, extract_text
 from app.services.product_matching_service import (
     match_product_by_alias,
     match_product_by_code,
@@ -203,8 +203,22 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
     # フォールバックする。非PDF添付・添付なしメール（storage_path が空）は、
     # そもそもPDFが存在しないため直接メール本文から抽出する（Issue #280）。
     if row.get("content_type") == "application/pdf" and row.get("storage_path"):
+        # Storageダウンロード自体がPDF全体をメモリ展開するため、ダウンロード前に
+        # わかっている size_bytes で弾けるものは弾く（extract_text() 内のバイト数
+        # チェックはダウンロード後にしか効かないため、ダウンロード時点のメモリ負荷は
+        # 防げない。Issue #425 レビュー指摘）。size_bytes が未記録（None）の場合は
+        # 従来どおりダウンロードしてから extract_text() 側のチェックに委ねる。
+        known_size = row.get("size_bytes")
+        if isinstance(known_size, int) and known_size > MAX_PDF_BYTES:
+            return _process_oversized_pdf(
+                db, row, f"size_bytes {known_size} exceeds limit {MAX_PDF_BYTES}"
+            )
+
         content = download_attachment(db, row["storage_path"])
-        text_result = extract_text(content)
+        try:
+            text_result = extract_text(content)
+        except PdfTooLargeError as exc:
+            return _process_oversized_pdf(db, row, str(exc))
 
         if text_result.failure_reason is not None:
             # テキストが取れないPDFは文面から顧客を解決し直せないため、メール単位で
@@ -478,6 +492,34 @@ def _process_unreadable_pdf(
         f"unreadable attachment {attachment_id} ({failure_reason})"
     )
     return 1
+
+
+def _process_oversized_pdf(db: Client, staging_row: dict[str, Any], detail: str) -> int:
+    """
+    PDFのバイト数・ページ数が上限を超え、メモリ保護のため処理を拒否したケース。
+
+    `_process_unreadable_pdf`（暗号化/画像PDF）とは異なり下書き order は起票しない
+    （サイズ超過は稀なケースという前提で、今回は最小対応とする。Issue #425）。
+    重要なのは `order_parse_log` に記録した上でステージング行を確定的に
+    `parse_status='success'` へ更新し、`pending` のまま残さないこと。
+    バッチ処理に `.order("created_at").limit(N)` を導入したことで、`pending` のまま
+    残る行は常にバッチの先頭に選ばれ続け、後続の正常な添付の処理を止めてしまう
+    （スターベーション。レビュー指摘）。
+    """
+    table = SupabaseTableName.ORDER_ATTACHMENTS.value
+    tenant_id = staging_row["tenant_id"]
+    attachment_id = staging_row["id"]
+
+    _log_parse_event(
+        db, tenant_id, attachment_id, "failed_too_large", {"detail": detail}
+    )
+    db.table(table).update({"parse_status": "success"}).eq(
+        "id", attachment_id
+    ).execute()
+    logger.info(
+        f"pdf_order_parsing: attachment {attachment_id} rejected as too large ({detail})"
+    )
+    return 0
 
 
 def _check_multi_order_suspected(

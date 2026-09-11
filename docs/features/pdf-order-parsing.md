@@ -697,11 +697,24 @@ Webインスタンス自身に高負荷を掛ける構造・`pdf_text_service` �
   超過時は `PdfTooLargeError` を送出して処理を拒否する。また、ページごとの
   `extract_text()` 後に `page.flush_cache()` を呼び、pdfplumber の内部レイアウトキャッシュを
   ページ単位で解放するようにした
-  - `PdfTooLargeError` は既存の1件ごとの例外ハンドラ（`parse_pending_order_pdfs()` の
-    `for row in staging_rows` ループ）でキャッチされ、当該添付は `parse_status='pending'`
-    のまま次回cronで再試行される（他の解析失敗ケースのような専用の
-    `failed_*` ステータス・通知は今回追加していない。サイズ超過は稀なケースという前提。
-    頻発するようであれば専用ステータスの追加を検討する）
+  - **ダウンロード前ガード（Copilotレビュー指摘対応）**: Storageダウンロード自体が
+    PDF全体をメモリ展開するため、`extract_text()` 内のバイト数チェックだけではダウンロード
+    時点のメモリ負荷を防げない。`pdf_order_parsing_service._parse_one()` は
+    `order_attachments.size_bytes`（ステージング行作成時に記録済み）が
+    `MAX_PDF_BYTES` を超えていれば、`download_attachment()` を呼ぶ前に拒否する
+    （`_process_oversized_pdf()`）。`size_bytes` が未記録（`None`）の場合は従来どおり
+    ダウンロード後の `extract_text()` 側のチェックに委ねる
+  - **バッチ化とのスターベーション対策（Copilotレビュー指摘対応）**: `PdfTooLargeError`
+    （ダウンロード前ガード・`extract_text()` 内のページ数チェックいずれも）は
+    `_process_oversized_pdf()` が `order_parse_log` に `reason='failed_too_large'` で記録した
+    上でステージング行を即座に `parse_status='success'` へ更新する。`.order("created_at")
+    .limit(N)` でバッチ化した後にこの種の確定的失敗を `pending` のまま残すと、常にバッチの
+    先頭（最古）に選ばれ続けて後続の正常な添付の処理をブロックしてしまうため
+  - 下書き order は起票しない（`_process_unreadable_pdf` の暗号化/画像PDFケースとは異なり、
+    最小対応として今回は見送った）。ユーザーへの通知（`notifications`）も今回は追加していない
+    （`notif_type` の CHECK 制約変更＝マイグレーションが必要になるため）。サイズ超過は
+    稀なケースという前提で、頻発するようであれば専用の `notifications`/`order_attachments.
+    parse_status` 値の追加を検討する
 - `backend/requirements.txt`: アプリコードから参照のない `azure-functions`（Azure Functions
   時代の残骸）・`pytest`／`pre_commit` とその専用依存（`virtualenv`/`distlib`/`filelock`/
   `platformdirs`/`cfgv`/`identify`/`nodeenv`/`iniconfig`/`pluggy`、azure-functions専用の

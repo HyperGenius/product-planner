@@ -80,7 +80,7 @@ class TestExtractText:
 
     def test_oversized_content_raises_before_opening(self):
         with (
-            patch("app.services.pdf_text_service._MAX_PDF_BYTES", 10),
+            patch("app.services.pdf_text_service.MAX_PDF_BYTES", 10),
             pytest.raises(PdfTooLargeError),
         ):
             extract_text(_build_text_pdf("Hello Order PDF"))

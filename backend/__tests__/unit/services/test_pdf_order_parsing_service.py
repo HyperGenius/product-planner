@@ -118,6 +118,66 @@ class TestParsePendingOrderPdfs:
             c.args[0].get("notif_type") == "failed_encrypted" for c in insert_calls
         )
 
+    def test_oversized_pdf_by_known_size_bytes_skips_download(self):
+        """size_bytes が事前にMAX_PDF_BYTESを超えている場合、Storageダウンロード
+        自体を行わずに拒否すること（レビュー指摘: ダウンロード前ガード）。"""
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row(size_bytes=999_999_999)])
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment"
+            ) as mock_download,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text"
+            ) as mock_extract_text,
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        mock_download.assert_not_called()
+        mock_extract_text.assert_not_called()
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+
+        log_insert = mock_db.table("order_parse_log").insert.call_args.args[0]
+        assert log_insert["reason"] == "failed_too_large"
+
+        update_calls = mock_db.table().update.call_args_list
+        assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
+    def test_pdf_too_large_error_during_extraction_does_not_stay_pending(self):
+        """extract_text() が PdfTooLargeError を送出した場合も、ステージング行を
+        pending のまま残さないこと。pending のまま残すと `.order("created_at")
+        .limit(N)` のバッチが常にこの行を先頭に選び続け、後続の正常な添付の処理を
+        止めてしまう（スターベーション、レビュー指摘）。"""
+        from app.services.pdf_text_service import PdfTooLargeError
+
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                side_effect=PdfTooLargeError("too many pages"),
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+
+        log_insert = mock_db.table("order_parse_log").insert.call_args.args[0]
+        assert log_insert["reason"] == "failed_too_large"
+
+        update_calls = mock_db.table().update.call_args_list
+        assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
     def test_missing_customer_id_is_treated_as_error_not_silent_null(self):
         """resolve_or_create_customer は常に customer_id を解決するはずなので、
         ステージング行に customer_id が無いのは不整合。customer_id=NULL の

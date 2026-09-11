@@ -13,7 +13,9 @@ logger = get_logger(__name__)
 # 図形数の多いPDFで数百MB規模のメモリスパイクになりうる（Issue #425）。cron
 # （parse-order-pdfs）から全テナント横断で呼ばれる Web インスタンス上での処理のため、
 # 事前にバイト数・ページ数の上限を設けて超過分は例外で弾く。
-_MAX_PDF_BYTES = int(os.environ.get("PDF_TEXT_MAX_BYTES", str(20 * 1024 * 1024)))
+# MAX_PDF_BYTES は呼び出し元（pdf_order_parsing_service）が Storage ダウンロード前に
+# order_attachments.size_bytes と突き合わせる事前ガードにも使うため公開定数にしている。
+MAX_PDF_BYTES = int(os.environ.get("PDF_TEXT_MAX_BYTES", str(20 * 1024 * 1024)))
 _MAX_PDF_PAGES = int(os.environ.get("PDF_TEXT_MAX_PAGES", "50"))
 
 
@@ -36,9 +38,9 @@ def extract_text(content: bytes) -> PdfTextResult:
     - バイト数・ページ数が上限を超える場合は PdfTooLargeError を送出する（呼び出し側は
       他の解析失敗ケースと同様に1件ごとにキャッチしてスキップする想定）
     """
-    if len(content) > _MAX_PDF_BYTES:
+    if len(content) > MAX_PDF_BYTES:
         raise PdfTooLargeError(
-            f"PDF size {len(content)} bytes exceeds limit {_MAX_PDF_BYTES} bytes"
+            f"PDF size {len(content)} bytes exceeds limit {MAX_PDF_BYTES} bytes"
         )
 
     try:
