@@ -246,9 +246,9 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 | ファイル | 変更内容 |
 |---|---|
 | `supabase/migrations/20260909000000_add_approval_requested_to_orders.sql` | `orders.approval_requested_at timestamptz` / `orders.approval_requested_by uuid REFERENCES auth.users(id)` を追加。既存の `pending_approval` 注文は `order_approval_log` の最新 `request_approval` 行からバックフィル |
-| `routers/transaction/orders.py` `request_order_approval` | `orders` の上記 2 カラムを `request-approval` 実行時に更新（監査ログ `order_approval_log` とは別に非正規化） |
-| `routers/transaction/orders.py` `reject_order` / `withdraw_order_approval` | `draft` へ戻す際に 2 カラムを NULL クリア |
-| `routers/transaction/orders.py` `get_orders` | `_attach_approval_requester_names()` で `approval_requested_by`（auth.users.id）から `profiles` を 1 クエリで引き、`full_name` → なければ `email` を `approval_requested_by_name` として付与。依頼者のいない注文は `null` |
+| `routers/transaction/orders/approval_workflow.py` `request_order_approval` | `orders` の上記 2 カラムを `request-approval` 実行時に更新（監査ログ `order_approval_log` とは別に非正規化） |
+| `routers/transaction/orders/approval_workflow.py` `reject_order` / `withdraw_order_approval` | `draft` へ戻す際に 2 カラムを NULL クリア |
+| `routers/transaction/orders/crud.py` `get_orders` | `_attach_approval_requester_names()` で `approval_requested_by`（auth.users.id）から `profiles` を 1 クエリで引き、`full_name` → なければ `email` を `approval_requested_by_name` として付与。依頼者のいない注文は `null` |
 
 依頼者名は `order_approval_log` 経由でも取得できるが、ダッシュボード表示のたびに
 ログテーブルを join するのを避けるため `orders` へ非正規化する方針。

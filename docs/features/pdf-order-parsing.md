@@ -393,8 +393,8 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   を受け取り、`(tenant_id, customer_id, raw_text)` の完全一致のみを見る。該当顧客の
   別名が無い場合に**他顧客の別名へフォールバックはしない**（誤爆防止）
 - 別名の記録は `backend/app/services/product_alias_service.py` の
-  `record_correction_if_applicable()` が担い、`PATCH /orders/{id}` と
-  `POST /orders/{id}/split` の両経路（`orders.py`）から呼ばれる。対象注文が
+  `record_correction_if_applicable()` が担い、`PATCH /orders/{id}`（`orders/crud.py`）と
+  `POST /orders/{id}/split`（`orders/email_intake.py`）の両経路から呼ばれる。対象注文が
   `source_type='email'` かつ `extracted_product_name` が設定されている場合のみ、
   修正前後で `product_id` が変化したときに発火する（手動起票の注文編集では
   発火しない）
@@ -592,7 +592,8 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 - `backend/app/services/attachment_service.py`: `download_attachment()` を追加
 - `backend/app/repositories/supa_infra/common/table_name.py`: `ORDER_PARSE_LOG` を追加。
   `PRODUCT_NAME_ALIASES` / `PRODUCT_NAME_ALIAS_HISTORY` を追加（Issue #347）
-- `backend/app/routers/transaction/orders.py`: `update_order` / `split_order` に
+- `backend/app/routers/transaction/orders/crud.py`（`update_order`）/
+  `backend/app/routers/transaction/orders/email_intake.py`（`split_order`）:
   `record_correction_if_applicable()` の呼び出しを追加（Issue #347）
 - `backend/app/routers/master/products.py`: `GET /products/{product_id}/aliases` を追加（Issue #347）
 - `backend/requirements.txt`: `pdfplumber==0.11.10`
@@ -658,8 +659,9 @@ Issue #296 での変更（製品未マッチ明細のNULL product_id下書き起
   no-match時early returnを撤廃し、`product_id=NULL`・`extracted_product_name`
   （TRIM済み）でorder作成処理に合流させる。`_mark_superseded_orders` は
   `product_id is not None` の場合のみ呼ぶよう変更
-- `backend/app/routers/transaction/orders.py`: `/orders/{order_id}/simulate`・
-  `/orders/{order_id}/confirm` に `product_id IS NULL` のNoneガードを追加し
+- `backend/app/routers/transaction/orders/simulation.py`（`/orders/{order_id}/simulate`）・
+  `backend/app/routers/transaction/orders/approval_workflow.py`（`/orders/{order_id}/confirm`）:
+  `product_id IS NULL` のNoneガードを追加し
   `422`（FastAPIの`HTTPException`によりレスポンスボディは
   `{"detail": {"error": "product_unmatched"}}`。フロントの`ApiError.errorCode`は
   `detail.error`を参照する）を返す
@@ -823,7 +825,7 @@ PDF_TEXT_MAX_PAGES=50                # extract_text() が処理するPDFのペ�
 粗いヒューリスティックで検知しきれない場合を含む）に備え、ユーザーが手動で
 下書き注文をN件に分割できるUIを実装した。
 
-- `POST /orders/{order_id}/split`（`backend/app/routers/transaction/orders.py`）
+- `POST /orders/{order_id}/split`（`backend/app/routers/transaction/orders/email_intake.py`）
   - リクエスト: `{"line_items": [{"product_id", "quantity", "desired_deadline",
     "customer_id"?, "customer_certainty"?, "extracted_product_name"?}, ...]}`
     （`line_items` は2件以上必須）

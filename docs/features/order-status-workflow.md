@@ -43,7 +43,7 @@ draft ──────────▶ pending_approval ───────�
 バリデーションは
 [order_status_service.py](../../backend/app/services/order_status_service.py) の
 `validate_order_status_transition()` が担い、`POST /orders/{id}/confirm`
-（[orders.py](../../backend/app/routers/transaction/orders.py)）はこれを経由して
+（[approval_workflow.py](../../backend/app/routers/transaction/orders/approval_workflow.py)）はこれを経由して
 `pending_approval → confirmed` の遷移のみを許可するよう変更した
 （それ以前は無条件にステータスを上書きしていた）。
 
@@ -96,7 +96,7 @@ draft ──────────▶ pending_approval ───────�
 
 トライアル運用中に作成され、下書きのまま希望納期を過ぎて放置された受注を
 後片付けするための管理者操作。`POST /orders/ship-overdue-drafts`
-（[orders.py](../../backend/app/routers/transaction/orders.py)）が担う。
+（[approval_workflow.py](../../backend/app/routers/transaction/orders/approval_workflow.py)）が担う。
 
 - **ロール**: `president` / `platform_admin` 限定（`_require_any_role`）。承認操作
   （工程確定等）は `president` 限定だが、本操作は「承認を通さず終端へ寄せる後片付け」
@@ -122,7 +122,7 @@ draft ──────────▶ pending_approval ───────�
 
 「シミュレーション完了・未確定」は `orders.status` の値**ではない**。`draft` のまま
 `POST /orders/{id}/simulate`（dry-run。`schedules` テーブルへは保存しない）が成功すると
-`orders.is_scheduled = true` が立つ（[orders.py](../../backend/app/routers/transaction/orders.py) の
+`orders.is_scheduled = true` が立つ（[simulation.py](../../backend/app/routers/transaction/orders/simulation.py) の
 `mark_as_scheduled()`）。これを**フロントエンドだけで** `status='draft' && is_scheduled` として
 判定し、一覧上の表示ステータスを分ける。DB スキーマ・API・`Order["status"]` 型は変更しない。
 

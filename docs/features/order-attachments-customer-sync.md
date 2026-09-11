@@ -27,7 +27,7 @@
 `sync_order_attachments_customer_id`（`supabase/migrations/20260724000000_sync_order_attachments_customer_id_trigger.sql`）
 で同期する。
 
-- 当初はアプリ層（`update_order`, `backend/app/routers/transaction/orders.py`）で
+- 当初はアプリ層（`update_order`, `backend/app/routers/transaction/orders/crud.py`）で
   `orders` 更新後に別クエリで `order_attachments` を更新する実装にしていたが、
   レビューで「後続の更新が失敗した場合に `orders` と `order_attachments` の
   `customer_id` が不整合のまま残る」指摘を受け、DBトリガーに変更した。
