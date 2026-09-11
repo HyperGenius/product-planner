@@ -1,13 +1,14 @@
 # routers/transaction/orders/routing_queue.py
 """工程未確定の draft 注文を残バッファ昇順で返す専門家キュー（Issue #376）。"""
 
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_order_repo, get_product_repo
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
+from app.utils.calendar import JST
 from app.utils.logger import get_logger
 
 router = APIRouter()
@@ -22,7 +23,8 @@ def get_unconfirmed_routing_queue(
 ):
     """工程未確定の draft 注文を残バッファ昇順で返す専門家キュー"""
     logger.info("Fetching unconfirmed routing queue")
-    today = date.today()
+    # 実行ホストのTZに関わらず、残バッファはJST基準の暦日で判定する（Issue #376 PRレビュー対応）。
+    today = datetime.now(JST).date()
 
     all_orders = repo.get_all_with_routing_status()
     draft_unconfirmed = [

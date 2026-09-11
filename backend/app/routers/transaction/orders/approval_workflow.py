@@ -2,7 +2,7 @@
 """承認ワークフロー（状態遷移）: request-approval / confirm / approve-bulk /
 reject / withdraw-approval / ship / ship-overdue-drafts（Issue #376）。"""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -43,6 +43,7 @@ from app.services.order_status_service import (
 )
 from app.services.product_alias_service import record_auto_match_alias_if_applicable
 from app.services.scheduling_start_service import to_scheduling_start_time
+from app.utils.calendar import JST
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -478,7 +479,8 @@ def ship_overdue_drafts(
         "納期超過下書きの送品済み化",
     )
 
-    today = date.today()
+    # 実行ホストのTZに関わらず、納期超過判定はJST基準の暦日で行う（Issue #376 PRレビュー対応）。
+    today = datetime.now(JST).date()
     target_ids = [
         order["id"]
         for order in order_repo.get_all()
