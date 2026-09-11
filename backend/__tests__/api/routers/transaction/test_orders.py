@@ -192,6 +192,23 @@ class TestOrderRouter:
         assert result["order_no"] == "ORD-001"
         mock_repo.get_by_id_with_routing_status.assert_called_with(order_id)
 
+    def test_unconfirmed_routing_queue_route_resolves_before_order_id(
+        self, mock_repo, mock_product_repo
+    ):
+        """GET /unconfirmed-routing-queue が GET /{order_id} に奪われずに解決されること
+        （orders パッケージ分割後もルート登録順が維持されていることの確認、Issue #376）。"""
+        mock_repo.get_all_with_routing_status.return_value = []
+        mock_product_repo.get_all.return_value = []
+        mock_product_repo.get_unconfirmed_routing_counts.return_value = {}
+
+        response = client.get("/orders/unconfirmed-routing-queue")
+
+        # order_id: int の /{order_id} に奪われていれば、"unconfirmed-routing-queue" を
+        # int変換できず 422 になる。専用ハンドラに届いていれば 200 で正しい形が返る。
+        assert response.status_code == 200
+        assert response.json() == {"count": 0, "items": []}
+        mock_repo.get_by_id_with_routing_status.assert_not_called()
+
     def test_list_email_intake_results(
         self, headers, mock_supabase_client, mock_admin_client
     ):
@@ -703,7 +720,7 @@ class TestOrderRouter:
     ):
         """POST /{order_id}/request-approval: 自動マッチのまま承認依頼したら
         別名辞書への反映フックを呼ぶ（Issue #350）。"""
-        import app.routers.transaction.orders as orders_module
+        import app.routers.transaction.orders.approval_workflow as approval_workflow_module
 
         recorded: dict = {}
 
@@ -712,7 +729,9 @@ class TestOrderRouter:
             recorded["changed_by"] = changed_by
 
         monkeypatch.setattr(
-            orders_module, "record_auto_match_alias_if_applicable", _fake_record
+            approval_workflow_module,
+            "record_auto_match_alias_if_applicable",
+            _fake_record,
         )
 
         order_id = 1
@@ -1052,7 +1071,7 @@ class TestOrderRouter:
     ):
         """POST /{id}/simulate: スケジューラ内部の想定外状態（ValueError）は
         クライアント起因の 400 ではなく 500 で返す（Issue #374）。"""
-        import app.routers.transaction.orders as orders_module
+        import app.routers.transaction.orders.simulation as simulation_module
 
         self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
         mock_repo.get_by_id.return_value = {
@@ -1065,7 +1084,7 @@ class TestOrderRouter:
         def _boom(*_args, **_kwargs):
             raise ValueError("開始時刻が取得できません")
 
-        monkeypatch.setattr(orders_module, "schedule_order", _boom)
+        monkeypatch.setattr(simulation_module, "schedule_order", _boom)
 
         response = client.post("/orders/1/simulate", headers=headers)
 
@@ -1154,14 +1173,14 @@ class TestOrderRouter:
         monkeypatch,
     ):
         """POST /simulate: スケジューラ内部の想定外状態（ValueError）は 500 で返す（Issue #374）。"""
-        import app.routers.transaction.orders as orders_module
+        import app.routers.transaction.orders.simulation as simulation_module
 
         self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
 
         def _boom(*_args, **_kwargs):
             raise ValueError("スケジュール情報が空です")
 
-        monkeypatch.setattr(orders_module, "schedule_order", _boom)
+        monkeypatch.setattr(simulation_module, "schedule_order", _boom)
 
         payload = {"product_id": 100, "quantity": 10}
         response = client.post("/orders/simulate", json=payload, headers=headers)

@@ -236,7 +236,7 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 | `orders_tenant_id_order_number_idx` | `(tenant_id, order_number)`（`order_number IS NOT NULL`） | 注文番号を既存注文と一致させた |
 
 - バックエンド: `BaseRepository.update()` / `create()` はいずれも Postgres の unique_violation（`23505`）を `DuplicateRecordError`（`constraint` に元の例外文言＝制約名を保持）へ変換する（PR1 で `update()`、PR2 で `create()` を統一。`create()` は以前 `ValueError` を投げていたため、生の DB 制約文言を含んだメッセージがそのまま 400 detail に載っていた）。
-- 4 経路（`PATCH /orders/{id}` / `POST /orders` / `POST /orders/email-intake` / `POST /orders/{id}/split`）すべてで **409 Conflict** の構造化 detail を共通ヘルパー `_duplicate_order_conflict_exception()`（`routers/transaction/orders.py`）で組み立てる。`DuplicateRecordError.constraint` に `order_number` が含まれるかで振り分ける:
+- 4 経路（`PATCH /orders/{id}` / `POST /orders` / `POST /orders/email-intake` / `POST /orders/{id}/split`）すべてで **409 Conflict** の構造化 detail を共通ヘルパー `_duplicate_order_conflict_exception()`（`routers/transaction/orders/_shared.py`）で組み立てる。`DuplicateRecordError.constraint` に `order_number` が含まれるかで振り分ける:
   - dedupe_key 系: `{"error": "duplicate_order", "message": "同じ 顧客 × 製品 × 納期 の注文がすでに存在します", "conflicting_order": {...}}`
   - 注文番号: `{"error": "duplicate_order_number", "message": "この注文番号はすでに使用されています"}`（`conflicting_order` は付与しない）
   - `conflicting_order`（`id` / `order_no` / `customer_name` / `product_name` / `quantity` / `deadline_date` / `status`）は `OrderRepository.find_dedupe_conflict()` で衝突先レコードを再検索して組み立てる（RLS 下のユーザー JWT クライアントで顧客名・製品名も解決）。衝突先が見つからない場合（同時更新等）は `conflicting_order` を省略し固定文言のみ返す。

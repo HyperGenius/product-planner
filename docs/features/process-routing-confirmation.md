@@ -106,7 +106,7 @@ Issue #197 / #199 / #200 で実装。
 | ファイル | 変更内容 |
 |---|---|
 | `app/scheduler_logic.py` | `RoutingUnconfirmedError` に `no_routing: bool = False` フィールドを追加。工程0件時は `ValueError` ではなく `RoutingUnconfirmedError(no_routing=True)` を送出 |
-| `app/routers/transaction/orders.py` | `POST /orders/simulate` で `RoutingUnconfirmedError` を catch し、HTTP 200 + `{"routing_status": "no_routing", ...}` を返す |
+| `app/routers/transaction/orders/simulation.py` | `POST /orders/simulate` で `RoutingUnconfirmedError` を catch し、HTTP 200 + `{"routing_status": "no_routing", ...}` を返す |
 
 ### Frontend の変更
 

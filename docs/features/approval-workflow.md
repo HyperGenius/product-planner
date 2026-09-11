@@ -21,7 +21,7 @@ order_handler へディスパッチし、president は最終承認（および�
 | `pending_approval → draft`（差し戻し／内部名`reject`） | `POST /orders/{id}/reject`（body: `reason`、任意） | `president` |
 | `pending_approval → draft`（取り下げ） | `POST /orders/{id}/withdraw-approval` | `order_handler` |
 
-いずれも `backend/app/routers/transaction/orders.py` の
+いずれも `backend/app/routers/transaction/orders/approval_workflow.py` の
 [order_status_service.py](../../backend/app/services/order_status_service.py) 経由の遷移バリデーションと、
 `app.dependencies.get_current_user_role()` によるロールチェック（`_require_role` ヘルパー）を通す。
 対象ロール以外からのリクエストは403で拒否される。
@@ -108,7 +108,7 @@ order_handler が誤って承認依頼を送信してしまった場合、presid
 
 ### 記録タイミング
 
-`backend/app/routers/transaction/orders.py` の各エンドポイントで、状態遷移の更新が成功した直後に
+`backend/app/routers/transaction/orders/approval_workflow.py` の各エンドポイントで、状態遷移の更新が成功した直後に
 `_log_approval_action_safely()`（内部で `approval_log_repo.log_action(...)` を呼ぶ）を実行する。
 
 | エンドポイント | action | reason |
