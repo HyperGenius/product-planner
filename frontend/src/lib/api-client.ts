@@ -1,5 +1,6 @@
 /* frontend/src/lib/api-client.ts */
 import { createClient } from '@/utils/supabase/client'
+import type { ConflictingOrder } from '@/types/order'
 
 type FetchOptions = RequestInit & {
     headers?: Record<string, string>
@@ -21,6 +22,24 @@ export class ApiError extends Error {
         const detail = this.data.detail
         if (detail && typeof detail === 'object' && 'error' in detail) {
             return (detail as Record<string, unknown>).error as string
+        }
+        return undefined
+    }
+
+    // errorCode === "duplicate_order" のとき、衝突先レコードの識別情報が入る（Issue #415 PR3）
+    get conflictingOrder(): ConflictingOrder | undefined {
+        const detail = this.data.detail
+        if (detail && typeof detail === 'object' && 'conflicting_order' in detail) {
+            return (detail as Record<string, unknown>).conflicting_order as ConflictingOrder
+        }
+        return undefined
+    }
+
+    // email-intake の重複時のみ、どの明細（0-indexed）が重複したかが入る（Issue #415 PR2/PR3）
+    get lineItemIndex(): number | undefined {
+        const detail = this.data.detail
+        if (detail && typeof detail === 'object' && 'line_item_index' in detail) {
+            return (detail as Record<string, unknown>).line_item_index as number
         }
         return undefined
     }

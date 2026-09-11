@@ -242,8 +242,10 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
   - `conflicting_order`（`id` / `order_no` / `customer_name` / `product_name` / `quantity` / `deadline_date` / `status`）は `OrderRepository.find_dedupe_conflict()` で衝突先レコードを再検索して組み立てる（RLS 下のユーザー JWT クライアントで顧客名・製品名も解決）。衝突先が見つからない場合（同時更新等）は `conflicting_order` を省略し固定文言のみ返す。
   - `POST /orders/email-intake` は明細単位で作成するため、`line_item_index`（0始まり）を detail に追加し、どの明細が重複したか判別できるようにしている。
   - レスポンスに生の DB 制約名・例外文言は含めない。
-- フロントエンド: `EditOrderDialog` の `onError` は `ApiError.errorCode` を `duplicate_order_number` / `duplicate_order` で分岐し、それぞれ実態に合ったトーストを出す。以前は注文番号欄の下に「この注文番号はすでに使用されています」というインライン文言（`duplicateError` state）を、`message` に `"400"` / `"duplicate"` / `"already"` を含むかどうかという曖昧な判定で出しており、dedupe_key 衝突でも「注文番号が重複」と誤表示していた。この分岐と state は削除した。
-- 衝突先レコードの識別情報を表示する通知モーダル（`conflicting_order` を使ったフロント実装）は #415 PR3 で対応予定。
+- フロントエンド: `ApiError`（`lib/api-client.ts`）に `errorCode`（`detail.error`）に加え `conflictingOrder`（`detail.conflicting_order`）・`lineItemIndex`（`detail.line_item_index`、email-intake のみ）の getter を追加した（#415 PR3）。
+- `duplicate_order`（dedupe_key 系）は共通コンポーネント `DuplicateOrderDialog`（`components/orders/duplicate-order-dialog.tsx`）で衝突先レコードの識別情報（注文番号・顧客名・製品名・数量・希望納期・ステータス）を一覧表示する。情報表示専用（フッターは「閉じる」のみ）で、マージ等の自動解決は行わない。`conflicting_order` が取得できなかった場合（同時更新等）は固定文言のみ表示する。
+- `duplicate_order_number`（注文番号重複）は `conflicting_order` を持たないため従来通りトースト表示のまま（`DuplicateOrderDialog` は使わない）。
+- 4 呼び出し元すべてで `errorCode === "duplicate_order"` を判定して `DuplicateOrderDialog` を開く: `EditOrderDialog`（以前は注文番号欄の下に「この注文番号はすでに使用されています」というインライン文言を、`message` に `"400"` / `"duplicate"` / `"already"` を含むかどうかという曖昧な判定で出しており、dedupe_key 衝突でも「注文番号が重複」と誤表示していた。この分岐と state は PR1 で削除済み）／`SplitOrderDialog`／`orders/new/page.tsx`（`POST /orders` の下書き保存・確定、`POST /orders/email-intake`。email-intake のみ `lineItemIndex` を渡し「明細 N: 」を案内文に含める）。
 
 **内部状態のリセット**
 `EditOrderDialog` は開くたびに `key` に `editDialogGeneration`（ダイアログを開く操作のたびにインクリメントするカウンタ）を含めて再マウントされる。同一注文を「未保存でキャンセル→再オープン」した場合でも、DB上の値で初期化し直される (#277)。

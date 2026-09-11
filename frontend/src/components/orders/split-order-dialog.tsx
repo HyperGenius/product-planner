@@ -17,8 +17,10 @@ import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { SourceEmailPanel } from "@/components/orders/source-email-panel"
+import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
+import { ApiError } from "@/lib/api-client"
 import { useSplitOrder } from "@/hooks/use-orders"
-import type { Order } from "@/types/order"
+import type { ConflictingOrder, Order } from "@/types/order"
 
 interface SplitOrderDialogProps {
   order: Order | null
@@ -52,6 +54,9 @@ export function SplitOrderDialog({
   const splitOrder = useSplitOrder()
   const [items, setItems] = useState<SplitLineItemForm[]>([])
   const [error, setError] = useState("")
+  // 重複起票（顧客×製品×希望納期）を検知した際の通知モーダル状態（Issue #415 PR3）
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
+  const [conflictingOrder, setConflictingOrder] = useState<ConflictingOrder | undefined>()
 
   // ダイアログを開いた時点の注文内容を初期値として2行を用意する
   useEffect(() => {
@@ -123,6 +128,11 @@ export function SplitOrderDialog({
           onSplit?.()
         },
         onError: (err: Error) => {
+          if (err instanceof ApiError && err.errorCode === "duplicate_order") {
+            setConflictingOrder(err.conflictingOrder)
+            setDuplicateDialogOpen(true)
+            return
+          }
           setError(err.message || "分割に失敗しました")
         },
       }
@@ -130,6 +140,7 @@ export function SplitOrderDialog({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-[960px]">
         <DialogHeader className="px-6 pb-4 pt-6">
@@ -220,5 +231,11 @@ export function SplitOrderDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <DuplicateOrderDialog
+      open={duplicateDialogOpen}
+      onOpenChange={setDuplicateDialogOpen}
+      conflictingOrder={conflictingOrder}
+    />
+    </>
   )
 }
