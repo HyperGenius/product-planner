@@ -60,10 +60,11 @@ const displayName = product.code ? product.name : null  // 品名として表示
 ```
 
 - `code` あり: 図番 = `code`、品名 = `name`
-- `code` なし（未移行行。`name` に図番が入っている）: 図番 = `name`、品名 = 「品名未設定」（グレー）
+- `code` なし（未移行行。`name` に図番が入っている）: 図番 = `name`、品名 = 「品名未設定」（主テキスト側で表示）
 
-一覧セル内の視覚的な優先度は **図番＝主テキスト（`text-sm font-medium`）／品名＝副次テキスト（`text-xs text-muted-foreground`）** とする。
-図番が実質的な識別子であり、現場は図番で製品を識別するため（列見出し「図番 / 品名」・`product-selector.tsx` の `図番 - 品名` 表示順とも整合。Issue #382）。
+一覧セル内の視覚的な優先度は **品名＝主テキスト（`text-sm font-medium`）／図番＝副次テキスト（`text-xs text-muted-foreground`）** とする（表示順自体は図番が1行目・品名が2行目のまま変更なし）。
+品名は必須項目で製品を最も具体的に表す文字列であるのに対し、図番は任意項目（未設定の製品が存在する）であるため。
+なお `product-selector.tsx` は単一行で `図番 - 品名` の表記のみ（色分けなし）のため本変更の対象外。
 
 ## 機能一覧
 
