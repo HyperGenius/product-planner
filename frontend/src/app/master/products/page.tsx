@@ -4,7 +4,6 @@ import { useMemo, useState, useEffect, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { AlertTriangle, Circle, MoreHorizontal, Plus, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { splitProductCodeName } from "@/lib/order-utils"
 import { toast } from "sonner"
 import {
   useProducts,
@@ -55,16 +54,20 @@ import { MasterPagination } from "@/components/master-pagination"
 const PAGE_SIZE = 20
 
 /**
- * 未移行データ（`code` が NULL で `name` に図番が入っている行）を吸収する表示ヒューリスティック。
- * 検索フィルタと一覧表示の両方でこの関数を使い、表示ロジックを一元化する
- * （全テナントの図番が揃ったら撤去予定。docs/features/product-master.md 参照）。
+ * 図番・品名の表示用の値を返す。`name` は必須項目のため常にそのまま表示し、
+ * `code`（任意項目）が NULL の行は「図番未設定」とする。検索フィルタと一覧表示の
+ * 両方でこの関数を使い、表示ロジックを一元化する。
+ *
+ * `splitProductCodeName`（order-utils）は「code が NULL の行は name に図番相当の
+ * 値が入っている」という受注一覧向けの前提を置いているが、製品マスタでは name は
+ * 常に実際の品名であり、この前提に基づいて name を図番欄へ繰り上げると「品名未設定」
+ * という誤った表示になる（品名は NOT NULL のため実際には常に設定されている）ため使わない。
  */
 function resolveProductDisplay(p: Pick<Product, "code" | "name">): {
-  displayCode: string
-  displayName: string | null
+  displayCode: string | null
+  displayName: string
 } {
-  const { primary, secondary } = splitProductCodeName(p.code, p.name)
-  return { displayCode: primary, displayName: secondary }
+  return { displayCode: p.code, displayName: p.name }
 }
 
 type StatusFilter = "all" | "active" | "inactive" | "no_process"
@@ -115,8 +118,8 @@ export default function ProductsPage() {
         const q = searchQuery.toLowerCase()
         const matchesSearch =
           !q ||
-          displayCode.toLowerCase().includes(q) ||
-          (displayName?.toLowerCase().includes(q) ?? false)
+          (displayCode?.toLowerCase().includes(q) ?? false) ||
+          displayName.toLowerCase().includes(q)
         const matchesStatus =
           statusFilter === "all" ||
           (statusFilter === "active" && p.is_active) ||
@@ -384,12 +387,10 @@ export default function ProductsPage() {
                       <TableCell>
                         {/* 品名（name）は必須項目で製品を最も具体的に表す文字列のため主テキストで表示し、
                             図番（code）は任意項目（未設定あり）のため副次テキストにする */}
-                        <div className="text-xs text-muted-foreground">{displayCode}</div>
-                        {displayName ? (
-                          <div className="text-sm font-medium">{displayName}</div>
-                        ) : (
-                          <div className="text-sm font-medium">品名未設定</div>
-                        )}
+                        <div className="text-xs text-muted-foreground">
+                          {displayCode ?? "図番未設定"}
+                        </div>
+                        <div className="text-sm font-medium">{displayName}</div>
                       </TableCell>
                       <TableCell>
                         {!product.has_process ? (

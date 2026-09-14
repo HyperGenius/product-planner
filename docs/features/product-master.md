@@ -45,22 +45,27 @@ interface Product {
   曖昧一致の適用は行わない（必要が発生した段階で個別対応）。継続同期は別 Issue。
 - 上記の結果、`code` が入るのは Tier 1 で突合できた行のみ。突合できなかった既存行や
   未移行テナントには旧データ（`code` が NULL で `name` に図番が入っている）が残るため、
-  下記の表示ヒューリスティックと `product_matching_service.py` のフォールバックは当面維持する
-  （全テナント移行後に別 Issue で撤去）。
+  `product_matching_service.py` のフォールバックは当面維持する（全テナント移行後に別 Issue で撤去）。
+  製品マスタ一覧の表示（下記）はこのような行でも `name` をそのまま品名として表示するだけで、
+  `code` を補うヒューリスティックは持たない（`name` は常に実データなので、これで問題ない）
 
 ## 表示ロジック
 
-未移行テナント向けに、`code` の有無によって表示を切り替える（全テナント移行後に撤去予定）。
 検索フィルタと一覧表示で必ず同じ関数（`resolveProductDisplay()` in `page.tsx`）を通し、
 表示ロジックを一元化する：
 
 ```typescript
-const displayCode = product.code || product.name  // 図番として表示
-const displayName = product.code ? product.name : null  // 品名として表示
+const displayCode = product.code   // 図番として表示（NULL なら「図番未設定」）
+const displayName = product.name   // 品名として表示（NOT NULL のため常に実際の値）
 ```
 
-- `code` あり: 図番 = `code`、品名 = `name`
-- `code` なし（未移行行。`name` に図番が入っている）: 図番 = `name`、品名 = 「品名未設定」（主テキスト側で表示）
+- 図番 = `code`（NULL の場合は「図番未設定」と表示）、品名 = `name`（常にそのまま表示）
+- `name` は NOT NULL のため「品名未設定」という表示は行わない。過去は `code` が NULL の未移行行
+  （`name` に図番相当の値が入っている行）を吸収するため `name` を図番欄へ繰り上げ、品名側を
+  「品名未設定」とするヒューリスティックだったが、`name` に実際の品名が入っている通常の行
+  （編集で図番だけ空にした場合等）まで「品名未設定」と誤表示してしまう不具合があったため撤去した
+  （Issue #435）。注文一覧向けの `splitProductCodeName`（`order-utils.ts`）はこの前提を引き続き
+  使うため、製品マスタでは使わない
 
 一覧セル内の視覚的な優先度は **品名＝主テキスト（`text-sm font-medium`）／図番＝副次テキスト（`text-xs text-muted-foreground`）** とする（表示順自体は図番が1行目・品名が2行目のまま変更なし）。
 品名は必須項目で製品を最も具体的に表す文字列であるのに対し、図番は任意項目（未設定の製品が存在する）であるため。
