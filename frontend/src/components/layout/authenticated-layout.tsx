@@ -30,6 +30,10 @@ interface AuthenticatedLayoutProps {
   } | null
 }
 
+// サイドバー・ヘッダー無しのフルスクリーン専用レイアウトにするルートのプレフィックス
+// （大型ディスプレイ常時表示を想定。Issue #440）
+const FULLSCREEN_ROUTE_PREFIXES = ["/floor-dashboard"]
+
 /**
  * アプリケーションの認証済みレイアウトコンポーネント
  * SidebarProviderで全体をラップして状態を共有可能にする
@@ -37,6 +41,10 @@ interface AuthenticatedLayoutProps {
 export function AuthenticatedLayout({ children, user }: AuthenticatedLayoutProps) {
   const pathname = usePathname()
   const pageTitle = pageTitleMap[pathname] ?? "Product Planner"
+
+  if (FULLSCREEN_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+    return <>{children}</>
+  }
 
   return (
     <SidebarProvider style={{ overflowX: 'hidden'}}>
