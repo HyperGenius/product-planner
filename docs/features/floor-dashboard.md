@@ -6,16 +6,18 @@
 既存の管理画面ダッシュボード（`/`、サイドバー付き、ロール別パーソナライズ。Epic #399）とは目的が異なり、
 常時表示・大きめフォント・自動更新前提のフルスクリーン画面として新設した（Epic #437、本Issueは基盤部分の #440）。
 
-後続Issueで KPI・検索/フィルタ・顧客別受注情報・出荷予定表を `FloorDashboardLayout` の中に差し込んでいく。
+後続Issueで検索/フィルタ・顧客別受注情報・出荷予定表を `FloorDashboardLayout` の中に差し込んでいく（KPIサマリーカードは #441 で実装済み）。
 
 ## 対象ファイル
 
 | ファイル | 役割 |
 |---|---|
-| `frontend/src/app/floor-dashboard/page.tsx` | ルートページ。`useOrders()` を自動更新間隔付きで呼び出し、最終更新時刻を子に渡す |
+| `frontend/src/app/floor-dashboard/page.tsx` | ルートページ。`useOrders()` を自動更新間隔付きで呼び出し、最終更新時刻・KPI集計結果を子に渡す |
 | `frontend/src/components/floor-dashboard/FloorDashboardLayout.tsx` | フルスクリーン用の器（サイドバー・通常ヘッダー無し） |
 | `frontend/src/components/floor-dashboard/FloorDashboardHeader.tsx` | 画面タイトル＋最終更新時刻 |
 | `frontend/src/components/floor-dashboard/FloorDashboardPhaseBanner.tsx` | 「フェーズ1: 計画データのみ表示中」注記バナー |
+| `frontend/src/components/floor-dashboard/KpiSummaryCards.tsx` | KPIサマリーカード（受注中件数・納期超過件数・本日出荷予定件数。Issue #441） |
+| `frontend/src/hooks/use-floor-dashboard-metrics.ts` | KPI集計ロジック。`computeFloorDashboardMetrics()`（純粋関数）＋ `useFloorDashboardMetrics()` フック（Issue #441） |
 | `frontend/src/components/layout/authenticated-layout.tsx` | `/floor-dashboard` 配下をフルスクリーン扱いする分岐を追加 |
 | `frontend/src/hooks/use-orders.ts` | `useOrders()` に `{ refetchInterval }` オプションを追加（既存呼び出しは省略可、後方互換） |
 
@@ -44,6 +46,24 @@
   （PR #445 Copilotレビュー指摘）。`refetchInterval` は失敗時も継続してリトライされるため、追加の
   リトライ制御は不要
 
+- **KPI集計のスコープ（Issue #441）**: 3枚のKPIカード（受注中件数・納期超過件数・本日出荷予定件数）は
+  すべて「受注中」（`status` が `confirmed` / `in_progress`）を母集団とする。Issue本文では「本日出荷予定」
+  （`confirmed_deadline` が本日）の定義に明示的な絞り込み条件が無かったが、`shipped` / `completed`（出荷・完了
+  済み）や `canceled` の受注は `confirmed_deadline` が過去のまま残るため、他の2指標と同様に受注中スコープに
+  絞らないと「出荷済みなのに本日出荷予定に数える」ような誤カウントが起こる。3指標とも受注中スコープに統一した
+- **納期フィールドの優先順位**: `overdueCount`（納期超過）は `confirmed_deadline ?? simulated_deadline`
+  （CLAUDE.md の受注の納期フィールド方針どおり、承認確定前は `simulated_deadline` にフォールバック）で判定する。
+  一方 `todayShippingCount`（本日出荷予定）は `confirmed_deadline` のみを見る（Issue本文の「`confirmed_deadline`
+  が本日の件数」という定義どおり。未確定の受注は確定した納期が無いため「出荷予定」に含めない）
+- **「今日」の判定**: `jstTodayIso()`（`frontend/src/lib/order-utils.ts`、Issue #372 で導入済み）をそのまま再利用。
+  `computeFloorDashboardMetrics(orders, todayIso)` を純粋関数として切り出し、`today` の文字列注入だけでシステム
+  時刻に依存せずユニットテストできるようにした（`use-dashboard-metrics.ts` の構成を踏襲）。`useFloorDashboardMetrics()`
+  は毎レンダーで `jstTodayIso()` を呼び直す（`useMemo` の空配列キャッシュにしない）。常時表示画面のため、
+  日付が変わった後も次の自動更新（5分間隔）で「今日」の判定が追随するようにするため
+- 日付のみのフィールド（`confirmed_deadline` 等）同士の前後比較は、ISO 8601 形式（`"YYYY-MM-DD"`）が辞書順＝
+  時系列順に一致することを利用し、`Date` オブジェクト化せず文字列比較のみで行っている（TZ変換によるズレの
+  リスクそのものを無くすため）
+
 ## 完了条件（Issue #440）
 
 - [x] `/floor-dashboard` にアクセスすると専用レイアウトの画面が表示される（サイドバー無し、フルスクリーン）
@@ -52,7 +72,14 @@
 - [x] 後続Issue（KPI・検索/フィルタ・顧客別受注情報・出荷予定表）を差し込める構造になっている
 - [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
 
+## 完了条件（Issue #441）
+
+- [x] 3枚のKPIカード（受注中件数・納期超過件数・本日出荷予定件数）が正しい件数を表示する
+- [x] 「今日」判定が日付のみフィールドのTZズレを起こさず正しく動く（ユニットテストでシステム時刻を固定して検証）
+- [x] `cd frontend && npm run test` で新規テストがパスすること
+
 ## 関連
 
 - Epic: [#437](https://github.com/HyperGenius/product-planner/issues/437)
-- Issue: [#440](https://github.com/HyperGenius/product-planner/issues/440)
+- Issue: [#440](https://github.com/HyperGenius/product-planner/issues/440)（基盤）
+- Issue: [#441](https://github.com/HyperGenius/product-planner/issues/441)（KPIサマリーカード）
