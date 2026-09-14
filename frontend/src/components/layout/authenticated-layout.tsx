@@ -42,7 +42,11 @@ export function AuthenticatedLayout({ children, user }: AuthenticatedLayoutProps
   const pathname = usePathname()
   const pageTitle = pageTitleMap[pathname] ?? "Product Planner"
 
-  if (FULLSCREEN_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (
+    FULLSCREEN_ROUTE_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
     return <>{children}</>
   }
 

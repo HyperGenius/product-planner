@@ -15,6 +15,10 @@ function mockOrders(): void {
   server.use(http.get(`${API_BASE}/orders`, () => HttpResponse.json([])))
 }
 
+function mockOrdersError(): void {
+  server.use(http.get(`${API_BASE}/orders`, () => new HttpResponse(null, { status: 500 })))
+}
+
 describe("FloorDashboardPage", () => {
   it("画面タイトルとフェーズ1注記バナーを表示する", async () => {
     mockOrders()
@@ -40,5 +44,15 @@ describe("FloorDashboardPage", () => {
       expect(screen.queryByText(/取得中\.\.\./)).not.toBeInTheDocument()
     })
     expect(screen.getByText(/最終更新:/)).toBeInTheDocument()
+  })
+
+  it("受注データの取得に失敗したらエラー表示に切り替わる（常時表示画面での障害検知用）", async () => {
+    mockOrdersError()
+    render(<FloorDashboardPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/データ取得に失敗しました/)).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/取得中\.\.\./)).not.toBeInTheDocument()
   })
 })

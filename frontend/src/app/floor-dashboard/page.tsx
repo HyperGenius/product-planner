@@ -9,11 +9,14 @@ import { FloorDashboardPhaseBanner } from "@/components/floor-dashboard/FloorDas
 const REFETCH_INTERVAL_MS = 5 * 60 * 1000
 
 export default function FloorDashboardPage() {
-  const { dataUpdatedAt } = useOrders({ refetchInterval: REFETCH_INTERVAL_MS })
+  const { dataUpdatedAt, isError } = useOrders({ refetchInterval: REFETCH_INTERVAL_MS })
 
   return (
     <FloorDashboardLayout>
-      <FloorDashboardHeader lastUpdatedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null} />
+      <FloorDashboardHeader
+        lastUpdatedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+        isError={isError}
+      />
       <FloorDashboardPhaseBanner />
       {/* 後続Issue（KPI・検索/フィルタ・顧客別受注情報・出荷予定表）はここに差し込む */}
     </FloorDashboardLayout>

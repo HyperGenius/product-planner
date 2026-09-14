@@ -35,6 +35,14 @@
 - **認証**: この画面専用の認証方式は用意していない。既存のログインセッションをそのまま利用する
   （「大型ディスプレイに紐づくブラウザで一度ログインしたままにしておく」運用を想定。共有端末PIN認証
   [Issue #342](https://github.com/HyperGenius/product-planner/issues/342) とは別の話）
+- **フルスクリーン判定のルートセグメント境界**: `AuthenticatedLayout` の `FULLSCREEN_ROUTE_PREFIXES` 判定は
+  単純な `pathname.startsWith(prefix)` だと `/floor-dashboard-old` のような無関係なルートまで巻き込む。
+  `pathname === prefix || pathname.startsWith(prefix + "/")` でセグメント境界を明示すること（PR #445 Copilotレビュー指摘）
+- **データ取得失敗時の表示**: 常時表示画面のため、`useOrders()` が失敗し続けても最終更新時刻表示が
+  「取得中...」のまま固まっていると、現場側が通信断・認証切れに気づけない。`FloorDashboardHeader` は
+  `isError` を受け取り、取得失敗時は「データ取得に失敗しました」（`text-destructive`）に切り替える
+  （PR #445 Copilotレビュー指摘）。`refetchInterval` は失敗時も継続してリトライされるため、追加の
+  リトライ制御は不要
 
 ## 完了条件（Issue #440）
 
