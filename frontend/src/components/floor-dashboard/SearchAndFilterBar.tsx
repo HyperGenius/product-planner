@@ -3,9 +3,7 @@
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { STATUS_CLASS } from "@/components/floor-dashboard/DeadlineBadge"
-import type { OrderSearchFilters } from "@/lib/floor-dashboard-utils"
-import type { DeadlineStatus } from "@/lib/floor-dashboard-utils"
+import { STATUS_CLASS, type DeadlineStatus, type OrderSearchFilters } from "@/lib/floor-dashboard-utils"
 
 const LEGEND_ITEMS: { status: DeadlineStatus; label: string }[] = [
   { status: "overdue", label: "納期超過" },
@@ -30,7 +28,7 @@ interface SearchAndFilterBarProps {
 /**
  * 現場ダッシュボードの検索・フィルタバー（Issue #444）。
  * 顧客名・製品名・注文番号のフリーテキスト検索、「納期遅れのみ」トグル、納期状態の色分け凡例を提供する。
- * 凡例の色は `DeadlineBadge` の `STATUS_CLASS` をそのまま使い、バッジの実際の色とズレないようにする。
+ * 凡例の色は `floor-dashboard-utils.ts` の `STATUS_CLASS` をそのまま使い、バッジの実際の色とズレないようにする。
  */
 export function SearchAndFilterBar({ filters, onFiltersChange }: SearchAndFilterBarProps) {
   return (

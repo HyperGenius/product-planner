@@ -64,6 +64,16 @@ export function getDaysRemaining(deadline: string, todayIso: string): number {
   return toUtcDays(deadline) - toUtcDays(todayIso)
 }
 
+/**
+ * 納期状態ごとの色クラス。検索・フィルタの凡例（`SearchAndFilterBar`）と納期バッジ
+ * （`PlanValueBadges` の `DeadlineValueBadge`）で共有し、色がズレないようにする（Issue #452）。
+ */
+export const STATUS_CLASS: Record<DeadlineStatus, string> = {
+  overdue: "bg-red-600 text-white hover:bg-red-600",
+  due_soon: "bg-amber-500 text-white hover:bg-amber-500",
+  on_track: "bg-secondary text-secondary-foreground hover:bg-secondary",
+}
+
 /** 検索・フィルタ（Issue #444）の状態。顧客別受注情報（#442）・出荷予定表（#443）の両エリアで共有する */
 export interface OrderSearchFilters {
   /** 顧客名・製品名・注文番号のいずれかへの部分一致 */

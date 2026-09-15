@@ -137,9 +137,46 @@ describe("CustomerOrderList", () => {
     expect(screen.getByText("顧客A")).toBeInTheDocument()
     expect(screen.getByText("P-001")).toBeInTheDocument()
     expect(screen.getByText("製品A")).toBeInTheDocument()
-    expect(screen.getByText(/数量\s*5/)).toBeInTheDocument()
-    expect(screen.getByText(/納期\s*09\/08/)).toBeInTheDocument()
-    expect(screen.getByText("納期超過")).toBeInTheDocument()
+    expect(screen.getByText(/5\s*個/)).toBeInTheDocument()
+    expect(screen.getByText(/09\/08/)).toBeInTheDocument()
+  })
+
+  it("納期超過の注文は納期バッジが赤背景になり、残り日数ラベルは表示しない", () => {
+    const orders: Order[] = [
+      makeOrder({ id: 1, customer_id: 1, product_id: 1, quantity: 5, confirmed_deadline: "2026-09-08" }), // 超過
+    ]
+
+    render(
+      <CustomerOrderList
+        orders={orders}
+        products={products}
+        customers={customers}
+        isLoading={false}
+        filters={NO_FILTERS}
+      />,
+    )
+
+    expect(screen.getByText(/09\/08/).closest("span")).toHaveClass("bg-red-600")
+    expect(screen.queryByText("予定通り")).not.toBeInTheDocument()
+    expect(screen.queryByText(/^残り/)).not.toBeInTheDocument()
+  })
+
+  it("予定通りの注文は残り日数ラベル「予定通り」を表示する", () => {
+    const orders: Order[] = [
+      makeOrder({ id: 1, customer_id: 1, product_id: 1, quantity: 5, confirmed_deadline: "2026-09-20" }),
+    ]
+
+    render(
+      <CustomerOrderList
+        orders={orders}
+        products={products}
+        customers={customers}
+        isLoading={false}
+        filters={NO_FILTERS}
+      />,
+    )
+
+    expect(screen.getByText("予定通り")).toBeInTheDocument()
   })
 
   it("数量はカンマ区切り、納期は翌年のみ年を追加表示する", () => {
@@ -157,8 +194,8 @@ describe("CustomerOrderList", () => {
       />,
     )
 
-    expect(screen.getByText(/数量\s*1,234/)).toBeInTheDocument()
-    expect(screen.getByText(/納期\s*2027\/01\/05/)).toBeInTheDocument()
+    expect(screen.getByText(/1,234\s*個/)).toBeInTheDocument()
+    expect(screen.getByText(/2027\/01\/05/)).toBeInTheDocument()
   })
 
   it("製品未確定の注文は extracted_product_name にフォールバックする", () => {

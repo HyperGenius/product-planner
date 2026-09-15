@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@/test-utils/render"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -13,7 +13,20 @@ const customers: Customer[] = [
 
 /**
  * 現場ダッシュボードの出荷予定表エリア（Issue #443）のユニットテスト。
+ * 「今日」（当日セクションの強調表示, Issue #452）判定は JST 基準のため、UTC 深夜をまたぐ時刻で
+ * システム時刻を固定する（`CustomerOrderList.test.tsx` と同じ方針）。
  */
+
+const NOW_UTC = new Date("2026-09-09T15:30:00Z") // JST 2026-09-10 00:30
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(NOW_UTC)
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 const products: Product[] = [
   {
@@ -114,6 +127,25 @@ describe("groupSchedulesByShipmentDate", () => {
 
     expect(groups[0].rows[0].productPrimary).toBe("非正規化製品")
     expect(groups[0].rows[0].quantity).toBeNull()
+    expect(groups[0].rows[0].customerName).toBe("顧客未設定")
+  })
+
+  it("注文の顧客IDから顧客名を解決する", () => {
+    const orders = [makeOrder({ id: 1, customer_id: 1 })]
+    const schedules = [makeSchedule({ id: 1, order_id: 1, end_datetime: "2026-09-10T05:00:00Z" })]
+
+    const groups = groupSchedulesByShipmentDate(schedules, orders, products, customers)
+
+    expect(groups[0].rows[0].customerName).toBe("顧客A")
+  })
+
+  it("注文が一致しても顧客未設定の場合は「顧客未設定」にする", () => {
+    const orders = [makeOrder({ id: 1, customer_id: undefined })]
+    const schedules = [makeSchedule({ id: 1, order_id: 1, end_datetime: "2026-09-10T05:00:00Z" })]
+
+    const groups = groupSchedulesByShipmentDate(schedules, orders, products, customers)
+
+    expect(groups[0].rows[0].customerName).toBe("顧客未設定")
   })
 
   it("UTC日付境界を跨ぐ end_datetime は JST の暦日でグループ化する", () => {
@@ -199,8 +231,8 @@ describe("ShipmentScheduleList", () => {
     expect(screen.getByText("出荷予定はありません")).toBeInTheDocument()
   })
 
-  it("製品名・設備名・計画数量を表示する", () => {
-    const orders = [makeOrder({ id: 1, product_id: 1, quantity: 5 })]
+  it("注文番号・顧客名・製品名・設備名・計画数量を表示する", () => {
+    const orders = [makeOrder({ id: 1, product_id: 1, quantity: 5, customer_id: 1, order_no: "O-999" })]
     const schedules = [
       makeSchedule({
         id: 1,
@@ -211,12 +243,37 @@ describe("ShipmentScheduleList", () => {
     ]
 
     render(
+      <ShipmentScheduleList
+        schedules={schedules}
+        orders={orders}
+        products={products}
+        customers={customers}
+        isLoading={false}
+      />,
+    )
+
+    expect(screen.getByText("O-999")).toBeInTheDocument()
+    expect(screen.getByText("顧客A")).toBeInTheDocument()
+    expect(screen.getByText("製品A")).toBeInTheDocument()
+    expect(screen.getByText("設備1")).toBeInTheDocument()
+    expect(screen.getByText(/5\s*個/)).toBeInTheDocument()
+  })
+
+  it("当日の日付セクションに「本日」ラベルを表示する", () => {
+    const orders = [
+      makeOrder({ id: 1, product_id: 1 }),
+      makeOrder({ id: 2, product_id: 1 }),
+    ]
+    const schedules = [
+      makeSchedule({ id: 1, order_id: 1, end_datetime: "2026-09-10T05:00:00Z" }), // 本日
+      makeSchedule({ id: 2, order_id: 2, end_datetime: "2026-09-12T05:00:00Z" }), // 別日
+    ]
+
+    render(
       <ShipmentScheduleList schedules={schedules} orders={orders} products={products} isLoading={false} />,
     )
 
-    expect(screen.getByText("製品A")).toBeInTheDocument()
-    expect(screen.getByText("設備1")).toBeInTheDocument()
-    expect(screen.getByText(/数量\s*5/)).toBeInTheDocument()
+    expect(screen.getByText("本日")).toBeInTheDocument()
   })
 
   it("実績「未報告」バッジは Phase 1 では表示しない（Issue #450）", () => {

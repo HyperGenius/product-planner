@@ -13,7 +13,7 @@ import {
   matchesSearchText,
   type OrderSearchFilters,
 } from "@/lib/floor-dashboard-utils"
-import { DeadlineBadge } from "@/components/floor-dashboard/DeadlineBadge"
+import { RemainingDaysLabel } from "@/components/floor-dashboard/RemainingDaysLabel"
 import { QuantityBadge, DeadlineValueBadge } from "@/components/floor-dashboard/PlanValueBadges"
 
 export interface CustomerOrderGroup {
@@ -123,7 +123,7 @@ export function CustomerOrderList({
             : "受注中の注文はありません"}
         </p>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 overflow-y-auto flex-1 min-h-0">
+        <div className="grid gap-6 grid-cols-1 overflow-y-auto flex-1 min-h-0">
           {groups.map((group) => (
             <div key={group.customerId ?? "unassigned"} className="rounded-md border border-border">
               <h3 className="text-lg font-semibold px-4 py-2 border-b border-border bg-muted/50">
@@ -153,8 +153,8 @@ export function CustomerOrderList({
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <QuantityBadge quantity={order.quantity} />
-                        <DeadlineValueBadge deadline={deadline} todayIso={todayIso} />
-                        <DeadlineBadge status={status} daysRemaining={daysRemaining} />
+                        <DeadlineValueBadge deadline={deadline} todayIso={todayIso} status={status} />
+                        <RemainingDaysLabel status={status} daysRemaining={daysRemaining} />
                       </div>
                     </li>
                   )
