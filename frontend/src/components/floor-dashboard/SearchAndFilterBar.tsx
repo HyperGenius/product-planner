@@ -13,6 +13,15 @@ const LEGEND_ITEMS: { status: DeadlineStatus; label: string }[] = [
   { status: "on_track", label: "1週間以上" },
 ]
 
+/**
+ * `STATUS_CLASS` の値（複数のTailwindクラスを含む文字列）から `bg-` クラスのみを抽出する。
+ * クラスの並び順に依存すると `STATUS_CLASS` の並び替えで凡例の色が壊れるため（Copilotレビュー指摘, PR #449）、
+ * 順序に依存しない形で `bg-` クラスを検索する。
+ */
+function extractBgClass(classNames: string): string {
+  return classNames.split(" ").find((c) => c.startsWith("bg-")) ?? ""
+}
+
 interface SearchAndFilterBarProps {
   filters: OrderSearchFilters
   onFiltersChange: (filters: OrderSearchFilters) => void
@@ -49,7 +58,7 @@ export function SearchAndFilterBar({ filters, onFiltersChange }: SearchAndFilter
           {LEGEND_ITEMS.map(({ status, label }) => (
             <div key={status} className="flex items-center gap-1.5">
               <span
-                className={`inline-block h-3 w-3 rounded-sm ${STATUS_CLASS[status].split(" ")[0]}`}
+                className={`inline-block h-3 w-3 rounded-sm ${extractBgClass(STATUS_CLASS[status])}`}
                 aria-hidden="true"
               />
               <span className="text-sm text-muted-foreground">{label}</span>

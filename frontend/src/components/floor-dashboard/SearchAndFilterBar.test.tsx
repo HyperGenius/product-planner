@@ -18,6 +18,16 @@ describe("SearchAndFilterBar", () => {
     expect(screen.getByText("1週間以上")).toBeInTheDocument()
   })
 
+  it("凡例スウォッチは STATUS_CLASS と同じ bg- クラスを持つ（クラスの並び順に依存しない）", () => {
+    render(<SearchAndFilterBar filters={filters} onFiltersChange={() => {}} />)
+
+    // STATUS_CLASS（DeadlineBadge.tsx）と同じ色。並び順（text-* が先頭に来る等）が変わっても
+    // 抽出結果がズレないことを確認する（Copilotレビュー指摘, PR #449）
+    expect(screen.getByText("納期超過").previousSibling).toHaveClass("bg-red-600")
+    expect(screen.getByText("1週間未満").previousSibling).toHaveClass("bg-amber-500")
+    expect(screen.getByText("1週間以上").previousSibling).toHaveClass("bg-secondary")
+  })
+
   it("検索語を入力すると onFiltersChange が呼ばれる", async () => {
     const user = userEvent.setup()
     const onFiltersChange = vi.fn()
