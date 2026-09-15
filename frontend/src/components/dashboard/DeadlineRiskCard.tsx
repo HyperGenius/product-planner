@@ -79,7 +79,7 @@ export function DeadlineRiskCard({
             >
               <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
                 <span className="flex-shrink-0 text-sm font-medium text-foreground">
-                  {getCustomerDisplayName(order.customer_id, customers)}
+                  {customers ? getCustomerDisplayName(order.customer_id, customers) : "-"}
                 </span>
                 <span className="flex-shrink-0 text-sm text-muted-foreground">
                   /
@@ -93,10 +93,7 @@ export function DeadlineRiskCard({
                 </span>
               </div>
 
-              <Badge
-                variant="outline"
-                className="justify-self-start font-normal"
-              >
+              <Badge variant="outline" className="justify-self-end font-normal">
                 {order.quantity != null
                   ? `${order.quantity.toLocaleString("ja-JP")} 個`
                   : "-"}

@@ -21,13 +21,17 @@ import { PresidentDashboard } from "./PresidentDashboard"
  * 再マウント → 再フェッチ（TanStack Query は既定で staleTime=0）が走りうるため。
  *
  * `useCustomers()` は納期リスク注文カード（president 限定）の顧客名表示にのみ使うため、
- * `PresidentDashboard` にだけ渡す（Issue #454）。
+ * `currentMember.role === "president"` が確定するまで `enabled: false` で fetch を止め、
+ * それ以外のロールで不要な `/customers` 取得が走らないようにする（Issue #454 Copilotレビュー対応）。
+ * `PresidentDashboard` にだけ渡す。
  */
 export function DashboardRouter() {
   const { data: currentMember } = useCurrentMember()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
-  const { data: customers } = useCustomers()
+  const { data: customers } = useCustomers({
+    enabled: currentMember?.role === "president",
+  })
   const metrics = useDashboardMetrics(orders)
 
   const dashboardProps = {
