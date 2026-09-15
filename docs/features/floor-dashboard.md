@@ -6,7 +6,7 @@
 既存の管理画面ダッシュボード（`/`、サイドバー付き、ロール別パーソナライズ。Epic #399）とは目的が異なり、
 常時表示・大きめフォント・自動更新前提のフルスクリーン画面として新設した（Epic #437、本Issueは基盤部分の #440）。
 
-後続Issueで検索/フィルタ・顧客別受注情報・出荷予定表を `FloorDashboardLayout` の中に差し込んでいく（KPIサマリーカードは #441 で実装済み）。
+後続Issueで検索/フィルタ・出荷予定表を `FloorDashboardLayout` の中に差し込んでいく（KPIサマリーカードは #441、顧客別受注情報エリアは #442 で実装済み）。
 
 ## 対象ファイル
 
@@ -20,6 +20,9 @@
 | `frontend/src/hooks/use-floor-dashboard-metrics.ts` | KPI集計ロジック。`computeFloorDashboardMetrics()`（純粋関数）＋ `useFloorDashboardMetrics()` フック（Issue #441） |
 | `frontend/src/components/layout/authenticated-layout.tsx` | `/floor-dashboard` 配下をフルスクリーン扱いする分岐を追加 |
 | `frontend/src/hooks/use-orders.ts` | `useOrders()` に `{ refetchInterval }` オプションを追加（既存呼び出しは省略可、後方互換） |
+| `frontend/src/lib/floor-dashboard-utils.ts` | `IN_PRODUCTION_STATUSES` / `getEffectiveDeadline()` / 納期状態判定 `getDeadlineStatus()` / 残日数 `getDaysRemaining()`（Issue #442。検索・フィルタ #444 の凡例と閾値を共有する想定で `use-floor-dashboard-metrics.ts` からも参照） |
+| `frontend/src/components/floor-dashboard/CustomerOrderList.tsx` | 顧客別受注情報エリア。`groupOrdersByCustomer()`（純粋関数）＋表示コンポーネント（Issue #442） |
+| `frontend/src/components/floor-dashboard/DeadlineBadge.tsx` | 納期状態バッジ（納期超過／残りN日／予定通り。Issue #442） |
 
 ## 実装メモ
 
@@ -64,6 +67,26 @@
   時系列順に一致することを利用し、`Date` オブジェクト化せず文字列比較のみで行っている（TZ変換によるズレの
   リスクそのものを無くすため）
 
+- **顧客別受注情報エリアの対象スコープ（Issue #442）**: KPIサマリー（#441）と同じく `status` が
+  `confirmed` / `in_progress`（`IN_PRODUCTION_STATUSES`、`floor-dashboard-utils.ts` に集約）の受注のみを対象にする。
+  Issue本文で「`pending_approval` を含めるかは要確認」とされていたが、`pending_approval` は計画納期
+  （`confirmed_deadline`）がまだ確定していない（承認前）ため、KPIの「受注中」定義と揃えて対象外とした
+- **納期状態バッジの判定ロジックの共有先**: `getDeadlineStatus(deadline, todayIso)`（`overdue` / `due_soon` /
+  `on_track` を返す純粋関数）と、残日数を計算する `getDaysRemaining()` を `lib/floor-dashboard-utils.ts` に
+  切り出した。検索・フィルタ（凡例。Issue #444）から閾値がズレないよう同じ関数を再利用する前提で設計している。
+  閾値は `DEADLINE_DUE_SOON_THRESHOLD_DAYS`（7日）の1箇所のみで管理する
+- **納期状態の判定基準**: 表示納期は KPI と同様 `confirmed_deadline ?? simulated_deadline`
+  （`getEffectiveDeadline()`）。日付のみの文字列同士の比較のため、TZ変換を挟まず文字列比較・UTC固定の
+  日付演算（`Date.UTC` ベース）で行い、端末TZの影響を受けないようにしている
+- **製品名のフォールバック**: 既存の `getProductDisplayParts()`（`order-utils.ts`）をそのまま再利用。
+  `product_id` が未確定でも `extracted_product_name`（「〇〇（製品未確定）」表記）で表示できる
+- **グルーピング・並び順**: 顧客ごとにグループ化し、グループは顧客名（`getCustomerDisplayName()`、通称優先）の
+  50音順、各グループ内の注文は納期の早い順（未設定は末尾）に並べる。`customer_id` が無い受注は「顧客未設定」
+  グループにまとめる（本来 `confirmed` / `in_progress` では稀だが、データ不整合時にサイレントに消さない）
+- **テスト用MSWデフォルトハンドラの追加**: `GET /customers` のデフォルトハンドラが無かったため
+  `test-utils/msw/handlers.ts` に `sampleCustomers` ＋ハンドラを追加した（`GET /products` の `sampleProducts` と
+  同じ構成）。個別テストは従来どおり `server.use()` で上書き可能
+
 ## 完了条件（Issue #440）
 
 - [x] `/floor-dashboard` にアクセスすると専用レイアウトの画面が表示される（サイドバー無し、フルスクリーン）
@@ -78,8 +101,18 @@
 - [x] 「今日」判定が日付のみフィールドのTZズレを起こさず正しく動く（ユニットテストでシステム時刻を固定して検証）
 - [x] `cd frontend && npm run test` で新規テストがパスすること
 
+## 完了条件（Issue #442）
+
+- [x] 受注が顧客ごとにグループ化されて表示される
+- [x] 各行に製品名・計画数量・納期が表示される
+- [x] 納期に応じて3色のバッジ（納期超過／残りN日／予定通り）が正しく表示される
+- [ ] 検索・フィルタと連動して絞り込める（検索・フィルタ本体は #444 で実装。本Issueでは連動できる構造を残すのみ）
+- [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
+
 ## 関連
 
 - Epic: [#437](https://github.com/HyperGenius/product-planner/issues/437)
 - Issue: [#440](https://github.com/HyperGenius/product-planner/issues/440)（基盤）
 - Issue: [#441](https://github.com/HyperGenius/product-planner/issues/441)（KPIサマリーカード）
+- Issue: [#442](https://github.com/HyperGenius/product-planner/issues/442)（顧客別受注情報エリア）
+- Issue: [#444](https://github.com/HyperGenius/product-planner/issues/444)（検索・フィルタ。本Issueの納期状態判定ロジックを共有する予定）
