@@ -50,7 +50,7 @@
   すべて「受注中」（`status` が `confirmed` / `in_progress`）を母集団とする。Issue本文では「本日出荷予定」
   （`confirmed_deadline` が本日）の定義に明示的な絞り込み条件が無かったが、`shipped` / `completed`（出荷・完了
   済み）や `canceled` の受注は `confirmed_deadline` が過去のまま残るため、他の2指標と同様に受注中スコープに
-  絞らないと「出荷済みなのに本日出荷予定に数える」ような誤カウントが起こる。3指標とも受注中スコープに統一した
+  絞らないと「出荷済みなのに本日出荷予定に数える」ような誤カウントが起こるため、3指標とも受注中スコープに統一した。
 - **納期フィールドの優先順位**: `overdueCount`（納期超過）は `confirmed_deadline ?? simulated_deadline`
   （CLAUDE.md の受注の納期フィールド方針どおり、承認確定前は `simulated_deadline` にフォールバック）で判定する。
   一方 `todayShippingCount`（本日出荷予定）は `confirmed_deadline` のみを見る（Issue本文の「`confirmed_deadline`

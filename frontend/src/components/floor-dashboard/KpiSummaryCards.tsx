@@ -65,7 +65,7 @@ export function KpiSummaryCards({ metrics, isLoading }: KpiSummaryCardsProps) {
         return (
           <div
             key={card.label}
-            className={`rounded-lg border-t-4 ${card.accent} border border-border bg-card p-6 shadow-sm ${
+            className={`rounded-lg border border-border border-t-4 ${card.accent} bg-card p-6 shadow-sm ${
               isOverdueWithCount ? "ring-2 ring-red-400 dark:ring-red-700" : ""
             }`}
           >
