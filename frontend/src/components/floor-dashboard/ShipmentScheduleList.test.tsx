@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest"
 import { render, screen } from "@/test-utils/render"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
+import type { Customer } from "@/types/customer"
 import type { Schedule } from "@/types/schedule"
 import { ShipmentScheduleList, groupSchedulesByShipmentDate } from "./ShipmentScheduleList"
+
+const customers: Customer[] = [
+  { id: 1, name: "顧客A", status: "active", tenant_id: "t1", created_at: "", updated_at: "" },
+  { id: 2, name: "顧客B", status: "active", tenant_id: "t1", created_at: "", updated_at: "" },
+]
 
 /**
  * 現場ダッシュボードの出荷予定表エリア（Issue #443）のユニットテスト。
@@ -133,6 +139,48 @@ describe("groupSchedulesByShipmentDate", () => {
     const groups = groupSchedulesByShipmentDate(schedules, orders, products)
 
     expect(groups.map((g) => g.dateIso)).toEqual(["2026-09-10", "2026-09-12"])
+  })
+
+  it("検索語（顧客名・製品名・注文番号）で絞り込む", () => {
+    const orders = [
+      makeOrder({ id: 1, customer_id: 1, order_no: "O-100" }),
+      makeOrder({ id: 2, customer_id: 2, order_no: "O-200" }),
+    ]
+    const schedules = [
+      makeSchedule({ id: 1, order_id: 1, end_datetime: "2026-09-10T05:00:00Z" }),
+      makeSchedule({ id: 2, order_id: 2, end_datetime: "2026-09-10T05:00:00Z" }),
+    ]
+
+    const groups = groupSchedulesByShipmentDate(schedules, orders, products, customers, {
+      searchText: "O-200",
+      overdueOnly: false,
+    })
+
+    const orderIds = groups.flatMap((g) => g.rows.map((r) => r.orderId))
+    expect(orderIds).toEqual([2])
+  })
+
+  it("「納期遅れのみ」フィルタで納期超過の注文だけに絞り込む", () => {
+    const orders = [
+      makeOrder({ id: 1, confirmed_deadline: "2026-09-08" }), // 超過
+      makeOrder({ id: 2, confirmed_deadline: "2026-09-20" }), // 予定通り
+    ]
+    const schedules = [
+      makeSchedule({ id: 1, order_id: 1, end_datetime: "2026-09-10T05:00:00Z" }),
+      makeSchedule({ id: 2, order_id: 2, end_datetime: "2026-09-10T05:00:00Z" }),
+    ]
+
+    const groups = groupSchedulesByShipmentDate(
+      schedules,
+      orders,
+      products,
+      customers,
+      { searchText: "", overdueOnly: true },
+      "2026-09-10",
+    )
+
+    const orderIds = groups.flatMap((g) => g.rows.map((r) => r.orderId))
+    expect(orderIds).toEqual([1])
   })
 })
 

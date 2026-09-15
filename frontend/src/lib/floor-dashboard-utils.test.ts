@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getDaysRemaining, getDeadlineStatus } from "./floor-dashboard-utils"
+import { getDaysRemaining, getDeadlineStatus, matchesSearchText } from "./floor-dashboard-utils"
 
 /**
  * `getDeadlineStatus` / `getDaysRemaining` のユニットテスト（Issue #442）。
@@ -48,5 +48,55 @@ describe("getDaysRemaining", () => {
 
   it("未来なら正の値（月またぎでも正しい）", () => {
     expect(getDaysRemaining("2026-10-02", "2026-09-30")).toBe(2)
+  })
+})
+
+/**
+ * `matchesSearchText` のユニットテスト（Issue #444）。
+ * 顧客別受注情報（#442）・出荷予定表（#443）の両エリアで共有する検索マッチング関数。
+ */
+describe("matchesSearchText", () => {
+  const fields = {
+    customerName: "顧客A",
+    productPrimary: "P-001",
+    productSecondary: "製品A",
+    orderNumber: "O-100",
+  }
+
+  it("検索語が空なら常にtrue", () => {
+    expect(matchesSearchText("", fields)).toBe(true)
+    expect(matchesSearchText("   ", fields)).toBe(true)
+  })
+
+  it("顧客名に部分一致すればtrue", () => {
+    expect(matchesSearchText("顧客A", fields)).toBe(true)
+  })
+
+  it("製品名（primary/secondary）に部分一致すればtrue", () => {
+    expect(matchesSearchText("P-001", fields)).toBe(true)
+    expect(matchesSearchText("製品A", fields)).toBe(true)
+  })
+
+  it("注文番号に部分一致すればtrue", () => {
+    expect(matchesSearchText("O-100", fields)).toBe(true)
+  })
+
+  it("大文字小文字を区別しない", () => {
+    expect(matchesSearchText("o-100", fields)).toBe(true)
+  })
+
+  it("いずれにも一致しなければfalse", () => {
+    expect(matchesSearchText("該当なし", fields)).toBe(false)
+  })
+
+  it("フィールドがnullでもエラーにならない", () => {
+    expect(
+      matchesSearchText("該当なし", {
+        customerName: null,
+        productPrimary: null,
+        productSecondary: null,
+        orderNumber: null,
+      }),
+    ).toBe(false)
   })
 })
