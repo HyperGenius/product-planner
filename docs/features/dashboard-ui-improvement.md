@@ -239,7 +239,8 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 「依頼時刻不明」でフォールバックする。
 
 導線: 行クリック → `/orders/{id}`、見出し／フッターボタン →
-`/orders?status=pending_approval`（既存の一括承認画面）。
+`/orders?status=pending_approval`（既存の一括承認画面）。フッターボタンは
+Issue #456 でヘッダー行クリックと導線が重複するため削除済み（下記「レイアウト改善」参照）。
 
 ### レイアウト改善（Issue #456）
 
