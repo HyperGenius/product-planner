@@ -6,12 +6,13 @@ import { STATUS_CLASS, formatDeadlineForFloorDashboard, type DeadlineStatus } fr
  * 計画数量バッジ（Issue #450）。`RemainingDaysLabel`（納期状態）と同じ `Badge` コンポーネントで
  * テイストを揃えつつ、色分けが必要な状態バッジとは区別できるよう `variant="outline"` にする。
  * 数量はカンマ区切り（`toLocaleString("ja-JP")`。`order-table-row.tsx` の既存踏襲元と同じ表記）で
- * 末尾に単位「個」を付ける（Issue #452 で「数量」ラベルを削除し圧縮）。
+ * 末尾に単位「個」を付ける（Issue #452 で「数量」ラベルを削除し圧縮）。数量が未設定の場合は
+ * 単位だけ残ると不自然なため「-」のみ表示する（Copilotレビュー指摘, PR #453）。
  */
 export function QuantityBadge({ quantity }: { quantity: number | null | undefined }) {
   return (
     <Badge variant="outline" className="font-normal">
-      {quantity != null ? quantity.toLocaleString("ja-JP") : "-"} 個
+      {quantity != null ? `${quantity.toLocaleString("ja-JP")} 個` : "-"}
     </Badge>
   )
 }

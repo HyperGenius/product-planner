@@ -90,21 +90,21 @@ export function groupSchedulesByShipmentDate(
       ? getProductDisplayParts(order.product_id, products, order.extracted_product_name)
       : { primary: finalSchedule.product_name ?? "不明", secondary: null }
 
+    const customerName =
+      order?.customer_id != null ? getCustomerDisplayName(order.customer_id, customers) : null
+
     const matches = matchesSearchText(filters.searchText, {
-      customerName: order?.customer_id != null ? getCustomerDisplayName(order.customer_id, customers) : null,
+      customerName,
       productPrimary: product.primary,
       productSecondary: product.secondary,
       orderNumber: finalSchedule.order_number ?? order?.order_no ?? null,
     })
     if (!matches) continue
 
-    const customerName =
-      order?.customer_id != null ? getCustomerDisplayName(order.customer_id, customers) : "顧客未設定"
-
     const row: ShipmentScheduleRow = {
       orderId,
       orderNumber: finalSchedule.order_number ?? order?.order_no ?? undefined,
-      customerName,
+      customerName: customerName ?? "顧客未設定",
       productPrimary: product.primary,
       productSecondary: product.secondary,
       equipmentName: finalSchedule.equipment_name ?? "未設定",
