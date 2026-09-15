@@ -1,7 +1,8 @@
 import { Badge } from "@/components/ui/badge"
 import type { DeadlineStatus } from "@/lib/floor-dashboard-utils"
 
-const STATUS_CLASS: Record<DeadlineStatus, string> = {
+/** 納期状態ごとのバッジ色。凡例（Issue #444, `SearchAndFilterBar` の凡例スウォッチ）と共有し、色がズレないようにする */
+export const STATUS_CLASS: Record<DeadlineStatus, string> = {
   overdue: "bg-red-600 text-white hover:bg-red-600",
   due_soon: "bg-amber-500 text-white hover:bg-amber-500",
   on_track: "bg-secondary text-secondary-foreground hover:bg-secondary",

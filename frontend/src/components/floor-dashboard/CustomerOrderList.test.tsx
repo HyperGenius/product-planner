@@ -3,7 +3,11 @@ import { render, screen } from "@/test-utils/render"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
+import type { OrderSearchFilters } from "@/lib/floor-dashboard-utils"
 import { CustomerOrderList, groupOrdersByCustomer } from "./CustomerOrderList"
+
+const NO_FILTERS: OrderSearchFilters = { searchText: "", overdueOnly: false }
+const TODAY_ISO = "2026-09-10"
 
 /**
  * 現場ダッシュボードの顧客別受注情報エリア（Issue #442）のユニットテスト。
@@ -68,7 +72,7 @@ describe("groupOrdersByCustomer", () => {
       makeOrder({ id: 5, customer_id: 1, status: "shipped" }),
     ]
 
-    const groups = groupOrdersByCustomer(orders, customers)
+    const groups = groupOrdersByCustomer(orders, products, customers, NO_FILTERS, TODAY_ISO)
 
     expect(groups).toHaveLength(2)
     expect(groups[0].customerName).toBe("顧客A")
@@ -80,7 +84,7 @@ describe("groupOrdersByCustomer", () => {
   it("顧客未設定の注文は「顧客未設定」グループにまとめる", () => {
     const orders: Order[] = [makeOrder({ id: 1, customer_id: undefined, status: "confirmed" })]
 
-    const groups = groupOrdersByCustomer(orders, customers)
+    const groups = groupOrdersByCustomer(orders, products, customers, NO_FILTERS, TODAY_ISO)
 
     expect(groups).toHaveLength(1)
     expect(groups[0].customerName).toBe("顧客未設定")
@@ -94,7 +98,7 @@ describe("groupOrdersByCustomer", () => {
       makeOrder({ id: 4, customer_id: 1, confirmed_deadline: "2026-09-15" }),
     ]
 
-    const groups = groupOrdersByCustomer(orders, customers)
+    const groups = groupOrdersByCustomer(orders, products, customers, NO_FILTERS, TODAY_ISO)
 
     expect(groups[0].orders.map((o) => o.id)).toEqual([2, 4, 1, 3])
   })
@@ -103,14 +107,14 @@ describe("groupOrdersByCustomer", () => {
 describe("CustomerOrderList", () => {
   it("読み込み中はローディング表示", () => {
     render(
-      <CustomerOrderList orders={undefined} products={products} customers={customers} isLoading />,
+      <CustomerOrderList orders={undefined} products={products} customers={customers} isLoading filters={NO_FILTERS} />,
     )
     expect(screen.getByText("読み込み中…")).toBeInTheDocument()
   })
 
   it("受注中の注文が無ければ空表示", () => {
     render(
-      <CustomerOrderList orders={[]} products={products} customers={customers} isLoading={false} />,
+      <CustomerOrderList orders={[]} products={products} customers={customers} isLoading={false} filters={NO_FILTERS} />,
     )
     expect(screen.getByText("受注中の注文はありません")).toBeInTheDocument()
   })
@@ -126,6 +130,7 @@ describe("CustomerOrderList", () => {
         products={products}
         customers={customers}
         isLoading={false}
+        filters={NO_FILTERS}
       />,
     )
 
@@ -152,9 +157,50 @@ describe("CustomerOrderList", () => {
         products={products}
         customers={customers}
         isLoading={false}
+        filters={NO_FILTERS}
       />,
     )
 
     expect(screen.getByText("抽出製品X（製品未確定）")).toBeInTheDocument()
+  })
+
+  it("検索語（顧客名・製品名・注文番号）で絞り込む", () => {
+    const orders: Order[] = [
+      makeOrder({ id: 1, customer_id: 1, order_no: "O-100", product_id: 1 }),
+      makeOrder({ id: 2, customer_id: 2, order_no: "O-200", product_id: 1 }),
+    ]
+
+    render(
+      <CustomerOrderList
+        orders={orders}
+        products={products}
+        customers={customers}
+        isLoading={false}
+        filters={{ searchText: "O-200", overdueOnly: false }}
+      />,
+    )
+
+    expect(screen.getByText("顧客B")).toBeInTheDocument()
+    expect(screen.queryByText("顧客A")).not.toBeInTheDocument()
+  })
+
+  it("「納期遅れのみ」フィルタで納期超過の注文だけに絞り込む", () => {
+    const orders: Order[] = [
+      makeOrder({ id: 1, customer_id: 1, confirmed_deadline: "2026-09-08" }), // 超過
+      makeOrder({ id: 2, customer_id: 2, confirmed_deadline: "2026-09-20" }), // 予定通り
+    ]
+
+    render(
+      <CustomerOrderList
+        orders={orders}
+        products={products}
+        customers={customers}
+        isLoading={false}
+        filters={{ searchText: "", overdueOnly: true }}
+      />,
+    )
+
+    expect(screen.getByText("顧客A")).toBeInTheDocument()
+    expect(screen.queryByText("顧客B")).not.toBeInTheDocument()
   })
 })

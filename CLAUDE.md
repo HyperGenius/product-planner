@@ -99,6 +99,11 @@ cd backend && ruff check . && mypy .
   `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。詳細は
   [docs/features/order-status-workflow.md](docs/features/order-status-workflow.md)
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
+- **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
+  複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）
+  だけを取り出して別の要素（凡例のスウォッチ等）に使い回す場合、`.split(" ")[0]` のような**位置依存**の抽出は
+  クラスの並び順を変えただけで壊れる。`.split(" ").find((c) => c.startsWith("bg-"))` のように**接頭辞で検索**
+  する（Issue #444 の凡例実装、PR #449 Copilotレビュー指摘）
 - **ダッシュボード**: `app/page.tsx` は `components/dashboard/DashboardRouter` を描画するだけ。`DashboardRouter` が
   `useCurrentMember().role` で `PresidentDashboard`（`president`）／`DefaultDashboard`（それ以外・ロール未取得中の
   フォールバック）を出し分ける。`useOrders()` / `useProducts()` / `useDashboardMetrics()` は **`DashboardRouter` で

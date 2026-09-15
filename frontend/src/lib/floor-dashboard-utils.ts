@@ -64,6 +64,36 @@ export function getDaysRemaining(deadline: string, todayIso: string): number {
   return toUtcDays(deadline) - toUtcDays(todayIso)
 }
 
+/** 検索・フィルタ（Issue #444）の状態。顧客別受注情報（#442）・出荷予定表（#443）の両エリアで共有する */
+export interface OrderSearchFilters {
+  /** 顧客名・製品名・注文番号のいずれかへの部分一致 */
+  searchText: string
+  /** true の場合、納期超過の注文のみに絞り込む */
+  overdueOnly: boolean
+}
+
+/** 検索・フィルタ（Issue #444）で顧客名・製品名・注文番号の部分一致に使うフィールド */
+export interface SearchableOrderFields {
+  customerName: string | null
+  productPrimary: string | null
+  productSecondary: string | null
+  orderNumber: string | null
+}
+
+/**
+ * 検索語がいずれかのフィールドに部分一致するか判定する（大小文字を区別しない）。
+ * 顧客別受注情報（#442）・出荷予定表（#443）の両エリアで共有し、閾値・判定ロジックがズレないようにする。
+ * 検索語が空（前後空白のみ含む）なら常に true。
+ */
+export function matchesSearchText(searchText: string, fields: SearchableOrderFields): boolean {
+  const normalized = searchText.trim().toLowerCase()
+  if (!normalized) return true
+
+  return [fields.customerName, fields.productPrimary, fields.productSecondary, fields.orderNumber].some(
+    (field) => field?.toLowerCase().includes(normalized) ?? false,
+  )
+}
+
 /**
  * タイムスタンプ（timestamptz の ISO 8601 文字列）を Asia/Tokyo 基準の "YYYY-MM-DD" に変換する。
  * `production_schedules.end_datetime` のような時刻・TZ付きフィールドは `jstTodayIso()` と同じ

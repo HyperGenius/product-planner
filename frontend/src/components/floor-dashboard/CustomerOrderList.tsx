@@ -15,6 +15,8 @@ import {
   getEffectiveDeadline,
   getDeadlineStatus,
   getDaysRemaining,
+  matchesSearchText,
+  type OrderSearchFilters,
 } from "@/lib/floor-dashboard-utils"
 import { DeadlineBadge } from "@/components/floor-dashboard/DeadlineBadge"
 
@@ -25,16 +27,34 @@ export interface CustomerOrderGroup {
 }
 
 /**
- * 受注中（confirmed / in_progress）の注文を検索語で絞り込んだ上で顧客ごとにグループ化する（Issue #442）。
- * `filterText` は顧客名・製品名・注文番号のいずれかへの部分一致（検索・フィルタ #444 が渡す想定。
- * 本Issue単体では未使用＝空文字）。
+ * 受注中（confirmed / in_progress）の注文を検索語・「納期遅れのみ」フィルタで絞り込んだ上で
+ * 顧客ごとにグループ化する（Issue #442, #444）。
  * グループは顧客名（50音）順、各グループ内の注文は納期の早い順（納期未設定は末尾）で並べる。
  */
 export function groupOrdersByCustomer(
   orders: Order[] | undefined,
+  products: Product[] | undefined,
   customers: Customer[] | undefined,
+  filters: OrderSearchFilters,
+  todayIso: string,
 ): CustomerOrderGroup[] {
-  const targetOrders = orders?.filter((o) => IN_PRODUCTION_STATUSES.includes(o.status)) ?? []
+  const targetOrders = (orders?.filter((o) => IN_PRODUCTION_STATUSES.includes(o.status)) ?? [])
+    .filter((order) => {
+      if (!filters.overdueOnly) return true
+      const deadline = getEffectiveDeadline(order)
+      return getDeadlineStatus(deadline, todayIso) === "overdue"
+    })
+    .filter((order) => {
+      const customerName =
+        order.customer_id != null ? getCustomerDisplayName(order.customer_id, customers) : null
+      const product = getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+      return matchesSearchText(filters.searchText, {
+        customerName,
+        productPrimary: product.primary,
+        productSecondary: product.secondary,
+        orderNumber: order.order_no,
+      })
+    })
 
   const groupsByCustomerId = new Map<number | null, CustomerOrderGroup>()
   for (const order of targetOrders) {
@@ -73,24 +93,26 @@ interface CustomerOrderListProps {
   products: Product[] | undefined
   customers: Customer[] | undefined
   isLoading: boolean
+  filters: OrderSearchFilters
 }
 
 /**
  * 現場ダッシュボードの顧客別受注情報エリア（Issue #442）。
  * ホワイトボードの「顧客別受注情報」欄の置き換え。受注中（confirmed / in_progress）の注文を
- * 顧客ごとにグループ化し、各行に製品名（extracted_product_name フォールバック含む）・
- * 計画数量・納期・納期状態バッジを表示する。
+ * 検索語・「納期遅れのみ」フィルタ（Issue #444）で絞り込んだ上で顧客ごとにグループ化し、
+ * 各行に製品名（extracted_product_name フォールバック含む）・計画数量・納期・納期状態バッジを表示する。
  */
 export function CustomerOrderList({
   orders,
   products,
   customers,
   isLoading,
+  filters,
 }: CustomerOrderListProps) {
   const todayIso = jstTodayIso()
   const groups = useMemo(
-    () => groupOrdersByCustomer(orders, customers),
-    [orders, customers],
+    () => groupOrdersByCustomer(orders, products, customers, filters, todayIso),
+    [orders, products, customers, filters, todayIso],
   )
 
   return (
@@ -99,7 +121,11 @@ export function CustomerOrderList({
       {isLoading ? (
         <p className="text-muted-foreground">読み込み中…</p>
       ) : groups.length === 0 ? (
-        <p className="text-muted-foreground">受注中の注文はありません</p>
+        <p className="text-muted-foreground">
+          {filters.searchText || filters.overdueOnly
+            ? "条件に一致する受注はありません"
+            : "受注中の注文はありません"}
+        </p>
       ) : (
         <div className="grid gap-6 md:grid-cols-2">
           {groups.map((group) => (

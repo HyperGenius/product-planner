@@ -27,6 +27,8 @@
 | `frontend/src/components/floor-dashboard/UnreportedActualBadge.tsx` | 実績「未報告」固定バッジ（フェーズ2 #438 で差し替え予定。Issue #443） |
 | `frontend/src/hooks/use-schedules.ts` | 既存の `useSchedules()` を出荷予定表エリアでも再利用（変更なし） |
 | `frontend/src/lib/floor-dashboard-utils.ts` | `toJstDateIso()`（timestamptz → JST日付）／`addDaysToIsoDate()`のexport化／`SHIPMENT_SCHEDULE_WINDOW_DAYS` を追加（Issue #443） |
+| `frontend/src/components/floor-dashboard/SearchAndFilterBar.tsx` | 検索・フィルタバー（検索入力・「納期遅れのみ」トグル・凡例。Issue #444） |
+| `frontend/src/lib/floor-dashboard-utils.ts` | `OrderSearchFilters` 型・`matchesSearchText()`（顧客名/製品名/注文番号の部分一致判定、純粋関数）を追加（Issue #444） |
 
 ## 実装メモ
 
@@ -110,7 +112,7 @@
 - [x] 受注が顧客ごとにグループ化されて表示される
 - [x] 各行に製品名・計画数量・納期が表示される
 - [x] 納期に応じて3色のバッジ（納期超過／残りN日／予定通り）が正しく表示される
-- [ ] 検索・フィルタと連動して絞り込める（検索・フィルタ本体は #444 で実装。本Issueでは連動できる構造を残すのみ）
+- [x] 検索・フィルタと連動して絞り込める（Issue #444 で実装）
 - [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
 
 ## 完了条件（Issue #443）
@@ -118,7 +120,7 @@
 - [x] 出荷予定が日付ごとにグループ化されて表示される
 - [x] 各行に製品名・設備名・計画数量が表示される
 - [x] 各行に固定で「実績未報告」バッジが表示される
-- [ ] 検索・フィルタと連動して絞り込める（検索・フィルタ本体は #444 で実装）
+- [x] 検索・フィルタと連動して絞り込める（Issue #444 で実装）
 - [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
 
 - **「最終工程の完了予定日」の求め方**: `GET /production-schedules` は工程（`process_routing`）単位の
@@ -156,6 +158,32 @@
   UTC日付境界を跨いで JST では翌日になるケース（例: `2026-09-10T15:30:00Z` → JST `2026-09-11`）を
   ユニットテストで固定し、端末TZや実装変更による回帰を防ぐようにした
 
+- **検索語・「納期遅れのみ」フィルタの状態管理（Issue #444）**: Issue本文の方針どおり、URLクエリ同期はせず
+  `floor-dashboard/page.tsx` のローカル state（`OrderSearchFilters { searchText, overdueOnly }`）のみで保持する。
+  `SearchAndFilterBar` はこの state を props で受け取り `onFiltersChange` で更新するだけの制御コンポーネント
+- **両エリアで同じフィルタ判定を共有**: `matchesSearchText(searchText, fields)`（`floor-dashboard-utils.ts`）を
+  顧客別受注情報（`groupOrdersByCustomer`）・出荷予定表（`groupSchedulesByShipmentDate`）の両方から呼ぶ。
+  検索対象フィールドは顧客名（`getCustomerDisplayName`）・製品名（`getProductDisplayParts` の primary/secondary）・
+  注文番号（`order_no`）の4値で、大小文字を区別しない部分一致
+- **出荷予定表側は「一致する注文が無い行」の扱いが顧客別受注情報と非対称**: `groupSchedulesByShipmentDate` は
+  スケジュールに対応する `order` が見つからない場合（データ不整合等）でも非正規化データ（`finalSchedule.product_name`
+  等）で表示を続ける既存方針（#443）があるため、検索時はスケジュール側の非正規化データ（`order_number` /
+  `product_name`）でも一致判定できるようにした。一方 `overdueOnly` は納期を判定する材料（`order` の
+  `confirmed_deadline` 等）が無いと「超過かどうか」自体を決められないため、`order` が見つからない行は
+  `overdueOnly` 時は一律除外する（誤って「超過」扱いにも「対象外」扱いにもしない）
+- **`ShipmentScheduleList` に `customers` prop を追加**: 検索語を顧客名にも一致させる必要があるため、
+  `CustomerOrderList` 同様に `customers` を受け取るようにした（`page.tsx` から `useCustomers()` の結果をそのまま渡す）
+- **凡例の色は `DeadlineBadge` の `STATUS_CLASS` を再利用**: 独自に色クラスを再定義すると
+  バッジの実際の色とズレるリスクがあるため、`STATUS_CLASS` を `DeadlineBadge.tsx` から export し
+  `SearchAndFilterBar` の凡例スウォッチで同じ値を参照する（背景色クラスのみ抽出して使用）
+
+## 完了条件（Issue #444）
+
+- [x] 検索語を入力すると顧客別受注情報・出荷予定表の両エリアが絞り込まれる
+- [x] 「納期遅れのみ」トグルで納期超過の注文だけに絞り込める
+- [x] 凡例の3色が実際のバッジ色と一致する（`STATUS_CLASS` を共有）
+- [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
+
 ## 関連
 
 - Epic: [#437](https://github.com/HyperGenius/product-planner/issues/437)
@@ -163,4 +191,4 @@
 - Issue: [#441](https://github.com/HyperGenius/product-planner/issues/441)（KPIサマリーカード）
 - Issue: [#442](https://github.com/HyperGenius/product-planner/issues/442)（顧客別受注情報エリア）
 - Issue: [#443](https://github.com/HyperGenius/product-planner/issues/443)（出荷予定表エリア）
-- Issue: [#444](https://github.com/HyperGenius/product-planner/issues/444)（検索・フィルタ。本Issueの納期状態判定ロジックを共有する予定）
+- Issue: [#444](https://github.com/HyperGenius/product-planner/issues/444)（検索・フィルタ）
