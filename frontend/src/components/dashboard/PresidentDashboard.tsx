@@ -1,6 +1,7 @@
 "use client"
 
 import type { DashboardMetrics } from "@/hooks/use-dashboard-metrics"
+import type { Customer } from "@/types/customer"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import { ApprovalQueueCard } from "./ApprovalQueueCard"
@@ -15,6 +16,8 @@ interface PresidentDashboardProps {
   /** DashboardRouter が1回だけ取得した注文一覧（承認待ちキュー表示に使う。Issue #402） */
   orders: Order[] | undefined
   products: Product[] | undefined
+  /** 納期リスク注文カードの顧客名表示に使う（Issue #454） */
+  customers: Customer[] | undefined
   ordersLoading: boolean
   productsLoading: boolean
 }
@@ -31,6 +34,7 @@ export function PresidentDashboard({
   metrics,
   orders,
   products,
+  customers,
   ordersLoading,
   productsLoading,
 }: PresidentDashboardProps) {
@@ -45,9 +49,14 @@ export function PresidentDashboard({
       <DeadlineRiskCard
         orders={orders}
         products={products}
+        customers={customers}
         ordersLoading={ordersLoading}
       />
-      <KpiCards metrics={metrics} ordersLoading={ordersLoading} variant="president" />
+      <KpiCards
+        metrics={metrics}
+        ordersLoading={ordersLoading}
+        variant="president"
+      />
       <QuickActions />
       <RecentOrders
         recentOrders={metrics.recentOrders}

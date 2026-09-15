@@ -9,11 +9,16 @@ const CUSTOMERS_QUERY_KEY = ["customers"]
 
 /**
  * 顧客一覧を取得するフック
+ *
+ * 呼び出し側で利用可否が確定するまで fetch を遅らせたい場合は
+ * `enabled: false` を渡す（例: `DashboardRouter` は president 判定前の
+ * 不要な `/customers` 取得を避けるためこれを使う。Issue #454 Copilotレビュー対応）
  */
-export function useCustomers() {
+export function useCustomers(options?: { enabled?: boolean }) {
   return useQuery<Customer[]>({
     queryKey: CUSTOMERS_QUERY_KEY,
     queryFn: () => apiClient<Customer[]>("/customers"),
+    enabled: options?.enabled ?? true,
   })
 }
 
