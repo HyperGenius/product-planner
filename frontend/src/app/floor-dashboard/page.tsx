@@ -29,10 +29,13 @@ export default function FloorDashboardPage() {
   const metrics = useFloorDashboardMetrics(orders)
 
   const todayIso = jstTodayIso()
-  const { data: schedules, isLoading: schedulesLoading } = useSchedules({
-    start_date: todayIso,
-    end_date: addDaysToIsoDate(todayIso, SHIPMENT_SCHEDULE_WINDOW_DAYS),
-  })
+  const { data: schedules, isLoading: schedulesLoading } = useSchedules(
+    {
+      start_date: todayIso,
+      end_date: addDaysToIsoDate(todayIso, SHIPMENT_SCHEDULE_WINDOW_DAYS),
+    },
+    { refetchInterval: REFETCH_INTERVAL_MS },
+  )
 
   return (
     <FloorDashboardLayout>

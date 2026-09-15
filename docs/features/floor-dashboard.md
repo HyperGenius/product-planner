@@ -143,6 +143,18 @@
 - **実績「未報告」バッジの設計**: `UnreportedActualBadge` は props を持たない固定表示のみ。
   フェーズ2（実績入力、#438）でコンポーネントごと差し替える前提のため、`actualQuantity` のような
   未実装のロジックを先回りして作り込まない方針とした（Issue本文の過剰設計回避の指示どおり）
+- **常時表示画面での自動更新（PR #448 Copilotレビュー指摘）**: `useOrders` は `refetchInterval` を
+  受け取れるが `useSchedules` には無く、出荷予定表だけ自動更新されない（日付ウィンドウも日付跨ぎで
+  進まない）状態だった。`useSchedules(params, options)` に `useOrders` と同じ `{ refetchInterval }`
+  オプションを追加し、`floor-dashboard/page.tsx` から `KpiSummaryCards` 等と同じ `REFETCH_INTERVAL_MS`
+  （5分）を渡すようにした
+- **最終工程判定は `Date` 比較で行う（PR #448 Copilotレビュー指摘）**: `end_datetime` の大小判定を
+  ISO文字列の辞書順比較で行うと、タイムゾーンオフセット表記や小数秒の有無など文字列フォーマットの
+  差异で誤判定しうる。`new Date(a) > new Date(b)` に変更した。あわせて `orders?.find()` を注文ごとに
+  呼ぶと件数の2乗の計算量になるため、事前に `Map<number, Order>` 化してから参照するようにした
+- **JST日付グルーピングのテスト（PR #448 Copilotレビュー指摘）**: `toJstDateIso()` は要件の中心のため、
+  UTC日付境界を跨いで JST では翌日になるケース（例: `2026-09-10T15:30:00Z` → JST `2026-09-11`）を
+  ユニットテストで固定し、端末TZや実装変更による回帰を防ぐようにした
 
 ## 関連
 

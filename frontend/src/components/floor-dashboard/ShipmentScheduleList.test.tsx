@@ -110,6 +110,19 @@ describe("groupSchedulesByShipmentDate", () => {
     expect(groups[0].rows[0].quantity).toBeNull()
   })
 
+  it("UTC日付境界を跨ぐ end_datetime は JST の暦日でグループ化する", () => {
+    const orders = [makeOrder({ id: 1 })]
+    const schedules = [
+      // UTC では 9/10 だが JST(+9) では 9/11 0:30
+      makeSchedule({ id: 1, order_id: 1, end_datetime: "2026-09-10T15:30:00Z" }),
+    ]
+
+    const groups = groupSchedulesByShipmentDate(schedules, orders, products)
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0].dateIso).toBe("2026-09-11")
+  })
+
   it("日付が異なる複数注文は別セクションになり、日付昇順に並ぶ", () => {
     const orders = [makeOrder({ id: 1 }), makeOrder({ id: 2 })]
     const schedules = [

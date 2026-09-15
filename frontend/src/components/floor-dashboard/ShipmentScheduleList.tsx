@@ -48,13 +48,18 @@ export function groupSchedulesByShipmentDate(
     }
   }
 
+  const ordersById = new Map<number, Order>()
+  for (const order of orders ?? []) {
+    ordersById.set(order.id, order)
+  }
+
   const groupsByDate = new Map<string, ShipmentScheduleRow[]>()
   for (const [orderId, orderSchedules] of schedulesByOrderId) {
     const finalSchedule = orderSchedules.reduce((latest, current) =>
-      current.end_datetime > latest.end_datetime ? current : latest,
+      new Date(current.end_datetime) > new Date(latest.end_datetime) ? current : latest,
     )
 
-    const order = orders?.find((o) => o.id === orderId)
+    const order = ordersById.get(orderId)
     if (order && !IN_PRODUCTION_STATUSES.includes(order.status)) {
       continue
     }

@@ -25,8 +25,11 @@ export interface ScheduleUpdateParams {
 
 /**
  * 生産スケジュール一覧を取得するフック
+ *
+ * @param options.refetchInterval 自動再取得の間隔(ms)。現場ダッシュボード（Issue #443）等、
+ *   常時表示前提の画面から指定する想定。未指定時は自動再取得しない（`use-orders.ts` と同じ方針）
  */
-export function useSchedules(params: ScheduleQueryParams) {
+export function useSchedules(params: ScheduleQueryParams, options?: { refetchInterval?: number }) {
   return useQuery<Schedule[]>({
     queryKey: ["schedules", params.start_date, params.end_date, params.equipment_group_id],
     queryFn: async () => {
@@ -34,15 +37,16 @@ export function useSchedules(params: ScheduleQueryParams) {
         start_date: params.start_date,
         end_date: params.end_date,
       })
-      
+
       if (params.equipment_group_id !== undefined) {
         searchParams.append("equipment_group_id", String(params.equipment_group_id))
       }
-      
+
       return apiClient<Schedule[]>(`/production-schedules?${searchParams.toString()}`)
     },
     staleTime: 5 * 60 * 1000, // 5分
     refetchOnWindowFocus: false,
+    refetchInterval: options?.refetchInterval,
   })
 }
 
