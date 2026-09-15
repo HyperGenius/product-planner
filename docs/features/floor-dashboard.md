@@ -22,15 +22,15 @@
 | `frontend/src/hooks/use-orders.ts` | `useOrders()` に `{ refetchInterval }` オプションを追加（既存呼び出しは省略可、後方互換） |
 | `frontend/src/lib/floor-dashboard-utils.ts` | `IN_PRODUCTION_STATUSES` / `getEffectiveDeadline()` / 納期状態判定 `getDeadlineStatus()` / 残日数 `getDaysRemaining()`（Issue #442。検索・フィルタ #444 の凡例と閾値を共有する想定で `use-floor-dashboard-metrics.ts` からも参照） |
 | `frontend/src/components/floor-dashboard/CustomerOrderList.tsx` | 顧客別受注情報エリア。`groupOrdersByCustomer()`（純粋関数）＋表示コンポーネント（Issue #442） |
-| `frontend/src/components/floor-dashboard/DeadlineBadge.tsx` | 納期状態バッジ（納期超過／残りN日／予定通り。Issue #442） |
+| `frontend/src/components/floor-dashboard/RemainingDaysLabel.tsx` | 残り日数ラベル（残りN日／予定通り。Issue #442。旧 `DeadlineBadge`。納期超過の表現は Issue #452 で `DeadlineValueBadge` の赤塗りへ移管） |
 | `frontend/src/components/floor-dashboard/ShipmentScheduleList.tsx` | 出荷予定表エリア。`groupSchedulesByShipmentDate()`（純粋関数）＋表示コンポーネント（Issue #443） |
 | `frontend/src/components/floor-dashboard/UnreportedActualBadge.tsx` | 実績「未報告」固定バッジ（フェーズ2 #438 で差し替え予定。Issue #443） |
 | `frontend/src/hooks/use-schedules.ts` | 既存の `useSchedules()` を出荷予定表エリアでも再利用（変更なし） |
 | `frontend/src/lib/floor-dashboard-utils.ts` | `toJstDateIso()`（timestamptz → JST日付）／`addDaysToIsoDate()`のexport化／`SHIPMENT_SCHEDULE_WINDOW_DAYS` を追加（Issue #443） |
 | `frontend/src/components/floor-dashboard/SearchAndFilterBar.tsx` | 検索・フィルタバー（検索入力・「納期遅れのみ」トグル・凡例。Issue #444） |
 | `frontend/src/lib/floor-dashboard-utils.ts` | `OrderSearchFilters` 型・`matchesSearchText()`（顧客名/製品名/注文番号の部分一致判定、純粋関数）を追加（Issue #444） |
-| `frontend/src/components/floor-dashboard/PlanValueBadges.tsx` | `QuantityBadge` / `DeadlineValueBadge`（数量・納期の値バッジ、`DeadlineBadge` と同テイスト。Issue #450） |
-| `frontend/src/lib/floor-dashboard-utils.ts` | `formatDeadlineForFloorDashboard()`（当年 `MM/DD`・翌年以降 `YYYY/MM/DD`。Issue #450） |
+| `frontend/src/components/floor-dashboard/PlanValueBadges.tsx` | `QuantityBadge` / `DeadlineValueBadge`（数量・納期の値バッジ、`RemainingDaysLabel` と同テイスト。Issue #450。Issue #452 で表記圧縮・納期超過時の赤塗りに対応） |
+| `frontend/src/lib/floor-dashboard-utils.ts` | `formatDeadlineForFloorDashboard()`（当年 `MM/DD`・翌年以降 `YYYY/MM/DD`。Issue #450）／`STATUS_CLASS`（納期状態の色クラス、Issue #452 で `DeadlineBadge.tsx` から移設） |
 
 ## 実装メモ
 
@@ -175,9 +175,12 @@
   `overdueOnly` 時は一律除外する（誤って「超過」扱いにも「対象外」扱いにもしない）
 - **`ShipmentScheduleList` に `customers` prop を追加**: 検索語を顧客名にも一致させる必要があるため、
   `CustomerOrderList` 同様に `customers` を受け取るようにした（`page.tsx` から `useCustomers()` の結果をそのまま渡す）
-- **凡例の色は `DeadlineBadge` の `STATUS_CLASS` を再利用**: 独自に色クラスを再定義すると
-  バッジの実際の色とズレるリスクがあるため、`STATUS_CLASS` を `DeadlineBadge.tsx` から export し
-  `SearchAndFilterBar` の凡例スウォッチで同じ値を参照する（背景色クラスのみ抽出して使用）
+- **凡例の色は `STATUS_CLASS` を再利用**: 独自に色クラスを再定義すると
+  バッジの実際の色とズレるリスクがあるため、`STATUS_CLASS` を export し
+  `SearchAndFilterBar` の凡例スウォッチで同じ値を参照する（背景色クラスのみ抽出して使用）。
+  Issue #452 で `DeadlineBadge.tsx`（`RemainingDaysLabel.tsx` へ改称）から `lib/floor-dashboard-utils.ts`
+  へ移設した（`PlanValueBadges.tsx` からも参照するようになり、単一の状態バッジ専用ファイルに
+  置くのが不自然になったため）
 
 ## 完了条件（Issue #444）
 
@@ -214,6 +217,45 @@
 - [x] 出荷予定表に「実績未報告」バッジが表示されない
 - [x] `npx tsc --noEmit` / `npm run lint` / `npm run test` がエラーなく通ること
 
+- **顧客別受注情報エリアを1カラム化（Issue #452）**: `CustomerOrderList.tsx` の `grid md:grid-cols-2` を
+  `grid-cols-1` に変更した。実機（大型ディスプレイ）確認で2カラムだと幅が狭く製品名が `truncate` で
+  省略され読み取れないという指摘があったため。縦方向に伸びて1画面あたりの表示件数（情報密度）が
+  下がる trade-off は許容し、実際の運用で「情報密度が足りない」等の声が出た段階で別Issueとして改善する
+  方針とした。特に設置ディスプレイが大型でも低解像度（FHD等）の場合は文字サイズ等を含めた抜本的な
+  見直しが必要になりうる点に留意
+- **納期超過の表現を `DeadlineBadge`（状態バッジ）から `DeadlineValueBadge`（納期の値バッジ）へ移管し、
+  `DeadlineBadge` を `RemainingDaysLabel` に改称・役割縮小（Issue #452）**: 従来は納期超過を
+  `DeadlineBadge` の「納期超過」ラベル・赤背景のみで表現していたが、赤塗りバッジ自体をより目立たせる
+  ため `DeadlineValueBadge`（`PlanValueBadges.tsx`）に `status: DeadlineStatus | null` prop を追加し、
+  `overdue` 時は `STATUS_CLASS.overdue`（`bg-red-600 text-white`）を適用するようにした。「納期超過」の
+  情報がこのバッジに一本化されたため、`DeadlineBadge` は `due_soon`/`on_track`（「残りN日」「予定通り」）
+  専用の軽量ラベルに縮小し、`RemainingDaysLabel.tsx` へリネームした（`overdue`/`null` では何も表示しない）
+- **バッジの表記圧縮（Issue #452）**: `QuantityBadge` は「数量 2,000」→「2,000 個」（ラベル削除・末尾に
+  単位を付与）に変更。`DeadlineValueBadge` は「納期」テキストラベルを `lucide-react` の `Truck` アイコン
+  に置き換えた（アイコンのみでは意味が伝わらないユーザーのため `<span className="sr-only">納期</span>`
+  を残し、視覚的には非表示のままアクセシビリティを担保）
+- **出荷予定表に顧客名・注文番号を追加（Issue #452）**: `ShipmentScheduleRow` に `customerName` を追加。
+  `groupSchedulesByShipmentDate()` 内で `order?.customer_id` から `getCustomerDisplayName()` で解決し、
+  注文が見つからない／顧客未設定の場合は「顧客未設定」にフォールバックする（「ないものをあるように
+  見せない」原則により、サイレントに空欄にしない）。行の表示は「注文番号（等幅フォント）＋顧客名」を
+  1行目、製品名・設備名を2行目（従来どおり `text-muted-foreground`）にし、どの製品をどの会社へ
+  何個出荷するかを一目で把握できるようにした
+- **出荷予定表の当日セクション強調（Issue #452）**: `jstTodayIso()` と一致する日付セクションのみ
+  枠線・見出し背景を `border-primary` / `bg-primary` にし、「本日」ラベルを付与した。KPIサマリーの
+  「本日出荷予定件数」と対応させ、ホワイトボード脇での即座の確認という目的に沿わせている
+
+## 完了条件（Issue #452）
+
+- [x] 顧客別受注情報エリアが1カラムで表示され、製品名が省略されず読み取れる
+- [x] 納期超過の注文で納期バッジ（`DeadlineValueBadge`）が赤背景・白文字で表示される
+- [x] `DeadlineBadge` という名称・overdue 用の「納期超過」ラベルが廃止され、`RemainingDaysLabel`
+      （「残りN日」「予定通り」のみ）に整理されている
+- [x] 数量バッジが「◯◯ 個」表記になっている
+- [x] 納期バッジのラベルがトラックアイコンに置き換わっている
+- [x] 出荷予定表の各行で「注文番号・顧客名・数量」が一目で読み取れる
+- [x] 出荷予定表の当日セクションが他の日付と視覚的に区別できる
+- [x] `npx tsc --noEmit` / `npm run lint` / `npm run test` がエラーなく通ること
+
 ## 関連
 
 - Epic: [#437](https://github.com/HyperGenius/product-planner/issues/437)
@@ -223,3 +265,4 @@
 - Issue: [#443](https://github.com/HyperGenius/product-planner/issues/443)（出荷予定表エリア）
 - Issue: [#444](https://github.com/HyperGenius/product-planner/issues/444)（検索・フィルタ）
 - Issue: [#450](https://github.com/HyperGenius/product-planner/issues/450)（レイアウト・表示フォーマット改善）
+- Issue: [#452](https://github.com/HyperGenius/product-planner/issues/452)（1カラム化・納期超過バッジ強調・バッジ圧縮・出荷予定表の出荷先表示）

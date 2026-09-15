@@ -21,6 +21,7 @@ import { QuantityBadge } from "@/components/floor-dashboard/PlanValueBadges"
 export interface ShipmentScheduleRow {
   orderId: number
   orderNumber?: string
+  customerName: string
   productPrimary: string
   productSecondary?: string | null
   equipmentName: string
@@ -97,9 +98,13 @@ export function groupSchedulesByShipmentDate(
     })
     if (!matches) continue
 
+    const customerName =
+      order?.customer_id != null ? getCustomerDisplayName(order.customer_id, customers) : "顧客未設定"
+
     const row: ShipmentScheduleRow = {
       orderId,
       orderNumber: finalSchedule.order_number ?? order?.order_no ?? undefined,
+      customerName,
       productPrimary: product.primary,
       productSecondary: product.secondary,
       equipmentName: finalSchedule.equipment_name ?? "未設定",
@@ -140,6 +145,8 @@ interface ShipmentScheduleListProps {
  * 現場ダッシュボードの出荷予定表エリア（Issue #443）。
  * ホワイトボードの「出荷予定表」欄の置き換え。`GET /production-schedules` を最終工程の
  * 完了予定日でグルーピングして日付ごとに表示する。検索語・「納期遅れのみ」フィルタ（Issue #444）にも対応する。
+ * 各行は「注文番号・顧客名・数量」を中心に、どの製品をどの会社へ何個出荷するかが一目で
+ * わかる表示にする（Issue #452）。当日（JST基準）の日付セクションは他日と視覚的に区別する（Issue #452）。
  * 実績「未報告」バッジ（`UnreportedActualBadge`）は Phase 1 では非表示にする方針（Issue #450）。
  * フェーズ2（実績入力、Issue #438）で実績表示を導入する際に改めて組み込む想定のため、
  * コンポーネント自体は削除せず残してある。
@@ -171,34 +178,55 @@ export function ShipmentScheduleList({
         </p>
       ) : (
         <div className="space-y-6 overflow-y-auto flex-1 min-h-0">
-          {groups.map((group) => (
-            <div key={group.dateIso} className="rounded-md border border-border">
-              <h3 className="text-lg font-semibold px-4 py-2 border-b border-border bg-muted/50">
-                {formatSectionDate(group.dateIso)}
-              </h3>
-              <ul className="divide-y divide-border">
-                {group.rows.map((row) => (
-                  <li
-                    key={row.orderId}
-                    className="px-4 py-3 flex items-center justify-between gap-4"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">
-                        {row.productPrimary}
-                        {row.productSecondary && (
-                          <span className="ml-2 text-sm text-muted-foreground">
-                            {row.productSecondary}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-sm text-muted-foreground">{row.equipmentName}</p>
-                    </div>
-                    <QuantityBadge quantity={row.quantity} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {groups.map((group) => {
+            const isToday = group.dateIso === todayIso
+            return (
+              <div
+                key={group.dateIso}
+                className={`rounded-md border ${isToday ? "border-primary" : "border-border"}`}
+              >
+                <h3
+                  className={`text-lg font-semibold px-4 py-2 border-b flex items-center gap-2 ${
+                    isToday
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-muted/50"
+                  }`}
+                >
+                  {formatSectionDate(group.dateIso)}
+                  {isToday && (
+                    <span className="text-xs font-normal rounded-full bg-primary-foreground/20 px-2 py-0.5">
+                      本日
+                    </span>
+                  )}
+                </h3>
+                <ul className="divide-y divide-border">
+                  {group.rows.map((row) => (
+                    <li
+                      key={row.orderId}
+                      className="px-4 py-3 flex items-center justify-between gap-4"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">
+                          {row.orderNumber && (
+                            <span className="mr-3 font-mono text-sm text-muted-foreground">
+                              {row.orderNumber}
+                            </span>
+                          )}
+                          {row.customerName}
+                        </p>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {row.productPrimary}
+                          {row.productSecondary && <span className="ml-2">{row.productSecondary}</span>}
+                          <span className="ml-2">{row.equipmentName}</span>
+                        </p>
+                      </div>
+                      <QuantityBadge quantity={row.quantity} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
         </div>
       )}
     </section>
