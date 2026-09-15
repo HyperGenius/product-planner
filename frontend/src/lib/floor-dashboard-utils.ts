@@ -95,6 +95,25 @@ export function matchesSearchText(searchText: string, fields: SearchableOrderFie
 }
 
 /**
+ * 現場ダッシュボード向けの納期表示（Issue #450）。当年（JST基準）は "MM/DD"、翌年以降は
+ * "YYYY/MM/DD"。`order-utils.ts` の `formatDeadlineShort`（他画面向け・2桁年）とは表示桁数が
+ * 異なるため、現場ダッシュボード専用の関数として別に持つ。
+ * `getDeadlineStatus` 等と同様、`todayIso`（JST基準の "YYYY-MM-DD"）を呼び出し側から受け取る。
+ */
+export function formatDeadlineForFloorDashboard(
+  deadline: string | undefined,
+  todayIso: string,
+): string | null {
+  if (!deadline) return null
+  const iso = deadline.slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return iso.replace(/-/g, "/")
+  const [, year, month, day] = m
+  const currentYear = todayIso.slice(0, 4)
+  return year === currentYear ? `${month}/${day}` : `${year}/${month}/${day}`
+}
+
+/**
  * タイムスタンプ（timestamptz の ISO 8601 文字列）を Asia/Tokyo 基準の "YYYY-MM-DD" に変換する。
  * `production_schedules.end_datetime` のような時刻・TZ付きフィールドは `jstTodayIso()` と同じ
  * `en-CA` ロケール変換で JST の暦日に正しく丸められる（CLAUDE.md 日付文字列パースの方針）。

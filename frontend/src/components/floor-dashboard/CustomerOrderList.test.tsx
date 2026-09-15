@@ -137,8 +137,28 @@ describe("CustomerOrderList", () => {
     expect(screen.getByText("顧客A")).toBeInTheDocument()
     expect(screen.getByText("P-001")).toBeInTheDocument()
     expect(screen.getByText("製品A")).toBeInTheDocument()
-    expect(screen.getByText(/5 個 ／ 納期 2026\/09\/08/)).toBeInTheDocument()
+    expect(screen.getByText(/数量\s*5/)).toBeInTheDocument()
+    expect(screen.getByText(/納期\s*09\/08/)).toBeInTheDocument()
     expect(screen.getByText("納期超過")).toBeInTheDocument()
+  })
+
+  it("数量はカンマ区切り、納期は翌年のみ年を追加表示する", () => {
+    const orders: Order[] = [
+      makeOrder({ id: 1, customer_id: 1, product_id: 1, quantity: 1234, confirmed_deadline: "2027-01-05" }),
+    ]
+
+    render(
+      <CustomerOrderList
+        orders={orders}
+        products={products}
+        customers={customers}
+        isLoading={false}
+        filters={NO_FILTERS}
+      />,
+    )
+
+    expect(screen.getByText(/数量\s*1,234/)).toBeInTheDocument()
+    expect(screen.getByText(/納期\s*2027\/01\/05/)).toBeInTheDocument()
   })
 
   it("製品未確定の注文は extracted_product_name にフォールバックする", () => {

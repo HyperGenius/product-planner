@@ -29,6 +29,8 @@
 | `frontend/src/lib/floor-dashboard-utils.ts` | `toJstDateIso()`（timestamptz → JST日付）／`addDaysToIsoDate()`のexport化／`SHIPMENT_SCHEDULE_WINDOW_DAYS` を追加（Issue #443） |
 | `frontend/src/components/floor-dashboard/SearchAndFilterBar.tsx` | 検索・フィルタバー（検索入力・「納期遅れのみ」トグル・凡例。Issue #444） |
 | `frontend/src/lib/floor-dashboard-utils.ts` | `OrderSearchFilters` 型・`matchesSearchText()`（顧客名/製品名/注文番号の部分一致判定、純粋関数）を追加（Issue #444） |
+| `frontend/src/components/floor-dashboard/PlanValueBadges.tsx` | `QuantityBadge` / `DeadlineValueBadge`（数量・納期の値バッジ、`DeadlineBadge` と同テイスト。Issue #450） |
+| `frontend/src/lib/floor-dashboard-utils.ts` | `formatDeadlineForFloorDashboard()`（当年 `MM/DD`・翌年以降 `YYYY/MM/DD`。Issue #450） |
 
 ## 実装メモ
 
@@ -184,6 +186,34 @@
 - [x] 凡例の3色が実際のバッジ色と一致する（`STATUS_CLASS` を共有）
 - [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
 
+- **顧客別受注情報／出荷予定表の左右独立パネル化（Issue #450）**: `floor-dashboard/page.tsx` で両エリアを
+  `grid grid-cols-2 gap-6 flex-1 min-h-0` の2カラムで並べ、`CustomerOrderList` / `ShipmentScheduleList`
+  それぞれの `<section>` を `h-full flex flex-col overflow-hidden` にした上で、見出し（`h2`）を `shrink-0`、
+  中身のリストを `overflow-y-auto flex-1 min-h-0` にすることで、見出し固定・中身のみ独立スクロールを実現した。
+  `flex-1 min-h-0` を親（`FloorDashboardLayout`）から子まで一貫して指定しないと `overflow-y-auto` が効かない
+  （flexアイテムの初期 `min-height: auto` によりコンテンツ分の高さまで親ごと伸びてしまうため）点に注意。
+  `FloorDashboardLayout` のルートも `min-h-screen h-screen ... overflow-hidden` にして画面全体を1画面に固定し、
+  ページ自体はスクロールしない（各パネル内だけがスクロールする）構成にした
+- **数量・納期バッジの共通化（Issue #450）**: `DeadlineBadge`（納期状態）と同じ `Badge` コンポーネントで
+  テイストを揃えつつ役割を区別するため、`variant="outline"` の `QuantityBadge` / `DeadlineValueBadge`
+  （`components/floor-dashboard/PlanValueBadges.tsx`）を新設し、`CustomerOrderList` の行・`ShipmentScheduleList`
+  の行の両方から再利用する。数量は `toLocaleString("ja-JP")`（`order-table-row.tsx` の既存表記を踏襲）でカンマ
+  区切り、納期は当年（JST基準）`MM/DD`・翌年以降 `YYYY/MM/DD`（`formatDeadlineForFloorDashboard()`,
+  `floor-dashboard-utils.ts`）。既存の `order-utils.ts` の `formatDeadlineShort()`（他画面向け、2桁年）とは
+  年の桁数が異なる別要件のため、共通化せず現場ダッシュボード専用関数として分離した
+- **実績「未報告」バッジの非表示化（Issue #450）**: 現場での運用イメージのすり合わせの結果、Phase 1 では
+  出荷予定表に実績「未報告」を表示しない方針となった。`ShipmentScheduleList.tsx` から `UnreportedActualBadge`
+  の呼び出しを削除したが、コンポーネント自体はフェーズ2（実績入力、#438）で使う可能性があるため削除せず残す
+
+## 完了条件（Issue #450）
+
+- [x] 顧客別受注情報（左）と出荷予定表（右）が左右独立パネルで表示され、それぞれ独立してスクロールできる
+- [x] 各行の「数量」「納期」が `DeadlineBadge` と同じテイストのバッジで、状態バッジの左に表示される
+- [x] 納期表示が当年は `MM/DD`、翌年以降は `YYYY/MM/DD` になる
+- [x] 数量表示に3桁カンマ区切りが適用される
+- [x] 出荷予定表に「実績未報告」バッジが表示されない
+- [x] `npx tsc --noEmit` / `npm run lint` / `npm run test` がエラーなく通ること
+
 ## 関連
 
 - Epic: [#437](https://github.com/HyperGenius/product-planner/issues/437)
@@ -192,3 +222,4 @@
 - Issue: [#442](https://github.com/HyperGenius/product-planner/issues/442)（顧客別受注情報エリア）
 - Issue: [#443](https://github.com/HyperGenius/product-planner/issues/443)（出荷予定表エリア）
 - Issue: [#444](https://github.com/HyperGenius/product-planner/issues/444)（検索・フィルタ）
+- Issue: [#450](https://github.com/HyperGenius/product-planner/issues/450)（レイアウト・表示フォーマット改善）
