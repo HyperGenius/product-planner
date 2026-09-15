@@ -55,4 +55,5 @@ export const sampleCustomers: Customer[] = [
 export const handlers = [
   http.get(`${API_BASE}/products`, () => HttpResponse.json(sampleProducts)),
   http.get(`${API_BASE}/customers`, () => HttpResponse.json(sampleCustomers)),
+  http.get(`${API_BASE}/production-schedules`, () => HttpResponse.json([])),
 ]

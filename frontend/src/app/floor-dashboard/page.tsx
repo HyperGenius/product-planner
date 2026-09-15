@@ -3,12 +3,16 @@
 import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
+import { useSchedules } from "@/hooks/use-schedules"
 import { useFloorDashboardMetrics } from "@/hooks/use-floor-dashboard-metrics"
+import { jstTodayIso } from "@/lib/order-utils"
+import { addDaysToIsoDate, SHIPMENT_SCHEDULE_WINDOW_DAYS } from "@/lib/floor-dashboard-utils"
 import { FloorDashboardLayout } from "@/components/floor-dashboard/FloorDashboardLayout"
 import { FloorDashboardHeader } from "@/components/floor-dashboard/FloorDashboardHeader"
 import { FloorDashboardPhaseBanner } from "@/components/floor-dashboard/FloorDashboardPhaseBanner"
 import { KpiSummaryCards } from "@/components/floor-dashboard/KpiSummaryCards"
 import { CustomerOrderList } from "@/components/floor-dashboard/CustomerOrderList"
+import { ShipmentScheduleList } from "@/components/floor-dashboard/ShipmentScheduleList"
 
 // 自動更新間隔（5分）
 const REFETCH_INTERVAL_MS = 5 * 60 * 1000
@@ -24,6 +28,15 @@ export default function FloorDashboardPage() {
   const { data: customers, isLoading: customersLoading } = useCustomers()
   const metrics = useFloorDashboardMetrics(orders)
 
+  const todayIso = jstTodayIso()
+  const { data: schedules, isLoading: schedulesLoading } = useSchedules(
+    {
+      start_date: todayIso,
+      end_date: addDaysToIsoDate(todayIso, SHIPMENT_SCHEDULE_WINDOW_DAYS),
+    },
+    { refetchInterval: REFETCH_INTERVAL_MS },
+  )
+
   return (
     <FloorDashboardLayout>
       <FloorDashboardHeader
@@ -38,7 +51,13 @@ export default function FloorDashboardPage() {
         customers={customers}
         isLoading={isLoading || productsLoading || customersLoading}
       />
-      {/* 後続Issue（検索/フィルタ・出荷予定表）はここに差し込む */}
+      <ShipmentScheduleList
+        schedules={schedules}
+        orders={orders}
+        products={products}
+        isLoading={isLoading || productsLoading || schedulesLoading}
+      />
+      {/* 後続Issue（検索/フィルタ）はここに差し込む */}
     </FloorDashboardLayout>
   )
 }

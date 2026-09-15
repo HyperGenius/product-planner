@@ -6,7 +6,7 @@
 既存の管理画面ダッシュボード（`/`、サイドバー付き、ロール別パーソナライズ。Epic #399）とは目的が異なり、
 常時表示・大きめフォント・自動更新前提のフルスクリーン画面として新設した（Epic #437、本Issueは基盤部分の #440）。
 
-後続Issueで検索/フィルタ・出荷予定表を `FloorDashboardLayout` の中に差し込んでいく（KPIサマリーカードは #441、顧客別受注情報エリアは #442 で実装済み）。
+後続Issueで検索/フィルタを `FloorDashboardLayout` の中に差し込んでいく（KPIサマリーカードは #441、顧客別受注情報エリアは #442、出荷予定表エリアは #443 で実装済み）。
 
 ## 対象ファイル
 
@@ -23,6 +23,10 @@
 | `frontend/src/lib/floor-dashboard-utils.ts` | `IN_PRODUCTION_STATUSES` / `getEffectiveDeadline()` / 納期状態判定 `getDeadlineStatus()` / 残日数 `getDaysRemaining()`（Issue #442。検索・フィルタ #444 の凡例と閾値を共有する想定で `use-floor-dashboard-metrics.ts` からも参照） |
 | `frontend/src/components/floor-dashboard/CustomerOrderList.tsx` | 顧客別受注情報エリア。`groupOrdersByCustomer()`（純粋関数）＋表示コンポーネント（Issue #442） |
 | `frontend/src/components/floor-dashboard/DeadlineBadge.tsx` | 納期状態バッジ（納期超過／残りN日／予定通り。Issue #442） |
+| `frontend/src/components/floor-dashboard/ShipmentScheduleList.tsx` | 出荷予定表エリア。`groupSchedulesByShipmentDate()`（純粋関数）＋表示コンポーネント（Issue #443） |
+| `frontend/src/components/floor-dashboard/UnreportedActualBadge.tsx` | 実績「未報告」固定バッジ（フェーズ2 #438 で差し替え予定。Issue #443） |
+| `frontend/src/hooks/use-schedules.ts` | 既存の `useSchedules()` を出荷予定表エリアでも再利用（変更なし） |
+| `frontend/src/lib/floor-dashboard-utils.ts` | `toJstDateIso()`（timestamptz → JST日付）／`addDaysToIsoDate()`のexport化／`SHIPMENT_SCHEDULE_WINDOW_DAYS` を追加（Issue #443） |
 
 ## 実装メモ
 
@@ -109,10 +113,54 @@
 - [ ] 検索・フィルタと連動して絞り込める（検索・フィルタ本体は #444 で実装。本Issueでは連動できる構造を残すのみ）
 - [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
 
+## 完了条件（Issue #443）
+
+- [x] 出荷予定が日付ごとにグループ化されて表示される
+- [x] 各行に製品名・設備名・計画数量が表示される
+- [x] 各行に固定で「実績未報告」バッジが表示される
+- [ ] 検索・フィルタと連動して絞り込める（検索・フィルタ本体は #444 で実装）
+- [x] `npx tsc --noEmit` / `npm run lint` がエラーなく通ること
+
+- **「最終工程の完了予定日」の求め方**: `GET /production-schedules` は工程（`process_routing`）単位の
+  レコードを返す（1注文につき複数行）。Issue本文の「最終工程の完了予定日でグルーピング」は、
+  取得期間内に含まれる同一 `order_id` の行のうち `end_datetime` が最も遅いものを最終工程とみなして
+  求めている（`groupSchedulesByShipmentDate()`）。取得期間の外側に本当の最終工程がある場合
+  （期間の境界をまたぐ受注）は正しく求まらない既知の制約で、フェーズ1では許容している
+- **表示は1行＝1注文**: 各行の設備名は最終工程で使用する設備、計画数量は工程ごとではなく
+  注文（`orders.quantity`）そのものを表示する。数量はスケジュール側に無いため `orders` 一覧
+  （ページで既に取得済み）を `order_id` で突き合わせて取得する
+- **取得期間**: Issue本文で「本日以降 N 日間」が要確認とされていたため、暫定で本日（JST）〜13日後
+  （14日間）とした（`SHIPMENT_SCHEDULE_WINDOW_DAYS`、`floor-dashboard-utils.ts`）。長すぎる／短すぎる
+  場合は後続Issueで調整する
+- **対象スコープ**: `orders` に一致する注文が見つかる場合は `IN_PRODUCTION_STATUSES`
+  （confirmed / in_progress。KPI・顧客別受注情報と同じ定義）以外を除外する。一致しない場合
+  （データ不整合等）はスケジュール側の非正規化データ（`product_name` 等）のみでフォールバック表示する
+  （「ないものをあるように見せない」原則で、サイレントに行を消さない）
+- **JSTでの日付グルーピング**: `end_datetime` は時刻・TZ付きのタイムスタンプ（timestamptz）のため、
+  `new Date()` で正しくパースできるが、暦日への丸めは端末TZ依存になる。`toJstDateIso()`
+  （`jstTodayIso()` と同じ `en-CA` ロケール変換）で Asia/Tokyo 基準に固定した
+  （CLAUDE.md 日付の「今日」判定の方針に準拠）
+- **実績「未報告」バッジの設計**: `UnreportedActualBadge` は props を持たない固定表示のみ。
+  フェーズ2（実績入力、#438）でコンポーネントごと差し替える前提のため、`actualQuantity` のような
+  未実装のロジックを先回りして作り込まない方針とした（Issue本文の過剰設計回避の指示どおり）
+- **常時表示画面での自動更新（PR #448 Copilotレビュー指摘）**: `useOrders` は `refetchInterval` を
+  受け取れるが `useSchedules` には無く、出荷予定表だけ自動更新されない（日付ウィンドウも日付跨ぎで
+  進まない）状態だった。`useSchedules(params, options)` に `useOrders` と同じ `{ refetchInterval }`
+  オプションを追加し、`floor-dashboard/page.tsx` から `KpiSummaryCards` 等と同じ `REFETCH_INTERVAL_MS`
+  （5分）を渡すようにした
+- **最終工程判定は `Date` 比較で行う（PR #448 Copilotレビュー指摘）**: `end_datetime` の大小判定を
+  ISO文字列の辞書順比較で行うと、タイムゾーンオフセット表記や小数秒の有無など文字列フォーマットの
+  差异で誤判定しうる。`new Date(a) > new Date(b)` に変更した。あわせて `orders?.find()` を注文ごとに
+  呼ぶと件数の2乗の計算量になるため、事前に `Map<number, Order>` 化してから参照するようにした
+- **JST日付グルーピングのテスト（PR #448 Copilotレビュー指摘）**: `toJstDateIso()` は要件の中心のため、
+  UTC日付境界を跨いで JST では翌日になるケース（例: `2026-09-10T15:30:00Z` → JST `2026-09-11`）を
+  ユニットテストで固定し、端末TZや実装変更による回帰を防ぐようにした
+
 ## 関連
 
 - Epic: [#437](https://github.com/HyperGenius/product-planner/issues/437)
 - Issue: [#440](https://github.com/HyperGenius/product-planner/issues/440)（基盤）
 - Issue: [#441](https://github.com/HyperGenius/product-planner/issues/441)（KPIサマリーカード）
 - Issue: [#442](https://github.com/HyperGenius/product-planner/issues/442)（顧客別受注情報エリア）
+- Issue: [#443](https://github.com/HyperGenius/product-planner/issues/443)（出荷予定表エリア）
 - Issue: [#444](https://github.com/HyperGenius/product-planner/issues/444)（検索・フィルタ。本Issueの納期状態判定ロジックを共有する予定）
