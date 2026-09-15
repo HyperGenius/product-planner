@@ -56,21 +56,23 @@ export default function FloorDashboardPage() {
       <FloorDashboardPhaseBanner />
       <KpiSummaryCards metrics={metrics} isLoading={isLoading} />
       <SearchAndFilterBar filters={filters} onFiltersChange={setFilters} />
-      <CustomerOrderList
-        orders={orders}
-        products={products}
-        customers={customers}
-        isLoading={isLoading || productsLoading || customersLoading}
-        filters={filters}
-      />
-      <ShipmentScheduleList
-        schedules={schedules}
-        orders={orders}
-        products={products}
-        customers={customers}
-        isLoading={isLoading || productsLoading || schedulesLoading}
-        filters={filters}
-      />
+      <div className="grid grid-cols-2 gap-6 flex-1 min-h-0">
+        <CustomerOrderList
+          orders={orders}
+          products={products}
+          customers={customers}
+          isLoading={isLoading || productsLoading || customersLoading}
+          filters={filters}
+        />
+        <ShipmentScheduleList
+          schedules={schedules}
+          orders={orders}
+          products={products}
+          customers={customers}
+          isLoading={isLoading || productsLoading || schedulesLoading}
+          filters={filters}
+        />
+      </div>
     </FloorDashboardLayout>
   )
 }

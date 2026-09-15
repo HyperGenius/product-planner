@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { getDaysRemaining, getDeadlineStatus, matchesSearchText } from "./floor-dashboard-utils"
+import {
+  formatDeadlineForFloorDashboard,
+  getDaysRemaining,
+  getDeadlineStatus,
+  matchesSearchText,
+} from "./floor-dashboard-utils"
 
 /**
  * `getDeadlineStatus` / `getDaysRemaining` のユニットテスト（Issue #442）。
@@ -48,6 +53,20 @@ describe("getDaysRemaining", () => {
 
   it("未来なら正の値（月またぎでも正しい）", () => {
     expect(getDaysRemaining("2026-10-02", "2026-09-30")).toBe(2)
+  })
+})
+
+describe("formatDeadlineForFloorDashboard", () => {
+  it("当年は MM/DD", () => {
+    expect(formatDeadlineForFloorDashboard("2026-09-08", "2026-09-10")).toBe("09/08")
+  })
+
+  it("翌年以降は YYYY/MM/DD", () => {
+    expect(formatDeadlineForFloorDashboard("2027-01-05", "2026-09-10")).toBe("2027/01/05")
+  })
+
+  it("未設定なら null", () => {
+    expect(formatDeadlineForFloorDashboard(undefined, "2026-09-10")).toBeNull()
   })
 })
 

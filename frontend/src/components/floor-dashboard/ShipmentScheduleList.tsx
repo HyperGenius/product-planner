@@ -16,7 +16,7 @@ import {
   matchesSearchText,
   type OrderSearchFilters,
 } from "@/lib/floor-dashboard-utils"
-import { UnreportedActualBadge } from "@/components/floor-dashboard/UnreportedActualBadge"
+import { QuantityBadge } from "@/components/floor-dashboard/PlanValueBadges"
 
 export interface ShipmentScheduleRow {
   orderId: number
@@ -139,8 +139,10 @@ interface ShipmentScheduleListProps {
 /**
  * 現場ダッシュボードの出荷予定表エリア（Issue #443）。
  * ホワイトボードの「出荷予定表」欄の置き換え。`GET /production-schedules` を最終工程の
- * 完了予定日でグルーピングして日付ごとに表示し、各行に実績「未報告」を固定表示する
- * （実績入力はフェーズ2 #438 で実装予定）。検索語・「納期遅れのみ」フィルタ（Issue #444）にも対応する。
+ * 完了予定日でグルーピングして日付ごとに表示する。検索語・「納期遅れのみ」フィルタ（Issue #444）にも対応する。
+ * 実績「未報告」バッジ（`UnreportedActualBadge`）は Phase 1 では非表示にする方針（Issue #450）。
+ * フェーズ2（実績入力、Issue #438）で実績表示を導入する際に改めて組み込む想定のため、
+ * コンポーネント自体は削除せず残してある。
  */
 export function ShipmentScheduleList({
   schedules,
@@ -157,8 +159,8 @@ export function ShipmentScheduleList({
   )
 
   return (
-    <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
-      <h2 className="text-2xl font-bold mb-4">出荷予定表</h2>
+    <section className="rounded-lg border border-border bg-card p-6 shadow-sm h-full flex flex-col overflow-hidden">
+      <h2 className="text-2xl font-bold mb-4 shrink-0">出荷予定表</h2>
       {isLoading ? (
         <p className="text-muted-foreground">読み込み中…</p>
       ) : groups.length === 0 ? (
@@ -168,7 +170,7 @@ export function ShipmentScheduleList({
             : "出荷予定はありません"}
         </p>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-6 overflow-y-auto flex-1 min-h-0">
           {groups.map((group) => (
             <div key={group.dateIso} className="rounded-md border border-border">
               <h3 className="text-lg font-semibold px-4 py-2 border-b border-border bg-muted/50">
@@ -189,11 +191,9 @@ export function ShipmentScheduleList({
                           </span>
                         )}
                       </p>
-                      <p className="text-sm text-muted-foreground">
-                        {row.equipmentName} ／ {row.quantity ?? "-"} 個
-                      </p>
+                      <p className="text-sm text-muted-foreground">{row.equipmentName}</p>
                     </div>
-                    <UnreportedActualBadge />
+                    <QuantityBadge quantity={row.quantity} />
                   </li>
                 ))}
               </ul>

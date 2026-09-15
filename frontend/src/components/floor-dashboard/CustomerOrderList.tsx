@@ -4,12 +4,7 @@ import { useMemo } from "react"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
-import {
-  getCustomerDisplayName,
-  getProductDisplayParts,
-  formatDeadlineDate,
-  jstTodayIso,
-} from "@/lib/order-utils"
+import { getCustomerDisplayName, getProductDisplayParts, jstTodayIso } from "@/lib/order-utils"
 import {
   IN_PRODUCTION_STATUSES,
   getEffectiveDeadline,
@@ -19,6 +14,7 @@ import {
   type OrderSearchFilters,
 } from "@/lib/floor-dashboard-utils"
 import { DeadlineBadge } from "@/components/floor-dashboard/DeadlineBadge"
+import { QuantityBadge, DeadlineValueBadge } from "@/components/floor-dashboard/PlanValueBadges"
 
 export interface CustomerOrderGroup {
   customerId: number | null
@@ -116,8 +112,8 @@ export function CustomerOrderList({
   )
 
   return (
-    <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
-      <h2 className="text-2xl font-bold mb-4">顧客別受注情報</h2>
+    <section className="rounded-lg border border-border bg-card p-6 shadow-sm h-full flex flex-col overflow-hidden">
+      <h2 className="text-2xl font-bold mb-4 shrink-0">顧客別受注情報</h2>
       {isLoading ? (
         <p className="text-muted-foreground">読み込み中…</p>
       ) : groups.length === 0 ? (
@@ -127,7 +123,7 @@ export function CustomerOrderList({
             : "受注中の注文はありません"}
         </p>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2 overflow-y-auto flex-1 min-h-0">
           {groups.map((group) => (
             <div key={group.customerId ?? "unassigned"} className="rounded-md border border-border">
               <h3 className="text-lg font-semibold px-4 py-2 border-b border-border bg-muted/50">
@@ -154,11 +150,12 @@ export function CustomerOrderList({
                             </span>
                           )}
                         </p>
-                        <p className="text-sm text-muted-foreground">
-                          {order.quantity ?? "-"} 個 ／ 納期 {formatDeadlineDate(deadline) ?? "未設定"}
-                        </p>
                       </div>
-                      <DeadlineBadge status={status} daysRemaining={daysRemaining} />
+                      <div className="flex items-center gap-2 shrink-0">
+                        <QuantityBadge quantity={order.quantity} />
+                        <DeadlineValueBadge deadline={deadline} todayIso={todayIso} />
+                        <DeadlineBadge status={status} daysRemaining={daysRemaining} />
+                      </div>
                     </li>
                   )
                 })}

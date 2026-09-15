@@ -199,7 +199,7 @@ describe("ShipmentScheduleList", () => {
     expect(screen.getByText("出荷予定はありません")).toBeInTheDocument()
   })
 
-  it("製品名・設備名・計画数量・実績未報告バッジを表示する", () => {
+  it("製品名・設備名・計画数量を表示する", () => {
     const orders = [makeOrder({ id: 1, product_id: 1, quantity: 5 })]
     const schedules = [
       makeSchedule({
@@ -215,7 +215,25 @@ describe("ShipmentScheduleList", () => {
     )
 
     expect(screen.getByText("製品A")).toBeInTheDocument()
-    expect(screen.getByText(/設備1 ／ 5 個/)).toBeInTheDocument()
-    expect(screen.getByText("実績未報告")).toBeInTheDocument()
+    expect(screen.getByText("設備1")).toBeInTheDocument()
+    expect(screen.getByText(/数量\s*5/)).toBeInTheDocument()
+  })
+
+  it("実績「未報告」バッジは Phase 1 では表示しない（Issue #450）", () => {
+    const orders = [makeOrder({ id: 1, product_id: 1, quantity: 5 })]
+    const schedules = [
+      makeSchedule({
+        id: 1,
+        order_id: 1,
+        end_datetime: "2026-09-10T05:00:00Z",
+        equipment_name: "設備1",
+      }),
+    ]
+
+    render(
+      <ShipmentScheduleList schedules={schedules} orders={orders} products={products} isLoading={false} />,
+    )
+
+    expect(screen.queryByText("実績未報告")).not.toBeInTheDocument()
   })
 })
