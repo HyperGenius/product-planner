@@ -241,6 +241,33 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 導線: 行クリック → `/orders/{id}`、見出し／フッターボタン →
 `/orders?status=pending_approval`（既存の一括承認画面）。
 
+### レイアウト改善（Issue #456）
+
+`DeadlineRiskCard`（Issue #454）のレイアウト改善に合わせて、以下のとおり改善した。
+
+- ヘッダーのサブタイトル「クリックして一括承認画面へ」を削除。ヘッダー行は引き続き
+  クリック可能（`/orders?status=pending_approval`）で、右端の `ArrowRight` アイコンで
+  導線を示す
+- リスト最下部の「一括承認画面へ→」ボタンを削除（ヘッダー行クリックと導線が重複していたため）
+- 依頼者名・依頼からの経過時間の列を削除（`approval_requested_by_name` /
+  `approval_requested_at` はプロパティとしては残すが、カードには表示しない）
+- 各行を `DeadlineRiskCard` と同様の1行グリッドレイアウトに変更。顧客名（新規表示。
+  `getCustomerDisplayName(order.customer_id, customers)`）・製品名を `text-foreground`
+  で表示し、数量を `Badge`（`variant="outline"`）で表示。行全体を `grid`
+  （`grid-cols-[minmax(0,1fr)_auto_auto_auto]`）にして数量バッジ・希望/シミュ納期・
+  超過日数ラベルを固定列で右揃えし、行ごとの文字数・桁数差によるガタつきを防ぐ
+- 「納期遅延」ピルバッジを廃止し、`DeadlineRiskCard` と同じ「N日超過」表現の赤文字
+  ラベル（`AlertTriangle` アイコン付き）に統一。超過日数は
+  `diffDaysIso(desired, simulated)`（`lib/deadline-risk.ts` から export。
+  `simulated_deadline - desired_deadline` の日数）で算出する。超過判定自体は従来と
+  同じ単純な `simulated_deadline > desired_deadline`
+
+| ファイル | 変更内容 |
+|---|---|
+| `components/dashboard/ApprovalQueueCard.tsx` | サブタイトル・下部ボタン・依頼者情報を削除し、1行グリッドレイアウトへ変更。`customers` prop を追加 |
+| `components/dashboard/PresidentDashboard.tsx` | `ApprovalQueueCard` にも `customers`（Issue #454 で追加済み）を渡す |
+| `lib/deadline-risk.ts` | `diffDaysIso` を export し、`ApprovalQueueCard` の超過日数計算でも再利用 |
+
 ### Backend
 
 | ファイル | 変更内容 |
@@ -257,9 +284,11 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 
 1. `order_handler` で下書き注文の承認依頼を送信 → `orders.approval_requested_at` /
    `approval_requested_by` が更新されること
-2. `president` のダッシュボードに承認待ちキューカードが表示され、各行に依頼者・
-   経過時間・シミュ納期・遅延強調（`simulated_deadline > desired_deadline` の行）が出ること
-3. 行クリックで注文詳細、見出しから一括承認画面へ遷移できること
+2. `president` のダッシュボードに承認待ちキューカードが表示され、各行に顧客名・
+   製品名・数量バッジ・希望/シミュ納期が出ること。`simulated_deadline > desired_deadline`
+   の行には「N日超過」ラベル（赤文字）が出ること
+3. 行クリックで注文詳細、ヘッダー行クリックで一括承認画面へ遷移できること
+   （サブタイトル・下部ボタンは表示されない）
 4. 承認待ち 0 件のときカードが非表示になること
 5. `president` が差し戻し（reject）／`order_handler` が取り下げ（withdraw）すると
    2 カラムが NULL に戻ること

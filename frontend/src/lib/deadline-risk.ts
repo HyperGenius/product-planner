@@ -30,8 +30,9 @@ export interface DeadlineRiskOrder {
 /**
  * "YYYY-MM-DD" 同士の日数差（`toIso - fromIso`）を端末タイムゾーン非依存で返す。
  * 両端を UTC 深夜として解釈するため、`new Date("YYYY-MM-DD")` のような日付ズレは起きない。
+ * `ApprovalQueueCard`（Issue #456）の超過日数表示でも同じ計算を使うため export する。
  */
-function diffDaysIso(fromIso: string, toIso: string): number {
+export function diffDaysIso(fromIso: string, toIso: string): number {
   const from = Date.parse(`${fromIso}T00:00:00Z`)
   const to = Date.parse(`${toIso}T00:00:00Z`)
   return Math.round((to - from) / 86_400_000)

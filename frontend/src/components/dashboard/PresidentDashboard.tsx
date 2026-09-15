@@ -16,7 +16,7 @@ interface PresidentDashboardProps {
   /** DashboardRouter が1回だけ取得した注文一覧（承認待ちキュー表示に使う。Issue #402） */
   orders: Order[] | undefined
   products: Product[] | undefined
-  /** 納期リスク注文カードの顧客名表示に使う（Issue #454） */
+  /** 承認待ちキューカード・納期リスク注文カードの顧客名表示に使う（Issue #454, #456） */
   customers: Customer[] | undefined
   ordersLoading: boolean
   productsLoading: boolean
@@ -44,6 +44,7 @@ export function PresidentDashboard({
       <ApprovalQueueCard
         orders={orders}
         products={products}
+        customers={customers}
         ordersLoading={ordersLoading}
       />
       <DeadlineRiskCard
