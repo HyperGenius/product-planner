@@ -288,14 +288,36 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 - 導線: 行クリック → `/orders/{id}`
 - リスク 0 件・ロード中はカードごと非表示
 
+### レイアウト（Issue #454 で改善）
+
+初期実装（2行・注文番号＋ステータスバッジ表示）は、件数が多いと画面を圧迫し、
+1行あたりの情報も間延びして見づらかったため、以下のとおり改善した。
+
+- 5件を超える分はカードの高さを一定に保つため内部スクロール（`max-h-[220px]` +
+  `overflow-y-auto`）で表示する。ページネーション（前後ボタン）も検討したが、
+  「一覧してすぐ気づく」用途のため、追加の状態管理を要さないスクロール方式を採用
+- 1行表示（旧: 2行）。左に「顧客名 / 製品名 + 数量バッジ」、右に「希望・確定納期 +
+  超過日数ラベル」を配置
+- 注文番号（`#1000087` 形式）とステータスバッジは削除。確定日付が表示されていれば
+  確定済みと判別できるため
+- 顧客名（新規表示。`getCustomerDisplayName(order.customer_id, customers)`）・製品名を
+  `text-foreground` で表示（旧: 製品名のみ `text-muted-foreground`）
+- 数量はテキストではなく `Badge`（`variant="outline"`, `floor-dashboard/PlanValueBadges.tsx`
+  の `QuantityBadge` と同スタイル）で表示
+- 行ごとに顧客名・製品名の文字数や日付・超過日数の桁数が異なりバッジ／日付／
+  超過日数ラベルの横位置がガタつく問題があったため、行全体を `grid`
+  （`grid-cols-[minmax(0,1fr)_auto_auto_auto]`）にして数量バッジ・日付・超過日数ラベルを
+  それぞれ独立した列にした。`auto` 列は全行中の最大幅に揃うため、各列が縦に整列する
+
 ### Frontend
 
 | ファイル | 変更内容 |
 |---|---|
 | `lib/deadline-risk.ts` | 新規。`RISK_DEADLINE_BUFFER_DAYS` 定数、`getDeadlineRiskOrders(orders, todayIso?, bufferDays?)`（フィルタ＋ソート済みの純粋関数）、`describeDeadlineRisk(row)`（表示文言）。日付差は UTC 深夜基準で端末 TZ 非依存に計算 |
 | `lib/deadline-risk.test.ts` | 新規。リスク判定・ソート・文言の純粋関数ユニットテスト（Vitest、Issue #340 基盤） |
-| `components/dashboard/DeadlineRiskCard.tsx` | 新規。`orders` prop（`DashboardRouter` が 1 回だけ取得した全ステータスの注文一覧）を `getDeadlineRiskOrders()` で絞り込んで描画。表示専用 |
-| `components/dashboard/PresidentDashboard.tsx` | `ApprovalQueueCard` の直下に `DeadlineRiskCard` を追加（`orders` / `products` / `ordersLoading` を渡す。新規フェッチはしない） |
+| `components/dashboard/DeadlineRiskCard.tsx` | `orders` / `products` prop（`DashboardRouter` が 1 回だけ取得）を `getDeadlineRiskOrders()` で絞り込んで描画。表示専用。Issue #454 で `customers` prop・1行グリッドレイアウトを追加 |
+| `components/dashboard/PresidentDashboard.tsx` | `ApprovalQueueCard` の直下に `DeadlineRiskCard` を追加（`orders` / `products` / `customers` / `ordersLoading` を渡す。新規フェッチはしない） |
+| `hooks/use-customers.ts`（既存） | Issue #454 で `DashboardRouter` から呼び出すよう追加（`president` 向けのみ `PresidentDashboard` に渡す。`DefaultDashboard` には渡さない） |
 
 バックエンド変更なし（`GET /orders` の全件取得をクライアント側でフィルタ）。件数が
 増えて重くなったら `GET /orders?risk=true` 相当をバックエンドに追加する（別 Issue）。
@@ -305,11 +327,13 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 1. `president` のダッシュボードで、承認待ちキューカードの下に納期リスク注文カードが
    表示されること（`confirmed` / `in_progress` で `confirmed_deadline > desired_deadline`
    または `desired_deadline <= today` の注文がある状態）
-2. 各行に 注文番号 / 製品名 × 数量 / 希望納期 / 確定納期 / 超過日数 / ステータス が出ること
+2. 各行が1行で表示され、顧客名 / 製品名 + 数量バッジ / 希望納期・確定納期 / 超過日数
+   ラベルが出ること（注文番号・ステータスバッジは出ないこと）
 3. 超過日数降順 → 希望納期昇順でソートされること
-4. 行クリックで注文詳細へ遷移できること
-5. リスク対象が 0 件のときカードが非表示になること
-6. `cd frontend && npm run test` で `deadline-risk.test.ts` がパスすること
+4. リスク対象が6件以上のとき、カードの高さが一定に保たれ内部スクロールできること
+5. 行クリックで注文詳細へ遷移できること
+6. リスク対象が 0 件のときカードが非表示になること
+7. `cd frontend && npm run test` で `deadline-risk.test.ts` がパスすること
 
 ---
 

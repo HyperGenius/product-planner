@@ -1,5 +1,6 @@
 "use client"
 
+import { useCustomers } from "@/hooks/use-customers"
 import { useOrders } from "@/hooks/use-orders"
 import { useProducts } from "@/hooks/use-products"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
@@ -18,11 +19,15 @@ import { PresidentDashboard } from "./PresidentDashboard"
  * `useOrders()` / `useProducts()` はここで1回だけ呼び、両ダッシュボードには props で渡す。
  * 各ダッシュボード内で個別に呼ぶと、ロール判明時のコンポーネント切り替えで
  * 再マウント → 再フェッチ（TanStack Query は既定で staleTime=0）が走りうるため。
+ *
+ * `useCustomers()` は納期リスク注文カード（president 限定）の顧客名表示にのみ使うため、
+ * `PresidentDashboard` にだけ渡す（Issue #454）。
  */
 export function DashboardRouter() {
   const { data: currentMember } = useCurrentMember()
   const { data: orders, isLoading: ordersLoading } = useOrders()
   const { data: products, isLoading: productsLoading } = useProducts()
+  const { data: customers } = useCustomers()
   const metrics = useDashboardMetrics(orders)
 
   const dashboardProps = {
@@ -33,7 +38,13 @@ export function DashboardRouter() {
   }
 
   if (currentMember?.role === "president") {
-    return <PresidentDashboard {...dashboardProps} orders={orders} />
+    return (
+      <PresidentDashboard
+        {...dashboardProps}
+        orders={orders}
+        customers={customers}
+      />
+    )
   }
 
   return <DefaultDashboard {...dashboardProps} />
