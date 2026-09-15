@@ -56,7 +56,7 @@ export default function FloorDashboardPage() {
       <FloorDashboardPhaseBanner />
       <KpiSummaryCards metrics={metrics} isLoading={isLoading} />
       <SearchAndFilterBar filters={filters} onFiltersChange={setFilters} />
-      <div className="grid grid-cols-2 gap-6 flex-1 min-h-0">
+      <div className="grid grid-cols-2 gap-6 flex-1 min-h-0 overflow-hidden">
         <CustomerOrderList
           orders={orders}
           products={products}
