@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw"
 import type { Product } from "@/types/product"
+import type { Customer } from "@/types/customer"
 
 /** apiClient のベース URL（vitest.setup.ts の NEXT_PUBLIC_API_URL と揃える）。 */
 export const API_BASE = "http://localhost:8000"
@@ -29,9 +30,29 @@ export const sampleProducts: Product[] = [
   },
 ]
 
+export const sampleCustomers: Customer[] = [
+  {
+    id: 1,
+    name: "テスト顧客A",
+    status: "active",
+    tenant_id: "tenant-1",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: 2,
+    name: "テスト顧客B",
+    status: "active",
+    tenant_id: "tenant-1",
+    created_at: "2026-01-02T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+  },
+]
+
 /**
  * デフォルトのハンドラ。個別テストは `server.use(...)` で上書きする。
  */
 export const handlers = [
   http.get(`${API_BASE}/products`, () => HttpResponse.json(sampleProducts)),
+  http.get(`${API_BASE}/customers`, () => HttpResponse.json(sampleCustomers)),
 ]

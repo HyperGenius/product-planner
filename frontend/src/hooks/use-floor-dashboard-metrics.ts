@@ -3,12 +3,7 @@
 import { useMemo } from "react"
 import type { Order } from "@/types/order"
 import { jstTodayIso } from "@/lib/order-utils"
-
-/**
- * 「受注中」とみなす受注ステータス（Issue #441）。
- * `use-dashboard-metrics.ts` の `IN_PRODUCTION_STATUSES` と同じ定義。
- */
-const IN_PRODUCTION_STATUSES: readonly Order["status"][] = ["confirmed", "in_progress"]
+import { IN_PRODUCTION_STATUSES, getEffectiveDeadline } from "@/lib/floor-dashboard-utils"
 
 export interface FloorDashboardMetrics {
   /** 受注中（status が confirmed / in_progress）の注文数 */
@@ -17,11 +12,6 @@ export interface FloorDashboardMetrics {
   overdueCount: number
   /** 受注中のうち、confirmed_deadline が本日の件数（本日出荷予定） */
   todayShippingCount: number
-}
-
-/** 承認確定後は confirmed_deadline、承認前は simulated_deadline を納期とみなす（CLAUDE.md 納期フィールドの方針に準拠） */
-function effectiveDeadline(order: Order): string | undefined {
-  return order.confirmed_deadline ?? order.simulated_deadline
 }
 
 /**
@@ -38,7 +28,7 @@ export function computeFloorDashboardMetrics(
     orders?.filter((order) => IN_PRODUCTION_STATUSES.includes(order.status)) ?? []
 
   const overdueCount = inProduction.filter((order) => {
-    const deadline = effectiveDeadline(order)
+    const deadline = getEffectiveDeadline(order)
     return !!deadline && deadline < todayIso
   }).length
 
