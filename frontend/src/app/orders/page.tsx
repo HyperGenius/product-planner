@@ -192,12 +192,12 @@ export default function OrdersPage() {
           onSortChange={(v) => setParam("sort", v)}
         />
 
-        <div className="rounded-lg border bg-card shadow-sm">
+        <div className="rounded-lg border bg-card shadow-sm max-h-[calc(100vh-20rem)] overflow-y-auto">
           {isLoading ? (
             <div className="p-8 text-center text-muted-foreground">読み込み中...</div>
           ) : pagedOrders.length > 0 ? (
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead className="w-10">
                     <div className="flex items-center justify-center">
