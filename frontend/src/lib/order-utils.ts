@@ -69,7 +69,7 @@ export function isNoRoutingOrder(order: Order): boolean {
  * - platform_admin: 確定済み
  * ロール未取得中（null）は判定できないため対象外（false）とする。
  */
-function isActionRequiredForRole(order: Order, role: MemberRole | string | null): boolean {
+function isActionRequiredForRole(order: Order, role: MemberRole | null): boolean {
   if (role === "order_handler" || role === "iso_officer") {
     return order.status === "draft"
   }
@@ -85,7 +85,7 @@ function isActionRequiredForRole(order: Order, role: MemberRole | string | null)
 export function filterOrder(
   order: Order,
   statusFilter: StatusFilter,
-  role: MemberRole | string | null = null
+  role: MemberRole | null = null
 ): boolean {
   if (statusFilter === "action_required") {
     return isActionRequiredForRole(order, role)

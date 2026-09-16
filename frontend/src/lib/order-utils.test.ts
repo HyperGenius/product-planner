@@ -72,7 +72,7 @@ describe("filterOrder", () => {
       const draft = makeOrder({ status: "draft", is_scheduled: false })
       const simulated = makeOrder({ status: "draft", is_scheduled: true })
       const pendingApproval = makeOrder({ status: "pending_approval" })
-      for (const role of ["order_handler", "iso_officer"]) {
+      for (const role of ["order_handler", "iso_officer"] as const) {
         expect(filterOrder(draft, "action_required", role)).toBe(true)
         expect(filterOrder(simulated, "action_required", role)).toBe(true)
         expect(filterOrder(pendingApproval, "action_required", role)).toBe(false)
