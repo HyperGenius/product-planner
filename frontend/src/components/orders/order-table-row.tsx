@@ -30,6 +30,7 @@ import {
   formatDeadlineDate,
   formatDeadlineShort,
   getDeadlineForTab,
+  getOrderUrgency,
   isDeadlineOverdue,
   isNoRoutingOrder,
   type StatusFilter,
@@ -112,9 +113,16 @@ export function OrderTableRow({
   const hasMenuActionGroup =
     canWithdraw || canReject || canShip || canResimulate || canEditOrder
 
+  // 緊急度による段階的な背景色（Issue #461）。優先順位（高い順）:
+  // バルクシミュレーション失敗行 > 緊急度 > メール起票行。
+  const urgency = getOrderUrgency(order, statusFilter)
   let rowClassName: string | undefined
   if (hasBulkSimFailed) {
     rowClassName = "border-l-[3px] border-l-destructive bg-destructive/5"
+  } else if (urgency === "today") {
+    rowClassName = "bg-red-50"
+  } else if (urgency === "this_week") {
+    rowClassName = "bg-amber-50"
   } else if (isEmailOrder) {
     rowClassName = "bg-blue-50/60"
   }

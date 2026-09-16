@@ -1,3 +1,4 @@
+import type React from "react"
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@/test-utils/render"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -112,6 +113,51 @@ describe("OrderTableRow", () => {
       expect(
         screen.getByRole("button", { name: "シミュレーション実行" }),
       ).toBeEnabled()
+    })
+  })
+
+  describe("緊急度による行の背景色（Issue #461）", () => {
+    function renderRowWithProps(
+      order: Order,
+      props: Partial<React.ComponentProps<typeof OrderTableRow>> = {},
+    ) {
+      return render(
+        <TooltipProvider>
+          <Table>
+            <TableBody>
+              <OrderTableRow order={order} {...rowProps} {...props} />
+            </TableBody>
+          </Table>
+        </TooltipProvider>,
+      )
+    }
+
+    it("納期超過（today）の行は赤系の背景色になる", () => {
+      const { container } = renderRowWithProps(
+        makeOrder({ desired_deadline: "2020-01-01", source_type: "manual" }),
+      )
+      expect(container.querySelector("tr")).toHaveClass("bg-red-50")
+    })
+
+    it("shipped / completed / canceled は納期超過でも強調しない", () => {
+      const { container } = renderRowWithProps(
+        makeOrder({
+          status: "shipped",
+          desired_deadline: "2020-01-01",
+          source_type: "manual",
+        }),
+      )
+      expect(container.querySelector("tr")).not.toHaveClass("bg-red-50")
+    })
+
+    it("バルクシミュレーション失敗行の強調は緊急度より優先される", () => {
+      const { container } = renderRowWithProps(
+        makeOrder({ desired_deadline: "2020-01-01", source_type: "manual" }),
+        { hasBulkSimFailed: true },
+      )
+      const row = container.querySelector("tr")
+      expect(row).toHaveClass("bg-destructive/5")
+      expect(row).not.toHaveClass("bg-red-50")
     })
   })
 })
