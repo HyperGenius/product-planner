@@ -25,6 +25,7 @@ import {
   isNoRoutingOrder,
   isOverdueDraft,
   DEFAULT_SORT,
+  STATUS_TABS,
   type StatusFilter,
   type SortKey,
 } from "@/lib/order-utils"
@@ -35,11 +36,28 @@ const PAGE_SIZE = 20
 
 export { PAGE_SIZE }
 
+// `?status=` はユーザー入力（直接遷移・ブックマーク）なので、未知の値をそのまま
+// `as StatusFilter` すると「一致する注文なし」の誤表示やタブの選択状態不整合になる。
+// タブに出す値に加え、通知カード導線からのみ渡される派生フィルタ `incomplete`
+// （タブ非表示、order-utils.ts 参照）も許容し、それ以外は「すべて」（""）にクランプする。
+const VALID_STATUS_FILTERS = new Set<string>([
+  ...STATUS_TABS.map((tab) => tab.value),
+  "incomplete",
+])
+
+function toValidStatusFilter(raw: string | null): StatusFilter {
+  if (raw === null) return "action_required"
+  return VALID_STATUS_FILTERS.has(raw) ? (raw as StatusFilter) : ""
+}
+
 export function useOrdersPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const statusFilter = (searchParams.get("status") ?? "") as StatusFilter
+  // `?status=` が無い初回表示は「対応が必要」をデフォルトにする（Issue #460）。
+  // 明示的に `?status=` を指定した遷移・ブックマークはその値をそのまま尊重するが、
+  // 未知の値は「すべて」にクランプする（toValidStatusFilter 参照）。
+  const statusFilter = toValidStatusFilter(searchParams.get("status"))
   const sortKey = (searchParams.get("sort") ?? DEFAULT_SORT) as SortKey
   const page = Number(searchParams.get("page") ?? "1")
 
@@ -89,7 +107,10 @@ export function useOrdersPage() {
 
   const setParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString())
-    if (value) {
+    // status は「対応が必要」がデフォルト（Issue #460）になったため、「すべて」(value="")
+    // を選んだ操作は param 自体を削除せず `?status=` を明示的に残す。削除すると
+    // 「?status= 無し」と区別が付かず、リロード時に「対応が必要」へ戻ってしまう。
+    if (value || key === "status") {
       params.set(key, value)
     } else {
       params.delete(key)
@@ -127,9 +148,9 @@ export function useOrdersPage() {
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
-      .filter((order) => filterOrder(order, statusFilter))
+      .filter((order) => filterOrder(order, statusFilter, currentUserRole))
       .sort((a, b) => compareOrders(a, b, sortKey))
-  }, [orders, statusFilter, sortKey])
+  }, [orders, statusFilter, sortKey, currentUserRole])
 
   const pagedOrders = useMemo(() => {
     const offset = (page - 1) * PAGE_SIZE

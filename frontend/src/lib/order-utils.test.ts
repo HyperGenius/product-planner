@@ -66,4 +66,43 @@ describe("filterOrder", () => {
       ),
     ).toBe(false)
   })
+
+  describe("action_required（Issue #460）", () => {
+    it("order_handler / iso_officer は下書き全般（未シミュレーション・シミュ済み）が対象", () => {
+      const draft = makeOrder({ status: "draft", is_scheduled: false })
+      const simulated = makeOrder({ status: "draft", is_scheduled: true })
+      const pendingApproval = makeOrder({ status: "pending_approval" })
+      for (const role of ["order_handler", "iso_officer"] as const) {
+        expect(filterOrder(draft, "action_required", role)).toBe(true)
+        expect(filterOrder(simulated, "action_required", role)).toBe(true)
+        expect(filterOrder(pendingApproval, "action_required", role)).toBe(false)
+      }
+    })
+
+    it("president は承認待ちのみ対象", () => {
+      expect(
+        filterOrder(makeOrder({ status: "pending_approval" }), "action_required", "president"),
+      ).toBe(true)
+      expect(
+        filterOrder(makeOrder({ status: "draft" }), "action_required", "president"),
+      ).toBe(false)
+    })
+
+    it("platform_admin は確定済みのみ対象", () => {
+      expect(
+        filterOrder(makeOrder({ status: "confirmed" }), "action_required", "platform_admin"),
+      ).toBe(true)
+      expect(
+        filterOrder(
+          makeOrder({ status: "pending_approval" }),
+          "action_required",
+          "platform_admin",
+        ),
+      ).toBe(false)
+    })
+
+    it("ロール未取得（null）は対象外", () => {
+      expect(filterOrder(makeOrder({ status: "draft" }), "action_required", null)).toBe(false)
+    })
+  })
 })

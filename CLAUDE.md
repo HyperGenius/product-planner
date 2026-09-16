@@ -117,9 +117,19 @@ cd backend && ruff check . && mypy .
   バッジ（`order-table-row.tsx`）で認知させる。`filterOrder()` はタブ非表示の派生フィルタ（`incomplete` ＝
   顧客/希望納期未設定、Issue #406 で導線復旧）も URL `?status=` から受けるので、`STATUS_TABS` に無い値でも
   分岐を必ず用意する。「工程未入力・起票不可」（`has_no_routings`）判定は `isNoRoutingOrder()` に集約し、
-  受注詳細（`orders/[id]/page.tsx` の `hasNoRouting`）と条件を揃える。詳細は
+  受注詳細（`orders/[id]/page.tsx` の `hasNoRouting`）と条件を揃える。一覧のデフォルトフィルタは
+  「対応が必要」（`action_required`、Issue #460）＝ロール別に自分がアクションすべき注文
+  （`order_handler`/`iso_officer`: 下書き全般、`president`: 承認待ち、`platform_admin`: 確定済み）で、
+  `?status=` 未指定時のみ適用する（明示指定は尊重）。詳細は
   [docs/features/order-management-ui-design.md](docs/features/order-management-ui-design.md) /
   [docs/features/process-routing-confirmation.md](docs/features/process-routing-confirmation.md)
+- **URL クエリを Union 型にキャストするとき（`?status=` 等）**: `searchParams.get(...) as StatusFilter`
+  のように無検証で `as` キャストすると、URL 直接編集・ブックマーク由来の未知の値で「該当なし」の誤表示や
+  タブの選択状態不整合を起こす（Issue #460 PR #465 Copilotレビュー指摘）。既知の値の集合
+  （`STATUS_TABS` の値＋タブ非表示の派生フィルタ等）と照合し、外れていたらデフォルト値へクランプする
+  ヘルパー関数を挟むこと（`use-orders-page.ts` の `toValidStatusFilter()` が実装例）。同様に、ロール等の
+  Union 型を受け取る関数は引数を `Role | string` のように広げず `Role | null` のまま保つ（`string` を混ぜると
+  呼び出し側のタイプミスをコンパイル時に検知できなくなる）
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止
 - **フロントエンド単体テスト**: Vitest + React Testing Library + MSW（`frontend/vitest.config.ts`）。
   Playwright（`frontend/e2e/`）とは物理的に分離し、テストは対象コードにコロケーション配置（`Foo.tsx` の隣に `Foo.test.tsx`）。
