@@ -147,7 +147,7 @@ export function OrderTableRow({
             </div>
           ) : null}
         </TableCell>
-        <TableCell className="font-medium">
+        <TableCell className="text-muted-foreground">
           <div className="flex flex-col gap-0.5 leading-tight">
             <span className="inline-flex items-center gap-1">
               {order.order_no}
@@ -170,7 +170,7 @@ export function OrderTableRow({
         </TableCell>
         <TableCell>
           <div className="flex flex-col leading-tight">
-            <span className="text-sm">{product.primary}</span>
+            <span className="text-sm text-muted-foreground">{product.primary}</span>
             {product.secondary && (
               <span className="text-xs text-muted-foreground">{product.secondary}</span>
             )}
@@ -188,12 +188,16 @@ export function OrderTableRow({
               <TooltipContent>顧客が設定されていません</TooltipContent>
             </Tooltip>
           ) : (
-            getCustomerDisplayName(order.customer_id, customers)
+            <span className="text-muted-foreground">
+              {getCustomerDisplayName(order.customer_id, customers)}
+            </span>
           )}
         </TableCell>
         <TableCell className="text-right">
           {order.quantity != null ? (
-            order.quantity.toLocaleString("ja-JP")
+            <span className="text-muted-foreground">
+              {order.quantity.toLocaleString("ja-JP")}
+            </span>
           ) : (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -231,7 +235,7 @@ export function OrderTableRow({
                 className={
                   isDeadlineOverdue(order, tabDeadline)
                     ? "font-semibold text-destructive"
-                    : undefined
+                    : "text-muted-foreground"
                 }
                 title={tabDeadlineLabel ?? undefined}
               >

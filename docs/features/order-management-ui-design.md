@@ -147,6 +147,13 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 行数が多い状態でページ全体をスクロールすると列見出し行が画面外に流れて見えなくなっていたため、テーブルを包む `div` に `max-h-[calc(100vh-20rem)] overflow-y-auto` を付与してテーブル本体のみを内部スクロール化し、`TableHeader` に `sticky top-0 z-10 bg-card` を付けて見出し行を画面内に固定した（ダイアログ内スクロール領域での先例は `product-routings-dialog.tsx`）。ページ全体のヘッダー・通知カード・フィルタタブ・ページネーションはこのスクロール領域の外にあるため、位置は変わらない。共通コンポーネント `components/ui/table.tsx` 自体は変更しておらず、`className` で個別ページからスタイルを上書きしているため他の一覧画面（マスタ系等）には影響しない。
 
+**読む列/触る列のスタイル分離（Issue #462）**
+
+全列が同じ文字色・太さだと、識別のための静的情報（注文番号・製品・通称・数量・希望納期）と操作の起点になる情報（ステータス・操作列）が同じ視覚的重みで並んでしまう。`OrderTableRow` の各 `TableCell` で以下のように区別する。
+
+- 読む列（識別情報）: セル本体のテキストを `text-muted-foreground` にする（注文番号セル本体・製品名・通称・数量・希望納期の2行目=タブ依存納期）。ただし未設定を示す警告表示（`AlertCircle` + `text-yellow-500`、顧客・数量・希望納期セル）と、納期超過の強調（`font-semibold text-destructive`）はアクションを促す要素のため対象外（控えめ化しない）
+- 触る列（アクションの起点）: ステータスバッジ列・操作列はセル側で色を変えず、`TableCell` のデフォルト文字色（`text-foreground`）のままにする。他列を `text-muted-foreground` にした結果、相対的にコントラストが上がって視線を誘導する。バッジ配色自体（`getStatusBadgeClass` 等）は変更しない。ヘッダー行（`page.tsx`）もステータス・操作の2列だけ `TableHead` のデフォルト（`text-muted-foreground`）を明示的に `text-foreground` で上書きし、見出しの時点から強弱を出す
+
 **緊急度の段階的な行背景色（Issue #461）**
 
 一覧をスクロールするだけで「今日／今週対応が必要な行」を視認できるよう、表示中の納期（`getDeadlineForTab(order, statusFilter)`。無ければ `desired_deadline`）を基準に行背景を段階的に強調する。
