@@ -1,9 +1,11 @@
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
+import type { MemberRole } from "@/types/member"
 
 export type StatusFilter =
   | ""
+  | "action_required"
   | "draft"
   | "simulated"
   | "pending_approval"
@@ -18,6 +20,7 @@ export type StatusFilter =
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
+  { label: "対応が必要", value: "action_required" },
   { label: "すべて", value: "" },
   { label: "下書き", value: "draft" },
   { label: "シミュ済", value: "simulated" },
@@ -59,7 +62,34 @@ export function isNoRoutingOrder(order: Order): boolean {
   )
 }
 
-export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
+/**
+ * 「対応が必要」（Issue #460）＝ロールごとに自分がアクションすべき注文か。
+ * - order_handler / iso_officer: 下書き全般（未シミュレーション・差し戻し済み・シミュ済みを含む）
+ * - president: 承認待ち
+ * - platform_admin: 確定済み
+ * ロール未取得中（null）は判定できないため対象外（false）とする。
+ */
+function isActionRequiredForRole(order: Order, role: MemberRole | string | null): boolean {
+  if (role === "order_handler" || role === "iso_officer") {
+    return order.status === "draft"
+  }
+  if (role === "president") {
+    return order.status === "pending_approval"
+  }
+  if (role === "platform_admin") {
+    return order.status === "confirmed"
+  }
+  return false
+}
+
+export function filterOrder(
+  order: Order,
+  statusFilter: StatusFilter,
+  role: MemberRole | string | null = null
+): boolean {
+  if (statusFilter === "action_required") {
+    return isActionRequiredForRole(order, role)
+  }
   if (!statusFilter) return true
   // 「情報不足」= 顧客または希望納期が未設定（ステータス問わず）。フィルタタブには出さず、
   // 通知カードの導線からのみ ?status=incomplete で絞り込む（use-orders-page の incompleteCount と同条件）。
@@ -191,16 +221,24 @@ export function usesSimulatedDeadlineForOrder(order: Order): boolean {
   return !CONFIRMED_DEADLINE_STATUSES.includes(order.status)
 }
 
-/** 一覧カラムのヘッダ文言。 */
+/**
+ * 一覧カラムのヘッダ文言。
+ * 「対応が必要」タブ（Issue #460）はロールにより中身の status（下書き／承認待ち／確定済み）が
+ * 変わり単一タイトルに決められないため、汎用の「納期」を返す（値自体は行ごとに
+ * `usesSimulatedDeadlineForOrder` で正しい方を出す）。
+ */
 export function getDeadlineColumnLabel(statusFilter: StatusFilter): string {
+  if (statusFilter === "action_required") return "納期"
   return usesSimulatedDeadline(statusFilter) ? "シミュ納期" : "確定納期"
 }
 
 /** そのタブで表示すべき納期値（未設定なら null）。 */
 export function getDeadlineForTab(order: Order, statusFilter: StatusFilter): string | null {
-  const raw = usesSimulatedDeadline(statusFilter)
-    ? order.simulated_deadline
-    : order.confirmed_deadline
+  const useSimulated =
+    statusFilter === "action_required"
+      ? usesSimulatedDeadlineForOrder(order)
+      : usesSimulatedDeadline(statusFilter)
+  const raw = useSimulated ? order.simulated_deadline : order.confirmed_deadline
   return raw ?? null
 }
 

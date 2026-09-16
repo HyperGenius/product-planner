@@ -289,7 +289,9 @@ export default function OrdersPage() {
             </Table>
           ) : (
             <div className="p-8 text-center text-muted-foreground">
-              {statusFilter ? (
+              {statusFilter === "action_required" ? (
+                <p>対応が必要な注文はありません</p>
+              ) : statusFilter ? (
                 <p>条件に一致する注文がありません</p>
               ) : (
                 <>

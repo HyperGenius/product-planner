@@ -71,10 +71,11 @@
 
 URL クエリパラメータ `?status=` で管理（マスタ画面と同じパターン）。
 
-フィルタータブは `orders.status` の値のみに限定する。「情報不足」「工程未確認」は `orders.status` に存在しない派生的な概念であり、同列に扱うと軸が混在してユーザーを混乱させる（詳細は「設計上の決定事項」参照）。
+フィルタータブは `orders.status` の値のみに限定する。「情報不足」「工程未確認」は `orders.status` に存在しない派生的な概念であり、同列に扱うと軸が混在してユーザーを混乱させる（詳細は「設計上の決定事項」参照）。唯一の例外が次項の「対応が必要」（ロール依存の派生フィルタ）。
 
 | フィルター値 | 表示ラベル | 対象 |
 |---|---|---|
+| `action_required` | 対応が必要 | ロールに応じた要対応の注文（下記参照） |
 | (なし) | すべて | 全注文 |
 | `draft` | 下書き | status='draft' |
 | `pending_approval` | 承認待ち | status='pending_approval' |
@@ -82,6 +83,24 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 | `shipped` | 送品済み | status='shipped' |
 | `completed` | 完了 | status='completed' |
 | `canceled` | キャンセル | status='canceled' |
+
+#### デフォルトフィルタ「対応が必要」(Issue #460)
+
+一覧を開いた瞬間に未整理の全件が並ぶと「今日やるべきこと」が埋もれるため、`?status=` を**指定せずに** `/orders` を開いた場合のみ `action_required` をデフォルト適用する（`use-orders-page.ts`）。`?status=` を明示指定した遷移・ブックマークはその値を優先する。「すべて」タブ自体は削除しない。
+
+ロールごとの対象（`order-utils.ts` の `filterOrder` / `isActionRequiredForRole`）:
+
+| ロール | 対象 |
+|---|---|
+| `order_handler` | `status === 'draft'`（未シミュレーション・差し戻し済み・シミュ済みを含む） |
+| `iso_officer` | 同上（下書き全般） |
+| `president` | `status === 'pending_approval'` |
+| `platform_admin` | `status === 'confirmed'` |
+| ロール未取得（`null`） | 対象なし（0件） |
+
+「対応が必要」はログイン中のロールにより中身の `status` が単一に定まる（下書き／承認待ち／確定済みのいずれか）ため、納期列は行ごとに `usesSimulatedDeadlineForOrder()` でシミュ納期／確定納期を出し分け、列見出しは汎用の「納期」にする（`getDeadlineColumnLabel` / `getDeadlineForTab`）。
+
+「すべて」タブ選択時は `?status=`（空文字）を URL に明示的に残す（`setParam` で `status` キーのみ削除せず維持）。削除すると「`?status=` 無し」と区別が付かず、リロードで「対応が必要」に戻ってしまうため。
 
 ### テーブル設計
 

@@ -39,7 +39,10 @@ export function useOrdersPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const statusFilter = (searchParams.get("status") ?? "") as StatusFilter
+  // `?status=` が無い初回表示は「対応が必要」をデフォルトにする（Issue #460）。
+  // 明示的に `?status=` を指定した遷移・ブックマークはその値をそのまま尊重する。
+  const rawStatusParam = searchParams.get("status")
+  const statusFilter = (rawStatusParam ?? "action_required") as StatusFilter
   const sortKey = (searchParams.get("sort") ?? DEFAULT_SORT) as SortKey
   const page = Number(searchParams.get("page") ?? "1")
 
@@ -89,7 +92,10 @@ export function useOrdersPage() {
 
   const setParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString())
-    if (value) {
+    // status は「対応が必要」がデフォルト（Issue #460）になったため、「すべて」(value="")
+    // を選んだ操作は param 自体を削除せず `?status=` を明示的に残す。削除すると
+    // 「?status= 無し」と区別が付かず、リロード時に「対応が必要」へ戻ってしまう。
+    if (value || key === "status") {
       params.set(key, value)
     } else {
       params.delete(key)
@@ -127,9 +133,9 @@ export function useOrdersPage() {
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
-      .filter((order) => filterOrder(order, statusFilter))
+      .filter((order) => filterOrder(order, statusFilter, currentUserRole))
       .sort((a, b) => compareOrders(a, b, sortKey))
-  }, [orders, statusFilter, sortKey])
+  }, [orders, statusFilter, sortKey, currentUserRole])
 
   const pagedOrders = useMemo(() => {
     const offset = (page - 1) * PAGE_SIZE
