@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Order } from "@/types/order"
-import { filterOrder, isNoRoutingOrder } from "./order-utils"
+import { filterOrder, getOrderUrgency, isNoRoutingOrder } from "./order-utils"
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -47,6 +47,60 @@ describe("isNoRoutingOrder", () => {
     expect(
       isNoRoutingOrder(makeOrder({ has_no_routings: true, status: "confirmed" })),
     ).toBe(false)
+  })
+})
+
+describe("getOrderUrgency（Issue #461）", () => {
+  // 2026-09-16 は水曜日。週の定義（日曜始まり）で今週は 09-13(日)〜09-19(土)。
+  const TODAY = "2026-09-16"
+
+  it("納期が当日〜過去（超過）なら today", () => {
+    expect(
+      getOrderUrgency(makeOrder({ desired_deadline: "2026-09-16" }), "", TODAY),
+    ).toBe("today")
+    expect(
+      getOrderUrgency(makeOrder({ desired_deadline: "2026-09-10" }), "", TODAY),
+    ).toBe("today")
+  })
+
+  it("納期が今日より後・今週中（土曜まで）なら this_week", () => {
+    expect(
+      getOrderUrgency(makeOrder({ desired_deadline: "2026-09-19" }), "", TODAY),
+    ).toBe("this_week")
+  })
+
+  it("納期が来週以降なら next_week_or_later", () => {
+    expect(
+      getOrderUrgency(makeOrder({ desired_deadline: "2026-09-20" }), "", TODAY),
+    ).toBe("next_week_or_later")
+  })
+
+  it("納期未設定なら unset", () => {
+    expect(
+      getOrderUrgency(makeOrder({ desired_deadline: undefined }), "", TODAY),
+    ).toBe("unset")
+  })
+
+  it("shipped / completed / canceled は強調対象外（null）", () => {
+    for (const status of ["shipped", "completed", "canceled"] as const) {
+      expect(
+        getOrderUrgency(
+          makeOrder({ status, desired_deadline: "2026-09-16" }),
+          "",
+          TODAY,
+        ),
+      ).toBeNull()
+    }
+  })
+
+  it("タブに応じた納期（シミュ納期／確定納期）を基準にする", () => {
+    const order = makeOrder({
+      status: "confirmed",
+      desired_deadline: "2026-09-30",
+      confirmed_deadline: "2026-09-16",
+    })
+    // "confirmed" タブは確定納期（当日）を基準に today
+    expect(getOrderUrgency(order, "confirmed", TODAY)).toBe("today")
   })
 })
 

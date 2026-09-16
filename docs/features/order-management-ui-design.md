@@ -147,6 +147,15 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 行数が多い状態でページ全体をスクロールすると列見出し行が画面外に流れて見えなくなっていたため、テーブルを包む `div` に `max-h-[calc(100vh-20rem)] overflow-y-auto` を付与してテーブル本体のみを内部スクロール化し、`TableHeader` に `sticky top-0 z-10 bg-card` を付けて見出し行を画面内に固定した（ダイアログ内スクロール領域での先例は `product-routings-dialog.tsx`）。ページ全体のヘッダー・通知カード・フィルタタブ・ページネーションはこのスクロール領域の外にあるため、位置は変わらない。共通コンポーネント `components/ui/table.tsx` 自体は変更しておらず、`className` で個別ページからスタイルを上書きしているため他の一覧画面（マスタ系等）には影響しない。
 
+**緊急度の段階的な行背景色（Issue #461）**
+
+一覧をスクロールするだけで「今日／今週対応が必要な行」を視認できるよう、表示中の納期（`getDeadlineForTab(order, statusFilter)`。無ければ `desired_deadline`）を基準に行背景を段階的に強調する。
+
+- 判定は `lib/order-utils.ts` の `getOrderUrgency(order, statusFilter, todayIso = jstTodayIso())`。`jstTodayIso()` からの残日数で `today`（当日〜納期超過）／`this_week`（今週中。日曜始まりの暦週で `date-fns` の `startOfWeek(..., { locale: ja })` と揃える。ダッシュボード `use-dashboard-metrics.ts` の `weekStart`/`weekEnd` と同じ定義）／`next_week_or_later`（来週以降）／`unset`（納期未設定・不正な日付文字列）に分類する
+- `shipped` / `completed` / `canceled` は既に対応不要なため対象外（`null` を返し強調しない）
+- 行背景（`order-table-row.tsx` の `rowClassName`）の優先順位（高い順）: バルクシミュレーション失敗行（`hasBulkSimFailed`、赤系ボーダー+背景）＞ 緊急度（`today` = `bg-red-50` / `this_week` = `bg-amber-50`）＞ 自動起票行（`isEmailOrder`、`bg-blue-50/60`）。自動起票かどうかは注文番号セルのメールアイコンで別途判別できるため、背景色の優先度は最下位でよい
+- グルーピング（見出し行方式）はページネーション（20件/ページ）を跨ぐとグループが分断されるため見送り、段階的な背景色案を採用した
+
 ### アクション体系
 
 注文の状態・ロールによってプライマリアクションを切り替える。操作カラムを圧縮するため、

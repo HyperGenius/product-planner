@@ -1,3 +1,5 @@
+import { addDays, startOfWeek, parseISO } from "date-fns"
+import { ja } from "date-fns/locale"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
@@ -255,6 +257,47 @@ export function isDeadlineOverdue(
   const desired = order.desired_deadline.slice(0, 10)
   if (!isValidIsoDate(actual) || !isValidIsoDate(desired)) return false
   return actual > desired
+}
+
+export type OrderUrgency = "today" | "this_week" | "next_week_or_later" | "unset"
+
+/**
+ * 緊急度強調の対象外にするステータス（Issue #461）。
+ * すでに対応不要なため、納期が近くても強調しない。
+ */
+const URGENCY_EXCLUDED_STATUSES: readonly Order["status"][] = [
+  "shipped",
+  "completed",
+  "canceled",
+]
+
+/**
+ * 一覧行の緊急度を算出する（Issue #461）。
+ * 表示中の納期（`getDeadlineForTab`。無ければ `desired_deadline`）を基準に、
+ * `jstTodayIso()` からの残日数で分類する:
+ *  - `today`: 当日〜納期超過
+ *  - `this_week`: 今日より後かつ今週中（日曜始まり、Issue #404 の `weekStart`/`weekEnd` と同じ定義）
+ *  - `next_week_or_later`: 来週以降
+ *  - `unset`: 納期が未設定、または不正な日付文字列
+ * `shipped` / `completed` / `canceled` は対応不要のため `null`（強調対象外）を返す。
+ */
+export function getOrderUrgency(
+  order: Order,
+  statusFilter: StatusFilter,
+  todayIso: string = jstTodayIso()
+): OrderUrgency | null {
+  if (URGENCY_EXCLUDED_STATUSES.includes(order.status)) return null
+
+  const rawDeadline = getDeadlineForTab(order, statusFilter) ?? order.desired_deadline ?? null
+  if (!rawDeadline) return "unset"
+  const deadline = rawDeadline.slice(0, 10)
+  if (!isValidIsoDate(deadline)) return "unset"
+
+  if (deadline <= todayIso) return "today"
+
+  const weekStart = startOfWeek(parseISO(todayIso), { locale: ja })
+  const weekEnd = addDays(weekStart, 7)
+  return parseISO(deadline) < weekEnd ? "this_week" : "next_week_or_later"
 }
 
 export function compareOrders(a: Order, b: Order, sortKey: SortKey): number {
