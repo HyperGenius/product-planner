@@ -251,8 +251,8 @@ export default function OrdersPage() {
                       </span>
                     </div>
                   </TableHead>
-                  <TableHead>ステータス</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
+                  <TableHead className="text-foreground">ステータス</TableHead>
+                  <TableHead className="text-right text-foreground">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
