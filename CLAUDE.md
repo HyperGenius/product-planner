@@ -83,6 +83,13 @@ cd backend && ruff check . && mypy .
 
 - **RLS 必須**: 新規テーブルには必ず `ENABLE ROW LEVEL SECURITY` と `is_tenant_member(tenant_id)` ポリシーを設定
 - **Service Role Key 禁止**: アプリコード内で `SUPABASE_SERVICE_ROLE_KEY` を使用しない。必ずユーザー JWT を使用
+  - **例外**: ユーザー JWT を持たないリクエストだけは `get_supabase_admin_client()`（service role）を使う。
+    cron（`CRON_SECRET` で認可）、共有端末の PIN ログイン（`routers/auth/device.py`）、日報取り込みエージェント
+    （`routers/agent/`、Issue #470）が該当する。service role は RLS をバイパスするため、**`tenant_id` は必ずサーバー側で
+    検証済みの値（エージェントならトークン → `agent_tokens` の行）から解決し、リクエストのボディ・ヘッダ・クエリの
+    `tenant_id` は使わない**。以降のクエリはすべて `.eq("tenant_id", tenant_id)` でアプリ側から明示的に絞り込む。
+    エージェント API は `Depends(get_agent_context)` で `AgentContext` を受け取り、その値だけを使うこと。
+    詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
