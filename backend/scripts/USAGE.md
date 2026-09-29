@@ -40,6 +40,7 @@ supabase start
 | `seed_scenario.py` | シナリオ単位のデモデータ一括投入 | `python scripts/seed_scenario.py <シナリオ名>` |
 | `seed_gmail_drafts.py` | Gmail受注下書きサンプルデータ投入 | `python scripts/seed_gmail_drafts.py` |
 | `seed_split_demo.py` | 手動分割機能（Issue #280）確認用の下書き注文投入 | `python scripts/seed_split_demo.py` |
+| `issue_agent_token.py` | 日報取り込みエージェント用トークンの発行・一覧・失効（Issue #469） | `python scripts/issue_agent_token.py <issue\|list\|revoke> ...` |
 
 ---
 
@@ -211,3 +212,41 @@ python scripts/seed_gmail_drafts.py --dry-run
 ```
 
 冪等性が保証されているため、複数回実行しても重複インサートは発生しません。
+
+---
+
+## issue_agent_token.py — 日報取り込みエージェント用トークンの発行・一覧・失効
+
+共有PCで動く日報取り込みエージェント（Issue #468）がバックエンドに送信するときに使う、テナント単位の
+Bearer トークンを管理します。仕様は [docs/features/daily-report-agent.md](../../docs/features/daily-report-agent.md) を参照してください。
+
+### 追加の前提条件
+
+共通前提条件とは異なり、**service role で `agent_tokens` を直接読み書きする**運用スクリプトです
+（`create_tenant.py` と同じ扱い）。`--env-file` で指定した .env（省略時は `scripts/.env`）に以下を設定してください。
+
+| 変数名 | 説明 |
+|--------|------|
+| `SUPABASE_URL` | 発行先の Supabase の URL（本番に発行する場合は本番の URL） |
+| `SUPABASE_SERVICE_ROLE_KEY` | 同 service role キー |
+
+### 使い方
+
+```bash
+cd backend
+
+# 発行: 平文トークンはこの1回しか表示されない（DB には SHA-256 ハッシュのみ保存）
+python scripts/issue_agent_token.py issue --tenant-id <tenant_uuid> --name "工場1F 共有PC"
+
+# 一覧: 有効/失効済み・最終利用日時を確認する（ハッシュは表示しない）
+python scripts/issue_agent_token.py list --tenant-id <tenant_uuid>
+
+# 失効: 共有PCの入れ替え・漏洩時に使う。失効後は新しいトークンを issue し直す
+python scripts/issue_agent_token.py revoke --token-id <token_uuid>
+```
+
+### 注意事項
+
+- 表示された平文トークンは共有PCのエージェント設定に登録したら、端末のスクロールバック等に残さないこと。
+  紛失した場合は再表示できないため、`revoke` して `issue` し直す
+- `--name` には設置場所など識別用の名前を入れる。顧客の実名や端末の実ホスト名をリポジトリ・Issue に書かないこと
