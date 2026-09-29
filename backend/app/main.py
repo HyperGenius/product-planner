@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.admin import admin_router
+from app.routers.agent import heartbeat_router
 from app.routers.auth import device_router
 from app.routers.cron import (
     advance_order_status_router,
@@ -71,6 +72,7 @@ app.include_router(admin_router)
 app.include_router(cron_router)
 app.include_router(parse_order_pdfs_router)
 app.include_router(advance_order_status_router)
+app.include_router(heartbeat_router)
 
 
 @app.get("/health")

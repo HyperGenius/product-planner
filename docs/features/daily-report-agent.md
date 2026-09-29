@@ -10,7 +10,7 @@
 | Issue | 内容 | 状態 |
 |---|---|---|
 | #469 | DB・Storage 基盤とエージェントトークン発行 CLI | 本ドキュメントに記載 |
-| #470 | エージェント認証と `POST /api/agent/heartbeat` | 未着手 |
+| #470 | エージェント認証と `POST /api/agent/heartbeat` | 本ドキュメントに記載 |
 | #471 | 日報ファイル受信 `POST /api/agent/daily-reports` | 未着手 |
 | #472 | 共有PCエージェントの配置と設置手順（`tools/daily-report-agent/`） | 未着手 |
 
@@ -43,7 +43,7 @@
   別テナントで同じ内容のファイルがあっても衝突しない
 - `original_path` は URL エンコードされて送られてくるファイルパスを復元した値。日本語を含みうるので
   Storage のキーには使わず、テーブル側に保存する
-- `agent_heartbeats` の集計値の列は #470 でエージェントスクリプトの実際の出力に合わせて調整してよい。
+- `agent_heartbeats` の集計値の列は、エージェントスクリプト（#472 で配置）の実際の出力に合わせて調整してよい。
   それ以外の項目は `payload` にそのまま保存する
 - `agent_token_id` の外部キーは `ON DELETE` を指定していない（NO ACTION）。トークンは削除ではなく
   `revoked_at` で失効させる運用とし、どのトークンから送られたかの記録を残す
@@ -55,6 +55,54 @@
 - 読み書きはバックエンド（service role）のみ。`storage.objects` に `authenticated` 向けのポリシーは付けない
 - Terraform（`infra/terraform/`）の `supabase/supabase` provider はバケットを管理できないため、
   `order-attachments` と同じくマイグレーションの `INSERT INTO storage.buckets ... ON CONFLICT DO NOTHING` で作る
+
+## エージェント API（`/api/agent/*`）
+
+`backend/app/routers/agent/`。マシン間通信のため `/api/cron/*` に揃えて `/api/agent/*` とし、`/v1` は付けない。
+ルーターはエンドポイントごとに `APIRouter(prefix="/api/agent")` を持ち、`app/main.py` に個別に登録する（cron と同じ形）。
+
+### 認証 dependency `get_agent_context`（`routers/agent/_auth.py`）
+
+1. `Authorization: Bearer <token>` を取り出す
+2. `hash_agent_token()` でハッシュ化し、`agent_tokens.token_hash` で1行引く（service role）
+3. 該当行が未失効（`revoked_at IS NULL`）なら `AgentContext(tenant_id, agent_token_id)` を返す
+4. `agent_tokens.last_used_at` を現在時刻で更新する（`id` と `tenant_id` で絞り込む）。
+   稼働状況の目安にすぎないので、**更新に失敗しても warning ログを残して本処理は続行**する
+
+| ケース | レスポンス |
+|---|---|
+| ヘッダ無し・`Bearer ` 以外の形式・空トークン | 401 `{"detail": "Invalid agent token."}` |
+| 該当トークン無し | 同上 |
+| 失効済み | 同上（該当なしと区別しない） |
+| トークン照合時の DB エラー | 500 `{"detail": "Agent authentication failed."}`（詳細はログのみ） |
+
+- 401 には `WWW-Authenticate: Bearer` を付ける。detail は固定文言で、例外文言や失効済みかどうかを返さない
+- **`tenant_id` は `AgentContext` からだけ取る**。ボディ・ヘッダ（`x-tenant-id`）・クエリに `tenant_id` が
+  含まれていても参照しない。エンドポイント側のクエリはすべて `.eq("tenant_id", ctx.tenant_id)` で明示的に絞り込む
+- テストで admin client を差し替えられるよう、admin client は `Depends(get_supabase_admin_client)` で受け取る
+
+### `POST /api/agent/heartbeat`（`routers/agent/heartbeat.py`）
+
+エージェントの実行ごとのサマリを `agent_heartbeats` に1行記録する。スキーマは `app/models/agent.py`。
+
+```json
+{
+  "scanned_count": 12,
+  "sent_count": 3,
+  "duplicate_count": 8,
+  "error_count": 1,
+  "agent_version": "0.1.0",
+  "hostname": "（未知のフィールドは payload に保存）"
+}
+```
+
+- 集計値4つは省略時 0、負数は 422。`agent_version` は任意（最大100文字）
+- スキーマに無いフィールド（`extra="allow"`）は `payload` にそのまま保存する。ただし `tenant_id` /
+  `agent_token_id` はトークンから解決する値なので、送られてきても `payload` にも残さず捨てる
+- `tenant_id` / `agent_token_id` の列は `AgentContext` の値で埋める
+- レスポンス: `200 {"status": "ok"}`
+- INSERT 失敗時は 500 `{"detail": "Failed to record heartbeat."}`。例外の詳細は `logger.error(..., exc_info=True)`
+  にのみ残す（cron と同じ規約）
 
 ## トークンの発行・失効
 
@@ -71,6 +119,9 @@
 
 - `backend/__tests__/unit/services/test_agent_token_service.py`: トークン生成・ハッシュ形式
 - `backend/__tests__/scripts/test_issue_agent_token.py`: CLI が平文を DB に渡さないこと、失効処理の分岐
+- `backend/__tests__/api/routers/agent/test_heartbeat.py`: 認証（ヘッダ不正・該当なし・失効済みがすべて同じ 401）、
+  トークンのテナントへの記録（リクエストの `tenant_id` を無視）、`last_used_at` 更新、`payload` への未知フィールド保存、
+  DB エラー時の固定文言
 - `backend/__tests__/integration/test_daily_report_agent_rls.py`（`--run-integration`）: RLS（ユーザー JWT から
   書き込めない・他テナントの行が見えない・`agent_tokens` が見えない）、UNIQUE (`tenant_id`, `sha256`)、
   `token_hash` の CHECK 制約、バケット設定
