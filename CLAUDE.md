@@ -98,6 +98,12 @@ cd backend && ruff check . && mypy .
   Issue #400）。フロントの取り得る値は `frontend/src/types/order.ts` の `Order["status"]` と
   `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。詳細は
   [docs/features/order-status-workflow.md](docs/features/order-status-workflow.md)
+- **顧客側の確度 (`orders.customer_certainty`)**: `confirmed` / `forecast` / `forecast_tentative` / NULL。
+  確度を判定できない取り込み（PDFテキスト抽出失敗・抽出値が許容値外等）は `forecast_tentative`（内々示）へ
+  フォールバックせず **NULL（確度不明）** で保存する（内々示と誤認させるため。Issue #474）。NULL は
+  `upsert_order_by_dedupe_key` で「新規 NULL は既存 draft を上書きしない（`skipped_downgrade`）／既存 NULL は
+  確度判明時に上書きされる」、`_mark_superseded_orders` では supersede 対象外。表示は受注詳細で「－」、
+  一覧ではバッジ無し
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）

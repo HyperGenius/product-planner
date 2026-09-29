@@ -431,6 +431,8 @@ def _process_unreadable_pdf(
     内容を補完する起点とする。product_id・deadline_date が共に NULL の行は
     upsert_order_by_dedupe_key が常に新規行としてINSERTするため、他の解析失敗
     ケースと誤って統合されることはない。
+    顧客側の確度も判定できないため customer_certainty は NULL（確度不明）で
+    起票する（Issue #474。以前は内々示扱いにしていたため誤認を招いていた）。
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
@@ -444,7 +446,7 @@ def _process_unreadable_pdf(
             "p_product_id": None,
             "p_quantity": None,
             "p_deadline_date": None,
-            "p_customer_certainty": "forecast_tentative",
+            "p_customer_certainty": None,
             "p_source_type": "email",
             "p_source_raw": staging_row.get("source_raw"),
             "p_extracted_product_name": None,
@@ -649,13 +651,12 @@ def _process_line_item(
         )
 
     certainty_raw = cast(str | None, line.get("certainty"))
-    # Claude抽出結果の揺れ・想定外値でも orders.customer_certainty のCHECK制約に
-    # 違反してRPCが失敗しないよう、許容値以外は最も確度が低い値にフォールバックする
-    certainty = (
-        certainty_raw
-        if certainty_raw in _VALID_CUSTOMER_CERTAINTIES
-        else "forecast_tentative"
-    )
+    # Claude抽出結果の揺れ・想定外値・未指定でも orders.customer_certainty のCHECK
+    # 制約に違反してRPCが失敗しないよう、許容値以外は NULL（確度不明）にする。
+    # 内々示へのフォールバックは確度を誤認させるため行わない（Issue #474）。
+    # NULL は upsert_order_by_dedupe_key の優先度判定で既存の自動起票 draft を
+    # 上書きしない（skipped_downgrade）ため、確度不明の情報で既存行を壊さない。
+    certainty = certainty_raw if certainty_raw in _VALID_CUSTOMER_CERTAINTIES else None
     deadline_date = line.get("delivery_date")
 
     # 抽出結果の揺れ・想定外の型（本来はツールスキーマで int|null に制約されるが、

@@ -33,7 +33,7 @@ def _upsert(
     product_id: int,
     quantity: int,
     deadline_date: str,
-    certainty: str,
+    certainty: str | None,
     customer_order_no: str | None = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
@@ -883,3 +883,109 @@ class TestUpsertCustomerOrderNo:
             .data
         )
         assert order["customer_order_no"] == "KEEP-ME"
+
+
+class TestUnknownCustomerCertainty:
+    """確度を判定できなかった明細は customer_certainty=NULL で渡される（Issue #474）。
+    NULL は確度不明として、既存の自動起票draftを上書きせず、逆に確度が判明した
+    後続の取り込みでは上書きされることを確認する。"""
+
+    def test_inserts_new_order_with_null_certainty(self, admin_db, dedupe_fixture):
+        result = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty=None,
+        )
+
+        assert result["action"] == "inserted"
+
+        order = (
+            admin_db.table("orders")
+            .select("status, customer_certainty")
+            .eq("id", result["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["status"] == "draft"
+        assert order["customer_certainty"] is None
+
+    def test_null_certainty_does_not_overwrite_existing_draft(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast_tentative",
+        )
+
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=99,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty=None,
+        )
+
+        # 確度不明の情報で既存行を上書きしない
+        assert second["action"] == "skipped_downgrade"
+        assert second["order_id"] == first["order_id"]
+
+        order = (
+            admin_db.table("orders")
+            .select("customer_certainty, quantity")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["customer_certainty"] == "forecast_tentative"
+        assert order["quantity"] == 10
+
+    def test_known_certainty_overwrites_existing_null_certainty_draft(
+        self, admin_db, dedupe_fixture
+    ):
+        first = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=10,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty=None,
+        )
+
+        second = _upsert(
+            admin_db,
+            dedupe_fixture["tenant_id"],
+            dedupe_fixture["customer_id"],
+            dedupe_fixture["product_id"],
+            quantity=20,
+            deadline_date=_FUTURE_DEADLINE,
+            certainty="forecast_tentative",
+        )
+
+        # 既存NULLは最低優先度(-1)扱いのため、確度が判明した情報で更新される
+        assert second["action"] == "updated"
+        assert second["order_id"] == first["order_id"]
+
+        order = (
+            admin_db.table("orders")
+            .select("customer_certainty, quantity")
+            .eq("id", first["order_id"])
+            .single()
+            .execute()
+            .data
+        )
+        assert order["customer_certainty"] == "forecast_tentative"
+        assert order["quantity"] == 20
