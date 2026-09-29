@@ -1,0 +1,13 @@
+{
+  "api_base_url": "https://api.example.com",
+  "token": "<issue_agent_token.py issue で発行したトークン>",
+  "target_folders": [
+    "\\\\fileserver.example.local\\share\\日報"
+  ],
+  "recurse": true,
+  "state_path": "state\\sent-files.json",
+  "log_dir": "logs",
+  "log_retention_days": 30,
+  "max_file_bytes": 20971520,
+  "timeout_seconds": 120
+}
