@@ -1,0 +1,2 @@
+# PowerShell 5.1 向けに CRLF で配布する（BOM 付き UTF-8 はファイル側で保持）
+*.ps1 text eol=crlf

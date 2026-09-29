@@ -36,6 +36,7 @@ frontend/src/
   types/                # TypeScript 型定義
 
 supabase/migrations/    # DB スキーマ変更は必ずここで管理
+tools/daily-report-agent/  # 共有PC上で動く日報取り込みエージェント (PowerShell 5.1、Issue #472)
 docs/                   # 設計・仕様ドキュメント
 docs/features/          # 機能別ドキュメント (PR 完了後に更新)
 ```
@@ -101,6 +102,14 @@ cd backend && ruff check . && mypy .
   前例は `routers/agent/daily_reports.py`。上限定数はルーターが `from ... import` しているため、テストでは
   ルーターモジュール側を `monkeypatch.setattr()` する。API テストでチャンク転送を再現するには
   `TestClient.post(..., content=iter([...]))`（httpx が `Content-Length` 無しで送る）
+- **共有PC用の PowerShell スクリプト（`tools/`）**: 顧客の Windows PC で動かすため **PowerShell 5.1・追加モジュール無し**で
+  動くように書く（`??`・三項演算子・`-SkipHttpErrorCheck` 等の PS 7 専用構文は使わない）。日本語を含む `.ps1` は
+  **BOM 付き UTF-8** で保存する（PS 5.1 は BOM 無しを Shift-JIS として読み文字化けする）。.NET メソッドの string 引数に
+  `$null` を渡すと PowerShell が `""` に変換するので `[NullString]::Value` を使う（`File.Replace` の第3引数で踏んだ）。
+  ローカルに PowerShell が無い場合は `mcr.microsoft.com/dotnet/sdk:8.0`（arm64 あり・pwsh 同梱）のコンテナで動かし、
+  バックエンドへは `host.docker.internal` で接続する（`mcr.microsoft.com/powershell` は arm64 が無く Apple Silicon ではクラッシュする）。
+  トークンを含む `config.json`・状態・ログはコミットしない。詳細は
+  [tools/daily-report-agent/README.md](tools/daily-report-agent/README.md)
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
