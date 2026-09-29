@@ -74,7 +74,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
       明細をドロップせず `product_id=NULL`・`extracted_product_name=<抽出生テキスト>` で
       下書きを起票する（Issue #296、詳細後述）
    c. certainty はそのまま orders.customer_certainty に保存する（confirmed/forecast/
-      forecast_tentative）。orders.status には反映しない（Issue #267）
+      forecast_tentative）。orders.status には反映しない（Issue #267）。
+      許容値外・未指定の場合は NULL（確度不明）で保存する（Issue #474、詳細後述）
    d. customer_id は、手順2でPDF文面から解決し直した値（解決できなければ
       ステージング行の値）を明細共通で使う（Issue #385）
    e. SQL RPC upsert_order_by_dedupe_key で orders に INSERT/UPDATE。INSERT時は
@@ -264,7 +265,10 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 - それ以外（`status='draft'` かつ `source_type != 'manual'` = メール/PDF起票の確認待ち
   draft）の場合のみ、`customer_certainty` の優先順位（数値が大きいほど確度が高い）で
   判定する: `forecast_tentative(0) < forecast(1) < confirmed(2)`。
-  既存 > 新規（格下げ）の場合は更新しない（`skipped_downgrade`）
+  既存 > 新規（格下げ）の場合は更新しない（`skipped_downgrade`）。
+  既存の `customer_certainty` が NULL（確度不明）の場合は最低優先度（-1）扱いで、
+  確度が判明した取り込みで上書きされる。新規が NULL の場合は常に `skipped_downgrade`
+  （確度不明の情報で既存行を上書きしない。Issue #474）
 - 優先順位が同じかつ数量も一致する場合は完全重複とみなし `skipped_no_change`
   （この場合のみ `order_parse_log` への記録なし）
 - それ以外（昇格 or 同確度での数量差分）は `customer_certainty`/`quantity`/`source_*`/
@@ -308,7 +312,9 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 同一 `(tenant_id, customer_id, product_id)` の異なる未来日付レコードに
 `superseded_at = now()` をセットし、注文一覧 (`OrderRepository.get_all`) から除外する。
 ユーザーが確定済み（`status='confirmed'`）の注文はこのフィルタ対象外のため supersede
-されない。
+されない。`customer_certainty IS NULL`（確度不明。Issue #474）の行も対象外で、自動では
+supersede されない。確度が判定できていない行を「旧内示」と断定して一覧から消すと
+取りこぼしになるため、受注担当者が内容を確認して手動で整理する前提とする。
 
 ### 製品未マッチ明細のNULL product_id下書き起票（Issue #296）
 
@@ -340,8 +346,10 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 時の `product_id=NULL` 下書き起票）と同じ設計方針をテキスト抽出失敗ケースにも適用した。
 
 - `pdf_order_parsing_service._process_unreadable_pdf()` が、`product_id`・`quantity`・
-  `deadline_date` をすべて `NULL`、`customer_certainty='forecast_tentative'` として
+  `deadline_date` をすべて `NULL`、`customer_certainty=NULL`（確度不明）として
   `upsert_order_by_dedupe_key` RPCを呼び、下書き order を1件起票する
+  （当初は `'forecast_tentative'` 固定だったが、内々示と誤認されるため Issue #474 で
+  NULL に変更。変更前に起票済みのデータは是正していない）
 - `customer_id` はステージング行作成時（`gmail_service.py` → `resolve_or_create_customer`）
   に既に解決済みの値をそのまま使う。送信元メールアドレスから顧客を特定できない場合も
   「不明な顧客 (YYYY-MM-DD HH:MM)」のプレースホルダー顧客が自動作成されているため、
@@ -357,6 +365,30 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
   パース処理自体は正常完了とみなす既存方針を踏襲）
 - `order_parse_log`・`notifications` への記録は従来どおり行う（`reason`/`notif_type` に
   `failed_encrypted`/`failed_image` を使用。新しい値の追加やCHECK制約変更は不要）
+
+### 確度を判定できなかった受注の扱い（Issue #474）
+
+以下の2経路では顧客側の確度を判定できないため、`orders.customer_certainty` を NULL
+（手動起票と同じ「確度情報なし」）で保存する。新しい値（`unknown` 等）は追加しておらず、
+CHECK 制約・型定義・RPC の変更は無い。
+
+1. PDFのテキスト抽出失敗（`_process_unreadable_pdf`、暗号化PDF・画像PDF等）で起票する下書き
+2. 抽出結果の `certainty` が `confirmed`/`forecast`/`forecast_tentative` 以外、または未指定の明細
+   （`_process_line_item`）。抽出ツールスキーマ（`pdf_order_extraction_service.py` /
+   `email_extraction_service.py`）は `certainty` を3値の enum・必須で制約しているため、
+   通常この経路に入るのはスキーマ変更・出力の揺れ等の防御的なケースのみ
+
+以前はどちらも最も確度が低い `forecast_tentative`（内々示）にフォールバックしていたが、
+受注担当者が「顧客から内々示が来ている」と誤認するため NULL に変更した。
+
+- `upsert_order_by_dedupe_key`: 新規 NULL は既存の自動起票 draft と衝突すると
+  `skipped_downgrade`（上書きしない）、既存 NULL は確度が判明した取り込みで `updated`
+  （integration テスト `TestUnknownCustomerCertainty` で担保）
+- `_mark_superseded_orders`: NULL の行は supersede 対象外（前述）
+- 受注詳細（`orders/[id]/page.tsx`）の「顧客側の確度」は常に表示し、NULL のときは
+  muted な「－」を表示する（`components/orders/customer-certainty-value.tsx`）。
+  手動起票の受注も同じく「－」になる。受注一覧（`order-table-row.tsx`）は従来通り
+  NULL のとき確度バッジを出さない
 
 #### 重複起票防止（dedupe）のNULL product_id対応
 
@@ -540,7 +572,7 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 
 | 値                    | 意味                       |
 |------------------------|----------------------------|
-| `null`                 | 手動起票（確度情報なし）     |
+| `null`                 | 確度情報なし（手動起票、またはPDF解析失敗・抽出確度が許容値外で判定不能。Issue #474） |
 | `confirmed`            | 確定納期・PO番号明記        |
 | `forecast`             | 内示                        |
 | `forecast_tentative`   | 内々示                      |
@@ -682,6 +714,15 @@ Issue #304 での変更（PDF解析失敗時の下書き起票）:
   `_process_unreadable_pdf()` による下書き order 起票に変更。
   `_parse_one()` は失敗時も最終的にステージング行を `parse_status='success'` に更新する
 
+Issue #474 での変更（確度を判定できなかった受注を NULL で保存）:
+
+- `backend/app/services/pdf_order_parsing_service.py`: `_process_unreadable_pdf()` の
+  `p_customer_certainty` を `'forecast_tentative'` → `None` に、`_process_line_item()` の
+  許容値外 certainty のフォールバック先を `'forecast_tentative'` → `None` に変更
+- `frontend/src/components/orders/customer-certainty-value.tsx`（新規）/
+  `frontend/src/app/orders/[id]/page.tsx`: 受注詳細の「顧客側の確度」行を常時表示し、
+  NULL は「－」を表示
+
 Issue #425 での変更（本番 Render インスタンスの OOM 対策）:
 
 本番（Render, 512MBインスタンス）が OOM でクラッシュし、cron `parse-order-pdfs` が
@@ -768,6 +809,9 @@ PDF_TEXT_MAX_PAGES=50                # extract_text() が処理するPDFのペ�
 - [x] 暗号化PDF・画像PDF（テキスト抽出不可）でもクラッシュせず、判明している情報
       （顧客等）だけで下書き order が1件起票され、対応する `order_attachments` 行の
       `parse_status` に失敗理由が引き継がれる（Issue #304）
+- [x] テキスト抽出不可PDFの下書き、および抽出確度が許容値外・未指定の明細は
+      `customer_certainty=NULL` で起票され、受注詳細で「顧客側の確度: －」と表示される。
+      受注一覧は NULL のとき確度バッジを出さない（Issue #474）
 - [x] 重複明細（UNIQUE制約抵触）はスキップされ `order_parse_log` に記録される
 - [x] 生成された各orderから、対応する添付PDFが注文詳細画面からダウンロードできる
       （既存の `/orders/{order_id}/attachments` エンドポイントを変更なしで再利用）

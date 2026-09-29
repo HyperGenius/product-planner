@@ -103,6 +103,8 @@ class TestParsePendingOrderPdfs:
         assert rpc_params["p_deadline_date"] is None
         assert rpc_params["p_customer_id"] == 7
         assert rpc_params["p_source_attachment_id"] == "att-1"
+        # 確度も判定できないため内々示ではなく NULL（確度不明）で起票する（Issue #474）
+        assert rpc_params["p_customer_certainty"] is None
 
         # ステージング行自体はorder紐付け済みとして "success" にする
         update_calls = mock_db.table().update.call_args_list
@@ -814,10 +816,22 @@ class TestProcessLineItem:
         attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
         assert attachment_insert["parse_status"] == "failed_no_attachment"
 
-    def test_unknown_certainty_falls_back_to_forecast_tentative(self):
-        """Claude抽出結果が想定外の値（揺れ・スキーマ変更等）を返した場合でも、
-        orders.customer_certainty のCHECK制約に違反しないよう
-        forecast_tentative にフォールバックしてRPCへ渡すこと。"""
+    @pytest.mark.parametrize(
+        "certainty_overrides",
+        [
+            # 許容値(confirmed/forecast/forecast_tentative)以外
+            {"certainty": "予定"},
+            # null
+            {"certainty": None},
+            # キー自体が未指定
+            {},
+        ],
+        ids=["unexpected_value", "null", "missing"],
+    )
+    def test_unknown_certainty_is_passed_as_null(self, certainty_overrides):
+        """Claude抽出結果の確度が想定外の値・未指定（揺れ・スキーマ変更等）の場合、
+        orders.customer_certainty のCHECK制約に違反せず、かつ内々示と誤認されない
+        よう NULL（確度不明）でRPCへ渡すこと（Issue #474）。"""
         mock_db = MagicMock()
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 555, "action": "inserted"}]
@@ -827,7 +841,7 @@ class TestProcessLineItem:
             "product_number_raw": "CODE-1",
             "quantity": 10,
             "delivery_date": "2026-08-01",
-            "certainty": "予定",  # 許容値(confirmed/forecast/forecast_tentative)以外
+            **certainty_overrides,
         }
 
         with patch(
@@ -838,7 +852,33 @@ class TestProcessLineItem:
 
         assert created is True
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
-        assert rpc_params["p_customer_certainty"] == "forecast_tentative"
+        assert rpc_params["p_customer_certainty"] is None
+
+    @pytest.mark.parametrize(
+        "certainty", ["confirmed", "forecast", "forecast_tentative"]
+    )
+    def test_valid_certainty_is_passed_through(self, certainty):
+        """許容値の確度はそのままRPCへ渡すこと。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+        line = {
+            "product_name_raw": "製品A",
+            "product_number_raw": "CODE-1",
+            "quantity": 10,
+            "delivery_date": "2026-08-01",
+            "certainty": certainty,
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            _process_line_item(mock_db, self._staging_row(), line)
+
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_certainty"] == certainty
 
     def test_inserted_order_marks_superseded_orders(self):
         """新規orderが挿入された場合、同一(tenant,customer,product)で

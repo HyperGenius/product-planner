@@ -25,6 +25,7 @@ import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
 import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
+import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
 import {
   useOrder,
   useOrderAttachments,
@@ -44,8 +45,6 @@ import {
   getCustomerName,
   getStatusLabel,
   getStatusBadgeClass,
-  getCertaintyLabel,
-  getCertaintyBadgeClass,
   formatDeadlineDate,
   usesSimulatedDeadlineForOrder,
   isDeadlineOverdue,
@@ -324,16 +323,12 @@ export default function OrderDetailPage() {
                   </Badge>
                 </dd>
               </div>
-              {order.customer_certainty && (
-                <div className="flex justify-between items-center">
-                  <dt className="text-muted-foreground">顧客側の確度</dt>
-                  <dd>
-                    <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
-                      {getCertaintyLabel(order.customer_certainty)}
-                    </Badge>
-                  </dd>
-                </div>
-              )}
+              <div className="flex justify-between items-center">
+                <dt className="text-muted-foreground">顧客側の確度</dt>
+                <dd>
+                  <CustomerCertaintyValue certainty={order.customer_certainty} />
+                </dd>
+              </div>
             </dl>
           </div>
 

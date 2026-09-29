@@ -84,6 +84,22 @@ describe("OrderTableRow", () => {
     expect(screen.getByText("未設定")).toBeInTheDocument()
   })
 
+  describe("顧客側の確度バッジ（Issue #474）", () => {
+    it("確度が NULL（判定できなかった受注）なら確度バッジを出さない", () => {
+      renderRow(makeOrder({ customer_certainty: null }))
+
+      expect(screen.queryByText("内々示")).not.toBeInTheDocument()
+      expect(screen.queryByText("内示")).not.toBeInTheDocument()
+      expect(screen.queryByText("－")).not.toBeInTheDocument()
+    })
+
+    it("内々示の受注には確度バッジを出す", () => {
+      renderRow(makeOrder({ customer_certainty: "forecast_tentative" }))
+
+      expect(screen.getByText("内々示")).toBeInTheDocument()
+    })
+  })
+
   describe("工程未入力（has_no_routings）— Issue #406", () => {
     it("製品マッチ済み・工程なしの draft に「工程未入力・起票不可」バッジを出す", () => {
       renderRow(makeOrder({ has_no_routings: true, source_type: "manual" }))
