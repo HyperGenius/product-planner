@@ -170,6 +170,18 @@ export function jstTodayIso(): string {
 }
 
 /**
+ * Asia/Tokyo タイムゾーンの「明日」を "YYYY-MM-DD" 形式で返す（Issue #477）。
+ * 作業開始日の既定値。バックエンドの `default_scheduling_start_date()`（JST の今日 + 1日）
+ * と、同じ画面の過去日判定（`jstTodayIso()`）に基準を揃える。
+ * 暦日の翌日をそのまま返し、稼働日への繰り上げはスケジューラに任せる。
+ */
+export function jstTomorrowIso(): string {
+  const d = new Date(`${jstTodayIso()}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
  * "YYYY-MM-DD" 形式かつ実在する日付か検証する。
  * バックエンドの `date.fromisoformat` 相当のチェックで、`2026-13-40` のような
  * 不正な文字列を弾く（文字列比較だけだと不正日付が「納期超過」と誤判定されるため）。

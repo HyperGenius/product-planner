@@ -89,6 +89,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
    g. `inserted` の場合のみ、同一 (tenant_id, customer_id, product_id) で異なる
       deadline_date を持つ未来日付の forecast/forecast_tentative レコードに
       `superseded_at = now()` をセットする（`_mark_superseded_orders`、Issue #252）
+   h. `inserted`/`updated` かつ `product_id` ありの場合、作業開始日（未設定なら処理日 JST の翌日）を
+      起点にシミュ納期まで自動算出する（`auto_simulate_intake_order`、Issue #477。後述）
 5. 処理後、ステージング行自体の parse_status を更新する
    (テキスト抽出・Claude抽出が完走すれば、生成された order 数によらず 'success' とする。
    0件生成となるケース＝全明細が重複/照合失敗＝も、パース処理自体は正常に完了しているため。
@@ -277,13 +279,13 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 
 `_process_line_item` は `action` に応じて分岐する:
 
-| action                    | order_attachments追加 | order_parse_log |
-|---------------------------|:---:|---|
-| `inserted`                | ○ | なし |
-| `updated`                 | ○ | なし |
-| `skipped_downgrade`       | - | `reason='downgrade_skipped'` |
-| `skipped_draft_conflict`  | - | `reason='draft_conflict_skipped'` |
-| `skipped_no_change`       | - | なし（※下記 Issue #357 の attachment 単位フォールバックを除く） |
+| action                    | order_attachments追加 | order_parse_log | 自動シミュ（Issue #477） |
+|---------------------------|:---:|---|:---:|
+| `inserted`                | ○ | なし | ○（`product_id` ありのみ） |
+| `updated`                 | ○ | なし | ○（`product_id` ありのみ。再シミュ） |
+| `skipped_downgrade`       | - | `reason='downgrade_skipped'` | - |
+| `skipped_draft_conflict`  | - | `reason='draft_conflict_skipped'` | - |
+| `skipped_no_change`       | - | なし（※下記 Issue #357 の attachment 単位フォールバックを除く） | - |
 
 #### パース成功・起票0件の可視化（Issue #357）
 
@@ -315,6 +317,37 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 されない。`customer_certainty IS NULL`（確度不明。Issue #474）の行も対象外で、自動では
 supersede されない。確度が判定できていない行を「旧内示」と断定して一覧から消すと
 取りこぼしになるため、受注担当者が内容を確認して手動で整理する前提とする。
+
+### 起票後の自動シミュレーション（Issue #477）
+
+自動起票された下書きごとに受注担当者が「シミュレーション実行」ボタンを押す手間をなくすため、
+`_process_line_item()` は `inserted` / `updated` の受注（`product_id` あり）に対して
+`order_simulation_service.auto_simulate_intake_order(db, tenant_id, order_id)` を呼ぶ。
+
+- 受注の `scheduling_start_date` が NULL なら **処理日（JST）の翌日（暦日）** を保存し、
+  `scheduling_start_date_auto = true` を立てる。既に値が入っている場合（`updated` で既存 draft に
+  手動設定済み等）は上書きしない。翌日が土日祝でも暦日のまま保存し、稼働日への繰り上げは
+  スケジューラのカレンダーロジックに任せる
+- その作業開始日を起点に `schedule_order(dry_run=True)` を実行し、`simulated_deadline` と
+  `is_scheduled = true` を**作業開始日と同一 UPDATE で**保存する。手動シミュ
+  （`POST /orders/{id}/simulate`）と同じ `simulate_and_persist()` を使うので結果は一致する
+- `updated`（数量変更等）でも再シミュするため、RPC の `updated` が `simulated_deadline` を
+  クリアしない問題（古いシミュ納期が残る）も解消される。RPC `upsert_order_by_dedupe_key` は変更していない
+- `skipped_*` は対象外のため、cron を再実行しても二重計算は起きない（冪等）
+- 対象外・失敗時はベストエフォート（**起票件数・`parse_status` に影響させない**）:
+  - `product_id IS NULL`（製品未照合、`_process_unreadable_pdf()` 経由を含む）はシミュせず、作業開始日も
+    設定しない（紐付け後の手動シミュで補完される）
+  - 工程未登録（`RoutingUnconfirmedError(no_routing=True)`）・工程所要時間不正
+    （`InvalidRoutingDurationError`）は `logger.warning`、その他の例外は `logger.exception` を残してスキップ
+  - 工程が未確定（`is_confirmed=false`）でも `dry_run=True` のシミュは実行できるため対象に含める
+- cron は admin クライアント（RLS バイパス）で動く。受注の SELECT / UPDATE は `.eq("tenant_id", tenant_id)`
+  で明示的に絞り込み、スケジューラ内のクエリ（工程・設備グループメンバー・設備スケジュール・
+  スケジューリング設定）は受注の `product_id` に紐づく工程・設備 ID、または `tenant_id` で絞り込まれるため
+  他テナントのデータは参照しない
+- 明細ごとにシミュ分の DB クエリが増えるため（1回の cron は最大 `PARSE_ORDER_PDFS_BATCH_LIMIT` 件の添付。
+  Issue #425）、`auto_simulate: order_id=... simulated in N.NNs` を INFO ログに出して処理時間を追えるようにしている
+- 自動補完した作業開始日が承認時点で過去日になっていたら、承認時に承認日（JST）の翌日へ繰り上げる
+  （[simulation-engine.md](simulation-engine.md) の `POST /orders/{order_id}/confirm` 参照）
 
 ### 製品未マッチ明細のNULL product_id下書き起票（Issue #296）
 
@@ -1016,3 +1049,4 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 - Issue #252: 既存orderのupsert処理（内示→確定の昇格・数量更新対応）。本ドキュメントに統合
 - [notifications.md](notifications.md): 処理ログの通知UI（Issue #254、`order_parse_log` を利用）
 - [product-master.md](product-master.md#別名辞書-product_name_aliases): 製品名の表記ゆれ辞書・修正履歴管理（Issue #347）
+- [simulation-engine.md](simulation-engine.md): シミュ納期（`simulated_deadline`）・作業開始日の補完と承認時の繰り上げ（Issue #477）

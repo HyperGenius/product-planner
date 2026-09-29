@@ -1,4 +1,5 @@
 # repositories/supa_infra/transaction/order_repo.py
+from datetime import date
 from typing import Any, cast
 
 from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
@@ -163,7 +164,12 @@ class OrderRepository(BaseRepository):
         return rows[0] if rows else None
 
     def mark_as_scheduled(
-        self, order_id: int, simulated_deadline: str | None = None
+        self,
+        order_id: int,
+        simulated_deadline: str | None = None,
+        *,
+        auto_scheduling_start_date: date | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """
         注文をスケジュール済み（is_scheduled=True）としてマークする。
@@ -173,6 +179,11 @@ class OrderRepository(BaseRepository):
             simulated_deadline (str | None): シミュレーションが算出した完成見込み日
                 （YYYY-MM-DD）。指定時は同一 UPDATE で simulated_deadline も保存する
                 （Issue #394-A）。None のときは is_scheduled のみ更新する。
+            auto_scheduling_start_date (date | None): シミュレーション時に自動補完した
+                作業開始日。指定時は同一 UPDATE で scheduling_start_date に保存し、
+                scheduling_start_date_auto=True を立てる（Issue #477）。
+            tenant_id (str | None): 指定時は tenant_id でも絞り込む。RLS をバイパスする
+                admin クライアント（cron）から呼ぶ場合に渡す。
 
         Raises:
             APIError: Supabase APIリクエストが失敗した場合。
@@ -180,4 +191,10 @@ class OrderRepository(BaseRepository):
         payload: dict[str, Any] = {"is_scheduled": True}
         if simulated_deadline is not None:
             payload["simulated_deadline"] = simulated_deadline
-        self.client.table(self.table_name).update(payload).eq("id", order_id).execute()
+        if auto_scheduling_start_date is not None:
+            payload["scheduling_start_date"] = auto_scheduling_start_date.isoformat()
+            payload["scheduling_start_date_auto"] = True
+        query = self.client.table(self.table_name).update(payload).eq("id", order_id)
+        if tenant_id is not None:
+            query = query.eq("tenant_id", tenant_id)
+        query.execute()

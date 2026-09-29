@@ -36,19 +36,23 @@ from app.scheduler_logic import (
     schedule_order,
 )
 from app.services.notification_service import create_notification
+from app.services.order_simulation_service import deadline_from_schedules
 from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
     is_overdue_draft,
     validate_order_status_transition,
 )
 from app.services.product_alias_service import record_auto_match_alias_if_applicable
-from app.services.scheduling_start_service import to_scheduling_start_time
+from app.services.scheduling_start_service import (
+    default_scheduling_start_date,
+    is_backdated,
+    to_scheduling_start_time,
+)
 from app.utils.calendar import JST
 from app.utils.logger import get_logger
 from supabase import Client
 
 from ._shared import (
-    _deadline_from_schedules,
     _map_order_response,
     _require_any_role,
     _require_role,
@@ -131,7 +135,22 @@ def _confirm_single_order(
     # 1. 実際に保存 (dry_run=False)
     #    受注に作業開始日が設定されていれば、その日の稼働開始時刻を起点にする（Issue #372）。
     #    保存済みの値は書き込み時に検証済みのため、ここでは権限チェック不要。
-    start_time = to_scheduling_start_time(order.get("scheduling_start_date"))
+    #    自動補完された作業開始日（scheduling_start_date_auto）が承認時点で過去日なら、
+    #    承認日（JST）の翌日へ繰り上げる。過去日から確定スケジュールを組んだり、
+    #    advance-order-status cron が承認直後に in_progress へ遷移させたりしないため
+    #    （Issue #477）。手動で意図的に設定した過去日（Issue #372 の救済）は据え置く。
+    scheduling_start_date = order.get("scheduling_start_date")
+    rolled_start = None
+    if order.get("scheduling_start_date_auto") and is_backdated(scheduling_start_date):
+        rolled_start = default_scheduling_start_date()
+        logger.info(
+            "confirm: roll forward auto scheduling_start_date order_id=%s %s -> %s",
+            order_id,
+            scheduling_start_date,
+            rolled_start,
+        )
+        scheduling_start_date = rolled_start.isoformat()
+    start_time = to_scheduling_start_time(scheduling_start_date)
     result = schedule_order(
         order_id=order["id"],
         product_id=order["product_id"],
@@ -146,16 +165,16 @@ def _confirm_single_order(
     )
 
     # 2. ステータス更新 & is_scheduled フラグ更新
-    confirmed_deadline = _deadline_from_schedules(result)
-    order_repo.update(
-        order_id,
-        {
-            "status": "confirmed",
-            "is_scheduled": True,
-            "confirmed_at": datetime.now(UTC).isoformat(),
-            "confirmed_deadline": confirmed_deadline,
-        },
-    )
+    confirmed_deadline = deadline_from_schedules(result)
+    confirm_payload: dict[str, Any] = {
+        "status": "confirmed",
+        "is_scheduled": True,
+        "confirmed_at": datetime.now(UTC).isoformat(),
+        "confirmed_deadline": confirmed_deadline,
+    }
+    if rolled_start is not None:
+        confirm_payload["scheduling_start_date"] = rolled_start.isoformat()
+    order_repo.update(order_id, confirm_payload)
 
     return {"status": "confirmed", "schedules": result}
 

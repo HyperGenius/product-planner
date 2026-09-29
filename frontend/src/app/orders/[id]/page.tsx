@@ -281,7 +281,7 @@ export default function OrderDetailPage() {
                 <dd>
                   {order.scheduling_start_date
                     ? formatDate(order.scheduling_start_date)
-                    : <span className="text-muted-foreground">実行日時から着手</span>}
+                    : <span className="text-muted-foreground">未設定（シミュ実行時に翌日を設定）</span>}
                 </dd>
               </div>
               <div className="flex justify-between">

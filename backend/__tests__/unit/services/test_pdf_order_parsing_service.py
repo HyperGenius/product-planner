@@ -37,6 +37,20 @@ def _no_alias_match():
         yield mock_alias
 
 
+@pytest.fixture(autouse=True)
+def _no_auto_simulate():
+    """起票後の自動シミュレーション（Issue #477）を既定で無効化し、既存テストが
+    起票まわりの DB 呼び出しだけを検証できるようにする。自動シミュの呼び出し有無を
+    検証するテストではこのフィクスチャを引数で受け取る。シミュ自体のロジックは
+    test_order_simulation_service.py で検証する。
+    """
+    with patch(
+        "app.services.pdf_order_parsing_service.auto_simulate_intake_order",
+        return_value=True,
+    ) as mock_auto_sim:
+        yield mock_auto_sim
+
+
 @pytest.mark.unit
 class TestParsePendingOrderPdfs:
     def _staging_row(self, **overrides):
@@ -1004,6 +1018,93 @@ class TestProcessLineItem:
             c.args[0] for c in mock_db.table().insert.call_args_list if c.args
         ]
         assert not any(c.get("reason") == "multi_order_suspected" for c in insert_calls)
+
+    # --- Issue #477: 起票後の自動シミュレーション ---------------------------------
+
+    _LINE = {
+        "product_name_raw": "製品A",
+        "product_number_raw": "CODE-1",
+        "quantity": 10,
+        "delivery_date": "2026-08-01",
+        "certainty": "confirmed",
+    }
+
+    @pytest.mark.parametrize("action", ["inserted", "updated"])
+    def test_inserted_or_updated_order_is_auto_simulated(
+        self, _no_auto_simulate, action
+    ):
+        """inserted / updated の受注は起票後に自動シミュを呼ぶ（updated は数量変更後の
+        シミュ納期へ更新するための再シミュ）。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": action}]
+        )
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), self._LINE)
+
+        assert created is True
+        _no_auto_simulate.assert_called_once_with(mock_db, "tenant-1", 555)
+
+    @pytest.mark.parametrize(
+        "action", ["skipped_no_change", "skipped_downgrade", "skipped_draft_conflict"]
+    )
+    def test_skipped_order_is_not_auto_simulated(self, _no_auto_simulate, action):
+        """skipped_* は起票していないため自動シミュしない（cron 再実行で二重計算しない）。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": action}]
+        )
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            _process_line_item(mock_db, self._staging_row(), self._LINE)
+
+        _no_auto_simulate.assert_not_called()
+
+    def test_unmatched_product_order_is_not_auto_simulated(self, _no_auto_simulate):
+        """製品未照合（product_id=NULL）の下書きは自動シミュの対象外。"""
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 999, "action": "inserted"}]
+        )
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=None,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+                return_value={"product_id": None, "candidates": []},
+            ),
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), self._LINE)
+
+        assert created is True
+        _no_auto_simulate.assert_not_called()
+
+    def test_auto_simulate_failure_does_not_affect_intake(self, _no_auto_simulate):
+        """自動シミュが失敗（False）しても起票自体は成功扱いのまま。"""
+        _no_auto_simulate.return_value = False
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 555, "action": "inserted"}]
+        )
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=100,
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), self._LINE)
+
+        assert created is True
+        _no_auto_simulate.assert_called_once()
 
 
 @pytest.mark.unit

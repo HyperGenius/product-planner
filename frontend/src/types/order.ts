@@ -26,6 +26,12 @@ export interface Order {
   order_date?: string | null
   /** 作業開始日（工場が着手する日、YYYY-MM-DD）。未設定なら実行日時から着手。過去日は president / platform_admin のみ設定可（Issue #372） */
   scheduling_start_date?: string | null
+  /**
+   * 作業開始日がシステムによる自動補完（処理日 JST の翌日）なら true。cron の自動起票・
+   * 作業開始日未設定でのシミュ実行時に立ち、手動設定で false に戻る。承認時に過去日なら
+   * 承認日の翌日へ繰り上げる対象（Issue #477）
+   */
+  scheduling_start_date_auto?: boolean
   status: 'draft' | 'pending_approval' | 'confirmed' | 'in_progress' | 'shipped' | 'completed' | 'canceled'
   /** 承認依頼を送信した日時 (ISO 8601 / timestamptz)。pending_approval 以外・既存データでは未設定（Issue #402） */
   approval_requested_at?: string | null

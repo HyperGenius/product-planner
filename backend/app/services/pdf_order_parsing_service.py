@@ -8,6 +8,7 @@ from app.services.attachment_service import download_attachment
 from app.services.customer_matching_service import match_customer_by_pdf_text
 from app.services.email_extraction_service import extract_email_order_lines
 from app.services.notification_service import create_notification
+from app.services.order_simulation_service import auto_simulate_intake_order
 from app.services.pdf_order_extraction_service import extract_order_lines
 from app.services.pdf_text_service import MAX_PDF_BYTES, PdfTooLargeError, extract_text
 from app.services.product_matching_service import (
@@ -758,6 +759,13 @@ def _process_line_item(
         # product_id が未確定の明細は、どの製品の内示を無効化すべきか判断できない
         # ため対象外とする（超過分の後始末は人力での紐付け後に委ねる）。
         _mark_superseded_orders(db, tenant_id, staging_row, product_id, deadline_date)
+
+    if product_id is not None:
+        # 作業開始日（未設定なら処理日 JST の翌日）を起点にシミュ納期まで自動算出し、
+        # 受注担当者がシミュ実行ボタンを押さずに済むようにする（Issue #477）。
+        # updated（数量変更等）でも再シミュして古いシミュ納期を残さない。
+        # ベストエフォートのため失敗しても起票自体は成功扱いのまま。
+        auto_simulate_intake_order(db, tenant_id, order_id)
 
     return True
 
