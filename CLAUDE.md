@@ -90,6 +90,17 @@ cd backend && ruff check . && mypy .
     `tenant_id` は使わない**。以降のクエリはすべて `.eq("tenant_id", tenant_id)` でアプリ側から明示的に絞り込む。
     エージェント API は `Depends(get_agent_context)` で `AgentContext` を受け取り、その値だけを使うこと。
     詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
+- **Storage の「上書きしない」アップロード**: `upload(..., file_options={"upsert": "false"})` で既存キーに書くと
+  storage3 は `StorageApiError` を投げ、実 Storage では `status == "409"`（文字列）/ `code == "Duplicate"` になる
+  （ローカル Supabase で確認済み。既存オブジェクトは上書きされない）。重複を正常系として扱う場合はこれで判定し、
+  それ以外の `StorageApiError` は再送出する（`daily_report_service._upload_if_absent()`、Issue #471）
+- **raw body（octet-stream）を受けるエンドポイント**: `UploadFile` を使わずボディを直接受ける場合は
+  `async def` にして `request.stream()` で読みながらサイズ上限（`Content-Length` 省略のチャンク転送に備えて
+  宣言値と実測値の両方）とハッシュを検証し、同期の supabase-py 呼び出しは `run_in_threadpool` で実行する。
+  認証 dependency（同期 `def`）はボディを読む前に走るので、未認証リクエストで上限まで読むことはない。
+  前例は `routers/agent/daily_reports.py`。上限定数はルーターが `from ... import` しているため、テストでは
+  ルーターモジュール側を `monkeypatch.setattr()` する。API テストでチャンク転送を再現するには
+  `TestClient.post(..., content=iter([...]))`（httpx が `Content-Length` 無しで送る）
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**

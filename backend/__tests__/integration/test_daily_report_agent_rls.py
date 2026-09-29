@@ -8,6 +8,7 @@ Integration テスト: 日報取り込みエージェントの DB・Storage 基�
 - daily_report_files の UNIQUE (tenant_id, sha256)
 - private バケット daily-reports の作成
 - issue_agent_token.py が実DBにハッシュのみを保存すること
+- store_daily_report() の重複排除（実 Storage の既存オブジェクトエラーの扱い。Issue #471）
 
 実行:
   supabase start
@@ -22,6 +23,11 @@ from typing import Any, cast
 
 import pytest
 from app.services.agent_token_service import hash_agent_token
+from app.services.daily_report_service import (
+    DAILY_REPORT_BUCKET,
+    build_storage_path,
+    store_daily_report,
+)
 from postgrest.exceptions import APIError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -270,3 +276,75 @@ class TestDailyReportsBucket:
         bucket = admin_db.storage.get_bucket("daily-reports")
         assert bucket.public is False
         assert bucket.file_size_limit == 20 * 1024 * 1024
+
+
+@pytest.mark.integration
+class TestStoreDailyReport:
+    """store_daily_report() を実 Storage・実DBに対して動かす (Issue #471)。
+
+    Storage の「既存オブジェクトへの upsert=false アップロード」が返すエラーの形は
+    モックでは検証できないため、ここで実際の挙動を確認する。
+    """
+
+    @pytest.fixture()
+    def content(self, admin_db, agent_tenants):
+        content = f"daily report {uuid.uuid4()}".encode()
+        sha = hashlib.sha256(content).hexdigest()
+        yield content, sha
+        admin_db.storage.from_(DAILY_REPORT_BUCKET).remove(
+            [build_storage_path(agent_tenants["own_id"], sha)]
+        )
+
+    def _store(self, admin_db, agent_tenants, content: bytes, sha: str) -> str:
+        return store_daily_report(
+            admin_db,
+            tenant_id=agent_tenants["own_id"],
+            agent_token_id=agent_tenants["own_token_id"],
+            sha256=sha,
+            content=content,
+            original_path=r"\\fileserver\日報\日報_0929.xlsx",
+            file_name="日報_0929.xlsx",
+            file_modified_at=None,
+        )
+
+    def _rows(self, admin_db, tenant_id: str, sha: str) -> list[dict[str, Any]]:
+        res = (
+            admin_db.table("daily_report_files")
+            .select("storage_path, size_bytes")
+            .eq("tenant_id", tenant_id)
+            .eq("sha256", sha)
+            .execute()
+        )
+        return cast(list[dict[str, Any]], res.data)
+
+    def test_store_then_resend_is_duplicate(self, admin_db, agent_tenants, content):
+        body, sha = content
+
+        assert self._store(admin_db, agent_tenants, body, sha) == "stored"
+        assert self._store(admin_db, agent_tenants, body, sha) == "duplicate"
+
+        rows = self._rows(admin_db, agent_tenants["own_id"], sha)
+        assert rows == [
+            {
+                "storage_path": build_storage_path(agent_tenants["own_id"], sha),
+                "size_bytes": len(body),
+            }
+        ]
+        downloaded = admin_db.storage.from_(DAILY_REPORT_BUCKET).download(
+            rows[0]["storage_path"]
+        )
+        assert bytes(downloaded) == body
+
+    def test_existing_object_without_row_is_recorded(
+        self, admin_db, agent_tenants, content
+    ):
+        """前回 INSERT に失敗して Storage にだけ残ったオブジェクトがあっても行を作る"""
+        body, sha = content
+        admin_db.storage.from_(DAILY_REPORT_BUCKET).upload(
+            path=build_storage_path(agent_tenants["own_id"], sha),
+            file=body,
+            file_options={"content-type": "application/octet-stream"},
+        )
+
+        assert self._store(admin_db, agent_tenants, body, sha) == "stored"
+        assert len(self._rows(admin_db, agent_tenants["own_id"], sha)) == 1

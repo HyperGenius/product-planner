@@ -11,7 +11,7 @@
 |---|---|---|
 | #469 | DB・Storage 基盤とエージェントトークン発行 CLI | 本ドキュメントに記載 |
 | #470 | エージェント認証と `POST /api/agent/heartbeat` | 本ドキュメントに記載 |
-| #471 | 日報ファイル受信 `POST /api/agent/daily-reports` | 未着手 |
+| #471 | 日報ファイル受信 `POST /api/agent/daily-reports` | 本ドキュメントに記載 |
 | #472 | 共有PCエージェントの配置と設置手順（`tools/daily-report-agent/`） | 未着手 |
 
 ## 認証とテナント分離の方針
@@ -104,6 +104,48 @@
 - INSERT 失敗時は 500 `{"detail": "Failed to record heartbeat."}`。例外の詳細は `logger.error(..., exc_info=True)`
   にのみ残す（cron と同じ規約）
 
+### `POST /api/agent/daily-reports`（`routers/agent/daily_reports.py`）
+
+日報ファイル1件を受信し、Storage に保存して `daily_report_files` に1行記録する。ボディはファイル本体
+（`application/octet-stream`）、メタデータはヘッダで受け取る。保存・重複判定は
+`app/services/daily_report_service.py`、レスポンススキーマは `app/models/agent.py` の `DailyReportUploadResponse`。
+
+| ヘッダ | 必須 | 内容 |
+|---|---|---|
+| `Authorization` | ○ | `Bearer <エージェントトークン>`（`get_agent_context`） |
+| `X-File-Sha256` | ○ | ファイル本体の SHA-256（hex 64桁）。大文字小文字は問わず、小文字に正規化して保存する（PowerShell の `Get-FileHash` は大文字を返す） |
+| `X-File-Path` | ○ | 元のファイルパスを UTF-8 で URL エンコードした値（PS 5.1 の `[System.Uri]::EscapeDataString()`）。`urllib.parse.unquote()` で復元して `original_path` に、`PureWindowsPath(...).name` を `file_name` に保存する |
+| `X-File-Modified-At` | 任意 | ファイルの更新日時（ISO 8601。PS の `ToString("o")` の小数7桁も可）。オフセット無しは JST とみなす。**解釈できない値はファイル受信を止めず NULL で保存**する（参考情報のため） |
+
+処理の流れ:
+
+1. 認証（401 は heartbeat と同じ）。ボディを読む前にヘッダを検証する
+2. `Content-Length` が上限を超えていれば、ボディを読まずに 413
+3. `request.stream()` で読みながら累計バイト数を数えて上限超過で 413（`Content-Length` 省略のチャンク転送対策）、
+   同時に SHA-256 を計算する。`X-File-Sha256` と一致しなければ 400
+4. `store_daily_report()`（同期の supabase-py を使うので `run_in_threadpool` で実行）
+   1. `(tenant_id, sha256)` の既存行があれば `duplicate`（Storage・テーブルとも触らない）
+   2. `upsert=false` でキー `{tenant_id}/{sha256}` にアップロードする。既存オブジェクトなら Storage は
+      `StorageApiError(status="409", code="Duplicate")` を返すので、上書きせずに次へ進む
+      （前回 INSERT に失敗して Storage にだけ残ったケース。キーが sha256 なので中身は同一）
+   3. INSERT する。`23505`（unique_violation、同時送信で先を越された）なら `duplicate`
+
+| ケース | レスポンス |
+|---|---|
+| 新規保存 | 200 `{"status": "stored", "sha256": "<小文字hex>"}` |
+| 同一テナントで同一 sha256 を受信済み | 200 `{"status": "duplicate", "sha256": "..."}` |
+| 必須ヘッダ無し | 400 `Missing required header: X-File-Sha256.` 等 |
+| `X-File-Sha256` が hex 64桁でない | 400 `Invalid X-File-Sha256 header.` |
+| `X-File-Path` が UTF-8 として復元できない・ファイル名部分が空 | 400 `Invalid X-File-Path header.` |
+| ボディのハッシュ不一致 | 400 `X-File-Sha256 does not match the request body.` |
+| 上限超過（宣言値・実測値とも） | 413 `File too large.` |
+| Storage・DB エラー | 500 `Failed to store daily report.`（詳細はログのみ） |
+
+- 上限は `MAX_DAILY_REPORT_BYTES`（環境変数 `DAILY_REPORT_MAX_BYTES`、デフォルト 20MB）。バケットの
+  `file_size_limit` と揃えること。上げる場合はバケット設定とホスティング先のリクエストボディ上限も確認する
+- ボディは上限までメモリに載せる（Storage へのアップロードが bytes を要求するため）
+- `tenant_id` はトークンからのみ解決し、Storage のキー・テーブルの行・既存行の検索のすべてに使う
+
 ## トークンの発行・失効
 
 `backend/scripts/issue_agent_token.py`（使い方は [backend/scripts/USAGE.md](../../backend/scripts/USAGE.md)）
@@ -122,9 +164,13 @@
 - `backend/__tests__/api/routers/agent/test_heartbeat.py`: 認証（ヘッダ不正・該当なし・失効済みがすべて同じ 401）、
   トークンのテナントへの記録（リクエストの `tenant_id` を無視）、`last_used_at` 更新、`payload` への未知フィールド保存、
   DB エラー時の固定文言
+- `backend/__tests__/api/routers/agent/test_daily_reports.py`: 保存・重複（既存行／既存オブジェクト／
+  unique_violation）、トークンのテナントへの保存、ヘッダ検証・ハッシュ不一致の 400、`Content-Length` 超過と
+  チャンク転送での超過の 413、日本語パスの復元、401、Storage・DB エラー時の固定文言
+- `backend/__tests__/unit/services/test_daily_report_service.py`: ヘッダ値のパース（sha256 正規化・パス復元・更新日時）
 - `backend/__tests__/integration/test_daily_report_agent_rls.py`（`--run-integration`）: RLS（ユーザー JWT から
   書き込めない・他テナントの行が見えない・`agent_tokens` が見えない）、UNIQUE (`tenant_id`, `sha256`)、
-  `token_hash` の CHECK 制約、バケット設定
+  `token_hash` の CHECK 制約、バケット設定、`store_daily_report()` の実 Storage での重複排除
 
 ## スコープ外（PoC ではやらない）
 

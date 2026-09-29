@@ -1,5 +1,5 @@
 # backend/app/models/agent.py
-"""日報取り込みエージェント向け API のスキーマ (Issue #470)。"""
+"""日報取り込みエージェント向け API のスキーマ (Issue #470, #471)。"""
 
 from typing import Any, Literal
 
@@ -42,3 +42,12 @@ class AgentHeartbeatResponse(BaseModel):
     """heartbeat 記録結果のレスポンス"""
 
     status: Literal["ok"] = "ok"
+
+
+class DailyReportUploadResponse(BaseModel):
+    """日報ファイル受信結果のレスポンス (Issue #471)"""
+
+    status: Literal["stored", "duplicate"] = Field(
+        description="stored: 新規保存 / duplicate: 同一内容（同一 sha256）を受信済み"
+    )
+    sha256: str = Field(description="受信したファイルの SHA-256（小文字の hex）")
