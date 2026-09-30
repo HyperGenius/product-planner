@@ -57,6 +57,36 @@
 - Terraform（`infra/terraform/`）の `supabase/supabase` provider はバケットを管理できないため、
   `order-attachments` と同じくマイグレーションの `INSERT INTO storage.buckets ... ON CONFLICT DO NOTHING` で作る
 
+## 受付口 Edge Function `agent-gateway`
+
+エージェントはバックエンド（Render）を直接叩かず、Supabase Edge Function
+`supabase/functions/agent-gateway/index.ts` を経由する。エージェントの `api_base_url` は
+`https://<project-ref>.supabase.co/functions/v1/agent-gateway` で、バックエンドのホスト先を変えても
+共有PC側の設定を変えずに済む（切り替えは Edge Function Secrets の `BACKEND_URL` だけ）。
+
+- ロジックは持たない薄いプロキシ。`/api/agent/heartbeat` と `/api/agent/daily-reports` の POST だけを
+  `BACKEND_URL` へ中継し、それ以外は 404 / 405（任意のバックエンド API への踏み台にしない）
+- 転送するリクエストヘッダは `Authorization` / `Content-Type` / `User-Agent` / `X-File-*` の許可リストのみ。
+  ステータスとボディはそのまま返す
+- **`verify_jwt = false` でデプロイする**。エージェントは Supabase の JWT ではなく独自のエージェントトークンを
+  `Authorization` に載せるため、既定の JWT 検証が有効だとゲートウェイで 401 になる。認証はバックエンドの
+  `get_agent_context` が行う。Terraform provider（`supabase/supabase` 1.9.x）の `supabase_edge_function` には
+  `verify_jwt` 属性が無いため、この関数は Terraform 管理にせず CLI でデプロイする:
+
+  ```bash
+  supabase functions deploy agent-gateway --no-verify-jwt --project-ref <project-ref>
+  ```
+
+- **ボディは上限（既定 20MB、Secrets の `AGENT_MAX_BODY_BYTES`）付きで読み切ってから転送する**。Edge Runtime は
+  クライアントのボディを読み切らずに応答すると応答を返せず、Kong のタイムアウト（約60秒）で 504 になる。
+  ストリームのまま中継すると、バックエンドがボディを読む前に応答するケース（トークン不正の 401、上限超過の 413）で
+  これを踏み、トークン設定ミスが「毎回タイムアウト」に見える（ローカルで 15MB＋不正トークンで再現）。
+  上限超過も読み捨ててから 413 を返す。バックエンドの `DAILY_REPORT_MAX_BYTES` を変えたときは合わせて変える
+- `BACKEND_URL` は `parse-order-pdfs-trigger` と共用の Secret
+- ローカル確認: `supabase functions serve --env-file <file>`（関数名は指定できず全関数が起動する。
+  `config.toml` の `verify_jwt = false` が効く）。`<file>` に `BACKEND_URL=http://host.docker.internal:8000` を書き、
+  `http://127.0.0.1:54321/functions/v1/agent-gateway/api/agent/heartbeat` へ POST する
+
 ## エージェント API（`/api/agent/*`）
 
 `backend/app/routers/agent/`。マシン間通信のため `/api/cron/*` に揃えて `/api/agent/*` とし、`/v1` は付けない。

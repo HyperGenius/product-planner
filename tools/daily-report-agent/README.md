@@ -87,7 +87,7 @@ python scripts/issue_agent_token.py issue --tenant-id <tenant_uuid> --name "工�
 
 | 項目 | 必須 | 既定値 | 内容 |
 |---|---|---|---|
-| `api_base_url` | ○ | － | バックエンドの URL（例: `https://api.example.com`）。末尾の `/` は不要。`/api/agent/...` はスクリプトが付ける |
+| `api_base_url` | ○ | － | 受付口の Edge Function の URL（`https://<project-ref>.supabase.co/functions/v1/agent-gateway`）。末尾の `/` は不要。`/api/agent/...` はスクリプトが付ける |
 | `token` | ○（※） | － | 手順1で発行したトークン |
 | `target_folders` | ○ | － | 日報Excelを置いているフォルダ（複数可）。UNC パス（`\\server\share\日報`）も可 |
 | `recurse` | | `true` | サブフォルダも走査するか |

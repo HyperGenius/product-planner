@@ -115,6 +115,11 @@ cd backend && ruff check . && mypy .
     ログオンユーザー）から取る。UNC を読むため `SYSTEM`・S4U は使わない。パスワードは `Get-Credential` 以外で受け取らない。
     コンテナの `pwsh` には `ScheduledTasks` が無いので、ロジックの確認は `New-ScheduledTask*` / `Register-ScheduledTask` を
     スタブ関数で差し替えて実行し、PS 5.1 互換性は PSScriptAnalyzer の `PSUseCompatibleSyntax`（TargetVersions 5.1）で見る
+- **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
+  `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
+  `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。
+  Edge Runtime は**クライアントのボディを読み切らずに応答すると 504（約60秒）になる**ため、ボディ付きリクエストを
+  中継・拒否するときは必ず最後まで読んでから応答する（ストリーム中継すると、上流がボディを読む前に返す 401/413 で踏む）
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
