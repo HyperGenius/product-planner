@@ -58,6 +58,19 @@ class EquipmentBase(BaseSchema):
     max_fragments: int | None = Field(
         None, ge=1, description="最大断片数。NULL=グループ/グローバル設定を継承"
     )
+    # --- 設備台帳（顧客の正典）の情報 (Issue #486) ---
+    ledger_no: int | None = Field(
+        None,
+        ge=1,
+        description="設備台帳の番号（テナント内で一意）。台帳に無い設備は NULL",
+    )
+    maker: str | None = Field(None, description="メーカー")
+    model: str | None = Field(None, description="型式")
+    manufactured_on: str | None = Field(
+        None, description="製造年月（台帳の表記のまま。例: 1993年5月 / S.53年11月）"
+    )
+    serial_no: str | None = Field(None, description="製造番号")
+    note: str | None = Field(None, description="備考")
 
 
 class EquipmentCreate(EquipmentBase):

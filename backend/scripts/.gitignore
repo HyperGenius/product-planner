@@ -1,1 +1,3 @@
 migrate/_data/*.json
+# 設備台帳の実データ（Issue #486）
+equipment_ledger/_data/

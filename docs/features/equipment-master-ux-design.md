@@ -115,6 +115,53 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 
 ---
 
+## 設備台帳との対応（Issue #486）
+
+設備マスタは顧客の設備台帳（日報ブックの「設備台帳目次」シート）を正典とする。日報の「使用設備No」
+（`〇〇t N号機` / `〇〇溶接機 N号機`）の `N` が台帳番号に対応し、日報の進捗反映（#488）で照合に使う。
+
+### データモデル
+
+`equipments` に台帳の列を追加（マイグレーション `20261001000000_add_ledger_columns_to_equipments.sql`）。いずれも NULL 可。
+
+| 列 | 型 | 説明 |
+|---|---|---|
+| `ledger_no` | `int` | 台帳番号（1以上）。`(tenant_id, ledger_no)` の部分 UNIQUE（`ledger_no IS NOT NULL`） |
+| `maker` / `model` | `text` | メーカー / 型式 |
+| `manufactured_on` | `text` | 製造年月。台帳の表記（「1993年5月」「S.53年11月」等）がまちまちなので日付型にしない |
+| `serial_no` / `note` | `text` | 製造番号 / 備考 |
+
+「汎用設備グループ」「カシメ汎用」等、物理的な設備ではないレコードは台帳に無いので `ledger_no` は NULL のまま残す
+（工程ルートから参照されているため削除しない）。
+
+### API
+
+`POST /equipments` / `PATCH /equipments/{id}` は台帳の列をそのまま受け付ける（`EquipmentBase`）。
+`equipments` の UNIQUE は `(tenant_id, name)` と `(tenant_id, ledger_no)` の2本で、違反時は **409** ＋
+`{"error": "duplicate_equipment_name" | "duplicate_ledger_no", "message": <固定文言>}` を返す
+（制約名で判別し、生の制約名・例外文言はレスポンスに載せない）。
+
+### 画面
+
+- 設備一覧に台帳番号・メーカー・型式・製造年月・製造番号・備考の列を表示。既定は台帳番号順（台帳番号の無い設備は末尾に名称順）で、
+  「台帳番号」「設備名」の見出しで並び替えられる（`lib/equipment-utils.ts` の `sortEquipments()`）
+- 作成・編集ダイアログに設備台帳の欄を追加（台帳に無い設備は台帳番号を空欄）。409 はどちらの重複かをトーストで出し分ける
+
+### 台帳の反映（運用スクリプト）
+
+`backend/scripts/equipment_ledger/apply_equipment_ledger.py`。台帳の実データはマイグレーション・リポジトリに含めず、
+手元の CSV（`_data/` は git 管理外）から反映する。使い方は [backend/scripts/USAGE.md](../../backend/scripts/USAGE.md) を参照。
+
+- 既存レコードは `id` を維持したまま名称・台帳の列を更新する（`production_schedules.equipment_id` / `equipment_group_members` の参照を壊さない）
+- 既存設備との対応は「設定済みの `ledger_no`」→「対応表（旧名称 → 台帳番号）」→「同名かつ `ledger_no` 未設定」の順で決め、
+  どれにも当たらない台帳の設備は新規登録する。同じメーカー・同じトン数が複数台ある設備の対応は顧客に確認して対応表に書く
+- 初期移行で設備ごとに同名のグループを作っているため、**メンバーがその設備1台だけの同名グループ**は名称を設備名に合わせる。
+  グループ構成（どの工程でどの設備を使えるか）は台帳から読み取れないため変更しない
+- `(tenant_id, name)` が UNIQUE なので、名称の入れ替え・玉突きは一時名（`__ledger_tmp__<id>`）を経由する
+  （`order_renames()`）。台帳番号を名称変更より先に書き込むので、途中で失敗しても再実行で続きから反映できる
+
+---
+
 ## 参考
 
 - [master-screen-design.md](../features/master-screen-design.md) — マスタ画面の共通設計ガイド
@@ -122,3 +169,4 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 - 工程ルーティングUI: `frontend/src/components/product-routings-dialog.tsx`
 - 設備グループアサインUI: `frontend/src/components/equipment-group-assignment-dialog.tsx`
 - パラメータ解決: `backend/app/services/scheduling_settings_service.py`
+- 設備台帳の反映: `backend/scripts/equipment_ledger/apply_equipment_ledger.py`（Issue #486）

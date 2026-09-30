@@ -41,6 +41,7 @@ supabase start
 | `seed_gmail_drafts.py` | Gmail受注下書きサンプルデータ投入 | `python scripts/seed_gmail_drafts.py` |
 | `seed_split_demo.py` | 手動分割機能（Issue #280）確認用の下書き注文投入 | `python scripts/seed_split_demo.py` |
 | `issue_agent_token.py` | 日報取り込みエージェント用トークンの発行・一覧・失効（Issue #469） | `python scripts/issue_agent_token.py <issue\|list\|revoke> ...` |
+| `equipment_ledger/apply_equipment_ledger.py` | 設備台帳 CSV を設備マスタに反映（Issue #486） | `python scripts/equipment_ledger/apply_equipment_ledger.py --tenant-id ... --csv ... [--mapping ...] [--dry-run]` |
 
 ---
 
@@ -250,3 +251,51 @@ python scripts/issue_agent_token.py revoke --token-id <token_uuid>
 - 表示された平文トークンは共有PCのエージェント設定に登録したら、端末のスクロールバック等に残さないこと。
   紛失した場合は再表示できないため、`revoke` して `issue` し直す
 - `--name` には設置場所など識別用の名前を入れる。顧客の実名や端末の実ホスト名をリポジトリ・Issue に書かないこと
+
+---
+
+## equipment_ledger/apply_equipment_ledger.py — 設備台帳の反映（Issue #486）
+
+顧客の設備台帳（正典）を設備マスタ `equipments` に反映する。既存の設備は `id` を維持したまま
+名称を台帳に合わせ、台帳の列（台帳番号・メーカー・型式・製造年月・製造番号・備考）を埋める。
+台帳にあってマスタに無い設備は新規登録する。仕様は
+[docs/features/equipment-master-ux-design.md](../../docs/features/equipment-master-ux-design.md#設備台帳との対応issue-486) を参照。
+
+### 追加の前提条件
+
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`（運用スクリプトのため service role で接続し、`--tenant-id` で絞り込む）
+- **台帳の実データはリポジトリに含めない。** CSV は `backend/scripts/equipment_ledger/_data/`（git 管理外）に置く
+
+### CSV の形式（UTF-8。Excel の BOM 付きも可）
+
+| ファイル | 列 |
+|---|---|
+| 台帳（`--csv`） | `ledger_no,name,maker,model,manufactured_on,serial_no,note`（`ledger_no` / `name` 必須。空欄は NULL） |
+| 対応表（`--mapping`） | `current_name,ledger_no`（既存設備の現在の名称 → 台帳番号） |
+
+対応表に無い台帳の行は、同名の既存設備（台帳番号未設定）があればそれに対応付け、無ければ新規登録する。
+
+### 使い方
+
+```bash
+cd backend
+
+# 1. 変更内容を確認する（DB には書き込まない）
+python scripts/equipment_ledger/apply_equipment_ledger.py \
+    --tenant-id <tenant_uuid> \
+    --csv scripts/equipment_ledger/_data/ledger.csv \
+    --mapping scripts/equipment_ledger/_data/mapping.csv \
+    --dry-run
+
+# 2. 問題なければ --dry-run を外して反映する
+python scripts/equipment_ledger/apply_equipment_ledger.py --tenant-id <tenant_uuid> \
+    --csv scripts/equipment_ledger/_data/ledger.csv --mapping scripts/equipment_ledger/_data/mapping.csv
+```
+
+### 注意事項
+
+- 設備と同名でメンバーがその設備1台だけの設備グループは、設備名に合わせて名称を変更する。グループ構成は変えない
+- 新規登録した設備はどの設備グループにも属さない。工程で使う場合は設備マスタ画面でグループに追加する
+- PostgREST 経由のためトランザクションにはならない。途中で失敗した場合はそのまま再実行すれば続きから反映される
+  （台帳番号を先に書き込み、再実行時は台帳番号で同じ設備に当たる）。反映済みの状態で再実行しても変更は出ない
+- 対応表・台帳の不整合（対応表の設備が無い、反映後に設備名が重複する等）があると、何も書き込まずにエラーで終了する
