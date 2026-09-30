@@ -1,10 +1,12 @@
 """scheduling_start_service のユニットテスト（Issue #372）。"""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
+import app.services.scheduling_start_service as scheduling_start_module
 import pytest
 from app.services.scheduling_start_service import (
     PastSchedulingStartDateError,
+    default_scheduling_start_date,
     is_backdated,
     parse_scheduling_start_date,
     to_scheduling_start_time,
@@ -118,3 +120,35 @@ class TestValidateSchedulingStartDate:
     def test_past_rejected_when_role_is_none(self):
         with pytest.raises(PastSchedulingStartDateError):
             validate_scheduling_start_date("2026-09-01", None, today=self._TODAY)
+
+
+class TestDefaultSchedulingStartDate:
+    """作業開始日の既定値＝本日 JST の翌日（Issue #477）。"""
+
+    def test_returns_next_calendar_day(self):
+        assert default_scheduling_start_date(today=date(2026, 9, 29)) == date(
+            2026, 9, 30
+        )
+
+    def test_does_not_skip_weekend_or_month_end(self):
+        # 2026-10-03 は土曜。稼働日への繰り上げはスケジューラに任せ、暦日の翌日を返す
+        assert default_scheduling_start_date(today=date(2026, 10, 2)) == date(
+            2026, 10, 3
+        )
+        assert default_scheduling_start_date(today=date(2026, 12, 31)) == date(
+            2027, 1, 1
+        )
+
+    def test_uses_jst_today_across_utc_date_boundary(self, monkeypatch):
+        """UTC では前日の深夜（JST 0〜9時）でも、JST の暦日を基準に翌日を返す。"""
+        # 2026-09-29T16:30Z == 2026-09-30T01:30+09:00
+        fixed_utc = datetime(2026, 9, 29, 16, 30, tzinfo=UTC)
+
+        class _FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_utc.astimezone(tz) if tz else fixed_utc
+
+        monkeypatch.setattr(scheduling_start_module, "datetime", _FixedDatetime)
+
+        assert default_scheduling_start_date() == date(2026, 10, 1)

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Order } from "@/types/order"
-import { filterOrder, getOrderUrgency, isNoRoutingOrder } from "./order-utils"
+import { filterOrder, getOrderUrgency, isNoRoutingOrder, jstTomorrowIso } from "./order-utils"
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -158,5 +158,25 @@ describe("filterOrder", () => {
     it("ロール未取得（null）は対象外", () => {
       expect(filterOrder(makeOrder({ status: "draft" }), "action_required", null)).toBe(false)
     })
+  })
+})
+
+describe("jstTomorrowIso（Issue #477）", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("JST の暦日の翌日を返す（UTC では前日の深夜でも JST 基準）", () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    // UTC 2026-09-29 16:30 == JST 2026-09-30 01:30
+    vi.setSystemTime(new Date("2026-09-29T16:30:00Z"))
+    expect(jstTomorrowIso()).toBe("2026-10-01")
+  })
+
+  it("月末・年末をまたいでも正しく繰り上がる", () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    // JST 2026-12-31 12:00
+    vi.setSystemTime(new Date("2026-12-31T03:00:00Z"))
+    expect(jstTomorrowIso()).toBe("2027-01-01")
   })
 })

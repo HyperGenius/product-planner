@@ -104,8 +104,8 @@ class TestOrderRouter:
         app.dependency_overrides[get_settings_repo] = lambda: mock_settings_repo
         app.dependency_overrides[get_supabase_client] = lambda: mock_supabase_client
         app.dependency_overrides[get_supabase_admin_client] = lambda: mock_admin_client
-        app.dependency_overrides[get_order_approval_log_repo] = (
-            lambda: mock_approval_log_repo
+        app.dependency_overrides[get_order_approval_log_repo] = lambda: (
+            mock_approval_log_repo
         )
         app.dependency_overrides[get_order_scheduling_start_backdate_log_repo] = (
             lambda: mock_backdate_log_repo
@@ -715,6 +715,50 @@ class TestOrderRouter:
         assert "simulated_deadline" not in called_data
         assert "is_scheduled" not in called_data
 
+    def test_update_order_manual_scheduling_start_date_clears_auto_flag(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: 作業開始日を手動設定したら scheduling_start_date_auto を
+        false に戻し、承認時の過去日繰り上げの対象外にする（Issue #477）。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "scheduling_start_date": "2099-01-01",
+            "scheduling_start_date_auto": True,
+        }
+        mock_repo.update.return_value = {"id": order_id}
+
+        response = client.patch(
+            f"/orders/{order_id}",
+            json={"scheduling_start_date": "2099-01-05"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert called_data["scheduling_start_date"] == "2099-01-05"
+        assert called_data["scheduling_start_date_auto"] is False
+
+    def test_update_order_without_scheduling_start_date_keeps_auto_flag(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: 作業開始日を含まない更新では自動補完フラグに触れない（Issue #477）。"""
+        order_id = 1
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "quantity": 10,
+            "scheduling_start_date_auto": True,
+        }
+        mock_repo.update.return_value = {"id": order_id}
+
+        response = client.patch(
+            f"/orders/{order_id}", json={"quantity": 20}, headers=headers
+        )
+
+        assert response.status_code == 200
+        _, called_data = mock_repo.update.call_args[0]
+        assert "scheduling_start_date_auto" not in called_data
+
     def test_request_order_approval_records_auto_match_alias(
         self, headers, mock_repo, mock_supabase_client, monkeypatch
     ):
@@ -1008,6 +1052,80 @@ class TestOrderRouter:
         assert response.json()["process_schedules"][0]["start_time"].startswith(
             "2099-01-05"
         )
+        # 保存済みの作業開始日は上書きしない（Issue #477）
+        mark_kwargs = mock_repo.mark_as_scheduled.call_args.kwargs
+        assert mark_kwargs["auto_scheduling_start_date"] is None
+
+    def test_simulate_by_id_fills_next_day_when_scheduling_start_date_unset(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        monkeypatch,
+    ):
+        """POST /{id}/simulate: 作業開始日が未設定なら実行日(JST)+1日を起点に計算し、
+        シミュ納期と同一 UPDATE で作業開始日も保存する（Issue #477）。"""
+        from datetime import date
+
+        import app.routers.transaction.orders.simulation as simulation_module
+
+        monkeypatch.setattr(
+            simulation_module,
+            "default_scheduling_start_date",
+            lambda: date(2099, 1, 5),
+        )
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "scheduling_start_date": None,
+        }
+
+        response = client.post("/orders/1/simulate", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["process_schedules"][0]["start_time"].startswith(
+            "2099-01-05"
+        )
+        mark_call = mock_repo.mark_as_scheduled.call_args
+        assert mark_call.args[0] == 1
+        assert mark_call.kwargs["auto_scheduling_start_date"] == date(2099, 1, 5)
+
+    def test_simulate_by_id_body_override_is_not_persisted(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+    ):
+        """POST /{id}/simulate: ボディの上書き指定は計算のみに使い、作業開始日として
+        保存しない（受注の作業開始日が未設定でも補完しない。Issue #477）。"""
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "scheduling_start_date": None,
+        }
+
+        response = client.post(
+            "/orders/1/simulate",
+            json={"scheduling_start_date": "2099-02-02"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json()["process_schedules"][0]["start_time"].startswith(
+            "2099-02-02"
+        )
+        mark_kwargs = mock_repo.mark_as_scheduled.call_args.kwargs
+        assert mark_kwargs["auto_scheduling_start_date"] is None
 
     def test_simulate_by_id_body_override_past_date_forbidden(
         self,
@@ -1071,7 +1189,8 @@ class TestOrderRouter:
     ):
         """POST /{id}/simulate: スケジューラ内部の想定外状態（ValueError）は
         クライアント起因の 400 ではなく 500 で返す（Issue #374）。"""
-        import app.routers.transaction.orders.simulation as simulation_module
+        # schedule_order は order_simulation_service 経由で呼ばれる（Issue #477）
+        import app.services.order_simulation_service as simulation_module
 
         self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
         mock_repo.get_by_id.return_value = {
@@ -1330,6 +1449,98 @@ class TestOrderRouter:
         assert called_data["is_scheduled"] is True
         assert "confirmed_at" in called_data
         assert "confirmed_deadline" in called_data
+        # 作業開始日が未設定なら繰り上げは発生しない（Issue #477）
+        assert "scheduling_start_date" not in called_data
+
+    @pytest.mark.parametrize(
+        ("auto", "expected_start"),
+        [
+            # 自動補完された作業開始日が過去日 → 承認日(JST)+1日へ繰り上げる
+            (True, "2099-01-05"),
+            # 手動で意図的に設定した過去日（Issue #372 の救済）は据え置く
+            (False, "2000-01-03"),
+        ],
+        ids=["auto_rolled_forward", "manual_kept"],
+    )
+    def test_confirm_order_rolls_forward_past_auto_scheduling_start_date(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+        monkeypatch,
+        auto,
+        expected_start,
+    ):
+        """POST /{id}/confirm: 承認時に過去日になった自動補完の作業開始日は繰り上げて
+        スケジュール確定し、confirmed への更新と同じ UPDATE で保存する（Issue #477）。"""
+        from datetime import date
+
+        import app.routers.transaction.orders.approval_workflow as approval_module
+
+        monkeypatch.setattr(
+            approval_module,
+            "default_scheduling_start_date",
+            lambda: date(2099, 1, 5),
+        )
+        self._set_role(mock_supabase_client, "president")
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "pending_approval",
+            "scheduling_start_date": "2000-01-03",
+            "scheduling_start_date_auto": auto,
+        }
+        mock_repo.update.return_value = {"id": 1, "status": "confirmed"}
+
+        response = client.post("/orders/1/confirm", headers=headers)
+
+        assert response.status_code == 200
+        schedules = response.json()["schedules"]
+        assert schedules[0]["start_datetime"].startswith(expected_start)
+        _, called_data = mock_repo.update.call_args[0]
+        assert called_data["status"] == "confirmed"
+        if auto:
+            assert called_data["scheduling_start_date"] == "2099-01-05"
+        else:
+            assert "scheduling_start_date" not in called_data
+
+    def test_confirm_order_keeps_future_auto_scheduling_start_date(
+        self,
+        headers,
+        mock_repo,
+        mock_product_repo,
+        mock_equipment_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+    ):
+        """POST /{id}/confirm: 自動補完でも今日以降の作業開始日は繰り上げない（Issue #477）。"""
+        self._set_role(mock_supabase_client, "president")
+        self._set_routings(mock_product_repo, mock_schedule_repo, mock_equipment_repo)
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "quantity": 10,
+            "order_number": "ORD-001",
+            "status": "pending_approval",
+            "scheduling_start_date": "2099-03-02",
+            "scheduling_start_date_auto": True,
+        }
+        mock_repo.update.return_value = {"id": 1, "status": "confirmed"}
+
+        response = client.post("/orders/1/confirm", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["schedules"][0]["start_datetime"].startswith(
+            "2099-03-02"
+        )
+        _, called_data = mock_repo.update.call_args[0]
+        assert "scheduling_start_date" not in called_data
 
     def test_confirm_order_not_found(self, headers, mock_repo, mock_supabase_client):
         """POST /{order_id}/confirm: 注文が存在しない場合の404エラーテスト"""
@@ -2246,7 +2457,7 @@ class TestOrderRouter:
             "order_number": "ORD-001",
             "status": "pending_approval",
         }
-        mock_repo.get_by_id.side_effect = lambda oid: (order_data if oid == 1 else None)
+        mock_repo.get_by_id.side_effect = lambda oid: order_data if oid == 1 else None
         routings = [
             {
                 "id": 1,

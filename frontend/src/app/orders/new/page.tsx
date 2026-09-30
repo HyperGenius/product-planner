@@ -44,7 +44,13 @@ import {
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
-import { getProductName, getCustomerName, formatDeadlineDate, jstTodayIso } from "@/lib/order-utils"
+import {
+  getProductName,
+  getCustomerName,
+  formatDeadlineDate,
+  jstTodayIso,
+  jstTomorrowIso,
+} from "@/lib/order-utils"
 import { ApiError } from "@/lib/api-client"
 import type { ConflictingOrder, OrderSimulateResponse } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -60,8 +66,9 @@ export default function NewOrderPage() {
   const [customerId, setCustomerId] = useState("")
   const [quantity, setQuantity] = useState("")
   const [desiredDeadline, setDesiredDeadline] = useState("")
-  // 作業開始日（工場が着手する日）。空なら実行日時から着手（Issue #372）
-  const [schedulingStartDate, setSchedulingStartDate] = useState("")
+  // 作業開始日（工場が着手する日）。初期値は翌日（JST、Issue #477）。
+  // ユーザーが空欄に戻した場合は実行日時から着手（Issue #372）
+  const [schedulingStartDate, setSchedulingStartDate] = useState(jstTomorrowIso)
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [hasAttemptedSimulation, setHasAttemptedSimulation] = useState(false)
   const [noRoutingDialogOpen, setNoRoutingDialogOpen] = useState(false)
@@ -674,7 +681,7 @@ export default function NewOrderPage() {
                 />
                 <p className="text-sm text-muted-foreground mt-1">
                   {schedulingStartDate
-                    ? "指定した日から着手する前提でスケジュールを計算します"
+                    ? "指定した日から着手する前提でスケジュールを計算します（初期値は翌日・変更可）"
                     : "未指定の場合、実行日時から着手する前提で計算します"}
                 </p>
                 {isSchedulingStartBackdated && !canBackdateSchedulingStart && (

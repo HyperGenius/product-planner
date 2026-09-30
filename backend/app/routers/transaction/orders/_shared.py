@@ -5,7 +5,6 @@
 simulation / approval_workflow 等）を import しないこと。
 """
 
-from datetime import datetime
 from typing import Any, cast
 
 from fastapi import Depends, HTTPException, status
@@ -133,22 +132,6 @@ def _duplicate_order_conflict_exception(
     if extra_detail:
         detail.update(extra_detail)
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
-
-
-def _deadline_from_schedules(schedules: list[dict]) -> str:
-    """スケジュール（工程セグメント）群の最終終了日時から完成見込み日を算出する。
-
-    承認確定の confirmed_deadline とシミュレーションの simulated_deadline で
-    同一ロジックを共有するための共通ヘルパー（Issue #394-A）。
-    end_datetime はタイムゾーン表記（`Z` / `+09:00` 等）が混在しても実時刻で
-    比較できるよう datetime にパースしてから最大値を取る。
-    戻り値は YYYY-MM-DD 形式の文字列。
-    """
-    last_end = max(
-        datetime.fromisoformat(s["end_datetime"].replace("Z", "+00:00"))
-        for s in schedules
-    )
-    return last_end.date().isoformat()
 
 
 def _require_role(

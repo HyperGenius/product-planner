@@ -441,9 +441,11 @@ export function useSimulateOrderById() {
           : undefined,
       })
     },
-    onSuccess: (_data, arg) => {
-      const orderId = typeof arg === "number" ? arg : arg.orderId
-      queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
+    onSuccess: () => {
+      // シミュ実行で simulated_deadline と（未設定なら補完された）作業開始日が保存されるため、
+      // 詳細（["orders", id]）だけでなく一覧（["orders"]）にも反映させる（Issue #477）。
+      // ["orders"] は前方一致で詳細キーも含む。
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
     },
   })
 }

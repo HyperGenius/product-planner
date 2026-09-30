@@ -9,7 +9,7 @@
   （起票前に着手してしまったケースの救済措置）。
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from app.utils.calendar import JST, WORK_START_HOUR
 
@@ -52,6 +52,18 @@ def parse_scheduling_start_date(value: str | date | None) -> date | None:
         return datetime.fromisoformat(value).date()
     except ValueError as e:
         raise ValueError(f"作業開始日の形式が不正です: {value!r}") from e
+
+
+def default_scheduling_start_date(*, today: date | None = None) -> date:
+    """作業開始日の既定値（本日 JST の翌日・暦日）を返す（Issue #477）。
+
+    自動起票（cron）や作業開始日が未設定の受注のシミュレーション時に補完する値。
+    翌日が土日祝でも暦日のまま返し、稼働日への繰り上げはスケジューラの
+    カレンダーロジックに任せる。`today` はテスト用の注入口
+    （実行ホストの TZ に依存しないよう、未指定時は JST の今日を使う）。
+    """
+    ref = today if today is not None else datetime.now(JST).date()
+    return ref + timedelta(days=1)
 
 
 def to_scheduling_start_time(value: str | date | None) -> datetime | None:

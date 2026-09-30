@@ -219,6 +219,11 @@ interface OrderCreate {
 [pdf-order-parsing.md](pdf-order-parsing.md) の「非PDF添付・添付なしメールの
 本処理への統一（Issue #280）」を参照。
 
+起票（`inserted` / `updated`）できた受注のうち `product_id` が照合できたものは、作業開始日
+（未設定なら処理日 JST の翌日）を保存し、シミュ納期（`simulated_deadline`）まで自動算出する
+（Issue #477）。受注担当者は一覧・詳細でシミュ納期を確認するだけでよい。詳細は
+[pdf-order-parsing.md](pdf-order-parsing.md#起票後の自動シミュレーションissue-477)。
+
 ### Gmail ラベル規約
 
 | ラベル | 意味 |
@@ -462,6 +467,8 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 - 担当者が明細に品番を指定した場合、`record_correction_if_applicable()` で表記ゆれ辞書へ
   フィードバックする（`split_order` と同じ）
 - 依存に `python-multipart` を追加（`requirements.txt`）
+- 自動経路（cron）と違い、起票後の自動シミュレーション（Issue #477）は行わない
+  （対象外。必要なら別 Issue）。シミュ実行時に作業開始日が未設定なら JST の翌日が補完される
 
 ### フロントエンド
 
@@ -507,3 +514,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
 | 複数PDF添付メールの添付ごとステージング（1メール:N添付）＋ 添付収集のネスト再帰化（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#複数pdf添付の分割ステージングissue-384)） | ✅ #384 |
 | 束ね添付メールでのPDF単位の顧客解決（パース時に PDF 文面の企業名で `customers` を突合し、一意なら添付ごとに `customer_id` を再解決。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)） | ✅ #385 |
+| 自動起票時の作業開始日（JST 翌日）設定とシミュ納期の自動算出（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#起票後の自動シミュレーションissue-477)） | ✅ #477 |

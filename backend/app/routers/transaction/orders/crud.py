@@ -191,6 +191,11 @@ def update_order(
         # 一度 true になったら false へは戻さない（Issue #350）
         update_dict["product_id_manually_corrected"] = True
 
+    # 作業開始日を手動で設定・変更したら「自動補完」フラグを下ろし、承認時の
+    # 過去日繰り上げの対象外にする（Issue #477）。
+    if "scheduling_start_date" in update_dict:
+        update_dict["scheduling_start_date_auto"] = False
+
     # スケジュール条件（製品・数量・希望納期・作業開始日）が実質変化したら、
     # 実行済みのシミュレーション結果を無効化する（Issue #394-A / #392 統合）。
     # 既に無効な項目は書き込まず、余計な UPDATE を避ける。

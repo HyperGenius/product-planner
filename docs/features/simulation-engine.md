@@ -226,7 +226,7 @@ class CalendarConfig:
 | `product_id` | `int` | 製品 ID |
 | `quantity` | `int` | 生産数量 |
 | `desired_deadline` | `string \| null` | 希望納期（ISO 8601）。未指定時は `is_feasible` が常に `true` |
-| `scheduling_start_date` | `string \| null` | 作業開始日（`YYYY-MM-DD`）。指定するとその日の稼働開始時刻（JST 09:00）を起点に算出。未指定なら実行日時が起点。過去日は `president` / `platform_admin` のみ許可（それ以外は 403）。Issue #372 |
+| `scheduling_start_date` | `string \| null` | 作業開始日（`YYYY-MM-DD`）。指定するとその日の稼働開始時刻（JST 09:00）を起点に算出。未指定なら実行日時が起点。過去日は `president` / `platform_admin` のみ許可（それ以外は 403）。Issue #372。新規受注フォーム（`app/orders/new/page.tsx`）は初期値として JST の翌日（`jstTomorrowIso()`）を送る（バックエンドの挙動は変更なし。ユーザーが空欄に戻せば従来どおり実行日時が起点。Issue #477） |
 | `standalone` | `bool` | `true` = 単体換算モード（既存スケジュール無視）。デフォルト `false` |
 
 **レスポンス**
@@ -269,7 +269,8 @@ class CalendarConfig:
 | フィールド | 値 | 備考 |
 |---|---|---|
 | `is_scheduled` | `true` | 「シミュ済」派生ステータスの判定に使う（Issue #392） |
-| `simulated_deadline` | 算出された最終工程終了日（`date` 型） | 承認前の「シミュ納期」表示用。`confirmed_deadline` と同一ロジック（`_deadline_from_schedules()`）で算出する（Issue #394-A） |
+| `simulated_deadline` | 算出された最終工程終了日（`date` 型） | 承認前の「シミュ納期」表示用。`confirmed_deadline` と同一ロジック（`services/order_simulation_service.deadline_from_schedules()`）で算出する（Issue #394-A） |
+| `scheduling_start_date` / `scheduling_start_date_auto` | 実行日（JST）の翌日 / `true` | **受注の作業開始日が未設定のときだけ**補完して同一 UPDATE で保存する（Issue #477）。保存済みの値・ボディの上書き指定があるときは書き込まない |
 
 `production_schedules` への保存は行わない（`dry_run=True` のまま）。`product_id` /
 `quantity` / `desired_deadline` / `scheduling_start_date` を `PATCH /orders/{id}` で
@@ -279,9 +280,19 @@ class CalendarConfig:
 
 1. リクエストボディ `{ "scheduling_start_date": "YYYY-MM-DD" }`（上書き指定。過去日は `president` / `platform_admin` のみ）
 2. 受注に保存済みの `orders.scheduling_start_date`
-3. いずれも無ければ実行日時
+3. いずれも無ければ**実行日（JST）の翌日**（`scheduling_start_service.default_scheduling_start_date()`）。
+   シミュ成功時に `simulated_deadline` と同一 UPDATE で `scheduling_start_date` に保存し、
+   `scheduling_start_date_auto = true` を立てる（Issue #477）
 
-ボディは省略可（その場合は 2 または 3）。
+ボディは省略可（その場合は 2 または 3）。ボディの上書き指定（1）は計算のみに使い、保存しない。
+
+Issue #477 以前は 3 が「実行日時」で、承認確定時も「承認した瞬間」を起点に再計算していたため、
+シミュ納期と確定納期の起点がずれていた。作業開始日を必ず埋めることで、シミュ時点と承認時点で
+同じ起点を使う。シミュ実行＋永続化（`schedule_order(dry_run=True)` → `deadline_from_schedules()` →
+`mark_as_scheduled()`）は `services/order_simulation_service.simulate_and_persist()` に切り出してあり、
+cron の自動起票（[pdf-order-parsing.md](pdf-order-parsing.md)「起票後の自動シミュレーション」）と共有する。
+一覧の単体シミュ・一括シミュ・詳細ページのシミュはすべてこのエンドポイントを使う。フロントの
+`useSimulateOrderById` は成功時に `["orders"]`（一覧・詳細の両方）を invalidate する。
 
 **エラーレスポンス**（`POST /orders/simulate` も同方針。Issue #374）
 
@@ -324,12 +335,21 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 起点にスケジュールを算出する（保存済みの値は書き込み時に検証済みのため、確定時のロールチェックは不要。Issue #372）。  
 受注テーブルも以下のフィールドを更新する。
 
+**自動補完された作業開始日の繰り上げ（Issue #477）**: `scheduling_start_date_auto = true`（自動補完）かつ
+作業開始日が**今日（JST）より前**なら、**承認日（JST）の翌日**に繰り上げてから `dry_run=False` で確定し、
+繰り上げ後の値を `confirmed` への更新と同じ UPDATE で保存する。起票から承認まで日数が空いたとき、
+(a) 過去日から確定スケジュールが組まれる、(b) `advance-order-status` cron（Issue #400）が承認直後に
+`confirmed → in_progress` へ自動遷移させる、のを防ぐため。`scheduling_start_date_auto = false`
+（`president` / `platform_admin` が「起票前着手の救済」として意図的に設定した過去日。Issue #372）は据え置く。
+繰り上げ後はシミュ納期（`simulated_deadline`）と確定納期がずれうるが、確定納期（`confirmed_deadline`）を正とする。
+
 | フィールド | 値 |
 |---|---|
 | `status` | `"confirmed"` |
 | `is_scheduled` | `true` |
 | `confirmed_deadline` | 算出された最終工程終了日（date 型） |
 | `confirmed_at` | 確定操作のタイムスタンプ |
+| `scheduling_start_date` | 上記の繰り上げが発生したときのみ、承認日（JST）の翌日 |
 
 **エラーレスポンス**
 
@@ -362,6 +382,10 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 にリセットする（既に無効な項目は書き込まずに UPDATE のペイロードを最小化する）。
 これにより PR #393 が課題として挙げていた「`is_scheduled` が編集後も立ったまま陳腐化する」
 問題を解消する。差し戻し（`reject`）・取り下げ（`withdraw`）では**リセットしない**（据え置き）。
+
+また、ボディに `scheduling_start_date` が含まれていれば（手動設定・クリア）、`scheduling_start_date_auto`
+を `false` に戻し、承認時の過去日繰り上げの対象外にする（Issue #477）。編集ダイアログは作業開始日を
+変更したときだけ送るため、補完値を開いて保存しただけではフラグは変わらない。
 
 ---
 
@@ -439,7 +463,8 @@ Issue #374 以前は、スケジューラ内部の `ValueError` やパース失�
 | `confirmed_deadline` | `date` | 確定時に算出された生産完了予定日 |
 | `confirmed_at` | `timestamptz` | 確定操作のタイムスタンプ |
 | `order_date` | `timestamptz` | 受注起票日（システムに受注が登録された日時）。作業開始日とは別物（Issue #372） |
-| `scheduling_start_date` | `date \| NULL` | 作業開始日（工場が着手する日）。`NULL` なら実行日時から着手。過去日の設定は `president` / `platform_admin` のみ（アプリ層で制御。Issue #372） |
+| `scheduling_start_date` | `date \| NULL` | 作業開始日（工場が着手する日）。`NULL` なら実行日時から着手。過去日の設定は `president` / `platform_admin` のみ（アプリ層で制御。Issue #372）。cron 自動起票・作業開始日未設定でのシミュ実行時に JST 翌日が補完される（Issue #477） |
+| `scheduling_start_date_auto` | `boolean NOT NULL DEFAULT false` | `scheduling_start_date` が自動補完なら `true`。`PATCH /orders/{id}` で手動設定すると `false`。承認時、`true` かつ過去日なら承認日 JST の翌日へ繰り上げる（Issue #477） |
 
 ### `order_scheduling_start_backdate_log` テーブル（Issue #372）
 
@@ -476,7 +501,8 @@ INSERT RLS: `is_tenant_member(tenant_id)` かつ `actor_user_id = auth.uid()` �
 | `backend/app/scheduler_logic.py` | コアスケジューリングアルゴリズム |
 | `backend/app/utils/calendar.py` | カレンダーユーティリティ（稼働時間・複数日分割） |
 | `backend/app/services/simulation_service.py` | シミュレーションレスポンスの整形 |
-| `backend/app/services/scheduling_start_service.py` | 作業開始日（`scheduling_start_date`）の解決・過去日権限チェック（Issue #372） |
+| `backend/app/services/scheduling_start_service.py` | 作業開始日（`scheduling_start_date`）の解決・過去日権限チェック（Issue #372）・既定値（JST 翌日、`default_scheduling_start_date()`。Issue #477） |
+| `backend/app/services/order_simulation_service.py` | 既存受注のシミュ実行＋シミュ納期の永続化（`simulate_and_persist()`）、cron 自動起票後の自動シミュ（`auto_simulate_intake_order()`）、`deadline_from_schedules()`（Issue #477） |
 | `backend/app/repositories/supa_infra/transaction/order_scheduling_start_backdate_log_repo.py` | 過去日設定の監査ログ `order_scheduling_start_backdate_log` への書き込み（Issue #372） |
 | `backend/app/services/calendar_service.py` | DB から `CalendarConfig` を構築 |
 | `backend/app/routers/transaction/orders/simulation.py` | `/orders/simulate`, `/orders/{id}/simulate` エンドポイント |

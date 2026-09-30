@@ -28,12 +28,16 @@ from app.scheduler_logic import (
     RoutingUnconfirmedError,
     schedule_order,
 )
-from app.services.scheduling_start_service import to_scheduling_start_time
+from app.services.order_simulation_service import simulate_and_persist
+from app.services.scheduling_start_service import (
+    default_scheduling_start_date,
+    to_scheduling_start_time,
+)
 from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
 
-from ._shared import _deadline_from_schedules, get_settings_repo
+from ._shared import get_settings_repo
 from .scheduling_start import _assert_scheduling_start_date_allowed
 
 router = APIRouter()
@@ -147,7 +151,10 @@ def simulate_schedule(
     既存の注文をベースにシミュレーションを実行。
 
     作業開始日は、リクエストボディの scheduling_start_date（上書き指定）→
-    受注に保存済みの scheduling_start_date の順で解決する。未指定なら実行日時が起点（Issue #372）。
+    受注に保存済みの scheduling_start_date の順で解決する（Issue #372）。
+    どちらも無ければ実行日（JST）の翌日を作業開始日とし、シミュ成功時に
+    simulated_deadline と同一 UPDATE で受注へ保存する（Issue #477）。
+    ボディの上書き指定は計算のみに使い、保存しない。
     ボディで上書きする場合、過去日は president / platform_admin のみ許可。
     """
     logger.info(f"Simulating schedule for order {order_id}")
@@ -158,12 +165,18 @@ def simulate_schedule(
         raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
 
     override = body.scheduling_start_date if body else None
+    auto_start = None
     if override:
         _assert_scheduling_start_date_allowed(override, tenant_id, user_id, client)
         raw_start = override
     else:
         # 受注に保存済みの値は書き込み時に検証済みのため、ここでは権限チェック不要
         raw_start = order.get("scheduling_start_date")
+        if raw_start is None:
+            # 未設定なら翌日を補完し、シミュ納期と一緒に保存する（Issue #477）。
+            # シミュ時点と承認時点で同じ起点を使うため、実行日時を起点にしない。
+            auto_start = default_scheduling_start_date()
+            raw_start = auto_start.isoformat()
 
     try:
         start_time = to_scheduling_start_time(raw_start)
@@ -180,20 +193,16 @@ def simulate_schedule(
         ) from None
 
     try:
-        result = schedule_order(
-            order_id=order["id"],
-            product_id=order["product_id"],
-            quantity=order["quantity"],
-            product_repo=product_repo,
-            schedule_repo=schedule_repo,
+        result = simulate_and_persist(
+            order,
             tenant_id=tenant_id,
             start_time=start_time,
-            dry_run=True,
+            order_repo=order_repo,
+            product_repo=product_repo,
+            schedule_repo=schedule_repo,
             settings_repo=settings_repo,
+            auto_scheduling_start_date=auto_start,
         )
-        # dry_run のため実スケジュールは保存されないが、完成見込み日（シミュ納期）は
-        # confirmed_deadline と同一ロジックで算出し、承認前の表示用に永続化する（Issue #394-A）。
-        order_repo.mark_as_scheduled(order_id, _deadline_from_schedules(result))
         return build_simulate_response(
             result, order.get("deadline_date"), product_repo, equipment_repo
         )
