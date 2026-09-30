@@ -13,7 +13,7 @@
 | #470 | エージェント認証と `POST /api/agent/heartbeat` | 本ドキュメントに記載 |
 | #471 | 日報ファイル受信 `POST /api/agent/daily-reports` | 本ドキュメントに記載 |
 | #472 | 共有PCエージェントの配置と設置手順（`tools/daily-report-agent/`） | 本ドキュメントに記載 |
-| #478 | タスクスケジューラ登録スクリプト | 未着手 |
+| #478 | タスクスケジューラ登録スクリプト | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -153,7 +153,7 @@
 （設置作業者向け）を参照。ここでは実装上の判断だけを書く。
 
 - `DailyReportAgent.ps1` は PowerShell 5.1・追加モジュール無しで動く。1回の実行で走査・送信・heartbeat を行って
-  終了し、定期実行はタスクスケジューラに任せる（登録スクリプトは #478）
+  終了し、定期実行はタスクスケジューラに任せる（登録スクリプトは #478、下記「タスクスケジューラ登録」）
 - **送信済みの判定はローカルの状態ファイル（`state/sent-files.json`、パス → SHA-256）で行う**。サーバが
   `stored` / `duplicate` を返したときだけ記録し、4xx/5xx・通信エラーは記録しない（次回の実行で再送）。
   状態ファイルを消しても、サーバ側の UNIQUE (`tenant_id`, `sha256`) で `duplicate` になるだけで重複保存はされない
@@ -173,6 +173,40 @@
 - `.ps1` は **BOM 付き UTF-8**。PS 5.1 は BOM 無しの UTF-8 を ANSI（日本語 Windows では Shift-JIS）として読み、
   日本語の文字列リテラルが化けるため。改行は `.gitattributes` で CRLF に固定している
 - トークンを含む `config.json`・状態ファイル・ログは `tools/daily-report-agent/.gitignore` でコミット対象外
+
+### タスクスケジューラ登録（Issue #478）
+
+`Install-DailyReportAgentTask.ps1`（登録・更新）／`Uninstall-DailyReportAgentTask.ps1`（削除）。使い方は README、
+顧客先での作業手順と確認用 SQL は
+[tools/daily-report-agent/SETUP_CHECKLIST.md](../../tools/daily-report-agent/SETUP_CHECKLIST.md) を参照。
+
+- タスクは `\ProductPlanner\DailyReportAgent` 固定。`Register-ScheduledTask -Force` で上書きするので何度実行しても1つ
+- 既定のトリガーは平日 9:00 開始・1時間間隔・8時間継続。開始時刻・間隔・継続時間・曜日・実行時間の上限はパラメータで
+  変えられる（終了を18時まで延ばすかは `-DurationHours 9` で調整）。PS 5.1 の `New-ScheduledTaskTrigger -Weekly` は
+  `-RepetitionInterval` を受け付けないため、`-Once` で作ったトリガーの `.Repetition` を週次トリガーに代入している
+- 設定: `MultipleInstances IgnoreNew`（多重起動しない。エージェント側のロックファイルと二重の防止）、
+  `ExecutionTimeLimit` 30分、`StartWhenAvailable`（予定時刻に PC が起動していなければ起動後に実行）、バッテリー駆動でも止めない
+- **実行アカウント**: ファイルサーバ（UNC パス）を読むためネットワーク資格情報を持つユーザーで動かす。`SYSTEM` と S4U は
+  ファイル共有にアクセスできないので使わない。`-LogonMode` で2方式を選ぶ
+  - `Interactive`（既定）: ログオン中のみ実行・パスワード不要。#468 の未決事項（共用アカウントか・パスワード有効期限）が
+    決まるまでは、パスワードの保存・期限切れによる停止が起きないこちらを既定にした
+  - `Password`: ログオンしていなくても実行。パスワードは `Get-Credential` で対話的に受け取り、引数・ファイルでは
+    受け取らない（コマンド履歴に残さない）。パスワード変更で失敗し始めるので再登録が必要（README に手順）
+  - `-User` 省略時は `Win32_ComputerSystem.UserName`（コンソールにログオン中のユーザー）を使う。「管理者として実行」で
+    別の管理者アカウントに昇格すると `$env:USERNAME` は管理者になり、共有PCのアカウントではなく管理者でタスクが
+    登録されてしまうため
+- 実行内容には仕様の `-NoProfile -NonInteractive -ExecutionPolicy Bypass -File` に加えて `-WindowStyle Hidden` を付けている。
+  `Interactive` では毎時コンソール画面が現場の作業画面の前面に出るため（一瞬は表示される）
+- `[CmdletBinding(SupportsShouldProcess)]` で `-WhatIf` / `-Confirm` に対応。`-WhatIf` では `New-ScheduledTask` で
+  組み立てたタスク定義を表示するだけで登録しない
+- 登録失敗時は HRESULT で対処を出し分ける（0x80070005 権限不足 → 管理者で実行、0x8007052E パスワード誤り、
+  0x80070569「バッチ ジョブとしてログオン」権限なし、0x80070534 アカウントなし）
+- 削除スクリプトはタスクが無くてもエラーにしない。`\ProductPlanner\` フォルダが空になれば `Schedule.Service` COM で
+  フォルダも消す（`ScheduledTasks` モジュールにフォルダ削除のコマンドが無いため）。`config.json`・`state\`・`logs\` は消さない
+- macOS / Linux の `pwsh` には `ScheduledTasks` モジュールが無い。構文と PS 5.1 互換性は `mcr.microsoft.com/dotnet/sdk:8.0`
+  コンテナの `pwsh` で PSScriptAnalyzer（`PSUseCompatibleSyntax`、TargetVersions 5.1）にかけ、実際の登録は Windows 実機で確認する
+- `.ps1` の CRLF は `tools/daily-report-agent/.gitattributes`（#472 で追加済み）で固定しているため、リポジトリ直下の
+  `.gitattributes` は追加していない
 
 ## トークンの発行・失効
 

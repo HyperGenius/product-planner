@@ -110,6 +110,11 @@ cd backend && ruff check . && mypy .
   バックエンドへは `host.docker.internal` で接続する（`mcr.microsoft.com/powershell` は arm64 が無く Apple Silicon ではクラッシュする）。
   トークンを含む `config.json`・状態・ログはコミットしない。詳細は
   [tools/daily-report-agent/README.md](tools/daily-report-agent/README.md)
+  - タスクスケジューラ登録（`Install-DailyReportAgentTask.ps1`、Issue #478）: 「管理者として実行」で別の管理者アカウントに
+    昇格すると `$env:USERNAME` は管理者になるので、実行アカウントの既定は `Win32_ComputerSystem.UserName`（コンソールの
+    ログオンユーザー）から取る。UNC を読むため `SYSTEM`・S4U は使わない。パスワードは `Get-Credential` 以外で受け取らない。
+    コンテナの `pwsh` には `ScheduledTasks` が無いので、ロジックの確認は `New-ScheduledTask*` / `Register-ScheduledTask` を
+    スタブ関数で差し替えて実行し、PS 5.1 互換性は PSScriptAnalyzer の `PSUseCompatibleSyntax`（TargetVersions 5.1）で見る
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
