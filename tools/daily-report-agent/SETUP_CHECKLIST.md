@@ -22,7 +22,7 @@
 - [ ] 本番のバックエンドが動いていて、エージェント API が有効なことを確認した（`401` が返れば OK）
 
   ```bash
-  curl -s -o /dev/null -w "%{http_code}\n" -X POST https://<api_base_url>/api/agent/heartbeat
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST <api_base_url>/api/agent/heartbeat
   ```
 
 - [ ] トークンを発行した（設置する PC ごとに1つ。表示は1回きり）

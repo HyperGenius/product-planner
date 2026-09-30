@@ -373,6 +373,14 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/parse-order-pdfs-trigger/index.ts"
 
+# 日報取り込みエージェントの受付口（Issue #468）。エージェントは Supabase の JWT を持たず
+# 独自のエージェントトークンを Authorization に載せるため、ゲートウェイの JWT 検証を切る
+# （認証はバックエンドの /api/agent/* が行う）。本番は `--no-verify-jwt` でデプロイする
+[functions.agent-gateway]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/agent-gateway/index.ts"
+
 [analytics]
 enabled = true
 port = 54327
