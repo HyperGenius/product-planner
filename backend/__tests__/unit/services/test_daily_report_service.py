@@ -5,9 +5,11 @@ import pytest
 from app.services.daily_report_service import (
     InvalidDailyReportHeaderError,
     build_storage_path,
+    content_type_for,
     decode_file_path,
     normalize_sha256,
     parse_file_modified_at,
+    storage_extension,
 )
 from app.utils.calendar import JST
 
@@ -65,7 +67,50 @@ class TestParseFileModifiedAt:
         assert parse_file_modified_at(raw) is None
 
 
-def test_build_storage_path_is_ascii_safe():
-    path = build_storage_path("11111111-1111-1111-1111-111111111111", "a" * 64)
-    assert path == f"11111111-1111-1111-1111-111111111111/{'a' * 64}"
-    assert path.isascii()
+TENANT_ID = "11111111-1111-1111-1111-111111111111"
+
+
+class TestStorageExtension:
+    @pytest.mark.parametrize(
+        ("file_name", "expected"),
+        [
+            ("日報_0929.xlsx", ".xlsx"),
+            ("日報.XLSX", ".xlsx"),
+            ("archive.tar.gz", ".gz"),
+            ("日報", ""),
+            ("日報.エクセル", ""),
+            ("日報.x-y", ""),
+            ("日報.abcdefghijk", ""),
+        ],
+    )
+    def test_extension(self, file_name, expected):
+        assert storage_extension(file_name) == expected
+
+
+class TestContentTypeFor:
+    @pytest.mark.parametrize(
+        ("file_name", "expected"),
+        [
+            (
+                "日報.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            ("日報.XLS", "application/vnd.ms-excel"),
+            ("日報.csv", "text/csv"),
+            ("日報.zip", "application/octet-stream"),
+            ("日報", "application/octet-stream"),
+        ],
+    )
+    def test_content_type(self, file_name, expected):
+        assert content_type_for(file_name) == expected
+
+
+class TestBuildStoragePath:
+    def test_appends_extension_and_is_ascii_safe(self):
+        path = build_storage_path(TENANT_ID, "a" * 64, "日報_0929.xlsx")
+        assert path == f"{TENANT_ID}/{'a' * 64}.xlsx"
+        assert path.isascii()
+
+    def test_without_extension(self):
+        path = build_storage_path(TENANT_ID, "a" * 64, "日報")
+        assert path == f"{TENANT_ID}/{'a' * 64}"

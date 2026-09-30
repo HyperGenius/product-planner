@@ -95,6 +95,10 @@ cd backend && ruff check . && mypy .
   storage3 は `StorageApiError` を投げ、実 Storage では `status == "409"`（文字列）/ `code == "Duplicate"` になる
   （ローカル Supabase で確認済み。既存オブジェクトは上書きされない）。重複を正常系として扱う場合はこれで判定し、
   それ以外の `StorageApiError` は再送出する（`daily_report_service._upload_if_absent()`、Issue #471）
+- **Storage のオブジェクトキーと content-type**: 日本語ファイル名をキーに使わない場合でも、ダウンロードしてそのまま
+  開けるよう元ファイル名の拡張子（ASCII 英数字のみ・小文字化）はキー末尾に付ける。content-type は `mimetypes` で
+  推測しない（本番の `python:3.11-slim` は `/etc/mime.types` が無く、Python バージョンによって `.xlsx` を解決できない）。
+  扱う拡張子を明示した対応表で持つ（`daily_report_service.storage_extension()` / `content_type_for()`）
 - **raw body（octet-stream）を受けるエンドポイント**: `UploadFile` を使わずボディを直接受ける場合は
   `async def` にして `request.stream()` で読みながらサイズ上限（`Content-Length` 省略のチャンク転送に備えて
   宣言値と実測値の両方）とハッシュを検証し、同期の supabase-py 呼び出しは `run_in_threadpool` で実行する。

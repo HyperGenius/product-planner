@@ -116,13 +116,16 @@ class TestPostDailyReport:
         assert response.status_code == 200
         assert response.json() == {"status": "stored", "sha256": CONTENT_SHA256}
 
-        storage_path = f"{TOKEN_TENANT_ID}/{CONTENT_SHA256}"
+        storage_path = f"{TOKEN_TENANT_ID}/{CONTENT_SHA256}.xlsx"
         admin.client.storage.from_.assert_called_with("daily-reports")
         admin.storage.upload.assert_called_once()
         upload_kwargs = admin.storage.upload.call_args.kwargs
         assert upload_kwargs["path"] == storage_path
         assert upload_kwargs["file"] == CONTENT
         assert upload_kwargs["file_options"]["upsert"] == "false"
+        assert upload_kwargs["file_options"]["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
         assert admin.inserted_row() == {
             "tenant_id": TOKEN_TENANT_ID,

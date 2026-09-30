@@ -278,6 +278,9 @@ class TestDailyReportsBucket:
         assert bucket.file_size_limit == 20 * 1024 * 1024
 
 
+FILE_NAME = "日報_0929.xlsx"
+
+
 @pytest.mark.integration
 class TestStoreDailyReport:
     """store_daily_report() を実 Storage・実DBに対して動かす (Issue #471)。
@@ -292,7 +295,7 @@ class TestStoreDailyReport:
         sha = hashlib.sha256(content).hexdigest()
         yield content, sha
         admin_db.storage.from_(DAILY_REPORT_BUCKET).remove(
-            [build_storage_path(agent_tenants["own_id"], sha)]
+            [build_storage_path(agent_tenants["own_id"], sha, FILE_NAME)]
         )
 
     def _store(self, admin_db, agent_tenants, content: bytes, sha: str) -> str:
@@ -302,8 +305,8 @@ class TestStoreDailyReport:
             agent_token_id=agent_tenants["own_token_id"],
             sha256=sha,
             content=content,
-            original_path=r"\\fileserver\日報\日報_0929.xlsx",
-            file_name="日報_0929.xlsx",
+            original_path=rf"\\fileserver\日報\{FILE_NAME}",
+            file_name=FILE_NAME,
             file_modified_at=None,
         )
 
@@ -326,7 +329,9 @@ class TestStoreDailyReport:
         rows = self._rows(admin_db, agent_tenants["own_id"], sha)
         assert rows == [
             {
-                "storage_path": build_storage_path(agent_tenants["own_id"], sha),
+                "storage_path": build_storage_path(
+                    agent_tenants["own_id"], sha, FILE_NAME
+                ),
                 "size_bytes": len(body),
             }
         ]
@@ -341,7 +346,7 @@ class TestStoreDailyReport:
         """前回 INSERT に失敗して Storage にだけ残ったオブジェクトがあっても行を作る"""
         body, sha = content
         admin_db.storage.from_(DAILY_REPORT_BUCKET).upload(
-            path=build_storage_path(agent_tenants["own_id"], sha),
+            path=build_storage_path(agent_tenants["own_id"], sha, FILE_NAME),
             file=body,
             file_options={"content-type": "application/octet-stream"},
         )
