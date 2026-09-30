@@ -145,6 +145,12 @@ cd backend && ruff check . && mypy .
   `upsert_order_by_dedupe_key` で「新規 NULL は既存 draft を上書きしない（`skipped_downgrade`）／既存 NULL は
   確度判明時に上書きされる」、`_mark_superseded_orders` では supersede 対象外。表示は受注詳細で「－」、
   一覧ではバッジ無し
+- **設備台帳（`equipments.ledger_no` 等、Issue #486）**: 設備マスタは顧客の設備台帳が正典で、日報の `〇〇t N号機` の
+  `N` を `ledger_no` で照合する。`equipments` の UNIQUE は `(tenant_id, name)` と `(tenant_id, ledger_no)`（部分）の2本で、
+  ルーターは制約名で振り分けて 409 `duplicate_equipment_name` / `duplicate_ledger_no` を返す。設備と同名の1台グループが
+  初期移行で作られているので、**設備名を一括で変えるときは同名1台グループも合わせる**。名称の入れ替え・玉突きは UNIQUE を
+  踏むので一時名を経由する（`scripts/equipment_ledger/apply_equipment_ledger.py` の `order_renames()`）。
+  台帳の実データは `scripts/equipment_ledger/_data/`（git 管理外）に置き、リポジトリ・テストに入れない
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）

@@ -10,6 +10,7 @@ from app.dependencies import (
 
 # テスト対象のAPIインスタンス
 from app.main import app
+from app.repositories.supa_infra.common import DuplicateRecordError
 from fastapi.testclient import TestClient
 
 # テストクライアントの作成
@@ -137,3 +138,60 @@ class TestEquipmentRouter:
 
         assert response.status_code == 404
         assert response.json()["detail"] == "Not found"
+
+    def test_create_equipment_with_ledger_fields(self, headers, mock_repo):
+        """POST /: 設備台帳の列（Issue #486）がそのまま repo へ渡ること"""
+        payload = {
+            "name": "15t 3号機",
+            "ledger_no": 3,
+            "maker": "メーカーA",
+            "model": "MODEL-15",
+            "manufactured_on": "S.53年11月",
+            "serial_no": "SN-0001",
+            "note": "備考",
+        }
+        mock_repo.create.return_value = {"id": 100, **payload}
+
+        response = client.post("/equipments", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        call_args = mock_repo.create.call_args[0][0]
+        for key, value in payload.items():
+            assert call_args[key] == value
+
+    def test_create_equipment_rejects_non_positive_ledger_no(self, headers, mock_repo):
+        """POST /: 台帳番号は 1 以上"""
+        response = client.post(
+            "/equipments", json={"name": "X", "ledger_no": 0}, headers=headers
+        )
+
+        assert response.status_code == 422
+        mock_repo.create.assert_not_called()
+
+    def test_update_equipment_duplicate_ledger_no_returns_409(self, headers, mock_repo):
+        """PATCH /{id}: 台帳番号の重複は 409 duplicate_ledger_no（制約名は返さない）"""
+        mock_repo.update.side_effect = DuplicateRecordError(
+            "dup",
+            constraint='duplicate key value violates unique constraint "equipments_tenant_id_ledger_no_key"',
+        )
+
+        response = client.patch(
+            "/equipments/1", json={"name": "15t 3号機", "ledger_no": 3}, headers=headers
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_ledger_no"
+        assert "equipments_tenant_id_ledger_no_key" not in response.text
+
+    def test_create_equipment_duplicate_name_returns_409(self, headers, mock_repo):
+        """POST /: 設備名の重複は 409 duplicate_equipment_name"""
+        mock_repo.create.side_effect = DuplicateRecordError(
+            "dup",
+            constraint='duplicate key value violates unique constraint "equipments_tenant_id_name_key"',
+        )
+
+        response = client.post("/equipments", json={"name": "X"}, headers=headers)
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["error"] == "duplicate_equipment_name"

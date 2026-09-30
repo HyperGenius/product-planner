@@ -6,12 +6,37 @@ from app.models.master.equipment_schemas import (
     EquipmentCreate,
     EquipmentUpdate,
 )
+from app.repositories.supa_infra.common import DuplicateRecordError
 from app.repositories.supa_infra.master.equipment_repo import EquipmentRepository
 from app.utils.logger import get_logger
 
 equipment_router = APIRouter(prefix="/equipments", tags=["Master (Equipments)"])
 
 logger = get_logger(__name__)
+
+
+def _duplicate_equipment_conflict(e: DuplicateRecordError) -> HTTPException:
+    """設備の一意制約違反を 409 Conflict へ変換する。
+
+    `equipments` の UNIQUE は (tenant_id, name) と (tenant_id, ledger_no) の2本
+    （Issue #486）。どちらに当たったかは制約名で判別する。レスポンスに生の DB
+    制約名・例外文言は載せない（orders の `_duplicate_order_conflict_exception()` と同方針）。
+    """
+    if e.constraint and "ledger_no" in e.constraint:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_ledger_no",
+                "message": "同じ台帳番号の設備が既に登録されています",
+            },
+        )
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error": "duplicate_equipment_name",
+            "message": "同じ名前の設備が既に登録されています",
+        },
+    )
 
 
 @equipment_router.post("")
@@ -22,7 +47,10 @@ def create_equipment(
 ):
     """設備を新規作成"""
     logger.info(f"Creating equipment {equipment_data}")
-    return repo.create(equipment_data.with_tenant_id(tenant_id))
+    try:
+        return repo.create(equipment_data.with_tenant_id(tenant_id))
+    except DuplicateRecordError as e:
+        raise _duplicate_equipment_conflict(e) from e
 
 
 @equipment_router.get("")
@@ -52,7 +80,12 @@ def update_equipment(
 ):
     """設備を更新"""
     logger.info(f"Updating equipment {equipment_id}")
-    result = repo.update(equipment_id, equipment_data.model_dump(exclude_unset=True))
+    try:
+        result = repo.update(
+            equipment_id, equipment_data.model_dump(exclude_unset=True)
+        )
+    except DuplicateRecordError as e:
+        raise _duplicate_equipment_conflict(e) from e
     if not result:
         raise HTTPException(status_code=404, detail="Not found")
     return result

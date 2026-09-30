@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Pencil, Plus, Trash2, Users, Layers } from "lucide-react"
+import { ArrowUpDown, Pencil, Plus, Trash2, Users, Layers } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -19,6 +19,15 @@ import {
 } from "@/lib/hooks/use-equipment-groups"
 import { useAllEquipmentGroupMembers } from "@/hooks/use-equipment-group-members"
 import type { Equipment } from "@/types/equipment"
+import {
+  EMPTY_LEDGER_FORM,
+  equipmentSaveErrorMessage,
+  ledgerFormFromEquipment,
+  parseLedgerForm,
+  sortEquipments,
+  type EquipmentSortKey,
+  type LedgerFormValues,
+} from "@/lib/equipment-utils"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -113,6 +122,86 @@ function SchedulingParamFields({
   )
 }
 
+function SortableHeader({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 whitespace-nowrap hover:text-foreground ${active ? "text-foreground" : ""}`}
+      aria-label={`${label}順に並べ替え`}
+      aria-pressed={active}
+    >
+      {label}
+      <ArrowUpDown className={`h-3 w-3 ${active ? "opacity-100" : "opacity-40"}`} />
+    </button>
+  )
+}
+
+function OptionalTextCell({ value, truncate = false }: { value?: string | null; truncate?: boolean }) {
+  if (!value) {
+    return (
+      <TableCell>
+        <span className="text-muted-foreground">—</span>
+      </TableCell>
+    )
+  }
+  return (
+    <TableCell className={truncate ? "max-w-[200px] truncate" : "whitespace-nowrap"} title={truncate ? value : undefined}>
+      {value}
+    </TableCell>
+  )
+}
+
+interface LedgerFieldsProps {
+  values: LedgerFormValues
+  onChange: (values: LedgerFormValues) => void
+  idPrefix: string
+}
+
+const LEDGER_TEXT_FIELDS: { key: Exclude<keyof LedgerFormValues, "ledgerNo">; label: string; placeholder: string }[] = [
+  { key: "maker", label: "メーカー", placeholder: "" },
+  { key: "model", label: "型式", placeholder: "" },
+  { key: "manufacturedOn", label: "製造年月", placeholder: "例: 1993年5月" },
+  { key: "serialNo", label: "製造番号", placeholder: "" },
+  { key: "note", label: "備考", placeholder: "" },
+]
+
+/** 設備台帳（顧客の正典）の情報。台帳に無い設備は台帳番号を空欄にする（Issue #486） */
+function LedgerFields({ values, onChange, idPrefix }: LedgerFieldsProps) {
+  return (
+    <div className="space-y-3 border-t pt-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        設備台帳（台帳に無い設備は台帳番号を空欄）
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-ledger-no`}>台帳番号</Label>
+          <Input
+            id={`${idPrefix}-ledger-no`}
+            type="number"
+            min={1}
+            value={values.ledgerNo}
+            onChange={(e) => onChange({ ...values, ledgerNo: e.target.value })}
+            placeholder="例: 3"
+          />
+        </div>
+        {LEDGER_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+          <div key={key} className={key === "note" ? "col-span-2 grid gap-2" : "grid gap-2"}>
+            <Label htmlFor={`${idPrefix}-${key}`}>{label}</Label>
+            <Input
+              id={`${idPrefix}-${key}`}
+              value={values[key]}
+              onChange={(e) => onChange({ ...values, [key]: e.target.value })}
+              placeholder={placeholder}
+              autoComplete="off"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function EquipmentsPage() {
   // ── 設備一覧タブの状態 ──────────────────────────────────────────
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
@@ -123,6 +212,8 @@ export default function EquipmentsPage() {
   const [equipGuardTime, setEquipGuardTime] = useState("")
   const [equipMinSlot, setEquipMinSlot] = useState("")
   const [equipMaxFragments, setEquipMaxFragments] = useState("")
+  const [ledgerForm, setLedgerForm] = useState<LedgerFormValues>(EMPTY_LEDGER_FORM)
+  const [sortKey, setSortKey] = useState<EquipmentSortKey>("ledger_no")
   const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
   const [equipmentForAssignment, setEquipmentForAssignment] = useState<Equipment | null>(null)
 
@@ -151,6 +242,11 @@ export default function EquipmentsPage() {
   const updateGroupMutation = useUpdateEquipmentGroup()
   const deleteGroupMutation = useDeleteEquipmentGroup()
 
+  const sortedEquipments = useMemo(
+    () => (equipments ? sortEquipments(equipments, sortKey) : []),
+    [equipments, sortKey]
+  )
+
   // 共有グループ(2設備以上)のIDセット
   const sharedGroupIds = useMemo(
     () => new Set(groups?.filter((g) => g.member_count >= 2).map((g) => g.id) ?? []),
@@ -177,6 +273,7 @@ export default function EquipmentsPage() {
     setEquipGuardTime("")
     setEquipMinSlot("")
     setEquipMaxFragments("")
+    setLedgerForm(EMPTY_LEDGER_FORM)
     setIsCreateDialogOpen(true)
   }
 
@@ -186,6 +283,7 @@ export default function EquipmentsPage() {
     setEquipGuardTime(equipment.guard_time_minutes != null ? String(equipment.guard_time_minutes) : "")
     setEquipMinSlot(equipment.min_slot_minutes != null ? String(equipment.min_slot_minutes) : "")
     setEquipMaxFragments(equipment.max_fragments != null ? String(equipment.max_fragments) : "")
+    setLedgerForm(ledgerFormFromEquipment(equipment))
     setIsEditDialogOpen(true)
   }
 
@@ -206,18 +304,24 @@ export default function EquipmentsPage() {
       toast.error("設備名を入力してください")
       return
     }
+    const ledger = parseLedgerForm(ledgerForm)
+    if (!ledger.ok) {
+      toast.error(ledger.error)
+      return
+    }
     try {
       await createEquipmentMutation.mutateAsync({
         name: equipmentName,
         guard_time_minutes: parseOptionalInt(equipGuardTime),
         min_slot_minutes: parseOptionalInt(equipMinSlot),
         max_fragments: parseOptionalInt(equipMaxFragments),
+        ...ledger.value,
       })
       toast.success("設備を作成しました")
       setIsCreateDialogOpen(false)
       setEquipmentName("")
     } catch (error) {
-      toast.error("設備の作成に失敗しました")
+      toast.error(equipmentSaveErrorMessage(error, "設備の作成に失敗しました"))
       console.error(error)
     }
   }
@@ -228,6 +332,11 @@ export default function EquipmentsPage() {
       toast.error("設備名を入力してください")
       return
     }
+    const ledger = parseLedgerForm(ledgerForm)
+    if (!ledger.ok) {
+      toast.error(ledger.error)
+      return
+    }
     try {
       await updateEquipmentMutation.mutateAsync({
         id: selectedEquipment.id,
@@ -236,6 +345,7 @@ export default function EquipmentsPage() {
           guard_time_minutes: parseOptionalInt(equipGuardTime),
           min_slot_minutes: parseOptionalInt(equipMinSlot),
           max_fragments: parseOptionalInt(equipMaxFragments),
+          ...ledger.value,
         },
       })
       toast.success("設備を更新しました")
@@ -243,7 +353,7 @@ export default function EquipmentsPage() {
       setEquipmentName("")
       setSelectedEquipment(null)
     } catch (error) {
-      toast.error("設備の更新に失敗しました")
+      toast.error(equipmentSaveErrorMessage(error, "設備の更新に失敗しました"))
       console.error(error)
     }
   }
@@ -379,18 +489,44 @@ export default function EquipmentsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>設備名</TableHead>
+                    <TableHead className="w-[100px]">
+                      <SortableHeader
+                        label="台帳番号"
+                        active={sortKey === "ledger_no"}
+                        onClick={() => setSortKey("ledger_no")}
+                      />
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
+                        label="設備名"
+                        active={sortKey === "name"}
+                        onClick={() => setSortKey("name")}
+                      />
+                    </TableHead>
+                    <TableHead>メーカー</TableHead>
+                    <TableHead>型式</TableHead>
+                    <TableHead>製造年月</TableHead>
+                    <TableHead>製造番号</TableHead>
+                    <TableHead>備考</TableHead>
                     <TableHead>所属グループ</TableHead>
                     <TableHead className="w-[150px] text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {equipments && equipments.length > 0 ? (
-                    equipments.map((equipment) => {
+                  {sortedEquipments.length > 0 ? (
+                    sortedEquipments.map((equipment) => {
                       const groupNames = equipmentGroupMap.get(equipment.id) ?? []
                       return (
                         <TableRow key={equipment.id}>
+                          <TableCell className="tabular-nums">
+                            {equipment.ledger_no ?? <span className="text-muted-foreground">—</span>}
+                          </TableCell>
                           <TableCell>{equipment.name}</TableCell>
+                          <OptionalTextCell value={equipment.maker} />
+                          <OptionalTextCell value={equipment.model} />
+                          <OptionalTextCell value={equipment.manufactured_on} />
+                          <OptionalTextCell value={equipment.serial_no} />
+                          <OptionalTextCell value={equipment.note} truncate />
                           <TableCell>
                             {groupNames.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
@@ -438,7 +574,7 @@ export default function EquipmentsPage() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={3} className="text-center py-10">
+                      <TableCell colSpan={9} className="text-center py-10">
                         設備がありません
                       </TableCell>
                     </TableRow>
@@ -520,10 +656,10 @@ export default function EquipmentsPage() {
 
       {/* ── 設備: 作成ダイアログ ─────────────────────────────────── */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>設備の新規作成</DialogTitle>
-            <DialogDescription>新しい設備を作成します。設備名を入力してください。</DialogDescription>
+            <DialogDescription>新しい設備を作成します。設備名と設備台帳の情報を入力してください。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -535,6 +671,7 @@ export default function EquipmentsPage() {
                 placeholder="例: 切断機A"
               />
             </div>
+            <LedgerFields values={ledgerForm} onChange={setLedgerForm} idPrefix="create-equip" />
             <SchedulingParamFields
               guardTime={equipGuardTime}
               minSlot={equipMinSlot}
@@ -558,10 +695,10 @@ export default function EquipmentsPage() {
 
       {/* ── 設備: 編集ダイアログ ─────────────────────────────────── */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>設備の編集</DialogTitle>
-            <DialogDescription>設備名を変更してください。</DialogDescription>
+            <DialogDescription>設備名・設備台帳の情報を変更してください。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -573,6 +710,7 @@ export default function EquipmentsPage() {
                 placeholder="例: 切断機A"
               />
             </div>
+            <LedgerFields values={ledgerForm} onChange={setLedgerForm} idPrefix="edit-equip" />
             <SchedulingParamFields
               guardTime={equipGuardTime}
               minSlot={equipMinSlot}
