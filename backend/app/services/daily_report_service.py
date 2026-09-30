@@ -2,7 +2,7 @@
 """日報ファイルの Storage 保存と重複判定 (Issue #471, 親Issue #468)。
 
 エージェントから受け取った日報ファイルを、バケット `daily-reports` のキー
-`{tenant_id}/{sha256}` に保存し、メタデータを `daily_report_files` に記録する。
+`{tenant_id}/{sha256}{拡張子}` に保存し、メタデータを `daily_report_files` に記録する。
 呼び出し側（`routers/agent/daily_reports.py`）は service role の admin client を
 渡すため、ここでのクエリはすべて `.eq("tenant_id", tenant_id)` で明示的に絞り込む。
 """
@@ -31,6 +31,18 @@ MAX_DAILY_REPORT_BYTES = int(
 )
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+# Storage のキーに付ける拡張子。ASCII 英数字以外（日本語・記号）を含む拡張子は付けない。
+_EXTENSION_PATTERN = re.compile(r"^\.[a-z0-9]{1,10}$")
+_DEFAULT_CONTENT_TYPE = "application/octet-stream"
+# mimetypes はホスト（Python バージョン・/etc/mime.types の有無）で .xlsx 等の
+# 解決結果が変わるため、日報で扱う拡張子は明示的に持つ。
+_CONTENT_TYPES: dict[str, str] = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+    ".pdf": "application/pdf",
+}
 _UNIQUE_VIOLATION = "23505"
 
 DailyReportStoreStatus = Literal["stored", "duplicate"]
@@ -87,9 +99,22 @@ def parse_file_modified_at(raw: str | None) -> datetime | None:
     return parsed
 
 
-def build_storage_path(tenant_id: str, sha256: str) -> str:
-    """Storage のオブジェクトキー。日本語ファイル名は含めず ASCII 安全にする。"""
-    return f"{tenant_id}/{sha256}"
+def storage_extension(file_name: str) -> str:
+    """元ファイル名の拡張子を小文字で返す（`.xlsx` 等）。付けられない場合は空文字。"""
+    suffix = PureWindowsPath(file_name).suffix.lower()
+    return suffix if _EXTENSION_PATTERN.fullmatch(suffix) else ""
+
+
+def content_type_for(file_name: str) -> str:
+    return _CONTENT_TYPES.get(storage_extension(file_name), _DEFAULT_CONTENT_TYPE)
+
+
+def build_storage_path(tenant_id: str, sha256: str, file_name: str) -> str:
+    """Storage のオブジェクトキー。日本語ファイル名は含めず ASCII 安全にする。
+
+    ダウンロード時に開けるよう、元ファイル名の拡張子だけは末尾に付ける。
+    """
+    return f"{tenant_id}/{sha256}{storage_extension(file_name)}"
 
 
 def _is_storage_duplicate(exc: StorageApiError) -> bool:
@@ -98,7 +123,9 @@ def _is_storage_duplicate(exc: StorageApiError) -> bool:
     return str(exc.status) == "409" or exc.code == "Duplicate"
 
 
-def _upload_if_absent(admin_client: Client, storage_path: str, content: bytes) -> None:
+def _upload_if_absent(
+    admin_client: Client, storage_path: str, content: bytes, content_type: str
+) -> None:
     """upsert=false でアップロードする。既存オブジェクトなら上書きせずに戻る。
 
     前回の INSERT 失敗等で Storage にだけオブジェクトが残っているケースでも、
@@ -109,7 +136,7 @@ def _upload_if_absent(admin_client: Client, storage_path: str, content: bytes) -
             path=storage_path,
             file=content,
             file_options={
-                "content-type": "application/octet-stream",
+                "content-type": content_type,
                 "upsert": "false",
             },
         )
@@ -148,8 +175,8 @@ def store_daily_report(
     if existing.data:
         return "duplicate"
 
-    storage_path = build_storage_path(tenant_id, sha256)
-    _upload_if_absent(admin_client, storage_path, content)
+    storage_path = build_storage_path(tenant_id, sha256, file_name)
+    _upload_if_absent(admin_client, storage_path, content, content_type_for(file_name))
 
     row: dict[str, Any] = {
         "tenant_id": tenant_id,

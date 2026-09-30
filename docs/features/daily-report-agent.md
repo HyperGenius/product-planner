@@ -52,7 +52,13 @@
 ### Storage バケット `daily-reports`
 
 - private。`file_size_limit` は 20MB（20971520 バイト）で、バックエンドの受信上限と揃える
-- オブジェクトのキーは `{tenant_id}/{sha256}`（ASCII 安全）。`tenant_id` をプレフィックスにする形は `order-attachments` と同じ
+- オブジェクトのキーは `{tenant_id}/{sha256}{拡張子}`（例: `.../{sha256}.xlsx`、ASCII 安全）。`tenant_id` をプレフィックスにする形は `order-attachments` と同じ
+  - 日本語を含むファイル名はキーに使わないが、ダウンロードしたファイルをそのまま開けるよう**元ファイル名の拡張子だけ**を
+    小文字化して付ける（`storage_extension()`）。ASCII 英数字 1〜10 文字以外の拡張子（日本語・記号入り）や拡張子無しの場合は付けない
+  - `content-type` も拡張子から決める（`content_type_for()`。`.xlsx` / `.xlsm` / `.xls` / `.csv` / `.pdf` 以外は
+    `application/octet-stream`）。`mimetypes` はホストの Python バージョン・`/etc/mime.types` の有無で `.xlsx` 等の
+    解決結果が変わるため使わず、明示的なテーブルで持つ
+  - 拡張子付与の導入前に保存されたオブジェクトは拡張子無しのキーのまま。参照は常に `daily_report_files.storage_path` 経由で行うこと
 - 読み書きはバックエンド（service role）のみ。`storage.objects` に `authenticated` 向けのポリシーは付けない
 - Terraform（`infra/terraform/`）の `supabase/supabase` provider はバケットを管理できないため、
   `order-attachments` と同じくマイグレーションの `INSERT INTO storage.buckets ... ON CONFLICT DO NOTHING` で作る
@@ -156,9 +162,9 @@
    同時に SHA-256 を計算する。`X-File-Sha256` と一致しなければ 400
 4. `store_daily_report()`（同期の supabase-py を使うので `run_in_threadpool` で実行）
    1. `(tenant_id, sha256)` の既存行があれば `duplicate`（Storage・テーブルとも触らない）
-   2. `upsert=false` でキー `{tenant_id}/{sha256}` にアップロードする。既存オブジェクトなら Storage は
+   2. `upsert=false` でキー `{tenant_id}/{sha256}{拡張子}` にアップロードする。既存オブジェクトなら Storage は
       `StorageApiError(status="409", code="Duplicate")` を返すので、上書きせずに次へ進む
-      （前回 INSERT に失敗して Storage にだけ残ったケース。キーが sha256 なので中身は同一）
+      （前回 INSERT に失敗して Storage にだけ残ったケース。キーが sha256 を含むので中身は同一）
    3. INSERT する。`23505`（unique_violation、同時送信で先を越された）なら `duplicate`
 
 | ケース | レスポンス |
