@@ -140,6 +140,8 @@ cd backend && ruff check . && mypy .
     （製品の別名辞書 `product_name_aliases` は `product_id` NOT NULL でメール起票と共有のため）。対象外は照合結果に影響させず、
     `list_unmatched_names()` で除外するだけにする。書き込めるロールは Backend `_ALIAS_EDITOR_ROLES` と Frontend
     `DAILY_REPORT_NAME_EDITOR_ROLES` を揃える
+  - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
+    **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。

@@ -182,6 +182,33 @@ describe("UnmatchedNameQueue", () => {
     )
   })
 
+  it("別名を登録しても、他の行の類似候補は再検索しない（PR #498 レビュー）", async () => {
+    const posts = mockQueue([
+      unmatched({ kind: "product", raw_text: "ピンA", customer_raw: "顧客A", customer_id: 10 }),
+      unmatched({ kind: "product", raw_text: "ピンB", customer_raw: "顧客A", customer_id: 10 }),
+    ])
+    const candidateRequests: string[] = []
+    server.use(
+      http.get(`${API_BASE}/daily-reports/product-candidates`, ({ request }) => {
+        const rawText = new URL(request.url).searchParams.get("raw_text")!
+        candidateRequests.push(rawText)
+        return HttpResponse.json([{ product_id: 100, name: `${rawText} 製品`, score: 0.8 }])
+      }),
+    )
+
+    render(<UnmatchedNameQueue canEdit />)
+    await openTab(/製品/)
+    await userEvent.click(
+      await screen.findByRole("button", { name: "「ピンA」を「ピンA 製品」に対応付ける" }),
+    )
+
+    await waitFor(() => expect(posts).toHaveLength(1))
+    // 登録後に未照合一覧は取り直す（ピンA が消える）が、候補の検索は行ごとに1回のまま
+    await waitFor(() => expect(screen.queryByText("ピンA")).not.toBeInTheDocument())
+    expect(screen.getByText("ピンB")).toBeInTheDocument()
+    expect(candidateRequests.sort()).toEqual(["ピンA", "ピンB"])
+  })
+
   it("顧客先が未照合の製品は、候補を出さずに先に顧客の対応付けを促す", async () => {
     let candidateRequested = false
     mockQueue([

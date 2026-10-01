@@ -18,6 +18,7 @@ import type {
  *
  * 照合結果は明細に保存せず都度解決されるので、別名・対象外を変えたら
  * `DAILY_REPORT_NAMES_QUERY_KEY` 配下（未照合一覧・登録済みの一覧）をまとめて無効化する。
+ * 製品の類似候補は別名・対象外で変わらないので配下に置かない（`PRODUCT_CANDIDATES_QUERY_KEY`）。
  */
 export const DAILY_REPORT_NAMES_QUERY_KEY = ["daily-report-names"]
 
@@ -58,14 +59,28 @@ export function useNameEntries(
   })
 }
 
-/** 日報の商品名に似た製品の候補（pg_trgm）。提示専用 */
+/**
+ * 製品の類似候補のクエリキー。`DAILY_REPORT_NAMES_QUERY_KEY` の配下に置かない:
+ * 候補は商品名と製品マスタだけで決まり別名・対象外の登録では変わらないので、登録のたびの
+ * 無効化で未照合の製品の行数分の類似検索（pg_trgm）を再実行させないため（PR #498 Copilotレビュー）
+ */
+export const PRODUCT_CANDIDATES_QUERY_KEY = ["daily-report-product-candidates"]
+
+/** 候補の鮮度。製品マスタの変更が数分遅れて反映される程度は許容し、タブの切り替えで再検索しない */
+const PRODUCT_CANDIDATES_STALE_TIME_MS = 5 * 60 * 1000
+
+/**
+ * 日報の商品名に似た製品の候補（pg_trgm）。提示専用。
+ * 未照合の製品の行ごとに呼ばれる（候補を行内に出して押すだけで対応付けるため）。
+ */
 export function useProductCandidates(rawText: string) {
   return useQuery<ProductCandidate[]>({
-    queryKey: [...DAILY_REPORT_NAMES_QUERY_KEY, "product-candidates", rawText],
+    queryKey: [...PRODUCT_CANDIDATES_QUERY_KEY, rawText],
     queryFn: () =>
       apiClient<ProductCandidate[]>(
         `${BASE}/product-candidates?${new URLSearchParams({ raw_text: rawText })}`,
       ),
+    staleTime: PRODUCT_CANDIDATES_STALE_TIME_MS,
   })
 }
 
