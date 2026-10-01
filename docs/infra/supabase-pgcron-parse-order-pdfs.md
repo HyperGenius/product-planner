@@ -6,7 +6,7 @@ Issue: #261
 
 メール起票パイプラインは `GET /api/cron/gmail-poll` → `GET /api/cron/parse-order-pdfs`（いずれもRender/FastAPI）の2段階で構成されている（詳細は [email-order-intake.md](../features/email-order-intake.md) の「2段階Cronのスケジューリング設計」を参照）。特に2段目は取りこぼしを避けるため5〜15分間隔程度の高頻度実行が必要だが、Vercel Cron は無料（Hobby）プランの実行回数制限（1日2回まで）によりこれを満たせない（詳細は [env-setup-gmail-cron.md](env-setup-gmail-cron.md) の「既知のギャップ」を参照）。
 
-Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加コストなしで使えるため、Supabase Edge Function + pg_cron の組み合わせで高頻度スケジューリングを構築する。ロジック自体は Render 側の既存エンドポイントに残したまま、Edge Function は `CRON_SECRET` 付きで各エンドポイントを順に fetch するだけの薄いトリガーに徹する。1回の実行で `gmail-poll` → `parse-order-pdfs` → `advance-order-status` をまとめて処理するため、Vercel Cron によるスケジューリングは不要になった。
+Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加コストなしで使えるため、Supabase Edge Function + pg_cron の組み合わせで高頻度スケジューリングを構築する。ロジック自体は Render 側の既存エンドポイントに残したまま、Edge Function は `CRON_SECRET` 付きで各エンドポイントを順に fetch するだけの薄いトリガーに徹する。1回の実行で `gmail-poll` → `parse-order-pdfs` → `advance-order-status` → `parse-daily-reports` をまとめて処理するため、Vercel Cron によるスケジューリングは不要になった。
 
 ```
 [pg_cron（5〜15分間隔）]
@@ -16,6 +16,7 @@ Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加
         → 1. [Render: GET /api/cron/gmail-poll]
         → 2. [Render: GET /api/cron/parse-order-pdfs]
         → 3. [Render: GET /api/cron/advance-order-status]  ← 着手日到来で confirmed ⇄ in_progress を自動遷移（Issue #400）
+        → 4. [Render: GET /api/cron/parse-daily-reports]   ← 受信済みの日報Excelをパースし明細を保存（Issue #487）
 ```
 
 3本目の `advance-order-status` はメール起票パイプラインとは独立した処理で、着手日
@@ -24,6 +25,11 @@ Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加
 横断のバルク更新。着手日は date 粒度のため本来は日次で十分だが、冪等なので高頻度実行でも
 副作用は無く、専用の pg_cron ジョブを追加せずこのトリガーに相乗りしている。詳細は
 [order-status-workflow.md](../features/order-status-workflow.md) の「着手日到来による生産中への自動遷移」を参照。
+
+4本目の `parse-daily-reports` も独立した処理で、日報取り込みエージェントが送った日報Excel
+（`daily_report_files` のうち `parse_status = 'pending'` のもの）をパースして明細に保存する。
+未処理のファイルだけを扱う冪等な処理なので、同じくこのトリガーに相乗りしている。詳細は
+[daily-report-agent.md](../features/daily-report-agent.md) の「日報のパースと明細の保存」を参照。
 
 厳密には `gmail-poll` の完了後に `parse-order-pdfs` を実行したいところだが、Edge Function は両エンドポイントを順番に（`gmail-poll` を待ってから）呼び出すだけであり、実行全体が10〜15分間隔で繰り返されるため、前回サイクルで完全に処理しきれなかった分は次回サイクルで拾われる。データ破損ではなく処理の持ち越しに留まる設計については [email-order-intake.md](../features/email-order-intake.md) の「2段階Cronのスケジューリング設計」を参照。`gmail-poll` が失敗（Render側エラー等）した場合でも、前回までにステージング済みの行が残っている可能性があるため `parse-order-pdfs` は続けて実行する。
 

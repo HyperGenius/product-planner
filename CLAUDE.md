@@ -119,6 +119,14 @@ cd backend && ruff check . && mypy .
     ログオンユーザー）から取る。UNC を読むため `SYSTEM`・S4U は使わない。パスワードは `Get-Credential` 以外で受け取らない。
     コンテナの `pwsh` には `ScheduledTasks` が無いので、ロジックの確認は `New-ScheduledTask*` / `Register-ScheduledTask` を
     スタブ関数で差し替えて実行し、PS 5.1 互換性は PSScriptAnalyzer の `PSUseCompatibleSyntax`（TargetVersions 5.1）で見る
+- **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
+  明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
+  版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は
+  ファイル単位ではなくこのテーブルを入力にする。パーサー（`services/daily_report_parser.py`）は Storage・DB から切り離した純粋関数に保つ。
+  `openpyxl` の `read_only=True` はファイルに記録された使用範囲しか読まないので `reset_dimensions()` してから読む。数式セル
+  （`不適合合計数`）は `data_only=True` でキャッシュ値を読み、openpyxl 等 Excel 以外で保存されたファイルではキャッシュが無い（None）
+  前提で代替値を持つ。テナントのメンバーが参照できる列（`parse_error` 等）に例外文言を入れない。
+  詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。
