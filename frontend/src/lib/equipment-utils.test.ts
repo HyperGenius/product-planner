@@ -5,6 +5,7 @@ import type { Equipment } from "@/types/equipment"
 
 import {
   EMPTY_LEDGER_FORM,
+  equipmentDisplayName,
   equipmentSaveErrorMessage,
   ledgerFormFromEquipment,
   parseLedgerForm,
@@ -33,10 +34,28 @@ describe("sortEquipments", () => {
     )
   })
 
+  it("呼称順は呼称（無ければ設備名）で並ぶ", () => {
+    const withShortNames = [
+      { ...eq(1, "25Tシングルクランクプレス"), short_name: "ワシノ25t" },
+      { ...eq(2, "アマダ15t"), short_name: null },
+      { ...eq(3, "15Tシングルクランクプレス"), short_name: "コマツ15t" },
+    ]
+    expect(sortEquipments(withShortNames, "short_name").map((e) => e.id)).toEqual([2, 3, 1])
+  })
+
   it("元の配列を変更しない", () => {
     const before = equipments.map((e) => e.id)
     sortEquipments(equipments, "ledger_no")
     expect(equipments.map((e) => e.id)).toEqual(before)
+  })
+})
+
+describe("equipmentDisplayName", () => {
+  it("呼称があれば呼称、無ければ設備名", () => {
+    expect(equipmentDisplayName({ name: "25Tシングルクランクプレス", short_name: "ワシノ25t" })).toBe("ワシノ25t")
+    expect(equipmentDisplayName({ name: "カシメ汎用", short_name: null })).toBe("カシメ汎用")
+    expect(equipmentDisplayName({ name: "カシメ汎用" })).toBe("カシメ汎用")
+    expect(equipmentDisplayName({ name: "カシメ汎用", short_name: "" })).toBe("カシメ汎用")
   })
 })
 
@@ -77,8 +96,10 @@ describe("equipmentSaveErrorMessage", () => {
   it("409 の error コードで文言を出し分ける", () => {
     const ledger = new ApiError(409, { detail: { error: "duplicate_ledger_no" } })
     const name = new ApiError(409, { detail: { error: "duplicate_equipment_name" } })
+    const shortName = new ApiError(409, { detail: { error: "duplicate_short_name" } })
     expect(equipmentSaveErrorMessage(ledger, "失敗")).toContain("台帳番号")
     expect(equipmentSaveErrorMessage(name, "失敗")).toContain("名前")
+    expect(equipmentSaveErrorMessage(shortName, "失敗")).toContain("呼称")
   })
 
   it("それ以外は既定の文言", () => {

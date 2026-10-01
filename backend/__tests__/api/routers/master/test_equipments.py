@@ -195,3 +195,40 @@ class TestEquipmentRouter:
 
         assert response.status_code == 409
         assert response.json()["detail"]["error"] == "duplicate_equipment_name"
+
+    def test_update_equipment_duplicate_short_name_returns_409(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: 呼称の重複は 409 duplicate_short_name（制約名は返さない）"""
+        mock_repo.update.side_effect = DuplicateRecordError(
+            "dup",
+            constraint='duplicate key value violates unique constraint "equipments_tenant_id_short_name_key"',
+        )
+
+        response = client.patch(
+            "/equipments/1",
+            json={"name": "25Tシングルクランクプレス", "short_name": "25tプレス"},
+            headers=headers,
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["error"] == "duplicate_short_name"
+        assert "equipments_tenant_id_short_name_key" not in response.text
+
+    @pytest.mark.parametrize(
+        "short_name, expected", [(" 25tプレス ", "25tプレス"), ("  ", None), ("", None)]
+    )
+    def test_create_equipment_normalizes_short_name(
+        self, headers, mock_repo, short_name, expected
+    ):
+        """POST /: 呼称は前後の空白を除き、空欄は未設定（NULL）にする"""
+        mock_repo.create.return_value = {"id": 100}
+
+        response = client.post(
+            "/equipments",
+            json={"name": "25Tシングルクランクプレス", "short_name": short_name},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert mock_repo.create.call_args[0][0]["short_name"] == expected

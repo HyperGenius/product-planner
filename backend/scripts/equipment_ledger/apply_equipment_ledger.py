@@ -13,8 +13,13 @@
       3. 台帳の名称と同名で `ledger_no` 未設定の設備
   - どれにも当たらない台帳の設備は新規登録する（設備グループには所属させない）
   - 台帳に無い既存設備（「汎用設備グループ」等）は変更しない（`ledger_no` は NULL のまま）
-  - 設備と同名でメンバーがその設備1台だけの設備グループは、設備名に合わせて名称を変更する
-    （初期移行で設備ごとに同名のグループを作っているため）。グループ構成は変更しない
+  - 台帳の名称に変わる設備は、旧名称（対応表の `current_name`。無ければ現在の設備名）を
+    呼称 `short_name` として残す。画面表示は呼称が優先されるため、長い正式名称で表示が冗長に
+    ならない。呼称が既に設定済み（画面での手動設定を含む）の設備は呼称を変更しない
+  - 設備と同名（旧名称・台帳の名称・呼称のいずれか）でメンバーがその設備1台だけの設備グループは、
+    設備の表示名（呼称、無ければ台帳の名称）に名称を揃える（初期移行で設備ごとに同名のグループを
+    作っているため。ガントチャートはグループ名を表示する）。グループ構成は変更しない。
+    旧版のスクリプトで台帳の名称に変えてしまったグループは、再実行で呼称に戻る
 
 `equipments` / `equipment_groups` は `(tenant_id, name)` が UNIQUE のため、名称の入れ替え
 （A→B, B→A）や玉突きは一時名（`__ledger_tmp__<id>`）を経由して反映する。
@@ -64,7 +69,7 @@ MAPPING_CSV_COLUMNS = ("current_name", "ledger_no")
 # 台帳から equipments へ反映する列
 LEDGER_FIELDS = LEDGER_CSV_COLUMNS
 
-_EQUIPMENT_SELECT = "id, " + ", ".join(LEDGER_FIELDS)
+_EQUIPMENT_SELECT = "id, short_name, " + ", ".join(LEDGER_FIELDS)
 
 
 class LedgerError(Exception):
@@ -298,23 +303,47 @@ def _match_ledger(
     return matched
 
 
+def _short_name_to_set(
+    entry: LedgerEntry, eq: dict[str, Any], mapping: dict[int, str]
+) -> str | None:
+    """台帳の名称に変わる設備に、旧名称を呼称として設定する場合はその値を返す。
+
+    旧名称は対応表の旧名称を優先する（旧版のスクリプトで設備名が既に台帳の名称へ変わった後の
+    再実行でも、対応表から旧名称を復元できる）。呼称が設定済みなら上書きしない。
+    """
+    if eq.get("short_name"):
+        return None
+    old_name = mapping.get(entry.ledger_no) or eq["name"]
+    if old_name == entry.name or old_name.startswith(TEMP_NAME_PREFIX):
+        return None
+    return old_name
+
+
 def _group_rename_targets(
     matched: Matched,
     mapping: dict[int, str],
     groups: list[dict[str, Any]],
+    short_names: dict[int, str | None],
     errors: list[str],
 ) -> dict[int, str]:
-    """設備と同名でメンバーがその設備1台だけのグループ → 新しい設備名"""
+    """設備と同名でメンバーがその設備1台だけのグループ → 設備の表示名（呼称、無ければ台帳の名称）"""
     targets: dict[int, str] = {}
     for entry, eq in matched:
-        # 旧名称は「現在の設備名」か「対応表の旧名称」（中断後の再実行で設備名だけ先に
-        # 変わっている場合）。一時名のまま中断したグループも拾う
-        candidates = {eq["name"], mapping.get(entry.ledger_no)}
+        target = short_names.get(eq["id"]) or entry.name
+        # 同名とみなすのは「現在の設備名」「対応表の旧名称」（中断後の再実行で設備名だけ先に
+        # 変わっている場合）「台帳の名称」（旧版のスクリプトでグループ名を台帳の名称に変えた場合）
+        # 「呼称」。一時名のまま中断したグループも拾う
+        candidates = {
+            eq["name"],
+            mapping.get(entry.ledger_no),
+            entry.name,
+            short_names.get(eq["id"]),
+        }
         solo_groups = [
             g
             for g in groups
             if set(g.get("member_ids") or ()) == {eq["id"]}
-            and g["name"] != entry.name
+            and g["name"] != target
             and (g["name"] in candidates or g["name"].startswith(TEMP_NAME_PREFIX))
         ]
         if len(solo_groups) > 1:
@@ -323,7 +352,7 @@ def _group_rename_targets(
                 + ", ".join(g["name"] for g in solo_groups)
             )
         elif solo_groups:
-            targets[solo_groups[0]["id"]] = entry.name
+            targets[solo_groups[0]["id"]] = target
     return targets
 
 
@@ -366,9 +395,17 @@ def build_plan(
 
     # --- 設備の更新と名称変更 ---
     current_names = {e["id"]: e["name"] for e in equipments}
+    # 反映後の呼称（設備ID → 呼称）
+    short_names: dict[int, str | None] = {
+        e["id"]: e.get("short_name") for e in equipments
+    }
     name_targets: dict[int, str] = {}
     for entry, eq in matched:
         changes = {k: v for k, v in entry.as_fields().items() if eq.get(k) != v}
+        short_name = _short_name_to_set(entry, eq, mapping)
+        if short_name:
+            changes["short_name"] = short_name
+            short_names[eq["id"]] = short_name
         if changes:
             plan.updates.append(EquipmentChange(eq["id"], eq["name"], changes))
         if "name" in changes:
@@ -382,9 +419,17 @@ def build_plan(
         )
     ]
 
+    duplicated_short_names = [
+        n for n, c in Counter(n for n in short_names.values() if n).items() if c > 1
+    ]
+    errors += [
+        f"反映後に呼称「{name}」が重複します（既に別の設備がその呼称を使っています）"
+        for name in duplicated_short_names
+    ]
+
     # --- 1対1の同名設備グループの名称変更 ---
     group_current = {g["id"]: g["name"] for g in groups}
-    group_targets = _group_rename_targets(matched, mapping, groups, errors)
+    group_targets = _group_rename_targets(matched, mapping, groups, short_names, errors)
     errors += [
         f"反映後に設備グループ名「{name}」が重複します（既に別のグループがその名前を使っています）"
         for name in _duplicated_final_names(group_current, group_targets, [])
@@ -410,7 +455,9 @@ def format_plan(plan: LedgerPlan) -> str:
         title = f"{u.current_name} → {new_name}" if new_name else u.current_name
         lines.append(f"  - [id={u.id}] {title}")
         for k, v in u.changes.items():
-            if k != "name":
+            if k == "short_name":
+                lines.append(f"      short_name（呼称）: {v}")
+            elif k != "name":
                 lines.append(f"      {k}: {v}")
     lines.append(f"■ 新規登録: {len(plan.inserts)} 件")
     for e in plan.inserts:
@@ -421,7 +468,7 @@ def format_plan(plan: LedgerPlan) -> str:
             "工程で使う場合は設備マスタ画面でグループに追加してください"
         )
     lines.append(
-        f"■ 設備グループの名称変更（1台だけの同名グループ）: {len(plan.group_renames)} 件"
+        f"■ 設備グループの名称変更（1台だけの同名グループを呼称に揃える）: {len(plan.group_renames)} 件"
     )
     for gid, (old, new) in plan.group_renames.items():
         lines.append(f"  - [id={gid}] {old} → {new}")
@@ -479,7 +526,7 @@ def apply_plan(client: Client, tenant_id: str, plan: LedgerPlan) -> None:
     equipments = client.table("equipments")
     groups = client.table("equipment_groups")
 
-    # 1. 台帳番号・台帳の列（名称以外）
+    # 1. 台帳番号・台帳の列・呼称（名称以外）
     for u in plan.updates:
         fields = {k: v for k, v in u.changes.items() if k != "name"}
         if fields:

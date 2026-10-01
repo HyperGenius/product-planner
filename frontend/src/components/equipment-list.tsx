@@ -1,6 +1,7 @@
 /* frontend/src/components/equipment-list.tsx */
 "use client"
 
+import { equipmentDisplayName } from "@/lib/equipment-utils"
 import { Equipment } from "@/types/equipment"
 
 interface EquipmentListProps {
@@ -52,7 +53,7 @@ export function EquipmentList({
                                     className="cursor-pointer"
                                     onClick={(e) => e.stopPropagation()}
                                 />
-                                <span className="text-sm">{equipment.name}</span>
+                                <span className="text-sm">{equipmentDisplayName(equipment)}</span>
                             </div>
                         </div>
                     ))

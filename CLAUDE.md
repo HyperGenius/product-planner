@@ -151,6 +151,10 @@ cd backend && ruff check . && mypy .
   初期移行で作られているので、**設備名を一括で変えるときは同名1台グループも合わせる**。名称の入れ替え・玉突きは UNIQUE を
   踏むので一時名を経由する（`scripts/equipment_ledger/apply_equipment_ledger.py` の `order_renames()`）。
   台帳の実データは `scripts/equipment_ledger/_data/`（git 管理外）に置き、リポジトリ・テストに入れない
+  - **呼称（`equipments.short_name`）**: `name` は台帳の正式名称で長いので、画面に設備名を出すときは
+    「呼称があれば呼称、無ければ `name`」の表示名を使う（Backend `equipment_display_name()` /
+    Frontend `equipmentDisplayName()`。`equipment.name` を直接描画しない）。呼称も `(tenant_id, short_name)` の部分
+    UNIQUE（409 `duplicate_short_name`）。ガントは設備名ではなく**設備グループ名**を出すので、1台グループの名前は呼称に揃える
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）

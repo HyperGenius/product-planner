@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 def _duplicate_equipment_conflict(e: DuplicateRecordError) -> HTTPException:
     """設備の一意制約違反を 409 Conflict へ変換する。
 
-    `equipments` の UNIQUE は (tenant_id, name) と (tenant_id, ledger_no) の2本
-    （Issue #486）。どちらに当たったかは制約名で判別する。レスポンスに生の DB
+    `equipments` の UNIQUE は (tenant_id, name)・(tenant_id, ledger_no)（Issue #486）・
+    (tenant_id, short_name) の3本。どれに当たったかは制約名で判別する。レスポンスに生の DB
     制約名・例外文言は載せない（orders の `_duplicate_order_conflict_exception()` と同方針）。
     """
     if e.constraint and "ledger_no" in e.constraint:
@@ -28,6 +28,14 @@ def _duplicate_equipment_conflict(e: DuplicateRecordError) -> HTTPException:
             detail={
                 "error": "duplicate_ledger_no",
                 "message": "同じ台帳番号の設備が既に登録されています",
+            },
+        )
+    if e.constraint and "short_name" in e.constraint:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_short_name",
+                "message": "同じ呼称の設備が既に登録されています",
             },
         )
     return HTTPException(

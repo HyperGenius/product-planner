@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 
+import { equipmentDisplayName } from '@/lib/equipment-utils'
 import { useEquipmentGroups } from '@/lib/hooks/use-equipment-groups'
 import {
   useAllEquipmentGroupMembers,
@@ -93,7 +94,7 @@ export function EquipmentGroupAssignmentDialog({ equipment, open, onOpenChange }
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex flex-col max-h-[90vh]">
         <DialogHeader>
-          <DialogTitle>{equipment?.name} のグループ設定</DialogTitle>
+          <DialogTitle>{equipment ? equipmentDisplayName(equipment) : ""} のグループ設定</DialogTitle>
           <DialogDescription>この設備が属するグループを選択してください</DialogDescription>
         </DialogHeader>
 

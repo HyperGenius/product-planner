@@ -258,6 +258,7 @@ python scripts/issue_agent_token.py revoke --token-id <token_uuid>
 
 顧客の設備台帳（正典）を設備マスタ `equipments` に反映する。既存の設備は `id` を維持したまま
 名称を台帳に合わせ、台帳の列（台帳番号・メーカー・型式・製造年月・製造番号・備考）を埋める。
+名称が変わる設備は旧名称を呼称（`short_name`、画面表示に使う短い名前）として残す。
 台帳にあってマスタに無い設備は新規登録する。仕様は
 [docs/features/equipment-master-ux-design.md](../../docs/features/equipment-master-ux-design.md#設備台帳との対応issue-486) を参照。
 
@@ -271,7 +272,7 @@ python scripts/issue_agent_token.py revoke --token-id <token_uuid>
 | ファイル | 列 |
 |---|---|
 | 台帳（`--csv`） | `ledger_no,name,maker,model,manufactured_on,serial_no,note`（`ledger_no` / `name` 必須。空欄は NULL） |
-| 対応表（`--mapping`） | `current_name,ledger_no`（既存設備の現在の名称 → 台帳番号） |
+| 対応表（`--mapping`） | `current_name,ledger_no`（既存設備の現在の名称 → 台帳番号。`current_name` は呼称として残る） |
 
 対応表に無い台帳の行は、同名の既存設備（台帳番号未設定）があればそれに対応付け、無ければ新規登録する。
 
@@ -294,7 +295,11 @@ python scripts/equipment_ledger/apply_equipment_ledger.py --tenant-id <tenant_uu
 
 ### 注意事項
 
-- 設備と同名でメンバーがその設備1台だけの設備グループは、設備名に合わせて名称を変更する。グループ構成は変えない
+- 呼称が設定済みの設備は呼称を上書きしない
+- 設備と同名でメンバーがその設備1台だけの設備グループは、設備の表示名（呼称、無ければ台帳の名称）に名称を揃える
+  （ガントチャートはグループ名を表示するため）。グループ構成は変えない
+- 呼称導入前の版で反映済みの環境は、同じ台帳・対応表で再実行すると対応表の `current_name` から呼称を復元し、
+  台帳の名称に変わった1台グループを呼称に戻す（マイグレーション `20261002000000_add_short_name_to_equipments.sql` の適用が先に必要）
 - 新規登録した設備はどの設備グループにも属さない。工程で使う場合は設備マスタ画面でグループに追加する
 - PostgREST 経由のためトランザクションにはならない。途中で失敗した場合はそのまま再実行すれば続きから反映される
   （台帳番号を先に書き込み、再実行時は台帳番号で同じ設備に当たる）。反映済みの状態で再実行しても変更は出ない

@@ -21,6 +21,7 @@ import { useAllEquipmentGroupMembers } from "@/hooks/use-equipment-group-members
 import type { Equipment } from "@/types/equipment"
 import {
   EMPTY_LEDGER_FORM,
+  equipmentDisplayName,
   equipmentSaveErrorMessage,
   ledgerFormFromEquipment,
   parseLedgerForm,
@@ -152,6 +153,33 @@ function OptionalTextCell({ value, truncate = false }: { value?: string | null; 
   )
 }
 
+/** 呼称（現場で使う短い名前）。ガントチャート等の表示に使う */
+function ShortNameField({
+  value,
+  onChange,
+  id,
+}: {
+  value: string
+  onChange: (v: string) => void
+  id: string
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>呼称</Label>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="例: ワシノ25t"
+        autoComplete="off"
+      />
+      <p className="text-xs text-muted-foreground">
+        ガントチャート等の表示に使う短い名前です。空欄なら設備名を表示します
+      </p>
+    </div>
+  )
+}
+
 interface LedgerFieldsProps {
   values: LedgerFormValues
   onChange: (values: LedgerFormValues) => void
@@ -209,6 +237,7 @@ export default function EquipmentsPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null)
   const [equipmentName, setEquipmentName] = useState("")
+  const [equipmentShortName, setEquipmentShortName] = useState("")
   const [equipGuardTime, setEquipGuardTime] = useState("")
   const [equipMinSlot, setEquipMinSlot] = useState("")
   const [equipMaxFragments, setEquipMaxFragments] = useState("")
@@ -270,6 +299,7 @@ export default function EquipmentsPage() {
   // ── 設備タブのハンドラ ────────────────────────────────────────
   const handleOpenCreateDialog = () => {
     setEquipmentName("")
+    setEquipmentShortName("")
     setEquipGuardTime("")
     setEquipMinSlot("")
     setEquipMaxFragments("")
@@ -280,6 +310,7 @@ export default function EquipmentsPage() {
   const handleOpenEditDialog = (equipment: Equipment) => {
     setSelectedEquipment(equipment)
     setEquipmentName(equipment.name)
+    setEquipmentShortName(equipment.short_name ?? "")
     setEquipGuardTime(equipment.guard_time_minutes != null ? String(equipment.guard_time_minutes) : "")
     setEquipMinSlot(equipment.min_slot_minutes != null ? String(equipment.min_slot_minutes) : "")
     setEquipMaxFragments(equipment.max_fragments != null ? String(equipment.max_fragments) : "")
@@ -312,6 +343,7 @@ export default function EquipmentsPage() {
     try {
       await createEquipmentMutation.mutateAsync({
         name: equipmentName,
+        short_name: equipmentShortName.trim() || null,
         guard_time_minutes: parseOptionalInt(equipGuardTime),
         min_slot_minutes: parseOptionalInt(equipMinSlot),
         max_fragments: parseOptionalInt(equipMaxFragments),
@@ -342,6 +374,7 @@ export default function EquipmentsPage() {
         id: selectedEquipment.id,
         data: {
           name: equipmentName,
+          short_name: equipmentShortName.trim() || null,
           guard_time_minutes: parseOptionalInt(equipGuardTime),
           min_slot_minutes: parseOptionalInt(equipMinSlot),
           max_fragments: parseOptionalInt(equipMaxFragments),
@@ -498,6 +531,13 @@ export default function EquipmentsPage() {
                     </TableHead>
                     <TableHead>
                       <SortableHeader
+                        label="呼称"
+                        active={sortKey === "short_name"}
+                        onClick={() => setSortKey("short_name")}
+                      />
+                    </TableHead>
+                    <TableHead>
+                      <SortableHeader
                         label="設備名"
                         active={sortKey === "name"}
                         onClick={() => setSortKey("name")}
@@ -516,11 +556,13 @@ export default function EquipmentsPage() {
                   {sortedEquipments.length > 0 ? (
                     sortedEquipments.map((equipment) => {
                       const groupNames = equipmentGroupMap.get(equipment.id) ?? []
+                      const displayName = equipmentDisplayName(equipment)
                       return (
                         <TableRow key={equipment.id}>
                           <TableCell className="tabular-nums">
                             {equipment.ledger_no ?? <span className="text-muted-foreground">—</span>}
                           </TableCell>
+                          <OptionalTextCell value={equipment.short_name} />
                           <TableCell>{equipment.name}</TableCell>
                           <OptionalTextCell value={equipment.maker} />
                           <OptionalTextCell value={equipment.model} />
@@ -547,7 +589,7 @@ export default function EquipmentsPage() {
                                 size="icon-sm"
                                 onClick={() => handleOpenAssignmentDialog(equipment)}
                                 title="グループ管理"
-                                aria-label={`${equipment.name}のグループ管理`}
+                                aria-label={`${displayName}のグループ管理`}
                               >
                                 <Layers className="h-4 w-4" />
                               </Button>
@@ -555,7 +597,7 @@ export default function EquipmentsPage() {
                                 variant="ghost"
                                 size="icon-sm"
                                 onClick={() => handleOpenEditDialog(equipment)}
-                                aria-label={`${equipment.name}を編集`}
+                                aria-label={`${displayName}を編集`}
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -563,7 +605,7 @@ export default function EquipmentsPage() {
                                 variant="ghost"
                                 size="icon-sm"
                                 onClick={() => handleOpenDeleteDialog(equipment)}
-                                aria-label={`${equipment.name}を削除`}
+                                aria-label={`${displayName}を削除`}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -574,7 +616,7 @@ export default function EquipmentsPage() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-10">
+                      <TableCell colSpan={10} className="text-center py-10">
                         設備がありません
                       </TableCell>
                     </TableRow>
@@ -659,7 +701,7 @@ export default function EquipmentsPage() {
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>設備の新規作成</DialogTitle>
-            <DialogDescription>新しい設備を作成します。設備名と設備台帳の情報を入力してください。</DialogDescription>
+            <DialogDescription>新しい設備を作成します。設備名（台帳の正式名称）・呼称と設備台帳の情報を入力してください。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -668,9 +710,10 @@ export default function EquipmentsPage() {
                 id="create-name"
                 value={equipmentName}
                 onChange={(e) => setEquipmentName(e.target.value)}
-                placeholder="例: 切断機A"
+                placeholder="例: 25Tシングルクランクプレス"
               />
             </div>
+            <ShortNameField id="create-short-name" value={equipmentShortName} onChange={setEquipmentShortName} />
             <LedgerFields values={ledgerForm} onChange={setLedgerForm} idPrefix="create-equip" />
             <SchedulingParamFields
               guardTime={equipGuardTime}
@@ -698,7 +741,7 @@ export default function EquipmentsPage() {
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>設備の編集</DialogTitle>
-            <DialogDescription>設備名・設備台帳の情報を変更してください。</DialogDescription>
+            <DialogDescription>設備名（台帳の正式名称）・呼称・設備台帳の情報を変更してください。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
@@ -707,9 +750,10 @@ export default function EquipmentsPage() {
                 id="edit-name"
                 value={equipmentName}
                 onChange={(e) => setEquipmentName(e.target.value)}
-                placeholder="例: 切断機A"
+                placeholder="例: 25Tシングルクランクプレス"
               />
             </div>
+            <ShortNameField id="edit-short-name" value={equipmentShortName} onChange={setEquipmentShortName} />
             <LedgerFields values={ledgerForm} onChange={setLedgerForm} idPrefix="edit-equip" />
             <SchedulingParamFields
               guardTime={equipGuardTime}
@@ -738,7 +782,7 @@ export default function EquipmentsPage() {
           <DialogHeader>
             <DialogTitle>設備の削除</DialogTitle>
             <DialogDescription>
-              本当に「{selectedEquipment?.name}」を削除しますか？この操作は取り消せません。
+              本当に「{selectedEquipment ? equipmentDisplayName(selectedEquipment) : ""}」を削除しますか？この操作は取り消せません。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
