@@ -24,6 +24,7 @@ backend/app/
   routers/transaction/  # 業務データ API (注文・スケジュール)
     orders/             # 受注 API はパッケージ化済み（責務別ファイル、Issue #376）
   routers/tenant/       # テナントメンバー管理 API
+  routers/daily_reports/  # 日報の名寄せ・別名辞書 API（Issue #488）
   repositories/         # Supabase データアクセス層
   scheduler_logic.py    # コアスケジューリングアルゴリズム
   services/             # カレンダー・シミュレーションサービス
@@ -127,6 +128,13 @@ cd backend && ruff check . && mypy .
   （`不適合合計数`）は `data_only=True` でキャッシュ値を読み、openpyxl 等 Excel 以外で保存されたファイルではキャッシュが無い（None）
   前提で代替値を持つ。テナントのメンバーが参照できる列（`parse_error` 等）に例外文言を入れない。
   詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
+- **日報の名寄せ（Issue #488）**: 明細の設備・工程・顧客・製品の照合結果は `daily_report_entries` に**保存せず**、
+  `daily_report_name_matching_service.load_matcher(db, tenant_id).match_entry(entry)` で都度解決する（辞書・マスタの変更を
+  再照合なしで過去の明細へ反映するため）。照合は表記単位で決まるので、表記の一覧は RPC `daily_report_name_stats` で集計して
+  から照合する。どの種別も**別名辞書が最優先**、候補が複数なら照合しない、**pg_trgm の類似候補で自動確定しない**
+  （`match_products()` は未照合キューの候補表示専用）。日報の商品名の別名は既存の `product_name_aliases`（顧客単位）に
+  `source='daily_report'` で登録する（確認済みの由来として `auto_match_unreviewed` に格下げされない）。
+  マスタ・辞書を全件読むときは PostgREST の `max_rows`（1000）で切られないよう `fetch_all_rows()`（`.range()` でページング）を使う
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。

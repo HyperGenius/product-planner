@@ -5,7 +5,8 @@
 「現場の生産実績」を補えるかを検証するための PoC で、**生ファイルを確実に・重複なく・継続的に集めることだけ**を
 目的とする。集まった日報の活用（パース・マスタとの照合・受注への割り付け・ガントへの進捗表示）は
 Epic #485「日報進捗反映」で進めており、パースと明細の保存（#487）は本ドキュメントの
-「[日報のパースと明細の保存](#日報のパースと明細の保存issue-487)」に記載する。
+「[日報のパースと明細の保存](#日報のパースと明細の保存issue-487)」に、名寄せと別名辞書（#488）は
+「[日報の名寄せと別名辞書](#日報の名寄せと別名辞書issue-488)」に記載する。
 
 ## 実装の進め方（サブIssue）
 
@@ -17,6 +18,7 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 | #472 | 共有PCエージェントの配置と設置手順（`tools/daily-report-agent/`） | 本ドキュメントに記載 |
 | #478 | タスクスケジューラ登録スクリプト | 本ドキュメントに記載 |
 | #487 | 日報のパースと明細の保存（Epic #485 の 2/6） | 本ドキュメントに記載 |
+| #488 | 名寄せ（設備・工程・顧客・製品）と別名辞書（Epic #485 の 3/6） | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -347,6 +349,86 @@ Storage・DB から切り離した純粋関数（`parse_daily_report_workbook()`
 - レスポンスは件数のサマリ: `processed` / `parsed` / `unsupported` / `failed` / `sheets_replaced` / `sheets_stale` /
   `sheets_without_header` / `entries_saved`
 
+## 日報の名寄せと別名辞書（Issue #488）
+
+日報の明細（`daily_report_entries`）の設備・工程・顧客・製品の表記をマスタに照合する。照合できなかった表記は
+事務担当者が別名辞書に登録し、以後は自動で照合されるようにする（現場の日報の書き方は変えない）。
+
+### 照合結果は明細に保存せず都度解決する
+
+照合結果（`equipment_id` / `customer_id` / `product_id` / マスタの工程名）は `daily_report_entries` に保存しない。
+割り付け（#490）・未照合一覧の取得のたびに **明細＋マスタ＋辞書から解決する**。
+
+- 辞書だけでなくマスタの変更（設備の台帳番号・製品の追加・工程名の変更）も、再照合の処理を挟まずに過去の明細へ反映される
+  （保存方式だと、どの変更で再照合するかの取りこぼしが起きうる）
+- 照合は表記単位で決まる（同じ表記は同じ結果）ので、未照合一覧は明細を全件読まず、RPC `daily_report_name_stats` で
+  表記ごとに集計した一覧（数百件程度）だけを照合する
+- #490 は明細を読んだうえで `load_matcher(db, tenant_id).match_entry(entry)` で1行ずつ解決する
+  （`EntryMatch(equipment_id, customer_id, product_id, process_names)`）
+
+### 照合ロジック（`services/daily_report_name_matcher.py`）
+
+DB から切り離した純粋なロジック。マスタと辞書のスナップショット（`NameMatchingSnapshot`。読み込みは
+`services/daily_report_name_matching_service.py` の `load_snapshot()`）から照合する。
+**いずれの種別も別名辞書が最優先**（誤った自動照合を辞書で上書きできるようにする）。
+
+| 種別 | 照合の順序 |
+|---|---|
+| 設備 | 別名辞書 → 「N号機」の N と `equipments.ledger_no`（#486）→ 設備名・呼称（`short_name`）の一致 |
+| 工程 | 別名辞書（1:N）→ `process_routings.process_name` の一致 |
+| 顧客 | 別名辞書 → `customers.name` / `alias` の一致（`normalize_company_name()`。法人格・記号・空白を無視。部分一致は使わない） |
+| 製品 | `product_name_aliases`（顧客単位。顧客が照合できたときだけ）→ 製品名・品番の完全一致 → 正規化後の一致 |
+
+- 設備・工程・顧客の名前の一致は NFKC・空白・英字の大小を無視する（`normalize_name_key()`）
+- 製品の正規化（`normalize_product_name()`）は NFKC・英字の大小・空白に加え、径の記号（`φ`/`Φ`/`ø`/`⌀`）の有無、
+  掛け算の記号（`x`/`×`/`*`/`✕`）、区切りの記号（`+`/`,`/`.`）、ハイフンの字形（`−`/`–`/`‐` 等）を無視する。
+  長音記号「ー」はカタカナの一部なのでハイフンに寄せない
+- 「N号機」の番号が台帳に無い場合は名前の一致も見ない（別の設備に誤って付けない）。番号が複数ある表記は照合しない
+- **候補が複数あるときは照合しない**。ただし製品は廃番（`is_active=false`）以外、顧客は下書き（`status='draft'`）以外が
+  1件に絞れればそれを採る
+- **pg_trgm の類似候補（`match_products()`）は自動では使わない**。誤った照合で他の受注に実績が付くのを避けるため、
+  未照合キュー（#489）での候補表示（`GET /daily-reports/product-candidates`）にだけ使う
+- 顧客が照合できない明細は、製品を名前・正規化の一致だけで照合する（顧客は割り付けの絞り込みに使う任意の条件、#490）
+- 別名辞書のキーは日報の表記そのもの（前後の空白のみ除去）。日報の設備・工程・顧客は `リスト` シートの選択肢から
+  入力されるので、正規化はせず完全一致で引く
+
+### データモデル
+
+`supabase/migrations/20261004000000_add_daily_report_name_aliases.sql`
+
+| テーブル | 内容 |
+|---|---|
+| `equipment_name_aliases` | `raw_text` → `equipment_id`。UNIQUE (`tenant_id`, `raw_text`) |
+| `process_name_aliases` | `raw_text` → `process_names text[]`（1件以上）。1つの表記が複数の工程を指しうる（「カシメ、仕上げ加工」→ {カシメ, クグシ}）。対応は工程名のレベル（製品をまたいで共通）で持ち、製品ごとの `process_routings` の行には割り付け時（#490）に引き当てる |
+| `customer_name_aliases` | `raw_text` → `customer_id`。製品の別名が顧客単位なので、顧客を照合できないと製品の別名も引けない |
+| `product_name_aliases`（既存） | `source` に `daily_report` を追加。日報の商品名の別名は専用の辞書に分けず、既存の顧客単位の辞書に登録する（メール起票の照合からも同じ顧客の表記として使われる） |
+
+- 3テーブルとも RLS 有効・`is_tenant_member(tenant_id)` の SELECT / INSERT / UPDATE / DELETE。INSERT は
+  `created_by = auth.uid()` を強制し、UPDATE では `created_by` を変えない（`product_name_aliases` と同じ方針）
+- 照合先（設備・顧客）を削除すると別名も消える（`ON DELETE CASCADE`）。工程名は配列で持つので、マスタの工程名を
+  変えた・消した場合は辞書の工程名が浮く（照合結果にはその名前がそのまま入る。#490 の引き当てで該当なしになる）
+- `daily_report_name_stats(p_tenant_id)`: 表記ごとの `entry_count` / `last_work_date`。製品は (`customer_raw`, `product_raw`)
+  の組で集計する。SECURITY INVOKER で、ユーザー JWT から呼ぶと `daily_report_entries` の RLS が効く
+- 「対象外」（無視する表記）の状態は #489 で辞書に列を追加する
+
+### API（`routers/daily_reports/name_matching.py`）
+
+参照はテナントメンバー全員、辞書の書き込みは **`order_handler` / `president` / `platform_admin`**（事務担当者。
+`iso_officer` は 403）。製品の別名の承認は不要（#347 の方針を踏襲）。
+
+| メソッド・パス | 内容 |
+|---|---|
+| `GET /daily-reports/unmatched-names?kind=` | 照合できなかった表記の一覧（`kind` / `raw_text` / `entry_count` / `last_work_date`。製品は `customer_raw` と、その照合結果 `customer_id`）。出現件数の多い順（同数は最終出現日の新しい順） |
+| `GET /daily-reports/product-candidates?raw_text=` | pg_trgm の類似候補（`product_id` / `name` / `score`）。自動確定の結果は返さない |
+| `GET` / `POST /daily-reports/name-aliases/equipment`、`PATCH` / `DELETE .../{alias_id}` | 設備の別名。body は `raw_text` / `equipment_id` |
+| `GET` / `POST /daily-reports/name-aliases/process`、`PATCH` / `DELETE .../{alias_id}` | 工程の別名。body は `raw_text` / `process_names`（重複・空白は除去。マスタに無い工程名は 422） |
+| `GET` / `POST /daily-reports/name-aliases/customer`、`PATCH` / `DELETE .../{alias_id}` | 顧客の別名。body は `raw_text` / `customer_id` |
+| `GET` / `POST /daily-reports/name-aliases/product` | 製品の別名（`product_name_aliases`）。POST は `raw_text` / `customer_id` / `product_id` で UPSERT し、履歴に `source='daily_report'`・「日報からの登録」で追記する（`register_daily_report_alias()`）。変更・削除は製品マスタの `PATCH` / `DELETE /products/{product_id}/aliases/{alias_id}` |
+
+- 照合先の ID はリクエストのテナントに存在することを確かめる（ユーザーが複数テナントに所属していても他テナントの行を指させない）。無ければ 422
+- 同じ表記の二重登録は 409 `{"error": "duplicate_alias", "message": ...}`（製品の POST は UPSERT なので 409 にならない）
+- 未照合の製品で `customer_id` が `null` のものは、先に顧客の別名を登録しないと製品の別名を登録できない
+
 ## テスト
 
 - `backend/__tests__/unit/services/test_agent_token_service.py`: トークン生成・ハッシュ形式
@@ -370,9 +452,17 @@ Storage・DB から切り離した純粋関数（`parse_daily_report_workbook()`
 - `backend/__tests__/integration/test_daily_report_entries.py`（`--run-integration`）: RPC の置き換え（新しい版で置き換え・
   古い版は `stale`・同じ版の再処理は冪等・`file_modified_at` が無いときは `received_at`・他テナントのファイルは拒否・
   テナント間の分離）、パーサーの出力がそのまま保存されること、RLS（所属テナントの行のみ見える・書き込めない・RPC を実行できない）
+- `backend/__tests__/unit/services/test_daily_report_name_matcher.py`: 製品名の正規化（全角半角・径の記号・掛け算・区切り・
+  ハイフン）、台帳番号の抽出、種別ごとの照合の順序（辞書優先）・候補が複数のとき照合しないこと・廃番／下書きの除外、1:N の工程
+- `backend/__tests__/unit/services/test_daily_report_name_matching_service.py`: ページングでの全件読み込み、スナップショットの
+  テナントでの絞り込み、未照合一覧の抽出・並び順・種別の絞り込み、辞書の追加が明細を書き換えずに反映されること
+- `backend/__tests__/api/routers/daily_reports/test_daily_report_names_router.py`: 別名の登録・変更・削除、ロール（`iso_officer` は 403）、
+  照合先が無い・マスタに無い工程名の 422、二重登録の 409、製品の類似候補が自動確定の結果を返さないこと
+- `backend/__tests__/integration/test_daily_report_name_matching.py`（`--run-integration`）: `daily_report_name_stats` の集計と RLS、
+  別名辞書の RLS（他テナント・`created_by` のなりすまし・UNIQUE）、`source='daily_report'`、API で別名を登録すると未照合一覧から外れること
 
 ## スコープ外（PoC ではやらない）
 
-- 製品・工程・設備マスタとの照合（#488）、注文・工程への配賦（#490）。Excel のパースと明細の保存は #487 で実装済み
+- 注文・工程への配賦（#490）。Excel のパースと明細の保存は #487、マスタとの照合は #488 で実装済み
 - heartbeat 途絶のアラート通知（記録のみ行い、PoC 期間中は手動で確認）
 - エージェントの自動アップデート、管理画面UI

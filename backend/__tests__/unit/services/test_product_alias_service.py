@@ -5,6 +5,7 @@ from app.services.product_alias_service import (
     record_auto_match_alias_if_applicable,
     record_correction_if_applicable,
     record_direct_alias_change,
+    register_daily_report_alias,
 )
 from postgrest.exceptions import APIError
 
@@ -539,5 +540,90 @@ class TestRecordDirectAliasChange:
                 "tenant-1",
                 alias_row={"id": "a-1", "product_id": 3, "raw_text": "x"},
                 action="created",
+                changed_by="user-1",
+            )
+
+
+@pytest.mark.unit
+class TestRegisterDailyReportAlias:
+    """日報の商品名の対応付け（Issue #488）。"""
+
+    def test_creates_alias_with_daily_report_source(self):
+        mock_db = _mock_db(existing_alias_rows=[])
+
+        register_daily_report_alias(
+            mock_db,
+            "tenant-1",
+            customer_id=55,
+            raw_text=" ピン6x20 ",
+            product_id=3,
+            changed_by="user-1",
+        )
+
+        alias_insert = mock_db._tables[_ALIASES].insert.call_args.args[0]
+        assert alias_insert == {
+            "tenant_id": "tenant-1",
+            "customer_id": 55,
+            "raw_text": "ピン6x20",
+            "product_id": 3,
+            "created_by": "user-1",
+            "source": "daily_report",
+        }
+        history_data = mock_db._tables[_HISTORY].insert.call_args.args[0]
+        assert history_data["source"] == "daily_report"
+        assert history_data["action"] == "created"
+        assert history_data["source_order_id"] is None
+        assert history_data["source_order_label_snapshot"] == "日報からの登録"
+
+    def test_upgrades_auto_match_unreviewed(self):
+        mock_db = _mock_db(
+            existing_alias_rows=[{"id": "a-1", "source": "auto_match_unreviewed"}]
+        )
+
+        register_daily_report_alias(
+            mock_db,
+            "tenant-1",
+            customer_id=55,
+            raw_text="ピン6x20",
+            product_id=3,
+            changed_by="user-1",
+        )
+
+        update_fields = mock_db._tables[_ALIASES].update.call_args.args[0]
+        assert update_fields == {"product_id": 3, "source": "daily_report"}
+
+    def test_auto_match_does_not_downgrade_daily_report(self):
+        mock_db = _mock_db(
+            existing_alias_rows=[{"id": "a-1", "source": "daily_report"}]
+        )
+
+        record_auto_match_alias_if_applicable(
+            mock_db,
+            "tenant-1",
+            {
+                "id": 7,
+                "product_id": 3,
+                "customer_id": 55,
+                "source_type": "email",
+                "extracted_product_name": "ピン6x20",
+                "product_id_manually_corrected": False,
+            },
+            "user-1",
+        )
+
+        update_fields = mock_db._tables[_ALIASES].update.call_args.args[0]
+        assert "source" not in update_fields
+
+    def test_errors_are_raised(self):
+        mock_db = _mock_db(existing_alias_rows=[])
+        mock_db._tables[_HISTORY].insert.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            register_daily_report_alias(
+                mock_db,
+                "tenant-1",
+                customer_id=55,
+                raw_text="ピン6x20",
+                product_id=3,
                 changed_by="user-1",
             )
