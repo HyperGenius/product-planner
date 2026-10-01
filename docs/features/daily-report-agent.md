@@ -7,7 +7,8 @@
 Epic #485「日報進捗反映」で進めており、パースと明細の保存（#487）は本ドキュメントの
 「[日報のパースと明細の保存](#日報のパースと明細の保存issue-487)」に、名寄せと別名辞書（#488）は
 「[日報の名寄せと別名辞書](#日報の名寄せと別名辞書issue-488)」に、未照合キューの画面（#489）は
-「[未照合キューの画面](#未照合キューの画面issue-489)」に記載する。
+「[未照合キューの画面](#未照合キューの画面issue-489)」に、受注への割り付けと進捗（#490）は
+「[受注への割り付けと進捗の算出](#受注への割り付けと進捗の算出issue-490)」に記載する。
 
 ## 実装の進め方（サブIssue）
 
@@ -21,6 +22,7 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 | #487 | 日報のパースと明細の保存（Epic #485 の 2/6） | 本ドキュメントに記載 |
 | #488 | 名寄せ（設備・工程・顧客・製品）と別名辞書（Epic #485 の 3/6） | 本ドキュメントに記載 |
 | #489 | 未照合キューの画面（Epic #485 の 4/6） | 本ドキュメントに記載 |
+| #490 | 受注への割り付けと進捗の算出（Epic #485 の 5/6） | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -480,6 +482,98 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
 
 `GET /daily-reports/unmatched-names` は対象外の表記を除いて返す（`list_unmatched_names()`）。
 
+## 受注への割り付けと進捗の算出（Issue #490）
+
+照合済みの明細の良品数（`good_qty`）を受注の工程に割り付け、受注×工程ごとの進捗（実績数量・初回／最終実績日・状態）を
+算出して保存する。日報には受注番号が無いので、どの受注のどの工程がどこまで進んでいるかを (製品, 工程) から推定する。
+ガントチャートの進捗表示（#491）の元データ。100%正確な進捗は求めない（Epic の決定事項）。
+
+### 割り付けの規則（`services/daily_report_allocator.py`）
+
+DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings)`。入力は照合済みの明細（`ActualEntry`）・
+候補の受注（`OrderRef`）・工程ルート（`RoutingRef`）、出力は進捗（`ProcessProgress`）と未割当（`UnallocatedActual`）。
+
+- 単位は **(製品, マスタの工程名)**。明細を加工日の古い順（同日は明細 ID 順）に、その製品の候補の受注へ
+  **納期の早い順**に充当する。受注数量を満たしたら、あふれた分を次の受注へ回す
+- 候補の受注: 同じ製品で `status` が `confirmed` / `in_progress` のもの（工程ルートは製品単位なので、その工程の
+  `process_routings` の行を持つかは製品で決まる）。**顧客が照合できている明細は同じ顧客の受注に絞る**
+  （顧客が照合できない明細は絞らない）
+- 納期は `deadline_date`（顧客希望納期）、無ければ `confirmed_deadline`。どちらも無い受注は最後、同じ納期は受注 ID 順
+- 1つの日報の工程名が複数の工程に対応する場合（工程の別名辞書の 1:N、「カシメ、仕上げ加工」→ カシメ・クグシ）は、
+  **各工程に同じ数量を計上**する
+- **加工日が受注日（`order_date` の JST 暦日）より前の実績はその受注に充当しない**（Issue で「実装時に決める」とされた点）。
+  `order_date` はシステムへの登録日時で、候補は確定済み・生産中だけなので、出荷済みになって候補から外れた過去の受注の実績や
+  在庫の先行生産が、後から登録した受注を完了に見せてしまうのを避けるため。充当できなかった分は未割当（`before_order_date`）に
+  残り、見込み生産・登録の遅れの発見に使える
+- 同じ製品に同じ工程名の行が複数ある場合は、日報からはどの行か区別できないので `sequence_order` の最も小さい行に計上する
+- 良品数が 0・空の明細、製品か工程が照合できない明細（未照合キュー #489 で解消するもの）は割り付けに使わない。
+  後者は未割当にも含めない（cron のサマリの `unmatched_entries` に件数だけ出す）
+
+### 進捗の状態
+
+受注×工程ごと。候補の受注は**全工程の行**を持つ（実績の無い工程も `not_started`）。
+
+| 状態 | 条件 | `completed_by` |
+|---|---|---|
+| `completed` | 割り付けた良品数が受注数量以上 | `quantity` |
+| `completed` | 後の工程（`sequence_order` が大きい工程）に実績がある。**日報に出てこない工程（洗浄・内職・検査など）も同じ規則** | `later_process` |
+| `in_progress` | 実績が1件以上あり、完了でない | なし |
+| `not_started` | それ以外（後の工程に実績が無い日報に出ない工程も、計画どおり未着手のまま） | なし |
+
+- 「後の工程に実績がある」は**同じ受注に割り付いた実績**で判定する（別の受注に割り付いた実績では完了にしない）
+- 割り付けの良品数は受注数量が上限（あふれた分は次の受注か未割当）
+- 受注のステータス（`orders.status`）はこの処理では変更しない（実績による `completed` への自動遷移は別途検討）
+
+### 未割当の理由（`daily_report_unallocated_actuals.reason`）
+
+| reason | 意味 |
+|---|---|
+| `no_candidate_order` | 同じ製品（顧客が照合できていれば同じ顧客）の確定済み・生産中の受注が無い、またはその製品の工程ルートにその工程名が無い |
+| `before_order_date` | 候補の受注はあるが、加工日がどの候補の受注日よりも前 |
+| `exceeds_order_qty` | 候補の受注の数量をすべて満たしてもあふれた（あふれた数量だけを記録） |
+| `no_work_date` | 加工日が読めない明細（受注日と比べられないので充当しない） |
+
+### 全量再計算（`services/daily_report_allocation_service.py`）
+
+- 差分更新せず、**テナント単位で毎回全量を再計算して丸ごと置き換える**（Epic の方針）。`recompute_tenant_allocation()` が
+  明細（`good_qty > 0`）・候補の受注・工程ルートを `fetch_all_rows()` で読み、明細を `load_matcher().match_entry()` で照合してから
+  `allocate_actuals()` に渡す。辞書の修正・受注の追加／ステータス変更・明細の置き換え・マスタの変更が、次の再計算でそのまま反映される
+- 置き換えは RPC `replace_daily_report_allocation(p_tenant_id, p_computed_at, p_progress, p_unallocated)` で1トランザクション
+  （途中で失敗しても進捗が空にならない）。テナントで advisory lock を取り、`p_computed_at`（読み込み開始時刻）が載っている結果より
+  古ければ `'stale'` を返して置き換えない（cron の実行が重なったとき、後から終わった古い計算で上書きしない）
+- 計算に使ったデータを読んだ後で受注・工程・明細が削除されることがあるので、RPC は**このテナントに現存する行に結合して INSERT** する
+  （外部キー違反で全体を失敗させない。他テナントの ID も入らない）
+- 再計算のタイミング: cron `GET /api/cron/compute-daily-report-progress`（`routers/cron/compute_daily_report_progress.py`）。
+  Edge Function `parse-order-pdfs-trigger` が `parse-daily-reports` の**直後**に呼ぶので、パースされた明細はその回で反映される。
+  別名辞書の変更・受注の追加は次の cron 実行（10〜15分間隔）で反映される
+  - 辞書の変更 API（ユーザー JWT）から同期的に再計算しないのは、進捗テーブルの書き込みを service role に限るため
+    （ユーザー JWT の API から service role を使わない規約、CLAUDE.md）
+- 対象テナントは `daily_report_sheets` のあるテナントと、前回の計算結果（`daily_report_allocation_runs`）が残っているテナント
+  （明細が無くなったテナントも前回の結果を空で置き換える）。1テナントの失敗はログに残して他のテナントを続ける
+- cron のレスポンスはサマリ（`tenants` / `replaced` / `stale` / `failed` / `progress` / `unallocated` / `unmatched_entries`）。
+  エラー時は 502 `{"detail": "compute-daily-report-progress failed"}`（詳細はログのみ）
+
+### データモデル
+
+`supabase/migrations/20261006000000_add_daily_report_allocation.sql`。3テーブルとも RLS 有効・`is_tenant_member(tenant_id)` の
+SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実行権限も `service_role` だけ）。
+
+| テーブル | 内容 |
+|---|---|
+| `order_process_progress` | PK (`order_id`, `process_routing_id`)。`good_qty` / `first_actual_date` / `last_actual_date` / `status`（`not_started` / `in_progress` / `completed`）/ `completed_by`（`quantity` / `later_process`、`completed` のときだけ）/ `computed_at`。受注・工程の削除で消える（CASCADE） |
+| `daily_report_unallocated_actuals` | 明細1行×マスタの工程名ごと。`entry_id`（明細の置き換えで消える）/ `product_id` / `customer_id` / `process_name` / `work_date` / `qty` / `reason` / `computed_at` |
+| `daily_report_allocation_runs` | PK `tenant_id`。最終計算の `computed_at` と件数（`progress_count` / `unallocated_count`）。古い計算での上書き防止と、API の「いつ時点の進捗か」の表示に使う |
+
+### API
+
+参照のみ（ユーザー JWT・RLS）。テナントメンバー全員が読める。
+
+| メソッド・パス | 内容 |
+|---|---|
+| `GET /orders/{order_id}/progress`（`routers/transaction/orders/progress.py`） | `{order_id, computed_at, processes: [...]}`。`processes` は工程順で、各行は `process_routing_id` / `sequence_order` / `process_name` / `good_qty` / `first_actual_date` / `last_actual_date` / `status` / `completed_by`。割り付けの対象外（確定済み・生産中以外）の受注は空配列、他テナント・存在しない受注は 404。`computed_at` は一度も計算していなければ `null` |
+| `GET /daily-reports/order-progress?order_id=1&order_id=2`（`routers/daily_reports/progress.py`） | ガントチャート向けに複数受注をまとめて返す `{computed_at, items: [...]}`（`items` の各行は上と同じ＋`order_id`）。`order_id` 省略時は全件、指定は500件まで |
+| `GET /daily-reports/unallocated-actuals` | 未割当の実績を加工日の新しい順に。日報上の位置と表記（`sheet_name` / `row_no` / `customer_raw` / `product_raw` / `process_raw`）を添える |
+
 ## テスト
 
 - `backend/__tests__/unit/services/test_agent_token_service.py`: トークン生成・ハッシュ形式
@@ -518,8 +612,19 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
   （種別ごとの件数・出現件数順、明細の展開、設備の登録、工程の複数選択、製品の類似候補からの登録、顧客未照合の製品、対象外、
   登録済みの変更・削除（確認）・製品の付け替えは製品マスタの API・絞り込み、対象外の解除、閲覧のみのロール）
 
+- `backend/__tests__/unit/services/test_daily_report_allocator.py`: 納期順の充当・あふれ（次の受注／未割当）・加工日順の適用・
+  納期が無い受注は最後・1:N の工程・顧客での絞り込み・候補なし・受注日より前・加工日なし・同名工程・後工程の実績による完了
+  （日報に出ない工程を含む、受注ごとの判定）・全工程の行・再計算の決定性
+- `backend/__tests__/unit/services/test_daily_report_allocation_service.py`: 読み込みのテナント・ステータスでの絞り込み、照合できない
+  明細の除外、RPC への受け渡し、別名辞書の追加が再計算で反映されること、受注日の JST 変換、対象テナントの列挙、1テナントの失敗で止めないこと、参照系の整形
+- `backend/__tests__/api/routers/daily_reports/test_daily_report_progress_router.py` / `.../cron/test_compute_daily_report_progress.py`:
+  進捗・未割当の API（受注1件の 404 を含む）、cron の認証・サマリ・固定文言
+- `backend/__tests__/integration/test_daily_report_allocation.py`（`--run-integration`）: 実 DB での割り付けと保存、再計算の冪等性、
+  別名辞書の追加・明細の置き換え・受注の出荷後の再計算、RPC の `stale` と消えた／他テナントの ID の除外、RLS（所属テナントのみ・
+  書き込み不可・RPC 実行不可）、ユーザー JWT での進捗 API
+
 ## スコープ外（PoC ではやらない）
 
-- 注文・工程への配賦（#490）。Excel のパースと明細の保存は #487、マスタとの照合は #488、未照合キューの画面は #489 で実装済み
+- ガントチャートへの進捗表示（#491）。Excel のパースと明細の保存は #487、マスタとの照合は #488、未照合キューの画面は #489、受注への割り付けと進捗の算出は #490 で実装済み
 - heartbeat 途絶のアラート通知（記録のみ行い、PoC 期間中は手動で確認）
 - エージェントの自動アップデート、管理画面UI

@@ -20,6 +20,7 @@ from .attachments import router as attachments_router
 from .crud import router as crud_router
 from .email_intake import _derive_email_intake_outcome
 from .email_intake import router as email_intake_router
+from .progress import router as progress_router
 from .routing_queue import router as routing_queue_router
 from .simulation import router as simulation_router
 
@@ -33,6 +34,7 @@ orders_router.include_router(approval_logs_router, prefix="/orders")
 orders_router.include_router(email_intake_router, prefix="/orders")
 orders_router.include_router(crud_router, prefix="/orders")
 orders_router.include_router(attachments_router, prefix="/orders")
+orders_router.include_router(progress_router, prefix="/orders")
 orders_router.include_router(simulation_router, prefix="/orders")
 orders_router.include_router(approval_workflow_router, prefix="/orders")
 
