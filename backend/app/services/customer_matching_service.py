@@ -42,7 +42,7 @@ _NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-―ー－_/／|｜]+")
 _MIN_COMPANY_CORE_LEN = 3
 
 
-def _normalize_company_name(value: str) -> str:
+def normalize_company_name(value: str) -> str:
     """会社名を照合用に正規化する。
 
     まず NFKC で全角/半角・互換文字を統一し（例: ＡＢＣ→ABC、㈱→(株)、ｶﾅ→カナ、
@@ -80,7 +80,7 @@ def match_customer_by_pdf_text(
     """
     if not pdf_text:
         return None
-    normalized_text = _normalize_company_name(pdf_text)
+    normalized_text = normalize_company_name(pdf_text)
     if not normalized_text:
         return None
 
@@ -97,7 +97,7 @@ def match_customer_by_pdf_text(
         for raw_name in (row.get("name"), row.get("alias")):
             if not isinstance(raw_name, str):
                 continue
-            normalized_name = _normalize_company_name(raw_name)
+            normalized_name = normalize_company_name(raw_name)
             if len(normalized_name) < _MIN_COMPANY_CORE_LEN:
                 continue
             if normalized_name in normalized_text:

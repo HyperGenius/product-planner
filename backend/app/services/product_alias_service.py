@@ -15,6 +15,8 @@
     （Issue #350。人間の明示的な確認を経ていない推定値）
 - record_direct_alias_change():
     製品マスタ画面からの別名の直接付け替え / 削除（Issue #351）。注文非経由。
+- register_daily_report_alias():
+    日報の商品名の対応付け（Issue #488）。source='daily_report'。注文非経由。
 """
 
 from typing import Any, cast
@@ -29,9 +31,13 @@ logger = get_logger(__name__)
 
 SOURCE_MANUAL_CORRECTION = "manual_correction"
 SOURCE_AUTO_MATCH_UNREVIEWED = "auto_match_unreviewed"
+SOURCE_DAILY_REPORT = "daily_report"
+# 人間が明示的に対応付けた由来。未検証の推定（auto_match_unreviewed）より優先する
+_REVIEWED_SOURCES = (SOURCE_MANUAL_CORRECTION, SOURCE_DAILY_REPORT)
 
 _DIRECT_EDIT_ORDER_LABEL = "製品マスタからの直接修正"
 _DIRECT_DELETE_ORDER_LABEL = "製品マスタからの直接削除"
+_DAILY_REPORT_ORDER_LABEL = "日報からの登録"
 
 
 def record_correction_if_applicable(
@@ -291,16 +297,16 @@ def _resolve_upsert_source(
 ) -> str | None:
     """既存の別名エントリに対して source をどう更新するかを決める（Issue #350 要件3）。
 
-    - incoming が manual_correction: 常に manual_correction へ更新（手動修正の方が
-      信頼度が高いため、既存が auto_match_unreviewed なら格上げする）
-    - incoming が auto_match_unreviewed: 既存が manual_correction なら据え置き
+    - incoming が人間の確認済み（manual_correction / daily_report）: 常に incoming へ更新
+      （手動修正の方が信頼度が高いため、既存が auto_match_unreviewed なら格上げする）
+    - incoming が auto_match_unreviewed: 既存が確認済みなら据え置き
       （未検証の推定で確認済みエントリを格下げしない）。それ以外は incoming で更新
 
     戻り値が None の場合は source 列を更新しない。
     """
-    if incoming_source == SOURCE_MANUAL_CORRECTION:
-        return SOURCE_MANUAL_CORRECTION
-    if existing_source == SOURCE_MANUAL_CORRECTION:
+    if incoming_source in _REVIEWED_SOURCES:
+        return incoming_source
+    if existing_source in _REVIEWED_SOURCES:
         return None
     return incoming_source
 
@@ -456,4 +462,35 @@ def record_direct_alias_change(
     logger.info(
         f"product_alias_service: direct {action} alias id={alias_row.get('id')} "
         f"raw_text={alias_row.get('raw_text')!r} -> product_id={product_id}"
+    )
+
+
+def register_daily_report_alias(
+    client: Client,
+    tenant_id: str,
+    *,
+    customer_id: int,
+    raw_text: str,
+    product_id: int,
+    changed_by: str,
+) -> None:
+    """日報の商品名（顧客先が照合できたもの）を製品別名辞書へ登録する（Issue #488）。
+
+    事務担当者が未照合キュー（#489）で対応付けた、人間の確認済みの別名として
+    source='daily_report' で UPSERT し、履歴に追記する。メール起票の照合
+    （match_product_by_alias）からも同じ顧客の表記として使われる。
+
+    record_direct_alias_change() と同じく、エンドポイントの主目的そのものなので
+    ベストエフォートにせず、失敗時は例外を伝播させる。
+    """
+    _write_alias_and_history(
+        client,
+        tenant_id,
+        customer_id=customer_id,
+        raw_text=raw_text.strip(),
+        product_id=product_id,
+        changed_by=changed_by,
+        source=SOURCE_DAILY_REPORT,
+        source_order_id=None,
+        source_order_label_snapshot=_DAILY_REPORT_ORDER_LABEL,
     )

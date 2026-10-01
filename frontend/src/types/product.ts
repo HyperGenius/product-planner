@@ -62,8 +62,9 @@ export interface ProductNameAliasHistoryEntry {
    * 別名の由来（Issue #350）。
    * - `manual_correction`: 担当者が明示的に product_id を修正した
    * - `auto_match_unreviewed`: 自動マッチのまま承認依頼された（人間の明示確認なし）
+   * - `daily_report`: 日報の商品名を事務担当者が対応付けた（Issue #488）
    */
-  source: "manual_correction" | "auto_match_unreviewed"
+  source: "manual_correction" | "auto_match_unreviewed" | "daily_report"
   source_order_id: number | null
   source_order_label_snapshot: string
   changed_at: string

@@ -24,3 +24,6 @@ class SupabaseTableName(Enum):
     ORDER_SCHEDULING_START_BACKDATE_LOG = "order_scheduling_start_backdate_log"
     PRODUCT_NAME_ALIASES = "product_name_aliases"
     PRODUCT_NAME_ALIAS_HISTORY = "product_name_alias_history"
+    EQUIPMENT_NAME_ALIASES = "equipment_name_aliases"
+    PROCESS_NAME_ALIASES = "process_name_aliases"
+    CUSTOMER_NAME_ALIASES = "customer_name_aliases"

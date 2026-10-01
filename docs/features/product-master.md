@@ -190,18 +190,19 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 |---|---|
 | `manual_correction` | 担当者が下書き注文の `product_id` を明示的に修正した、または製品マスタから直接付け替えた。人間の確認済み |
 | `auto_match_unreviewed` | pg_trgm 自動マッチのまま担当者が承認依頼を送信した（#350）。担当者の目は通ったが明示的な修正・確認はしていない推定値 |
+| `daily_report` | 日報の商品名を事務担当者が対応付けた（#488、`POST /daily-reports/name-aliases/product`）。人間の確認済み。詳細は [daily-report-agent.md](daily-report-agent.md#日報の名寄せと別名辞書issue-488) |
 
 同一キー（`(tenant_id, customer_id, raw_text)`）への UPSERT 時の `source` の扱い:
 
-- `manual_correction` は常に優先（既存が `auto_match_unreviewed` なら格上げする）
-- `auto_match_unreviewed` は既存 `manual_correction` を格下げしない（`product_id` の更新はするが `source` は据え置き）
+- 人間の確認済み（`manual_correction` / `daily_report`）は常に優先（既存が `auto_match_unreviewed` なら格上げする）
+- `auto_match_unreviewed` は既存の確認済みを格下げしない（`product_id` の更新はするが `source` は据え置き）
 
 ### データモデル
 
 | テーブル | カラム | 説明 |
 |---|---|---|
-| `product_name_aliases` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE CASCADE`, `NOT NULL`), `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `source` (`manual_correction`/`auto_match_unreviewed`, 既定 `manual_correction`), `created_by`, `created_at`, `updated_at` | `(tenant_id, customer_id, raw_text)` ごとに最新の対応を1件保持（`raw_text` は `extracted_product_name` と同じ `TRIM()` のみの正規化）。`(tenant_id, customer_id, raw_text)` UNIQUE。同一キーへの再修正は UPSERT（上書き） |
-| `product_name_alias_history` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE SET NULL`), `customer_name_snapshot`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`/`deleted`), `source` (`manual_correction`/`auto_match_unreviewed`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除・顧客削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（顧客名・製品表示名・注文ラベル）を保持する。製品マスタからの直接編集・削除は `source_order_id=NULL`、`source_order_label_snapshot` に「製品マスタからの直接修正 / 直接削除」を入れる |
+| `product_name_aliases` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE CASCADE`, `NOT NULL`), `product_id` (FK, `ON DELETE CASCADE`), `raw_text`, `source` (`manual_correction`/`auto_match_unreviewed`/`daily_report`, 既定 `manual_correction`), `created_by`, `created_at`, `updated_at` | `(tenant_id, customer_id, raw_text)` ごとに最新の対応を1件保持（`raw_text` は `extracted_product_name` と同じ `TRIM()` のみの正規化）。`(tenant_id, customer_id, raw_text)` UNIQUE。同一キーへの再修正は UPSERT（上書き） |
+| `product_name_alias_history` | `id`, `tenant_id`, `customer_id` (FK, `ON DELETE SET NULL`), `customer_name_snapshot`, `product_id` (FK, `ON DELETE SET NULL`), `product_name_snapshot`, `raw_text`, `changed_by`, `changed_at`, `action` (`created`/`updated`/`deleted`), `source` (`manual_correction`/`auto_match_unreviewed`/`daily_report`), `source_order_id` (FK, `ON DELETE SET NULL`), `source_order_label_snapshot` | 追記のみの修正履歴。製品削除・注文削除・顧客削除で行が消えないよう `ON DELETE SET NULL` とし、削除後も文脈が読めるようスナップショット列（顧客名・製品表示名・注文ラベル）を保持する。製品マスタからの直接編集・削除は `source_order_id=NULL`、`source_order_label_snapshot` に「製品マスタからの直接修正 / 直接削除」を入れる |
 
 `orders` にも `product_id_manually_corrected boolean NOT NULL DEFAULT false` を追加（#350）。
 `PATCH /orders/{id}` で `product_id` が変更されたら `true` にし、一度 `true` になったら
@@ -217,10 +218,11 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | `record_correction_if_applicable(client, tenant_id, order_before, order_after, changed_by)` | `PATCH /orders/{id}`（`update_order`）で修正前後の `product_id` が異なる場合 / `POST /orders/{id}/split`（`split_order`）で分割後の各明細に `product_id` が設定される場合 | `manual_correction` |
 | `record_auto_match_alias_if_applicable(client, tenant_id, order, changed_by)` | `POST /orders/{id}/request-approval`（`request_order_approval`）。ステータス更新・通知の後に呼ぶ | `auto_match_unreviewed` |
 | `record_direct_alias_change(client, tenant_id, *, alias_row, action, changed_by, target_product_id=None)` | 製品マスタからの `PATCH` / `DELETE /products/{id}/aliases/{alias_id}`（#351） | 付け替えは `manual_correction`、削除は削除対象の `source` を保持 |
+| `register_daily_report_alias(client, tenant_id, *, customer_id, raw_text, product_id, changed_by)` | `POST /daily-reports/name-aliases/product`（#488）。履歴は `source_order_id=NULL`・「日報からの登録」 | `daily_report` |
 
 注文経由の2関数（`record_correction_if_applicable` / `record_auto_match_alias_if_applicable`）は
 注文本体の更新とは別トランザクションのベストエフォート処理で、例外は送出せずログのみ。
-`record_direct_alias_change` はエンドポイントの主目的そのものの監査記録のため例外を伝播させる。
+`record_direct_alias_change` / `register_daily_report_alias` はエンドポイントの主目的そのものの監査記録のため例外を伝播させる。
 
 発火条件（いずれかに該当する場合は記録しない）:
 
@@ -279,3 +281,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #350 | 承認依頼（`POST /orders/{id}/request-approval`）時、自動マッチのままの対応も別名辞書へ反映。別名・履歴に由来 `source`（`manual_correction` / `auto_match_unreviewed`）を追加、`orders.product_id_manually_corrected` フラグで二重記録を防止。UI に「未確認」バッジ（Issue #350） |
 | #351 | 製品マスタの表記ゆれ履歴から別名エントリを直接付け替え（`PATCH`）・削除（`DELETE /products/{id}/aliases/{alias_id}`）できるように。`president` 承認不要。履歴 `action` に `deleted` を追加、削除しても監査履歴は保持（Issue #351） |
 | #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化。作成ダイアログが `name`/`code` を旧UI前提で逆に書き込んでいた不整合を修正し、作成・編集とも 図番=`code` / 品名=`name` にラベル・バリデーション・ペイロードを統一。編集で図番を空にした場合は空文字ではなく `null` を送る（`UNIQUE(tenant_id, code)` 対策）。読み取りモデル `Product.code` / フロント型 / `ProductUpdate.code` を nullable にし、作成時のみ `code` 必須（`ProductCreateSchema`）。突合スクリプトは CSV の図番重複を正規化キーで判定して非決定的 UPDATE を防止（Issue #352） |
+| #488 | 日報の名寄せで、日報の商品名の別名を `source='daily_report'` で登録できるように（`register_daily_report_alias()`）。確認済みの由来として `auto_match_unreviewed` より優先（Issue #488） |
