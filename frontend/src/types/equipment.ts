@@ -13,6 +13,8 @@ export interface EquipmentLedgerFields {
 export interface Equipment extends EquipmentLedgerFields {
   id: number
   name: string
+  /** 呼称（現場で使う短い名前）。画面表示に使い、null なら name（台帳の正式名称）を表示 */
+  short_name?: string | null
   tenant_id: string
   created_at: string
   updated_at: string
@@ -23,6 +25,8 @@ export interface Equipment extends EquipmentLedgerFields {
 
 export interface EquipmentCreate extends EquipmentLedgerFields {
   name: string
+  /** 呼称（現場で使う短い名前）。画面表示に使い、null なら name（台帳の正式名称）を表示 */
+  short_name?: string | null
   guard_time_minutes?: number | null
   min_slot_minutes?: number | null
   max_fragments?: number | null
@@ -30,6 +34,8 @@ export interface EquipmentCreate extends EquipmentLedgerFields {
 
 export interface EquipmentUpdate extends EquipmentLedgerFields {
   name: string
+  /** 呼称（現場で使う短い名前）。画面表示に使い、null なら name（台帳の正式名称）を表示 */
+  short_name?: string | null
   guard_time_minutes?: number | null
   min_slot_minutes?: number | null
   max_fragments?: number | null

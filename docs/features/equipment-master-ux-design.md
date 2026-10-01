@@ -134,18 +134,36 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 「汎用設備グループ」「カシメ汎用」等、物理的な設備ではないレコードは台帳に無いので `ledger_no` は NULL のまま残す
 （工程ルートから参照されているため削除しない）。
 
+### 呼称（`short_name`）
+
+台帳の反映で `name` は台帳の正式名称（例: 「25Tシングルクランクプレス」）になり、画面表示が冗長になるため、
+現場で使う短い名前（例: 「ワシノ25t」）を**呼称** `short_name` として持つ（マイグレーション
+`20261002000000_add_short_name_to_equipments.sql`）。
+
+- `short_name text` は NULL 可。空白だけの値は CHECK で禁止（API は前後の空白を除去し、空欄を NULL にする）。
+  表示で設備を見分けられるよう `(tenant_id, short_name)` の部分 UNIQUE（`short_name IS NOT NULL`）を張る
+- **画面表示は「呼称があれば呼称、無ければ `name`」**。Backend は `equipment_display_name()`（`equipment_repo.py`）、
+  Frontend は `equipmentDisplayName()`（`lib/equipment-utils.ts`）に集約し、両者の規則を揃える
+  - スケジュール取得（`GET /production-schedules` 等の `equipment_name`）・シミュ結果の `equipment_name`
+    （`get_equipment_name()`）・設備グループ一覧の `member_names` は表示名を返す
+  - 設備マスタ画面の一覧・グループ設定ダイアログ・グループのメンバー管理ダイアログも表示名
+- ガントチャートは設備名ではなく**設備グループ名**を表示する。設備ごとの1台グループの名前は呼称に揃えておく
+  （台帳反映スクリプトが揃える。後述）
+- `name`（正式名称）は台帳との照合・設備マスタ画面での確認用に残す
+
 ### API
 
 `POST /equipments` / `PATCH /equipments/{id}` は台帳の列をそのまま受け付ける（`EquipmentBase`）。
-`equipments` の UNIQUE は `(tenant_id, name)` と `(tenant_id, ledger_no)` の2本で、違反時は **409** ＋
-`{"error": "duplicate_equipment_name" | "duplicate_ledger_no", "message": <固定文言>}` を返す
+呼称 `short_name` も同様に受け付ける。
+`equipments` の UNIQUE は `(tenant_id, name)`・`(tenant_id, ledger_no)`・`(tenant_id, short_name)` の3本で、違反時は **409** ＋
+`{"error": "duplicate_equipment_name" | "duplicate_ledger_no" | "duplicate_short_name", "message": <固定文言>}` を返す
 （制約名で判別し、生の制約名・例外文言はレスポンスに載せない）。
 
 ### 画面
 
-- 設備一覧に台帳番号・メーカー・型式・製造年月・製造番号・備考の列を表示。既定は台帳番号順（台帳番号の無い設備は末尾に名称順）で、
-  「台帳番号」「設備名」の見出しで並び替えられる（`lib/equipment-utils.ts` の `sortEquipments()`）
-- 作成・編集ダイアログに設備台帳の欄を追加（台帳に無い設備は台帳番号を空欄）。409 はどちらの重複かをトーストで出し分ける
+- 設備一覧に呼称・台帳番号・メーカー・型式・製造年月・製造番号・備考の列を表示。既定は台帳番号順（台帳番号の無い設備は末尾に名称順）で、
+  「台帳番号」「呼称」（呼称が無い設備は設備名で比較）「設備名」の見出しで並び替えられる（`lib/equipment-utils.ts` の `sortEquipments()`）
+- 作成・編集ダイアログに呼称と設備台帳の欄を追加（台帳に無い設備は台帳番号を空欄）。409 はどの項目の重複かをトーストで出し分ける
 
 ### 台帳の反映（運用スクリプト）
 
@@ -155,7 +173,12 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 - 既存レコードは `id` を維持したまま名称・台帳の列を更新する（`production_schedules.equipment_id` / `equipment_group_members` の参照を壊さない）
 - 既存設備との対応は「設定済みの `ledger_no`」→「対応表（旧名称 → 台帳番号）」→「同名かつ `ledger_no` 未設定」の順で決め、
   どれにも当たらない台帳の設備は新規登録する。同じメーカー・同じトン数が複数台ある設備の対応は顧客に確認して対応表に書く
-- 初期移行で設備ごとに同名のグループを作っているため、**メンバーがその設備1台だけの同名グループ**は名称を設備名に合わせる。
+- 台帳の名称に変わる設備は、旧名称（対応表の `current_name`。無ければ現在の設備名）を**呼称**として残す。
+  呼称が設定済み（画面での手動設定を含む）の設備は上書きしない
+- 初期移行で設備ごとに同名のグループを作っているため、**メンバーがその設備1台だけの同名グループ**
+  （旧名称・台帳の名称・呼称のいずれかと同名）は名称を設備の表示名（呼称、無ければ台帳の名称）に揃える。
+  通常は旧名称＝呼称なのでグループ名は変わらない。旧版のスクリプト（呼称導入前）で台帳の名称に変えたグループと
+  設備は、同じ対応表で再実行すると呼称が復元され、グループ名も呼称に戻る。
   グループ構成（どの工程でどの設備を使えるか）は台帳から読み取れないため変更しない
 - `(tenant_id, name)` が UNIQUE なので、名称の入れ替え・玉突きは一時名（`__ledger_tmp__<id>`）を経由する
   （`order_renames()`）。台帳番号を名称変更より先に書き込むので、途中で失敗しても再実行で続きから反映できる

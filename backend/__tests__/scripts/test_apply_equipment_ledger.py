@@ -1,7 +1,7 @@
 """
 apply_equipment_ledger.py のユニットテスト (Issue #486)
 
-計画（build_plan）は純粋関数なので、計画をインメモリの設備・グループに順に適用する
+呼称（short_name）の引き継ぎも含む。計画（build_plan）は純粋関数なので、計画をインメモリの設備・グループに順に適用する
 簡易シミュレータで「id が維持される」「UNIQUE (tenant_id, name) を途中で踏まない」
 「再実行で変更が出ない（冪等）」を確認する。フィクスチャは全てダミー値。
 """
@@ -36,6 +36,7 @@ def _eq(id_: int, name: str, **ledger: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": id_,
         "name": name,
+        "short_name": None,
         "ledger_no": None,
         "maker": None,
         "model": None,
@@ -108,6 +109,8 @@ class TestBuildPlan:
 
         by_id = {e["id"]: e for e in equipments}
         assert by_id[101]["name"] == "15t 1号機"
+        # 旧名称は呼称として残す
+        assert by_id[101]["short_name"] == "メーカーA15t-1"
         assert by_id[101]["ledger_no"] == 1
         assert by_id[101]["serial_no"] == "S-1"
         assert by_id[102]["name"] == "15t 2号機"
@@ -123,17 +126,74 @@ class TestBuildPlan:
 
         assert [e.ledger_no for e in plan.inserts] == [3]
 
-    def test_renames_only_single_member_groups_with_same_name(self):
+    def test_single_member_groups_keep_short_name(self):
+        """1台だけの同名グループは呼称（＝旧名称）のまま。長い台帳の名称にしない"""
         equipments, groups = self._state()
         plan = build_plan(
             LEDGER, {1: "メーカーA15t-1", 2: "メーカーA15t-2"}, equipments, groups
         )
         _simulate(plan, equipments, groups)
 
+        assert plan.group_renames == {}
         names = {g["id"]: g["name"] for g in groups}
-        assert names == {201: "15t 1号機", 202: "15t 2号機", 203: "汎用設備グループ"}
+        assert names == {
+            201: "メーカーA15t-1",
+            202: "メーカーA15t-2",
+            203: "汎用設備グループ",
+        }
         # メンバー構成は変えない
         assert groups[2]["member_ids"] == {101, 102, 103}
+
+    def test_keeps_existing_short_name(self):
+        """呼称が設定済み（画面での手動設定等）なら上書きせず、1台グループをその呼称に揃える"""
+        equipments = [_eq(101, "旧A", short_name="A号")]
+        groups = [_group(201, "旧A", 101)]
+
+        plan = build_plan(LEDGER[:1], {1: "旧A"}, equipments, groups)
+        _simulate(plan, equipments, groups)
+
+        assert "short_name" not in plan.updates[0].changes
+        assert equipments[0]["short_name"] == "A号"
+        assert groups[0]["name"] == "A号"
+
+    def test_no_short_name_when_name_is_unchanged(self):
+        """台帳の名称と同名で対応付いた設備は呼称を設定しない"""
+        equipments = [_eq(101, "15t 1号機")]
+
+        plan = build_plan(LEDGER[:1], {}, equipments, [])
+
+        assert "short_name" not in plan.updates[0].changes
+
+    def test_restores_short_name_after_previous_version_run(self):
+        """旧版のスクリプトで台帳の名称に変わった設備・グループは、対応表から呼称を復元し
+        グループ名を呼称に戻す"""
+        equipments = [
+            _eq(
+                101,
+                "15t 1号機",
+                ledger_no=1,
+                maker="メーカーA",
+                model="M-15",
+                serial_no="S-1",
+            )
+        ]
+        groups = [_group(201, "15t 1号機", 101), _group(202, "共有", 101, 102)]
+
+        plan = build_plan(LEDGER[:1], {1: "メーカーA15t-1"}, equipments, groups)
+        _simulate(plan, equipments, groups)
+
+        assert plan.equipment_rename_steps == []
+        assert equipments[0]["short_name"] == "メーカーA15t-1"
+        assert {g["id"]: g["name"] for g in groups} == {
+            201: "メーカーA15t-1",
+            202: "共有",
+        }
+
+    def test_rejects_short_name_collision(self):
+        equipments = [_eq(101, "旧A"), _eq(102, "その他", short_name="旧A")]
+
+        with pytest.raises(LedgerError, match="呼称「旧A」が重複"):
+            build_plan(LEDGER[:1], {1: "旧A"}, equipments, [])
 
     def test_does_not_rename_group_with_other_name(self):
         equipments = [_eq(101, "旧A")]
@@ -161,7 +221,8 @@ class TestBuildPlan:
         _simulate(plan, equipments, groups)
 
         assert equipments[0]["name"] == "15t 1号機"
-        assert groups[0]["name"] == "15t 1号機"
+        assert equipments[0]["short_name"] == "メーカーA15t-1"
+        assert groups[0]["name"] == "メーカーA15t-1"
 
     def test_resumes_group_rename_from_temp_name(self):
         equipments = [_eq(101, "15t 1号機", ledger_no=1)]
@@ -171,7 +232,7 @@ class TestBuildPlan:
             [LedgerEntry(1, "15t 1号機")], {1: "旧名"}, equipments, groups
         )
 
-        assert plan.group_renames == {201: (f"{TEMP_NAME_PREFIX}201", "15t 1号機")}
+        assert plan.group_renames == {201: (f"{TEMP_NAME_PREFIX}201", "旧名")}
 
     def test_swapping_names_goes_through_temp_name(self):
         equipments = [_eq(101, "B"), _eq(102, "A")]
@@ -182,7 +243,9 @@ class TestBuildPlan:
         _simulate(plan, equipments, groups)
 
         assert {e["id"]: e["name"] for e in equipments} == {101: "A", 102: "B"}
-        assert {g["id"]: g["name"] for g in groups} == {201: "A", 202: "B"}
+        assert {e["id"]: e["short_name"] for e in equipments} == {101: "B", 102: "A"}
+        # グループ名は呼称（＝旧名称）のまま
+        assert {g["id"]: g["name"] for g in groups} == {201: "B", 202: "A"}
         assert any(
             n.startswith(TEMP_NAME_PREFIX) for _, n in plan.equipment_rename_steps
         )
@@ -221,8 +284,8 @@ class TestBuildPlan:
             build_plan(LEDGER[:1], mapping, equipments, [])
 
     def test_rejects_group_name_collision(self):
-        equipments = [_eq(101, "旧A")]
-        groups = [_group(201, "旧A", 101), _group(202, "15t 1号機", 101, 102)]
+        equipments = [_eq(101, "旧A", short_name="A号")]
+        groups = [_group(201, "旧A", 101), _group(202, "A号", 101, 102)]
 
         with pytest.raises(LedgerError, match="設備グループ名"):
             build_plan(LEDGER[:1], {1: "旧A"}, equipments, groups)
@@ -363,11 +426,12 @@ class TestRun:
 
         run(self._args(tmp_path, dry_run=False), client=client)
 
-        client.tables["equipments"].update.assert_any_call({"ledger_no": 1})
-        client.tables["equipments"].update.assert_any_call({"name": "15t 1号機"})
-        client.tables["equipment_groups"].update.assert_called_once_with(
-            {"name": "15t 1号機"}
+        client.tables["equipments"].update.assert_any_call(
+            {"ledger_no": 1, "short_name": "旧A"}
         )
+        client.tables["equipments"].update.assert_any_call({"name": "15t 1号機"})
+        # 1台グループは呼称（＝旧名称）と同名なので変更しない
+        client.tables["equipment_groups"].update.assert_not_called()
 
     def test_rejects_invalid_tenant_id(self, tmp_path):
         args = self._args(tmp_path, dry_run=True)

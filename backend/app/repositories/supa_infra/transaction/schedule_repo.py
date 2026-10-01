@@ -3,6 +3,10 @@ from datetime import datetime
 from typing import Any, cast
 
 from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
+from app.repositories.supa_infra.master.equipment_repo import (
+    EQUIPMENT_DISPLAY_COLUMNS,
+    equipment_display_name,
+)
 from supabase import Client  # type: ignore
 
 
@@ -114,7 +118,8 @@ class ScheduleRepository(BaseRepository):
         query = (
             self.client.table(self.table_name)
             .select(
-                "*, orders(order_number, products(name), customers(name)), process_routings(process_name, equipment_group_id), equipments(name)"
+                "*, orders(order_number, products(name), customers(name)), process_routings(process_name, equipment_group_id), "
+                f"equipments({EQUIPMENT_DISPLAY_COLUMNS})"
             )
             .lte("start_datetime", end_datetime_str)
             .gte("end_datetime", start_datetime_str)
@@ -227,7 +232,7 @@ class ScheduleRepository(BaseRepository):
                 "process_name": process_routing.get("process_name")
                 if process_routing
                 else None,
-                "equipment_name": equipment.get("name") if equipment else None,
+                "equipment_name": equipment_display_name(equipment),
                 "equipment_group_name": equipment_group_name,
             }
             schedules.append(schedule)

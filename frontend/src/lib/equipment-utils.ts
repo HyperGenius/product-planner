@@ -2,9 +2,20 @@
 import { ApiError } from "@/lib/api-client"
 import type { Equipment, EquipmentLedgerFields } from "@/types/equipment"
 
-export type EquipmentSortKey = "ledger_no" | "name"
+/** `short_name` は表示名（呼称、無ければ設備名）の順 */
+export type EquipmentSortKey = "ledger_no" | "short_name" | "name"
+
+/**
+ * 画面表示用の設備名。呼称（`short_name`）があれば呼称、無ければ設備名（台帳の正式名称）。
+ * Backend の `equipment_display_name()` と揃える
+ */
+export function equipmentDisplayName(equipment: Pick<Equipment, "name" | "short_name">): string {
+  return equipment.short_name || equipment.name
+}
 
 const compareName = (a: Equipment, b: Equipment) => a.name.localeCompare(b.name, "ja")
+const compareDisplayName = (a: Equipment, b: Equipment) =>
+  equipmentDisplayName(a).localeCompare(equipmentDisplayName(b), "ja")
 
 /**
  * 設備一覧の並び替え（Issue #486）。
@@ -13,6 +24,7 @@ const compareName = (a: Equipment, b: Equipment) => a.name.localeCompare(b.name,
 export function sortEquipments(equipments: Equipment[], key: EquipmentSortKey): Equipment[] {
   const sorted = [...equipments]
   if (key === "name") return sorted.sort(compareName)
+  if (key === "short_name") return sorted.sort(compareDisplayName)
   return sorted.sort((a, b) => {
     const an = a.ledger_no ?? null
     const bn = b.ledger_no ?? null
@@ -89,6 +101,7 @@ export function parseLedgerForm(form: LedgerFormValues): LedgerFormParseResult {
 export function equipmentSaveErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.errorCode === "duplicate_ledger_no") return "同じ台帳番号の設備が既に登録されています"
+    if (error.errorCode === "duplicate_short_name") return "同じ呼称の設備が既に登録されています"
     if (error.errorCode === "duplicate_equipment_name") return "同じ名前の設備が既に登録されています"
   }
   return fallback

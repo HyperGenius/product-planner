@@ -35,6 +35,40 @@ class TestEquipmentRepository:
         assert result == expected
         mock_client.table.assert_called_with(SupabaseTableName.EQUIPMENT_GROUPS.value)
 
+    def test_get_all_groups_member_names_prefer_short_name(
+        self, equipment_repo, mock_client
+    ):
+        """メンバー名は呼称があれば呼称、無ければ設備名で返す"""
+        (
+            mock_client.table.return_value.select.return_value.execute.return_value.data
+        ) = [
+            {
+                "id": 1,
+                "name": "25tプレス",
+                "equipment_group_members": [
+                    {
+                        "equipments": {
+                            "id": 10,
+                            "name": "25Tシングルクランクプレス",
+                            "short_name": "ワシノ25t",
+                        }
+                    },
+                    {
+                        "equipments": {
+                            "id": 11,
+                            "name": "汎用プレス",
+                            "short_name": None,
+                        }
+                    },
+                ],
+            }
+        ]
+
+        result = equipment_repo.get_all_groups()
+
+        assert result[0]["member_names"] == ["ワシノ25t", "汎用プレス"]
+        assert result[0]["member_count"] == 2
+
     @pytest.mark.parametrize(
         "group_name, expected",
         [
@@ -113,16 +147,20 @@ class TestEquipmentRepository:
     @pytest.mark.parametrize(
         "equipment_id, mock_data, expected",
         [
-            (1, {"equipment_name": "CNC Machine"}, "CNC Machine"),
-            (2, {"equipment_name": "Lathe"}, "Lathe"),
+            (1, {"name": "CNC Machine", "short_name": None}, "CNC Machine"),
+            (
+                2,
+                {"name": "25Tシングルクランクプレス", "short_name": "ワシノ25t"},
+                "ワシノ25t",
+            ),
             (3, None, None),  # データが取得できない場合
-            (4, {}, None),  # equipment_nameが含まれていない場合
+            (4, {}, None),  # 列が含まれていない場合
         ],
     )
     def test_get_equipment_name(
         self, equipment_repo, mock_client, equipment_id, mock_data, expected
     ):
-        """設備名取得テスト (独自メソッド)"""
+        """設備名取得テスト (独自メソッド)。呼称があれば呼称を返す"""
         # Mockの設定
         if mock_data is not None:
             (

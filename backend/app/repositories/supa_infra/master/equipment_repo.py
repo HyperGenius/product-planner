@@ -7,6 +7,16 @@ from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
 T = TypeVar("T", bound=dict[str, Any])  # 型変数を定義
 
+# 表示名（`equipment_display_name()`）を組み立てるのに必要な列
+EQUIPMENT_DISPLAY_COLUMNS = "name, short_name"
+
+
+def equipment_display_name(equipment: dict[str, Any] | None) -> str | None:
+    """画面表示用の設備名。呼称（short_name）があれば呼称、無ければ設備名（台帳の正式名称）"""
+    if not equipment:
+        return None
+    return equipment.get("short_name") or equipment.get("name")
+
 
 class EquipmentRepository(BaseRepository[T]):
     def __init__(self, client):
@@ -18,14 +28,18 @@ class EquipmentRepository(BaseRepository[T]):
         """設備グループのリストを取得する。member_names / member_count を付与して返す。"""
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
-            .select("*, equipment_group_members(equipments(id, name))")
+            .select(
+                f"*, equipment_group_members(equipments(id, {EQUIPMENT_DISPLAY_COLUMNS}))"
+            )
             .execute()
         )
         groups = cast(list[dict[str, Any]], res.data)
         for group in groups:
             members = group.pop("equipment_group_members", [])
             member_names = [
-                m["equipments"]["name"] for m in members if m.get("equipments")
+                cast(str, equipment_display_name(m["equipments"]))
+                for m in members
+                if m.get("equipments")
             ]
             group["member_names"] = sorted(member_names)
             group["member_count"] = len(member_names)
@@ -135,17 +149,17 @@ class EquipmentRepository(BaseRepository[T]):
         return cast(list[T], res.data)
 
     def get_equipment_name(self, equipment_id: int) -> str | None:
-        """設備IDから設備名を取得"""
+        """設備IDから表示用の設備名（呼称があれば呼称）を取得"""
         try:
             res = (
                 self.client.table(SupabaseTableName.EQUIPMENTS.value)
-                .select("equipment_name")
+                .select(EQUIPMENT_DISPLAY_COLUMNS)
                 .eq("id", equipment_id)
                 .single()
                 .execute()
             )
             if res.data and isinstance(res.data, dict):
-                return str(res.data.get("equipment_name"))
+                return equipment_display_name(res.data)
             return None
         except Exception:
             return None

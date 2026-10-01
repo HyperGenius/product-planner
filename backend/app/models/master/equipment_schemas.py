@@ -1,6 +1,6 @@
 # models/master/equipment_schemas.py
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.models.common.base_schema import BaseSchema
 
@@ -46,7 +46,11 @@ class EquipmentGroupUpdate(EquipmentGroupBase):
 class EquipmentBase(BaseSchema):
     """設備のベーススキーマ"""
 
-    name: str = Field(default=..., description="設備名")
+    name: str = Field(default=..., description="設備名（設備台帳の正式名称）")
+    short_name: str | None = Field(
+        None,
+        description="呼称（現場で使う短い名前。テナント内で一意）。画面表示に使い、NULL なら設備名を表示",
+    )
     guard_time_minutes: int | None = Field(
         None, ge=0, description="ガードタイム（分）。NULL=グループ/グローバル設定を継承"
     )
@@ -71,6 +75,14 @@ class EquipmentBase(BaseSchema):
     )
     serial_no: str | None = Field(None, description="製造番号")
     note: str | None = Field(None, description="備考")
+
+    @field_validator("short_name")
+    @classmethod
+    def _blank_short_name_to_none(cls, v: str | None) -> str | None:
+        """空白だけの呼称は未設定（NULL）として扱う（DB の CHECK で弾かれないように）"""
+        if v is None:
+            return None
+        return v.strip() or None
 
 
 class EquipmentCreate(EquipmentBase):
