@@ -11,6 +11,7 @@ from app.routers.auth import device_router
 from app.routers.cron import (
     advance_order_status_router,
     cron_router,
+    parse_daily_reports_router,
     parse_order_pdfs_router,
 )
 from app.routers.master import (
@@ -72,6 +73,7 @@ app.include_router(admin_router)
 app.include_router(cron_router)
 app.include_router(parse_order_pdfs_router)
 app.include_router(advance_order_status_router)
+app.include_router(parse_daily_reports_router)
 app.include_router(heartbeat_router)
 app.include_router(daily_reports_router)
 

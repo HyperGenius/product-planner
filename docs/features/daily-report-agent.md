@@ -3,7 +3,9 @@
 共有Windows PC上のエージェント（PowerShell 5.1、タスクスケジューラ起動）が、ファイルサーバ上の日報Excel
 （その日に作った製品と個数）をバックエンド経由で Supabase Storage へ送る。現状 ProductPlanner に無い
 「現場の生産実績」を補えるかを検証するための PoC で、**生ファイルを確実に・重複なく・継続的に集めることだけ**を
-目的とする。Excel のパースや生産実績への突き合わせは、集まったデータを見てから別 Issue で設計する。
+目的とする。集まった日報の活用（パース・マスタとの照合・受注への割り付け・ガントへの進捗表示）は
+Epic #485「日報進捗反映」で進めており、パースと明細の保存（#487）は本ドキュメントの
+「[日報のパースと明細の保存](#日報のパースと明細の保存issue-487)」に記載する。
 
 ## 実装の進め方（サブIssue）
 
@@ -14,6 +16,7 @@
 | #471 | 日報ファイル受信 `POST /api/agent/daily-reports` | 本ドキュメントに記載 |
 | #472 | 共有PCエージェントの配置と設置手順（`tools/daily-report-agent/`） | 本ドキュメントに記載 |
 | #478 | タスクスケジューラ登録スクリプト | 本ドキュメントに記載 |
+| #487 | 日報のパースと明細の保存（Epic #485 の 2/6） | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -255,6 +258,95 @@
 `create_tenant.py` には組み込んでいない。エージェントを使うのは一部のテナントだけで、発行・再発行・失効は
 テナント作成とは別のタイミングで起きるため。
 
+## 日報のパースと明細の保存（Issue #487）
+
+`daily_report_files` に保存された日報Excelを cron でパースし、1行ずつ `daily_report_entries` に保存する。
+ここでは**名寄せ（マスタとの照合）は行わず**、日報の値をそのまま（前後の空白除去・数値セルの文字列化と、
+日付・数量の解釈のみ）保存する。名寄せ（#488）・受注への割り付け（#490）は Excel ではなくこの明細を入力にする。
+
+### データモデル
+
+`supabase/migrations/20261003000000_add_daily_report_entries.sql`
+
+| テーブル／列 | 内容 | RLS |
+|---|---|---|
+| `daily_report_files.parse_status` | `pending`（未処理・既定値）/ `parsed` / `unsupported`（`.xls` 等）/ `failed`。`parsed_at`・`parse_error` も追加 | 既存（SELECT のみ） |
+| `daily_report_entries` | 1行＝日報の1行。`source_file_id` / `sheet_name` / `row_no`（Excel の行番号）/ `work_date`（解釈できなければ NULL）/ `work_date_raw` / `worker_raw` / `customer_raw` / `homeworker_raw`（内職者名）/ `product_raw` / `process_raw` / `equipment_raw` / `processed_qty` / `defect_qty` / `good_qty` / `setup_qty` / `lot_no` / `note` / `parse_issues`（jsonb）。UNIQUE (`tenant_id`, `sheet_name`, `row_no`) | 有効・`is_tenant_member(tenant_id)` の SELECT のみ |
+| `daily_report_sheets` | PK (`tenant_id`, `sheet_name`)。そのシートの明細がどのファイル（`source_file_id`）の内容か、その版（`source_version_at` = `file_modified_at`、無ければ `received_at`）と `entry_count` | 有効・`is_tenant_member(tenant_id)` の SELECT のみ |
+
+- 書き込みは cron（service role）のみ。既存テーブルと同じく INSERT/UPDATE/DELETE ポリシーは作らない
+- 既存の `daily_report_files` の行はマイグレーションで `pending` になり、デプロイ後の cron で順次取り込まれる
+- `daily_report_entries` / `daily_report_sheets` は `daily_report_files` から `ON DELETE CASCADE`（派生データのため）
+
+### パース（`services/daily_report_parser.py`）
+
+Storage・DB から切り離した純粋関数（`parse_daily_report_workbook()` / `parse_sheet_rows()` / `parse_work_date()`）。
+`openpyxl` の `load_workbook(..., read_only=True, data_only=True)` で読む。
+
+- **対象シート**は名前が `^\d{4}製造$`（`YYMM製造`）のものだけ。`原紙`（テンプレート）・`リスト`・`設備台帳目次` は読まない
+- **ヘッダ行**は固定の行番号ではなく、先頭30行から `加工日` のセルを探して特定する（上部に集計値・注意書きの行がある）。
+  見つからないシートは明細を置き換えずに飛ばす（既存の明細を消さないため）
+- **列はヘッダ名で引く**（NFKC・空白除去後に完全一致）。備考欄はヘッダが説明文（「…を記載する備考欄」）なので `備考` の部分一致
+- `read_only` モードはファイルに記録された使用範囲（dimensions）だけを読むので、`reset_dimensions()` してから全行を読む
+- **良品数** `good_qty = 加工数 − 不適合合計数`（0未満は0 ＋ `negative_clamped`）。`不適合合計数` は数式セルなので、
+  キャッシュ値が無い（Excel 以外で保存された）場合は同名の個別列 `不適合数`（複数列）の合計で代替する
+- 加工数が空の行は `good_qty = NULL` で保存する（進捗に数えない）
+- 商品名が数値セル（`1234`）なら文字列化する。担当者の複数名表記（`A・B` / `A/B`）は raw のまま
+- 数量の文字列（全角数字・桁区切りのカンマ）は整数に正規化し、整数にできない値は NULL ＋ `invalid`
+
+**加工日**（`YYYY.MM.DD` の文字列。日付セルでも可）は行を捨てずに `parse_issues` に記録する:
+
+| ケース | 例（シート `2609製造`） | 結果 | `parse_issues` |
+|---|---|---|---|
+| 連結 | `2026.09.232026.09.18` | 先頭の 2026-09-23 | `concatenated` |
+| 前月・翌月の行 | `2026.08.31` | そのまま | `outside_sheet_month` |
+| 年の誤記 | `2029.09.02` | 2026-09-02 | `year_corrected` |
+| 年をまたぐ前月 | `2025.12.31`（シート `2601製造`） | そのまま（誤記扱いしない） | `outside_sheet_month` |
+| 範囲外で補正もできない | `2026.03.05` | そのまま | `outside_sheet_month` |
+| 日付として読めない | `9/1`、`2026.09.31` | NULL | `invalid` |
+
+年の補正は「シートの年月の前月初〜翌月末」に収まらない日付だけが対象で、年をシートの年（またはその前後の年）に
+置き換えると収まる場合に補正する。
+
+**明細にしない行**: 日付として解釈できず商品名・加工数も空の行（シート下部のメモ行・空行）と、加工日だけが入った行。
+メモ行には `2026.07.06 ～を変更した` のように日付で始まるものがあるため、加工日は**セル全体が日付（の連結）**で
+あるときだけ解釈する。
+
+`parse_issues` は `[{"field": "work_date", "code": "year_corrected"}, ...]` の配列で、`field` は `work_date` /
+`processed_qty`（`missing` / `invalid`）/ `defect_qty`（`invalid`）/ `setup_qty`（`invalid`）/ `good_qty`（`negative_clamped`）。
+
+### シート単位で最新版を正とする（RPC `replace_daily_report_sheet_entries`）
+
+同じブックは保存のたびに別ファイル（別 sha256）として届くため、全ファイルの行を足すと二重計上になる。
+**(テナント, シート名) の明細は、最新のファイルの内容で丸ごと置き換える**（足し込まない）。過去の行の修正・削除もこれで反映される。
+
+- 「最新」は `file_modified_at`、無ければ `received_at`（同時刻なら `received_at`）。比較は RPC が
+  `daily_report_files` から引いた値で行い、呼び出し側の値は使わない
+- RPC は古い明細の DELETE と新しい明細の INSERT、`daily_report_sheets` の更新を1トランザクションで行う
+  （途中で失敗しても明細が消えない）。現在の版より古いファイルなら何もせず `stale` を返す。同じファイルの再処理は冪等
+- 同じシートを並行して処理しても順序が崩れないよう、(テナント, シート名) で `pg_advisory_xact_lock` を取る
+- ファイルが `p_tenant_id` 以外のテナントのものなら例外。実行権限は `service_role` のみ（`anon` / `authenticated` から REVOKE）
+- 同じテナントで同名のシートを持つ別のブックがあると互いに置き換え合う。現状の想定（1テナント1ブック）では問題ないが、
+  複数ブックを扱うことになったらキーにブックの識別子を加える
+
+### cron `GET /api/cron/parse-daily-reports`（`routers/cron/parse_daily_reports.py`）
+
+`services/daily_report_parsing_service.py` の `parse_pending_daily_reports()`。`parse-order-pdfs-trigger` から
+他の cron と一緒に呼ばれる（[supabase-pgcron-parse-order-pdfs.md](../infra/supabase-pgcron-parse-order-pdfs.md)）。
+
+1. `parse_status = 'pending'` のファイルを `received_at` 順に最大 `PARSE_DAILY_REPORTS_BATCH_LIMIT`（既定 10）件取得。残りは次回へ持ち越す
+2. 拡張子が `.xlsx` / `.xlsm` 以外（`.xls` 等）は Storage から取得せず `unsupported`
+3. Storage（`daily-reports`）から取得してパースし、シートごとに RPC で置き換える
+4. 成功したら `parsed`（対象シートが無い・古い版だった場合も `parsed`）、失敗したら `failed`
+
+- `tenant_id` は `daily_report_files` の行から取り、更新はすべて `.eq("tenant_id", tenant_id)` で絞る
+- 1ファイルの失敗で他のファイルの処理は止めない。例外の詳細はログにのみ残し、`parse_error` には固定文言
+  （`unsupported file type` / `unable to open workbook` / `parse failed`）を入れる（テナントのメンバーが参照できる列のため）。
+  全体が失敗したときのレスポンスも固定文言（502 `parse-daily-reports failed`）
+- `failed` のファイルは自動では再処理しない。原因を直したら `parse_status` を `pending` に戻すと次の cron で再処理される
+- レスポンスは件数のサマリ: `processed` / `parsed` / `unsupported` / `failed` / `sheets_replaced` / `sheets_stale` /
+  `sheets_without_header` / `entries_saved`
+
 ## テスト
 
 - `backend/__tests__/unit/services/test_agent_token_service.py`: トークン生成・ハッシュ形式
@@ -269,10 +361,18 @@
 - `backend/__tests__/integration/test_daily_report_agent_rls.py`（`--run-integration`）: RLS（ユーザー JWT から
   書き込めない・他テナントの行が見えない・`agent_tokens` が見えない）、UNIQUE (`tenant_id`, `sha256`)、
   `token_hash` の CHECK 制約、バケット設定、`store_daily_report()` の実 Storage での重複排除
+- `backend/__tests__/unit/services/test_daily_report_parser.py`: 対象シートの選別、ヘッダ行の探索・ヘッダ名での列の解決、
+  加工日の異常（年の誤記・連結・前月・年をまたぐ前月・読めない値）、良品数（0未満の切り上げ・数式のキャッシュ値が無いときの代替）、
+  加工数の空欄・不正値、商品名の数値セル、メモ行・空行の除外、読めないファイル
+- `backend/__tests__/unit/services/test_daily_report_parsing_service.py`: pending の処理、`stale` の扱い、`.xls` 等の
+  `unsupported`、パース失敗・想定外エラー時の `failed` と固定文言、ヘッダの無いシートで置き換えないこと
+- `backend/__tests__/api/routers/cron/test_parse_daily_reports.py`: `CRON_SECRET` 認証、サマリの返却、エラー時の固定文言
+- `backend/__tests__/integration/test_daily_report_entries.py`（`--run-integration`）: RPC の置き換え（新しい版で置き換え・
+  古い版は `stale`・同じ版の再処理は冪等・`file_modified_at` が無いときは `received_at`・他テナントのファイルは拒否・
+  テナント間の分離）、パーサーの出力がそのまま保存されること、RLS（所属テナントの行のみ見える・書き込めない・RPC を実行できない）
 
 ## スコープ外（PoC ではやらない）
 
-- Excel のパース、製品マスタとの照合、実績テーブルへの展開
-- 同一パスの新旧版の判定、注文・工程への配賦
+- 製品・工程・設備マスタとの照合（#488）、注文・工程への配賦（#490）。Excel のパースと明細の保存は #487 で実装済み
 - heartbeat 途絶のアラート通知（記録のみ行い、PoC 期間中は手動で確認）
 - エージェントの自動アップデート、管理画面UI
