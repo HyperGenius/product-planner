@@ -1,5 +1,5 @@
 # routers/daily_reports/name_matching.py
-"""日報の名寄せ: 未照合の表記の一覧と別名辞書の登録・変更・削除 (Issue #488)。
+"""日報の名寄せ: 未照合の表記の一覧と別名辞書の登録・変更・削除 (Issue #488 / #489)。
 
 照合結果は明細に保存せず、明細＋マスタ＋辞書から都度解決する
 （`services/daily_report_name_matching_service.py`）。辞書を変えれば過去の明細にも反映される。
@@ -8,6 +8,9 @@
 platform_admin）に限る。製品の別名は既存の product_name_aliases（顧客単位）に
 source='daily_report' で登録し、変更・削除は製品マスタの別名 API
 （`PATCH|DELETE /products/{product_id}/aliases/{alias_id}`）を使う。
+
+未照合キューの画面（#489）用に、表記が使われている明細の確認・マスタの工程名の一覧・
+「対象外」の登録/解除も提供する。
 """
 
 from dataclasses import dataclass
@@ -29,6 +32,9 @@ from app.models.daily_report_names import (
     DailyReportProductAliasCreate,
     EquipmentNameAliasCreate,
     EquipmentNameAliasUpdate,
+    IgnoredNameCreate,
+    IgnoredNameResponse,
+    NameEntryResponse,
     NameKindParam,
     ProcessNameAliasCreate,
     ProcessNameAliasUpdate,
@@ -38,6 +44,8 @@ from app.models.daily_report_names import (
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.daily_report_name_matching_service import (
     fetch_all_rows,
+    list_master_process_names,
+    list_name_entries,
     list_unmatched_names,
 )
 from app.services.product_alias_service import register_daily_report_alias
@@ -251,6 +259,121 @@ def get_product_candidates(
     付くのを避けるため）ので、`match_products()` の自動確定結果は使わない。
     """
     return match_products(client, tenant_id, raw_text.strip())["candidates"]
+
+
+@daily_report_names_router.get("/name-entries", response_model=list[NameEntryResponse])
+def get_name_entries(
+    kind: NameKindParam = Query(),
+    raw_text: str = Query(min_length=1),
+    customer_raw: str | None = Query(default=None),
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """表記が使われている日報の明細（加工日の新しい順に最大100件）を返す。
+
+    未照合キューで表記をクリックしたときの確認用。製品は (顧客先, 商品名) の組で絞り、
+    `customer_raw` を省略すると顧客先が空欄の行を返す。
+    """
+    return list_name_entries(client, tenant_id, kind, raw_text, customer_raw)
+
+
+@daily_report_names_router.get("/process-names", response_model=list[str])
+def get_process_names(
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """マスタの工程名の一覧（工程の別名で対応付ける先の選択肢）。"""
+    return list_master_process_names(client, tenant_id)
+
+
+# ---------------------------------------------------------------------------
+# 対象外の表記（Issue #489）
+# ---------------------------------------------------------------------------
+
+
+@daily_report_names_router.get(
+    "/ignored-names", response_model=list[IgnoredNameResponse]
+)
+def list_ignored_names(
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    return fetch_all_rows(
+        lambda: (
+            client.table(SupabaseTableName.DAILY_REPORT_IGNORED_NAMES.value)
+            .select("id, kind, raw_text, customer_raw, created_by, created_at")
+            .eq("tenant_id", tenant_id)
+            .order("kind")
+            .order("raw_text")
+            .order("id")
+        )
+    )
+
+
+@daily_report_names_router.post(
+    "/ignored-names",
+    status_code=status.HTTP_201_CREATED,
+    response_model=IgnoredNameResponse,
+)
+def create_ignored_name(
+    payload: IgnoredNameCreate,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """表記を「対象外」にして未照合キューに出さないようにする。
+
+    照合結果は変わらない（マスタに無くてよい表記を割り付けの対象にしないまま、キューから外す）。
+    顧客先は製品のときだけ使い、それ以外の種別では無視する。
+    """
+    _require_alias_editor(tenant_id, user_id, client)
+    customer_raw = payload.customer_raw if payload.kind == "product" else None
+    try:
+        result = (
+            client.table(SupabaseTableName.DAILY_REPORT_IGNORED_NAMES.value)
+            .insert(
+                {
+                    "tenant_id": tenant_id,
+                    "kind": payload.kind,
+                    "raw_text": payload.raw_text,
+                    "customer_raw": customer_raw,
+                    "created_by": user_id,
+                }
+            )
+            .execute()
+        )
+    except APIError as e:
+        if e.code == "23505":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "duplicate_ignored_name",
+                    "message": "この表記は既に対象外です",
+                },
+            ) from e
+        raise
+    return cast(list[dict[str, Any]], result.data)[0]
+
+
+@daily_report_names_router.delete("/ignored-names/{ignored_id}")
+def delete_ignored_name(
+    ignored_id: UUID,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """「対象外」を解除する（照合できていなければ未照合キューに戻る）。"""
+    _require_alias_editor(tenant_id, user_id, client)
+    result = (
+        client.table(SupabaseTableName.DAILY_REPORT_IGNORED_NAMES.value)
+        .delete()
+        .eq("tenant_id", tenant_id)
+        .eq("id", str(ignored_id))
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="対象外の表記が見つかりません")
+    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------

@@ -236,3 +236,145 @@ class TestListUnmatchedNames:
 
         assert [i["raw_text"] for i in before] == ["組立機B"]
         assert after == []
+
+
+@pytest.mark.unit
+class TestIgnoredNames:
+    """「対象外」にした表記は未照合キューに出さない (Issue #489)。"""
+
+    STATS = [
+        _stat("equipment", "組立機B", 4, "2026-09-20"),
+        _stat("process", "検査", 7, None),
+        _stat("product", "試作品", 3, "2026-09-09", customer_raw="SK"),
+        _stat("product", "試作品", 2, "2026-09-08", customer_raw="未登録の顧客"),
+        _stat("product", "社内治具", 1, "2026-09-07", customer_raw=None),
+    ]
+
+    def _unmatched(self, ignored):
+        db = _fake_db({**MASTERS, "daily_report_ignored_names": ignored}, self.STATS)
+        return [
+            (i["kind"], i["raw_text"], i["customer_raw"])
+            for i in service.list_unmatched_names(db, TENANT)
+        ]
+
+    def test_ignored_names_are_excluded(self):
+        result = self._unmatched(
+            [
+                {
+                    "id": "x",
+                    "kind": "process",
+                    "raw_text": "検査",
+                    "customer_raw": None,
+                },
+                {
+                    "id": "y",
+                    "kind": "product",
+                    "raw_text": "社内治具",
+                    "customer_raw": None,
+                },
+            ]
+        )
+
+        assert result == [
+            ("equipment", "組立機B", None),
+            ("product", "試作品", "SK"),
+            ("product", "試作品", "未登録の顧客"),
+        ]
+
+    def test_product_is_ignored_per_customer(self):
+        """製品は未照合キューの1行と同じく (顧客先, 商品名) の組で対象外にする。"""
+        result = self._unmatched(
+            [{"id": "x", "kind": "product", "raw_text": "試作品", "customer_raw": "SK"}]
+        )
+
+        assert ("product", "試作品", "SK") not in result
+        assert ("product", "試作品", "未登録の顧客") in result
+
+    def test_kind_must_match(self):
+        """同じ表記でも種別が違えば対象外にならない。"""
+        result = self._unmatched(
+            [{"id": "x", "kind": "customer", "raw_text": "検査", "customer_raw": None}]
+        )
+
+        assert ("process", "検査", None) in result
+
+    def test_ignored_keys_are_scoped_to_tenant(self):
+        db = _fake_db({"daily_report_ignored_names": []}, [])
+
+        service.fetch_ignored_keys(db, TENANT)
+
+        assert db._calls == [("eq", "tenant_id", TENANT)]
+
+
+@pytest.mark.unit
+class TestListMasterProcessNames:
+    def test_distinct_sorted_names(self):
+        db = _fake_db(MASTERS, [])
+
+        assert service.list_master_process_names(db, TENANT) == ["カシメ", "クグシ"]
+        assert db._calls == [("eq", "tenant_id", TENANT)]
+
+
+def _chain_db() -> tuple[MagicMock, MagicMock]:
+    query = MagicMock()
+    for method in ("select", "eq", "is_", "order", "limit"):
+        getattr(query, method).return_value = query
+    query.execute.return_value = MagicMock(data=[{"id": 1}])
+    db = MagicMock()
+    db.table.return_value = query
+    return db, query
+
+
+@pytest.mark.unit
+class TestListNameEntries:
+    @pytest.mark.parametrize(
+        ("kind", "column"),
+        [
+            ("equipment", "equipment_raw"),
+            ("process", "process_raw"),
+            ("customer", "customer_raw"),
+        ],
+    )
+    def test_filters_by_raw_column(self, kind, column):
+        db, query = _chain_db()
+
+        result = service.list_name_entries(db, TENANT, kind, "表記", "無視される")
+
+        assert result == [{"id": 1}]
+        db.table.assert_called_once_with("daily_report_entries")
+        assert [c.args for c in query.eq.call_args_list] == [
+            ("tenant_id", TENANT),
+            (column, "表記"),
+        ]
+        query.is_.assert_not_called()
+        query.limit.assert_called_once_with(100)
+
+    def test_product_filters_by_customer(self):
+        db, query = _chain_db()
+
+        service.list_name_entries(db, TENANT, "product", "短いピン", "SK")
+
+        assert [c.args for c in query.eq.call_args_list] == [
+            ("tenant_id", TENANT),
+            ("product_raw", "短いピン"),
+            ("customer_raw", "SK"),
+        ]
+
+    def test_product_without_customer_matches_null(self):
+        db, query = _chain_db()
+
+        service.list_name_entries(db, TENANT, "product", "短いピン", None)
+
+        query.is_.assert_called_once_with("customer_raw", "null")
+        assert ("customer_raw", None) not in [c.args for c in query.eq.call_args_list]
+
+    def test_newest_first(self):
+        db, query = _chain_db()
+
+        service.list_name_entries(db, TENANT, "process", "検査")
+
+        assert query.order.call_args_list[0].args == ("work_date",)
+        assert query.order.call_args_list[0].kwargs == {
+            "desc": True,
+            "nullsfirst": False,
+        }

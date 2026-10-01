@@ -345,3 +345,222 @@ class TestDailyReportNameMatchingRouter:
 
         assert response.status_code == 422
         register.assert_not_called()
+
+
+@pytest.mark.api
+class TestDailyReportUnmatchedQueueRouter:
+    """未照合キューの画面用 API (Issue #489)。"""
+
+    @pytest.fixture
+    def mock_client(self):
+        return MagicMock()
+
+    @pytest.fixture(autouse=True)
+    def override_dependency(self, mock_client):
+        app.dependency_overrides[get_current_tenant_id] = lambda: TENANT
+        app.dependency_overrides[get_current_user_id] = lambda: USER
+        app.dependency_overrides[get_supabase_client] = lambda: mock_client
+        with patch(f"{ROUTER}.get_current_user_role", return_value="order_handler"):
+            yield
+        app.dependency_overrides = {}
+
+    # --- 表記が使われている明細 -----------------------------------------------
+
+    def test_name_entries(self, mock_client):
+        entries = [
+            {
+                "id": 1,
+                "sheet_name": "2609製造",
+                "row_no": 5,
+                "work_date": "2026-09-09",
+                "customer_raw": "顧客A",
+                "product_raw": "短いピン",
+                "process_raw": "カシメ加工",
+                "equipment_raw": "200t 3号機",
+                "worker_raw": "作業者A",
+                "processed_qty": 100,
+                "defect_qty": 2,
+                "good_qty": 98,
+            }
+        ]
+        with patch(f"{ROUTER}.list_name_entries", return_value=entries) as service:
+            response = client.get(
+                "/daily-reports/name-entries",
+                params={
+                    "kind": "product",
+                    "raw_text": "短いピン",
+                    "customer_raw": "顧客A",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json() == entries
+        service.assert_called_once_with(
+            mock_client, TENANT, "product", "短いピン", "顧客A"
+        )
+
+    def test_name_entries_without_customer(self, mock_client):
+        with patch(f"{ROUTER}.list_name_entries", return_value=[]) as service:
+            response = client.get(
+                "/daily-reports/name-entries",
+                params={"kind": "product", "raw_text": "短いピン"},
+            )
+
+        assert response.status_code == 200
+        service.assert_called_once_with(
+            mock_client, TENANT, "product", "短いピン", None
+        )
+
+    @pytest.mark.parametrize(
+        "params", [{"kind": "process"}, {"kind": "worker", "raw_text": "x"}]
+    )
+    def test_name_entries_validation(self, params):
+        response = client.get("/daily-reports/name-entries", params=params)
+        assert response.status_code == 422
+
+    # --- マスタの工程名 -------------------------------------------------------
+
+    def test_process_names(self, mock_client):
+        with patch(
+            f"{ROUTER}.list_master_process_names", return_value=["カシメ", "クグシ"]
+        ) as service:
+            response = client.get("/daily-reports/process-names")
+
+        assert response.status_code == 200
+        assert response.json() == ["カシメ", "クグシ"]
+        service.assert_called_once_with(mock_client, TENANT)
+
+    # --- 対象外 ---------------------------------------------------------------
+
+    @staticmethod
+    def _ignored_row(**overrides):
+        return {
+            "id": str(uuid.uuid4()),
+            "kind": "product",
+            "raw_text": "試作品",
+            "customer_raw": "顧客A",
+            "created_by": USER,
+            "created_at": "2026-10-01T00:00:00+00:00",
+            **overrides,
+        }
+
+    def test_create_ignored_product(self, mock_client):
+        tables = _tables(mock_client)
+        row = self._ignored_row()
+        insert = tables.setdefault("daily_report_ignored_names", MagicMock()).insert
+        insert.return_value.execute.return_value = MagicMock(data=[row])
+
+        response = client.post(
+            "/daily-reports/ignored-names",
+            json={"kind": "product", "raw_text": " 試作品 ", "customer_raw": " 顧客A "},
+        )
+
+        assert response.status_code == 201
+        assert response.json() == row
+        insert.assert_called_once_with(
+            {
+                "tenant_id": TENANT,
+                "kind": "product",
+                "raw_text": "試作品",
+                "customer_raw": "顧客A",
+                "created_by": USER,
+            }
+        )
+
+    def test_customer_raw_is_dropped_for_non_product(self, mock_client):
+        tables = _tables(mock_client)
+        insert = tables.setdefault("daily_report_ignored_names", MagicMock()).insert
+        insert.return_value.execute.return_value = MagicMock(
+            data=[
+                self._ignored_row(kind="process", raw_text="段取り", customer_raw=None)
+            ]
+        )
+
+        response = client.post(
+            "/daily-reports/ignored-names",
+            json={"kind": "process", "raw_text": "段取り", "customer_raw": "顧客A"},
+        )
+
+        assert response.status_code == 201
+        assert insert.call_args.args[0]["customer_raw"] is None
+
+    def test_blank_customer_raw_becomes_null(self, mock_client):
+        tables = _tables(mock_client)
+        insert = tables.setdefault("daily_report_ignored_names", MagicMock()).insert
+        insert.return_value.execute.return_value = MagicMock(
+            data=[self._ignored_row(customer_raw=None)]
+        )
+
+        response = client.post(
+            "/daily-reports/ignored-names",
+            json={"kind": "product", "raw_text": "試作品", "customer_raw": "  "},
+        )
+
+        assert response.status_code == 201
+        assert insert.call_args.args[0]["customer_raw"] is None
+
+    def test_duplicate_ignored_returns_409(self, mock_client):
+        tables = _tables(mock_client)
+        tables.setdefault(
+            "daily_report_ignored_names", MagicMock()
+        ).insert.return_value.execute.side_effect = APIError(
+            {"code": "23505", "message": "duplicate key value"}
+        )
+
+        response = client.post(
+            "/daily-reports/ignored-names",
+            json={"kind": "equipment", "raw_text": "試作機"},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "error": "duplicate_ignored_name",
+            "message": "この表記は既に対象外です",
+        }
+
+    def test_iso_officer_cannot_ignore(self, mock_client):
+        tables = _tables(mock_client)
+        with patch(f"{ROUTER}.get_current_user_role", return_value="iso_officer"):
+            response = client.post(
+                "/daily-reports/ignored-names",
+                json={"kind": "equipment", "raw_text": "試作機"},
+            )
+
+        assert response.status_code == 403
+        assert "daily_report_ignored_names" not in tables
+
+    def test_delete_ignored(self, mock_client):
+        tables = _tables(mock_client)
+        delete = tables.setdefault("daily_report_ignored_names", MagicMock()).delete
+        delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            MagicMock(data=[{"id": "x"}])
+        )
+        ignored_id = uuid.uuid4()
+
+        response = client.delete(f"/daily-reports/ignored-names/{ignored_id}")
+
+        assert response.status_code == 200
+        delete.return_value.eq.assert_called_once_with("tenant_id", TENANT)
+        delete.return_value.eq.return_value.eq.assert_called_once_with(
+            "id", str(ignored_id)
+        )
+
+    def test_delete_missing_ignored_returns_404(self, mock_client):
+        tables = _tables(mock_client)
+        tables.setdefault(
+            "daily_report_ignored_names", MagicMock()
+        ).delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            MagicMock(data=[])
+        )
+
+        response = client.delete(f"/daily-reports/ignored-names/{uuid.uuid4()}")
+
+        assert response.status_code == 404
+
+    def test_list_ignored(self, mock_client):
+        row = self._ignored_row()
+        with patch(f"{ROUTER}.fetch_all_rows", return_value=[row]):
+            response = client.get("/daily-reports/ignored-names")
+
+        assert response.status_code == 200
+        assert response.json() == [row]

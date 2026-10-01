@@ -24,7 +24,7 @@ backend/app/
   routers/transaction/  # 業務データ API (注文・スケジュール)
     orders/             # 受注 API はパッケージ化済み（責務別ファイル、Issue #376）
   routers/tenant/       # テナントメンバー管理 API
-  routers/daily_reports/  # 日報の名寄せ・別名辞書 API（Issue #488）
+  routers/daily_reports/  # 日報の名寄せ・別名辞書・未照合キュー API（Issue #488 / #489）
   repositories/         # Supabase データアクセス層
   scheduler_logic.py    # コアスケジューリングアルゴリズム
   services/             # カレンダー・シミュレーションサービス
@@ -135,6 +135,11 @@ cd backend && ruff check . && mypy .
   （`match_products()` は未照合キューの候補表示専用）。日報の商品名の別名は既存の `product_name_aliases`（顧客単位）に
   `source='daily_report'` で登録する（確認済みの由来として `auto_match_unreviewed` に格下げされない）。
   マスタ・辞書を全件読むときは PostgREST の `max_rows`（1000）で切られないよう `fetch_all_rows()`（`.range()` でページング）を使う
+  - **未照合キュー（Issue #489）**: 画面は `/master/daily-report-names`（`components/daily-report-names/`）。「対象外」は別名辞書に
+    列を足さず `daily_report_ignored_names`（4種別共通、製品は (顧客先, 商品名) の組。顧客先 NULL も `UNIQUE NULLS NOT DISTINCT`）に持つ
+    （製品の別名辞書 `product_name_aliases` は `product_id` NOT NULL でメール起票と共有のため）。対象外は照合結果に影響させず、
+    `list_unmatched_names()` で除外するだけにする。書き込めるロールは Backend `_ALIAS_EDITOR_ROLES` と Frontend
+    `DAILY_REPORT_NAME_EDITOR_ROLES` を揃える
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。
@@ -213,6 +218,8 @@ cd backend && ruff check . && mypy .
   - `NEXT_PUBLIC_API_URL` / MSW の `API_BASE` は `.env.local.sample`・CI と同じ `http://localhost:8000`
     （`/api` を付けない。`apiClient` が `NEXT_PUBLIC_API_URL + endpoint` で組む）
   - 日付ロジックのテストは端末 TZ 非依存に書く（`new Date(y, m, d)` でローカル深夜を作る等）
+  - Radix の Popover / Popper 系（コンボボックス等）を開くテストが 1 回 10〜20 秒かかってタイムアウトするときは、
+    jsdom の依存 `nwsapi` が 2.2.27 になっていないか確認する（`matches(":modal")` の再帰バグ。2.2.28 以上で解消、Issue #489）
   - 詳細・基盤メンテ時の注意（`@testing-library/dom` を明示 devDep 化、`export *` 禁止、`vite-tsconfig-paths` 不使用の理由）は
     [docs/features/frontend-unit-testing.md](docs/features/frontend-unit-testing.md)
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること

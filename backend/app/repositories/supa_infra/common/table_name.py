@@ -27,3 +27,5 @@ class SupabaseTableName(Enum):
     EQUIPMENT_NAME_ALIASES = "equipment_name_aliases"
     PROCESS_NAME_ALIASES = "process_name_aliases"
     CUSTOMER_NAME_ALIASES = "customer_name_aliases"
+    DAILY_REPORT_ENTRIES = "daily_report_entries"
+    DAILY_REPORT_IGNORED_NAMES = "daily_report_ignored_names"
