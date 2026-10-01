@@ -37,3 +37,13 @@ export interface MemberPasswordResetResponse {
   user_id: string
   new_password: string
 }
+
+/**
+ * 日報の名寄せ（別名辞書の登録・変更・削除、対象外の登録・解除）を操作できるロール。
+ * Backend `routers/daily_reports/name_matching.py` の `_ALIAS_EDITOR_ROLES` と揃える（Issue #488 / #489）。
+ */
+export const DAILY_REPORT_NAME_EDITOR_ROLES: MemberRole[] = [
+  "order_handler",
+  "president",
+  "platform_admin",
+]

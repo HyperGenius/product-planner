@@ -87,3 +87,44 @@ class ProductCandidateResponse(BaseModel):
     product_id: int
     name: str
     score: float
+
+
+class IgnoredNameCreate(_RawTextSchema):
+    """未照合キューの表記を「対象外」にする (Issue #489)。"""
+
+    kind: NameKindParam
+    # 製品のみ: 顧客先の表記（未照合一覧の customer_raw をそのまま送る。空欄なら None）
+    customer_raw: str | None = Field(default=None, max_length=_RAW_TEXT_MAX_LENGTH)
+
+    @field_validator("customer_raw", mode="before")
+    @classmethod
+    def _strip_customer_raw(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+
+class IgnoredNameResponse(BaseModel):
+    id: str
+    kind: NameKindParam
+    raw_text: str
+    customer_raw: str | None = None
+    created_by: str
+    created_at: str
+
+
+class NameEntryResponse(BaseModel):
+    """表記が使われている日報の明細（未照合キューでの確認用）。"""
+
+    id: int
+    sheet_name: str
+    row_no: int
+    work_date: date | None = None
+    customer_raw: str | None = None
+    product_raw: str | None = None
+    process_raw: str | None = None
+    equipment_raw: str | None = None
+    worker_raw: str | None = None
+    processed_qty: int | None = None
+    defect_qty: int | None = None
+    good_qty: int | None = None

@@ -49,6 +49,28 @@ def _select_all(
     )
 
 
+def _distinct_process_names(routings: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for routing in routings:
+        name = (routing.get("process_name") or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def list_master_process_names(db: Client, tenant_id: str) -> list[str]:
+    """マスタの工程名（`process_routings.process_name`）の重複を除いた一覧（名前順）。
+
+    工程の別名は工程名のレベルで対応付けるので、製品をまたいで同じ名前は1つにまとめる。
+    """
+    routings = _select_all(
+        db, SupabaseTableName.PROCESS_ROUTINGS.value, "id, process_name", tenant_id
+    )
+    return sorted(_distinct_process_names(routings))
+
+
 def load_snapshot(db: Client, tenant_id: str) -> NameMatchingSnapshot:
     """照合に使うマスタと別名辞書を1テナント分読み込む。"""
     equipments = _select_all(
@@ -91,12 +113,6 @@ def load_snapshot(db: Client, tenant_id: str) -> NameMatchingSnapshot:
         tenant_id,
     )
 
-    process_names: list[str] = []
-    for routing in routings:
-        name = (routing.get("process_name") or "").strip()
-        if name and name not in process_names:
-            process_names.append(name)
-
     return NameMatchingSnapshot(
         equipments=[
             EquipmentRef(
@@ -125,7 +141,7 @@ def load_snapshot(db: Client, tenant_id: str) -> NameMatchingSnapshot:
             )
             for r in products
         ],
-        process_names=process_names,
+        process_names=_distinct_process_names(routings),
         equipment_aliases={
             r["raw_text"].strip(): int(r["equipment_id"]) for r in equipment_aliases
         },
@@ -158,6 +174,25 @@ def fetch_name_stats(db: Client, tenant_id: str) -> list[dict[str, Any]]:
     )
 
 
+IgnoredKey = tuple[str, str, str | None]
+
+
+def ignored_key(kind: str, raw_text: str, customer_raw: str | None) -> IgnoredKey:
+    """対象外の表記のキー。製品だけ顧客先を含める（未照合キューの1行と同じ単位）。"""
+    return (kind, raw_text, customer_raw if kind == "product" else None)
+
+
+def fetch_ignored_keys(db: Client, tenant_id: str) -> set[IgnoredKey]:
+    """「対象外」にした表記（#489）のキーの集合。"""
+    rows = _select_all(
+        db,
+        SupabaseTableName.DAILY_REPORT_IGNORED_NAMES.value,
+        "id, kind, raw_text, customer_raw",
+        tenant_id,
+    )
+    return {ignored_key(r["kind"], r["raw_text"], r.get("customer_raw")) for r in rows}
+
+
 def list_unmatched_names(
     db: Client, tenant_id: str, kind: NameKind | None = None
 ) -> list[dict[str, Any]]:
@@ -165,8 +200,10 @@ def list_unmatched_names(
 
     製品は (顧客先, 商品名) の組ごとに返す。製品の別名は顧客単位なので、別名を登録するには
     顧客が照合できている必要がある（`customer_id` が None なら先に顧客の対応付けが要る）。
+    「対象外」にした表記（`daily_report_ignored_names`、#489）は返さない。
     """
     matcher = load_matcher(db, tenant_id)
+    ignored = fetch_ignored_keys(db, tenant_id)
     unmatched: list[dict[str, Any]] = []
     for stat in fetch_name_stats(db, tenant_id):
         stat_kind = stat["kind"]
@@ -174,6 +211,8 @@ def list_unmatched_names(
             continue
         raw_text = stat["raw_text"]
         customer_raw = stat.get("customer_raw")
+        if ignored_key(stat_kind, raw_text, customer_raw) in ignored:
+            continue
         if matcher.is_matched(stat_kind, raw_text, customer_raw):
             continue
         item: dict[str, Any] = {
@@ -194,3 +233,51 @@ def list_unmatched_names(
     unmatched.sort(key=lambda i: i["last_work_date"] or "", reverse=True)
     unmatched.sort(key=lambda i: i["entry_count"], reverse=True)
     return unmatched
+
+
+# 日報の明細のうち、表記の確認用に返す列（未照合キューで表記をクリックしたとき）
+_ENTRY_COLUMNS = (
+    "id, sheet_name, row_no, work_date, customer_raw, product_raw, process_raw, "
+    "equipment_raw, worker_raw, processed_qty, defect_qty, good_qty"
+)
+# 明細の列名（daily_report_entries）。表記の種別ごと
+_ENTRY_RAW_COLUMN: dict[str, str] = {
+    "equipment": "equipment_raw",
+    "process": "process_raw",
+    "customer": "customer_raw",
+    "product": "product_raw",
+}
+
+
+def list_name_entries(
+    db: Client,
+    tenant_id: str,
+    kind: NameKind,
+    raw_text: str,
+    customer_raw: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """表記が使われている日報の明細を加工日の新しい順に返す（未照合キュー #489 の確認用）。
+
+    製品は未照合キューと同じく (顧客先, 商品名) の組で絞る（顧客先が空欄なら NULL の行）。
+    """
+    query = (
+        db.table(SupabaseTableName.DAILY_REPORT_ENTRIES.value)
+        .select(_ENTRY_COLUMNS)
+        .eq("tenant_id", tenant_id)
+        .eq(_ENTRY_RAW_COLUMN[kind], raw_text)
+    )
+    if kind == "product":
+        query = (
+            query.eq("customer_raw", customer_raw)
+            if customer_raw is not None
+            else query.is_("customer_raw", "null")
+        )
+    result = (
+        query.order("work_date", desc=True, nullsfirst=False)
+        .order("sheet_name", desc=True)
+        .order("row_no", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return cast(list[dict[str, Any]], result.data or [])

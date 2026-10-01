@@ -101,6 +101,9 @@ CI（`.github/workflows/ci-frontend.yml`）にも `Unit tests (Vitest)` ステ�
 - **認証状態は `src/test-utils/supabase.ts`** で制御。`createClient` を各テストで
   `vi.mock` し直さない。
 - 日付ロジックのテストは端末タイムゾーン非依存に書く（ローカル深夜の `new Date(y, m, d)` を使う等）。
+- マスタの読み込み中に `disabled` になるボタン（コンボボックスのトリガー等）は、`findByRole` が無効な状態の
+  要素も返すので、`await waitFor(() => expect(trigger).toBeEnabled())` してからクリックする（無効なボタンの
+  クリックは何も起きず、後続の `findByRole("option")` がタイムアウトする）。
 
 ## テスト基盤をメンテナンスするときの注意（Issue #340 の構築時にハマった点）
 
@@ -117,5 +120,12 @@ CI（`.github/workflows/ci-frontend.yml`）にも `Unit tests (Vitest)` ステ�
   `No QueryClient set` になる。`screen` / `waitFor` / `within` などは名前を挙げて re-export する。
 - **jsdom 未実装の DOM API は `vitest.setup.ts` でスタブ**する。Radix UI（Select / Tabs 等）は
   `matchMedia` / `ResizeObserver` / `scrollIntoView` / `*PointerCapture` を参照する。
+- **`nwsapi`（jsdom の CSS セレクタエンジン）は 2.2.28 以上にする**（Issue #489）。2.2.27 は
+  `element.matches(":modal")` が `isFullscreen` → `matchesNative` → `node.matches`（＝nwsapi 自身）と
+  再帰し、スタックオーバーフローを try/catch で握りつぶして返るため1回が非常に遅い。floating-ui
+  （Radix の Popover / Popper 系）は位置計算のたびに `matches(":modal")` を呼ぶので、**Popover を開くだけで
+  1回10〜20秒**かかり、`userEvent.click` / `findByRole` が 5 秒でタイムアウトする。2.2.28 で再入ガードが入った。
+  jsdom の依存（`^2.2.12`）なので `package-lock.json` だけで決まる。lockfile を作り直すときは
+  `npm ls nwsapi` で版を確認する
 - **CI は `.github/workflows/ci-frontend.yml` の `Unit tests (Vitest)` ステップ**で
   `npm run test` を実行する（lint → tsc → **test** → build の順）。

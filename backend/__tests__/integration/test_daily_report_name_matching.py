@@ -6,6 +6,7 @@ Integration テスト: 日報の名寄せと別名辞書 (Issue #488)
 - 別名辞書（equipment / process / customer）の RLS（所属テナントのみ読み書き・created_by の強制）
 - product_name_aliases に source='daily_report' を登録できること
 - API 経由で別名を登録すると、明細を書き換えずに未照合の一覧から外れること
+- 対象外の表記（daily_report_ignored_names、#489）の RLS・UNIQUE と、未照合の一覧からの除外
 
 実行:
   supabase start
@@ -133,6 +134,7 @@ def tenants(admin_db, auth_user_id):
     for tenant in ids.values():
         tid = tenant["id"]
         for table in (
+            "daily_report_ignored_names",
             "equipment_name_aliases",
             "process_name_aliases",
             "customer_name_aliases",
@@ -372,3 +374,115 @@ class TestNameMatchingApi:
         assert history == [
             {"source": "daily_report", "source_order_label_snapshot": "日報からの登録"}
         ]
+
+
+@pytest.mark.integration
+class TestIgnoredNames:
+    """「対象外」にした表記 (Issue #489)。"""
+
+    def _row(self, tenant, auth_user_id, **overrides):
+        return {
+            "tenant_id": tenant["id"],
+            "kind": "product",
+            "raw_text": "試作品",
+            "customer_raw": None,
+            "created_by": auth_user_id,
+            **overrides,
+        }
+
+    def test_rls_and_unique(
+        self, admin_db, real_supabase_client, auth_user_id, auth_token, tenants
+    ):
+        own, other = tenants["own"], tenants["other"]
+        table = real_supabase_client.table("daily_report_ignored_names")
+
+        table.insert(self._row(own, auth_user_id)).execute()
+        # 顧客先が違えば別の行（製品は (顧客先, 商品名) の組）
+        table.insert(self._row(own, auth_user_id, customer_raw="顧客A")).execute()
+
+        # 顧客先が空欄（NULL）同士も重複として弾く
+        with pytest.raises(APIError) as exc:
+            table.insert(self._row(own, auth_user_id)).execute()
+        assert exc.value.code == "23505"
+
+        # 顧客先は製品のときだけ持てる
+        with pytest.raises(APIError):
+            table.insert(
+                self._row(own, auth_user_id, kind="process", customer_raw="顧客A")
+            ).execute()
+
+        with pytest.raises(APIError):
+            table.insert(self._row(other, auth_user_id)).execute()
+        with pytest.raises(APIError):
+            table.insert(
+                self._row(
+                    own, auth_user_id, raw_text="別の表記", created_by=str(uuid.uuid4())
+                )
+            ).execute()
+
+        admin_db.table("daily_report_ignored_names").insert(
+            self._row(other, auth_user_id)
+        ).execute()
+        visible = _rows(table.select("tenant_id").execute())
+        assert {r["tenant_id"] for r in visible} == {own["id"]}
+
+    def test_api_ignore_and_entries(self, admin_db, auth_token, tenants):
+        own = tenants["own"]
+        _insert_entries(admin_db, own, ENTRY_ROWS)
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+
+        def unmatched():
+            res = client.get("/daily-reports/unmatched-names", headers=headers)
+            assert res.status_code == 200
+            return [(i["kind"], i["raw_text"], i["customer_raw"]) for i in res.json()]
+
+        # 表記が使われている明細（製品は顧客先との組で絞る）
+        res = client.get(
+            "/daily-reports/name-entries",
+            params={
+                "kind": "product",
+                "raw_text": "短いピン",
+                "customer_raw": "未登録の顧客",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 200
+        assert [(e["work_date"], e["processed_qty"]) for e in res.json()] == [
+            ("2026-09-05", 10)
+        ]
+
+        res = client.get("/daily-reports/process-names", headers=headers)
+        assert res.json() == ["カシメ"]
+
+        res = client.post(
+            "/daily-reports/ignored-names",
+            json={
+                "kind": "product",
+                "raw_text": "短いピン",
+                "customer_raw": "未登録の顧客",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 201, res.text
+        ignored_id = res.json()["id"]
+        assert ("product", "短いピン", "未登録の顧客") not in unmatched()
+        assert ("product", "短いピン", "サンプル工業") in unmatched()
+
+        res = client.post(
+            "/daily-reports/ignored-names",
+            json={
+                "kind": "product",
+                "raw_text": "短いピン",
+                "customer_raw": "未登録の顧客",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 409
+
+        # 解除すればキューに戻る
+        res = client.delete(
+            f"/daily-reports/ignored-names/{ignored_id}", headers=headers
+        )
+        assert res.status_code == 200
+        assert ("product", "短いピン", "未登録の顧客") in unmatched()
