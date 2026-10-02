@@ -124,6 +124,18 @@ class TestMatchEquipment:
         assert matcher.match_equipment("組 立") == NameMatch(3, "exact")
         assert matcher.match_equipment("フィルター組立機") is None
 
+    def test_same_name_equipments(self):
+        """同名の設備（Issue #501）は設備名では照合せず、台帳番号・呼称で照合する"""
+        matcher = _matcher(
+            equipments=[
+                EquipmentRef(id=1, name="15Tプレス", short_name="A15t(1)", ledger_no=1),
+                EquipmentRef(id=2, name="15Tプレス", short_name="A15t(2)", ledger_no=2),
+            ]
+        )
+        assert matcher.match_equipment("15Tプレス") is None
+        assert matcher.match_equipment("15t 2号機") == NameMatch(2, "ledger_no")
+        assert matcher.match_equipment("A15t(1)") == NameMatch(1, "exact")
+
     def test_alias_takes_precedence_over_ledger_no(self):
         matcher = _matcher(
             equipments=self.EQUIPMENTS,

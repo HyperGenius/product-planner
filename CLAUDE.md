@@ -187,15 +187,19 @@ cd backend && ruff check . && mypy .
   確度判明時に上書きされる」、`_mark_superseded_orders` では supersede 対象外。表示は受注詳細で「－」、
   一覧ではバッジ無し
 - **設備台帳（`equipments.ledger_no` 等、Issue #486）**: 設備マスタは顧客の設備台帳が正典で、日報の `〇〇t N号機` の
-  `N` を `ledger_no` で照合する。`equipments` の UNIQUE は `(tenant_id, name)` と `(tenant_id, ledger_no)`（部分）の2本で、
-  ルーターは制約名で振り分けて 409 `duplicate_equipment_name` / `duplicate_ledger_no` を返す。設備と同名の1台グループが
-  初期移行で作られているので、**設備名を一括で変えるときは同名1台グループも合わせる**。名称の入れ替え・玉突きは UNIQUE を
-  踏むので一時名を経由する（`scripts/equipment_ledger/apply_equipment_ledger.py` の `order_renames()`）。
+  `N` を `ledger_no` で照合する。`equipments` の UNIQUE は `(tenant_id, ledger_no)`（部分）と表示名（後述）の2本で、
+  ルーターは制約名で振り分けて 409 `duplicate_ledger_no` / `duplicate_display_name` を返す。設備と同名の1台グループが
+  初期移行で作られているので、**設備名を一括で変えるときは同名1台グループも合わせる**。表示名・グループ名の入れ替え・玉突きは
+  UNIQUE を踏むので一時名を経由する（`scripts/equipment_ledger/apply_equipment_ledger.py` の `order_renames()`）。
   台帳の実データは `scripts/equipment_ledger/_data/`（git 管理外）に置き、リポジトリ・テストに入れない
+  - **設備名 `name` は一意ではない**（台帳に同名の設備がある。Issue #501）。一意なのは表示名 `COALESCE(short_name, name)`
+    （式インデックス `equipments_tenant_id_display_name_key`、409 `duplicate_display_name`）で、同名の設備は呼称で区別する。
+    設備を名前で引く処理（ON CONFLICT・名称→ID の辞書・対応付け）を書くときは、同名が複数ある前提で表示名で引くか、
+    複数当たったら確定しない。名称と呼称を変えるときは1回の UPDATE でまとめて書く（別々に書くと途中で表示名の UNIQUE を踏みうる）
   - **呼称（`equipments.short_name`）**: `name` は台帳の正式名称で長いので、画面に設備名を出すときは
     「呼称があれば呼称、無ければ `name`」の表示名を使う（Backend `equipment_display_name()` /
-    Frontend `equipmentDisplayName()`。`equipment.name` を直接描画しない）。呼称も `(tenant_id, short_name)` の部分
-    UNIQUE（409 `duplicate_short_name`）。ガントは設備名ではなく**設備グループ名**を出すので、1台グループの名前は呼称に揃える
+    Frontend `equipmentDisplayName()`。`equipment.name` を直接描画しない）。同名の設備を見分ける補足（正式名称・メーカー・
+    製造番号）は `equipmentDetailLabel()`。ガントは設備名ではなく**設備グループ名**を出すので、1台グループの名前は呼称に揃える
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）

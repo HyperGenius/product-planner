@@ -5,7 +5,9 @@ import type { Equipment } from "@/types/equipment"
 
 import {
   EMPTY_LEDGER_FORM,
+  equipmentDetailLabel,
   equipmentDisplayName,
+  equipmentSearchKeywords,
   equipmentSaveErrorMessage,
   ledgerFormFromEquipment,
   parseLedgerForm,
@@ -92,14 +94,36 @@ describe("parseLedgerForm", () => {
   })
 })
 
+describe("equipmentDetailLabel", () => {
+  it("呼称があるときは正式名称・メーカー・製造番号を補足に出す（同名の設備を見分ける）", () => {
+    const equipment = {
+      ...eq(1, "15Tシングルクランクプレス", 1),
+      short_name: "A15t(1)",
+      maker: "メーカーA",
+      serial_no: "S-1",
+    }
+    expect(equipmentDetailLabel(equipment)).toBe("15Tシングルクランクプレス ／ メーカーA ／ 製造No.S-1")
+  })
+
+  it("呼称が無ければ正式名称は表示名と同じなので出さない", () => {
+    expect(equipmentDetailLabel({ ...eq(1, "自動組立機"), maker: "メーカーB" })).toBe("メーカーB")
+    expect(equipmentDetailLabel(eq(1, "自動組立機"))).toBeNull()
+  })
+})
+
+describe("equipmentSearchKeywords", () => {
+  it("正式名称・呼称・メーカー・製造番号を検索対象にする", () => {
+    const equipment = { ...eq(1, "15Tプレス"), short_name: "A15t(1)", maker: "メーカーA" }
+    expect(equipmentSearchKeywords(equipment)).toEqual(["15Tプレス", "A15t(1)", "メーカーA"])
+  })
+})
+
 describe("equipmentSaveErrorMessage", () => {
   it("409 の error コードで文言を出し分ける", () => {
     const ledger = new ApiError(409, { detail: { error: "duplicate_ledger_no" } })
-    const name = new ApiError(409, { detail: { error: "duplicate_equipment_name" } })
-    const shortName = new ApiError(409, { detail: { error: "duplicate_short_name" } })
+    const displayName = new ApiError(409, { detail: { error: "duplicate_display_name" } })
     expect(equipmentSaveErrorMessage(ledger, "失敗")).toContain("台帳番号")
-    expect(equipmentSaveErrorMessage(name, "失敗")).toContain("名前")
-    expect(equipmentSaveErrorMessage(shortName, "失敗")).toContain("呼称")
+    expect(equipmentSaveErrorMessage(displayName, "失敗")).toContain("呼称を入力して区別")
   })
 
   it("それ以外は既定の文言", () => {

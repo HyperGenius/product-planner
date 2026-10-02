@@ -10,22 +10,29 @@
   - 既存レコードと台帳の対応は次の優先順で決める
       1. 既に `ledger_no` が設定済みの設備（再実行・中断後の再実行で同じ設備に当たる）
       2. 対応表（--mapping）の「旧名称 → 台帳番号」
-      3. 台帳の名称と同名で `ledger_no` 未設定の設備
+      3. 台帳の名称と同名で `ledger_no` 未設定の設備（該当が1台だけで、台帳にもその名称が1行だけの
+         場合に限る。同名の設備が複数あると決められないので対応表での指定を求める）
   - どれにも当たらない台帳の設備は新規登録する（設備グループには所属させない）
   - 台帳に無い既存設備（「汎用設備グループ」等）は変更しない（`ledger_no` は NULL のまま）
-  - 台帳の名称に変わる設備は、旧名称（対応表の `current_name`。無ければ現在の設備名）を
-    呼称 `short_name` として残す。画面表示は呼称が優先されるため、長い正式名称で表示が冗長に
-    ならない。呼称が既に設定済み（画面での手動設定を含む）の設備は呼称を変更しない
+  - 呼称 `short_name` は、既に設定済み（画面での手動設定を含む）なら変更しない。未設定なら
+    台帳 CSV の `short_name` 列（任意）を設定し、それも無く台帳の名称に変わる設備は旧名称（対応表の
+    `current_name`。無ければ現在の設備名）を呼称として残す。画面表示は呼称が優先されるため、
+    長い正式名称で表示が冗長にならない
+  - 設備名 `name` は一意ではない（台帳に同名の設備がある。Issue #501）。一意なのは表示名
+    `COALESCE(short_name, name)` なので、同名の設備を新規登録するときは台帳 CSV の `short_name` 列で
+    呼称を指定する（指定しないと表示名の重複でエラーにする）
   - 設備と同名（旧名称・台帳の名称・呼称のいずれか）でメンバーがその設備1台だけの設備グループは、
     設備の表示名（呼称、無ければ台帳の名称）に名称を揃える（初期移行で設備ごとに同名のグループを
     作っているため。ガントチャートはグループ名を表示する）。グループ構成は変更しない。
     旧版のスクリプトで台帳の名称に変えてしまったグループは、再実行で呼称に戻る
 
-`equipments` / `equipment_groups` は `(tenant_id, name)` が UNIQUE のため、名称の入れ替え
-（A→B, B→A）や玉突きは一時名（`__ledger_tmp__<id>`）を経由して反映する。
+`equipments` は表示名 `(tenant_id, COALESCE(short_name, name))`、`equipment_groups` は
+`(tenant_id, name)` が UNIQUE のため、表示名・グループ名の入れ替え（A→B, B→A）や玉突きは
+一時名（`__ledger_tmp__<id>`。設備は呼称に入れる）を経由して反映する。設備の名称と呼称は
+1回の UPDATE でまとめて書き込む（表示名が変わらない名称変更は一時名を経由しない）。
 
 CSV（UTF-8。Excel の BOM 付きも可）:
-  台帳 (--csv):      ledger_no,name,maker,model,manufactured_on,serial_no,note
+  台帳 (--csv):      ledger_no,name,maker,model,manufactured_on,serial_no,note[,short_name]
   対応表 (--mapping): current_name,ledger_no
 
 Usage:
@@ -55,7 +62,8 @@ from supabase import Client, create_client  # type: ignore
 
 TEMP_NAME_PREFIX = "__ledger_tmp__"
 
-LEDGER_CSV_COLUMNS = (
+# 台帳から equipments へ反映する列
+LEDGER_FIELDS = (
     "ledger_no",
     "name",
     "maker",
@@ -64,10 +72,9 @@ LEDGER_CSV_COLUMNS = (
     "serial_no",
     "note",
 )
+# 台帳 CSV の列。short_name（呼称）は任意で、呼称が未設定の設備にだけ設定する
+LEDGER_CSV_COLUMNS = (*LEDGER_FIELDS, "short_name")
 MAPPING_CSV_COLUMNS = ("current_name", "ledger_no")
-
-# 台帳から equipments へ反映する列
-LEDGER_FIELDS = LEDGER_CSV_COLUMNS
 
 _EQUIPMENT_SELECT = "id, short_name, " + ", ".join(LEDGER_FIELDS)
 
@@ -87,9 +94,15 @@ class LedgerEntry:
     manufactured_on: str | None = None
     serial_no: str | None = None
     note: str | None = None
+    short_name: str | None = None
 
     def as_fields(self) -> dict[str, Any]:
+        """台帳の列（呼称を含まない）"""
         return {f: getattr(self, f) for f in LEDGER_FIELDS}
+
+    @property
+    def display_name(self) -> str:
+        return self.short_name or self.name
 
 
 @dataclass
@@ -107,8 +120,8 @@ class LedgerPlan:
 
     updates: list[EquipmentChange] = field(default_factory=list)
     inserts: list[LedgerEntry] = field(default_factory=list)
-    # (設備ID, 書き込む名前) を実行順に並べたもの（一時名を経由する場合を含む）
-    equipment_rename_steps: list[tuple[int, str]] = field(default_factory=list)
+    # (設備ID, 書き込む name / short_name) を実行順に並べたもの（呼称に一時名を経由する場合を含む）
+    equipment_name_steps: list[tuple[int, dict[str, Any]]] = field(default_factory=list)
     # グループID → (旧名称, 新名称)
     group_renames: dict[int, tuple[str, str]] = field(default_factory=dict)
     group_rename_steps: list[tuple[int, str]] = field(default_factory=list)
@@ -164,15 +177,20 @@ def _read_csv_rows(path: str, required: tuple[str, ...]) -> list[dict[str, str]]
 
 
 def load_ledger_csv(path: str) -> list[LedgerEntry]:
-    """台帳 CSV を読み込む。台帳番号・名称の重複はエラー。"""
+    """台帳 CSV を読み込む。台帳番号の重複はエラー（名称は同名の設備があるため重複してよい）。"""
     entries: list[LedgerEntry] = []
     for i, row in enumerate(_read_csv_rows(path, ("ledger_no", "name")), start=2):
         where = f"{os.path.basename(path)} {i}行目"
         name = _clean(row.get("name"))
         if name is None:
             raise LedgerError(f"{where}: name が空です")
-        if name.startswith(TEMP_NAME_PREFIX):
-            raise LedgerError(f"{where}: name に {TEMP_NAME_PREFIX} は使えません")
+        short_name = _clean(row.get("short_name"))
+        if name.startswith(TEMP_NAME_PREFIX) or (
+            short_name and short_name.startswith(TEMP_NAME_PREFIX)
+        ):
+            raise LedgerError(
+                f"{where}: name / short_name に {TEMP_NAME_PREFIX} は使えません"
+            )
         entries.append(
             LedgerEntry(
                 ledger_no=_parse_ledger_no(row.get("ledger_no"), where),
@@ -182,10 +200,10 @@ def load_ledger_csv(path: str) -> list[LedgerEntry]:
                 manufactured_on=_clean(row.get("manufactured_on")),
                 serial_no=_clean(row.get("serial_no")),
                 note=_clean(row.get("note")),
+                short_name=short_name,
             )
         )
     _raise_if_duplicated([e.ledger_no for e in entries], "台帳の ledger_no")
-    _raise_if_duplicated([e.name for e in entries], "台帳の name")
     return entries
 
 
@@ -217,7 +235,7 @@ def _raise_if_duplicated(values: list[Any], label: str) -> None:
 def order_renames(
     current_names: dict[int, str], targets: dict[int, str]
 ) -> list[tuple[int, str]]:
-    """UNIQUE (tenant_id, name) を途中で踏まない名称変更の実行順を返す。
+    """UNIQUE（設備は表示名、グループは名称）を途中で踏まない名称変更の実行順を返す。
 
     変更先の名前を（変更対象の）別レコードが現に使っている場合だけ、先に一時名へ退避する。
     退避しないものを先に反映して名前を空けてから、退避したものを最終名へ反映する。
@@ -243,11 +261,23 @@ def _duplicated_final_names(
 Matched = list[tuple[LedgerEntry, dict[str, Any]]]
 
 
+def _display_name(equipment: dict[str, Any]) -> str:
+    """表示名（呼称、無ければ設備名）。DB の UNIQUE (tenant_id, COALESCE(short_name, name)) と揃える"""
+    return equipment.get("short_name") or equipment["name"]
+
+
+def _find_by_name(name: str, equipments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """対応表の旧名称に当たる設備。表示名の一致（一意）を優先し、無ければ設備名の一致（複数あり得る）"""
+    by_display = [e for e in equipments if _display_name(e) == name]
+    return by_display or [e for e in equipments if e["name"] == name]
+
+
 def _resolve_equipment(
     entry: LedgerEntry,
     mapping: dict[int, str],
     by_ledger: dict[int, dict[str, Any]],
-    by_name: dict[str, dict[str, Any]],
+    equipments: list[dict[str, Any]],
+    ledger_name_counts: Counter[str],
     errors: list[str],
 ) -> dict[str, Any] | None:
     """台帳の1行に対応する既存設備を決める（モジュール docstring の優先順）。無ければ None"""
@@ -256,15 +286,25 @@ def _resolve_equipment(
     if no not in mapping:
         if linked:
             return linked
-        named = by_name.get(entry.name)
-        return named if named and not named.get("ledger_no") else None
+        same_name = [
+            e for e in equipments if e["name"] == entry.name and not e.get("ledger_no")
+        ]
+        if not same_name:
+            return None
+        if len(same_name) > 1 or ledger_name_counts[entry.name] > 1:
+            errors.append(
+                f"台帳番号 {no}（{entry.name}）に対応する既存の設備を名称から決められません"
+                "（同名の設備が複数あります）。対応表で指定してください"
+            )
+            return None
+        return same_name[0]
 
     old_name = mapping[no]
-    named = by_name.get(old_name)
+    named = _find_by_name(old_name, equipments)
     if linked:
-        if named and named["id"] != linked["id"]:
+        if named and all(e["id"] != linked["id"] for e in named):
             errors.append(
-                f"台帳番号 {no} は既に設備「{linked['name']}」に設定済みですが、"
+                f"台帳番号 {no} は既に設備「{_display_name(linked)}」に設定済みですが、"
                 f"対応表では「{old_name}」が指定されています"
             )
         return linked
@@ -273,12 +313,18 @@ def _resolve_equipment(
             f"対応表の設備「{old_name}」（台帳番号 {no}）が設備マスタにありません"
         )
         return None
-    if named.get("ledger_no"):
+    if len(named) > 1:
         errors.append(
-            f"設備「{old_name}」は既に台帳番号 {named['ledger_no']} に"
+            f"対応表の設備「{old_name}」（台帳番号 {no}）に当たる設備が複数あります。"
+            "同名の設備は呼称で指定してください"
+        )
+        return None
+    if named[0].get("ledger_no"):
+        errors.append(
+            f"設備「{old_name}」は既に台帳番号 {named[0]['ledger_no']} に"
             f"対応付け済みです（対応表では {no}）"
         )
-    return named
+    return named[0]
 
 
 def _match_ledger(
@@ -288,35 +334,73 @@ def _match_ledger(
     errors: list[str],
 ) -> Matched:
     by_ledger = {e["ledger_no"]: e for e in equipments if e.get("ledger_no")}
-    by_name = {e["name"]: e for e in equipments}
+    ledger_name_counts = Counter(e.name for e in ledger)
     matched: Matched = []
     matched_ids: set[int] = set()
     for entry in ledger:
-        eq = _resolve_equipment(entry, mapping, by_ledger, by_name, errors)
+        eq = _resolve_equipment(
+            entry, mapping, by_ledger, equipments, ledger_name_counts, errors
+        )
         if eq is None:
             continue
         if eq["id"] in matched_ids:
-            errors.append(f"設備「{eq['name']}」が複数の台帳番号に対応付けられています")
+            errors.append(
+                f"設備「{_display_name(eq)}」が複数の台帳番号に対応付けられています"
+            )
             continue
         matched_ids.add(eq["id"])
         matched.append((entry, eq))
     return matched
 
 
-def _short_name_to_set(
+def _final_short_name(
     entry: LedgerEntry, eq: dict[str, Any], mapping: dict[int, str]
 ) -> str | None:
-    """台帳の名称に変わる設備に、旧名称を呼称として設定する場合はその値を返す。
+    """反映後の呼称。
 
-    旧名称は対応表の旧名称を優先する（旧版のスクリプトで設備名が既に台帳の名称へ変わった後の
-    再実行でも、対応表から旧名称を復元できる）。呼称が設定済みなら上書きしない。
+    設定済みの呼称は上書きしない（中断で一時名のまま残った呼称は未設定とみなす）。未設定なら台帳 CSV の
+    呼称、それも無く台帳の名称に変わる設備は旧名称を呼称にする。旧名称は対応表の旧名称を優先する
+    （旧版のスクリプトで設備名が既に台帳の名称へ変わった後の再実行でも、対応表から旧名称を復元できる）。
     """
-    if eq.get("short_name"):
-        return None
+    current = eq.get("short_name")
+    if current and not current.startswith(TEMP_NAME_PREFIX):
+        return current
+    if entry.short_name:
+        return entry.short_name
     old_name = mapping.get(entry.ledger_no) or eq["name"]
     if old_name == entry.name or old_name.startswith(TEMP_NAME_PREFIX):
         return None
     return old_name
+
+
+def _equipment_name_steps(
+    equipments: list[dict[str, Any]], targets: dict[int, dict[str, Any]]
+) -> list[tuple[int, dict[str, Any]]]:
+    """設備の name / short_name を書き込む順序。表示名の UNIQUE を途中で踏まないようにする。
+
+    表示名が変わらない設備はいつ書いても衝突しないので先に書く。表示名が変わる設備は
+    `order_renames()` の順に従い、退避が必要なものは呼称に一時名を入れてから最終値を書く。
+    """
+    by_id = {e["id"]: e for e in equipments}
+    current = {e["id"]: _display_name(e) for e in equipments}
+    final = {
+        i: f.get("short_name", by_id[i].get("short_name"))
+        or f.get("name", by_id[i]["name"])
+        for i, f in targets.items()
+    }
+    steps = [(i, f) for i, f in targets.items() if current[i] == final[i]]
+    parked: set[int] = set()
+    for i, display in order_renames(current, final):
+        if display.startswith(TEMP_NAME_PREFIX):
+            parked.add(i)
+            steps.append((i, {"short_name": display}))
+        elif i in parked:
+            # 一時名を入れた呼称を必ず戻す（呼称が変わらない設備でも書く）
+            short_name = targets[i].get("short_name", by_id[i].get("short_name"))
+            steps.append((i, {**targets[i], "short_name": short_name}))
+        else:
+            steps.append((i, targets[i]))
+    return steps
 
 
 def _group_rename_targets(
@@ -384,47 +468,45 @@ def build_plan(
     matched_nos = {entry.ledger_no for entry, _ in matched}
 
     plan.warnings = [
-        f"設備「{eq['name']}」の台帳番号 {eq['ledger_no']} は台帳にありません（変更しません）"
+        f"設備「{_display_name(eq)}」の台帳番号 {eq['ledger_no']} は台帳にありません（変更しません）"
         for eq in equipments
         if eq.get("ledger_no") and eq["ledger_no"] not in ledger_nos
     ]
     plan.inserts = [e for e in ledger if e.ledger_no not in matched_nos]
     plan.untouched_equipments = sorted(
-        e["name"] for e in equipments if e["id"] not in matched_ids
+        _display_name(e) for e in equipments if e["id"] not in matched_ids
     )
 
-    # --- 設備の更新と名称変更 ---
-    current_names = {e["id"]: e["name"] for e in equipments}
+    # --- 設備の更新と名称・呼称の変更 ---
     # 反映後の呼称（設備ID → 呼称）
     short_names: dict[int, str | None] = {
         e["id"]: e.get("short_name") for e in equipments
     }
-    name_targets: dict[int, str] = {}
+    final_names = {e["id"]: e["name"] for e in equipments}
+    name_targets: dict[int, dict[str, Any]] = {}
     for entry, eq in matched:
         changes = {k: v for k, v in entry.as_fields().items() if eq.get(k) != v}
-        short_name = _short_name_to_set(entry, eq, mapping)
-        if short_name:
+        short_name = _final_short_name(entry, eq, mapping)
+        short_names[eq["id"]] = short_name
+        if short_name != eq.get("short_name"):
             changes["short_name"] = short_name
-            short_names[eq["id"]] = short_name
         if changes:
             plan.updates.append(EquipmentChange(eq["id"], eq["name"], changes))
         if "name" in changes:
-            name_targets[eq["id"]] = entry.name
+            final_names[eq["id"]] = entry.name
+        name_fields = {k: v for k, v in changes.items() if k in ("name", "short_name")}
+        if name_fields:
+            name_targets[eq["id"]] = name_fields
 
+    final_display_names = [
+        short_names[i] or name for i, name in final_names.items()
+    ] + [e.display_name for e in plan.inserts]
     errors += [
-        f"反映後に設備名「{name}」が重複します（台帳に対応しない既存設備と同名の可能性。"
-        "対応表を見直してください）"
-        for name in _duplicated_final_names(
-            current_names, name_targets, [e.name for e in plan.inserts]
-        )
-    ]
-
-    duplicated_short_names = [
-        n for n, c in Counter(n for n in short_names.values() if n).items() if c > 1
-    ]
-    errors += [
-        f"反映後に呼称「{name}」が重複します（既に別の設備がその呼称を使っています）"
-        for name in duplicated_short_names
+        f"反映後に設備の表示名（呼称、無ければ設備名）「{name}」が重複します"
+        "（同名の設備は台帳 CSV の short_name 列で呼称を指定してください。台帳に対応しない"
+        "既存設備や設定済みの呼称と重なる場合は対応表・呼称を見直してください）"
+        for name, count in Counter(final_display_names).items()
+        if count > 1
     ]
 
     # --- 1対1の同名設備グループの名称変更 ---
@@ -438,7 +520,7 @@ def build_plan(
     if errors:
         raise LedgerError("台帳を反映できません:\n  - " + "\n  - ".join(errors))
 
-    plan.equipment_rename_steps = order_renames(current_names, name_targets)
+    plan.equipment_name_steps = _equipment_name_steps(equipments, name_targets)
     plan.group_renames = {
         gid: (group_current[gid], name) for gid, name in group_targets.items()
     }
@@ -461,7 +543,8 @@ def format_plan(plan: LedgerPlan) -> str:
                 lines.append(f"      {k}: {v}")
     lines.append(f"■ 新規登録: {len(plan.inserts)} 件")
     for e in plan.inserts:
-        lines.append(f"  - [台帳番号 {e.ledger_no}] {e.name}")
+        short_name = f"（呼称: {e.short_name}）" if e.short_name else ""
+        lines.append(f"  - [台帳番号 {e.ledger_no}] {e.name}{short_name}")
     if plan.inserts:
         lines.append(
             "    ※ 新規登録した設備はどの設備グループにも属しません。"
@@ -526,24 +609,25 @@ def apply_plan(client: Client, tenant_id: str, plan: LedgerPlan) -> None:
     equipments = client.table("equipments")
     groups = client.table("equipment_groups")
 
-    # 1. 台帳番号・台帳の列・呼称（名称以外）
+    # 1. 台帳番号・台帳の列（名称・呼称以外）
     for u in plan.updates:
-        fields = {k: v for k, v in u.changes.items() if k != "name"}
+        fields = {k: v for k, v in u.changes.items() if k not in ("name", "short_name")}
         if fields:
             equipments.update(fields).eq("id", u.id).eq(
                 "tenant_id", tenant_id
             ).execute()
 
-    # 2. 設備名（一時名を経由する順序）
-    for eq_id, name in plan.equipment_rename_steps:
-        equipments.update({"name": name}).eq("id", eq_id).eq(
-            "tenant_id", tenant_id
-        ).execute()
+    # 2. 設備名・呼称（表示名の UNIQUE を踏まないよう一時名を経由する順序）
+    for eq_id, fields in plan.equipment_name_steps:
+        equipments.update(fields).eq("id", eq_id).eq("tenant_id", tenant_id).execute()
 
     # 3. 台帳にあってマスタに無い設備
     if plan.inserts:
         equipments.insert(
-            [{**e.as_fields(), "tenant_id": tenant_id} for e in plan.inserts]
+            [
+                {**e.as_fields(), "short_name": e.short_name, "tenant_id": tenant_id}
+                for e in plan.inserts
+            ]
         ).execute()
 
     # 4. 1台だけの同名設備グループ

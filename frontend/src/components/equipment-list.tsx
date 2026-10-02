@@ -1,7 +1,7 @@
 /* frontend/src/components/equipment-list.tsx */
 "use client"
 
-import { equipmentDisplayName } from "@/lib/equipment-utils"
+import { equipmentDetailLabel, equipmentDisplayName } from "@/lib/equipment-utils"
 import { Equipment } from "@/types/equipment"
 
 interface EquipmentListProps {
@@ -53,7 +53,15 @@ export function EquipmentList({
                                     className="cursor-pointer"
                                     onClick={(e) => e.stopPropagation()}
                                 />
-                                <span className="text-sm">{equipmentDisplayName(equipment)}</span>
+                                <div className="min-w-0">
+                                    <span className="text-sm">{equipmentDisplayName(equipment)}</span>
+                                    {/* 同名の設備（Issue #501）を見分けるための補足 */}
+                                    {equipmentDetailLabel(equipment) && (
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {equipmentDetailLabel(equipment)}
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ))

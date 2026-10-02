@@ -10,7 +10,7 @@ Usage:
 Note:
     各テーブルのユニーク制約に基づいてupsertを実行します:
     - equipment_groups: (tenant_id, name)
-    - equipments: (tenant_id, name)
+    - equipments: 設備名は一意ではない（Issue #501）ため、同名の設備を select して無ければ insert する
     - equipment_group_members: (equipment_group_id, equipment_id)
     - products: (tenant_id, code)
     - process_routings: (product_id, sequence_order)
@@ -87,6 +87,30 @@ def resolve_path(scenario_name: str) -> str:
     return base_path
 
 
+def _get_or_create_equipment(client: Client, tenant_id: str, name: str) -> int:
+    """同名の設備があればその ID、無ければ作成して ID を返す。
+
+    設備名は一意ではない（同名の設備は呼称で区別する、Issue #501）ので ON CONFLICT は使えない。
+    """
+    existing = (
+        client.table("equipments")
+        .select("id")
+        .eq("tenant_id", tenant_id)
+        .eq("name", name)
+        .order("id")
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]["id"]  # type: ignore
+    created = (
+        client.table("equipments")
+        .insert({"name": name, "tenant_id": tenant_id})
+        .execute()
+    )
+    return created.data[0]["id"]  # type: ignore
+
+
 def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, int]:
     """
     設備グループと設備をインポートする
@@ -125,16 +149,8 @@ def import_groups(client: Client, tenant_id: str, base_path: str) -> dict[str, i
         for machine_name in machine_names:
             # 設備を作成（重複チェック、upsert）
             if machine_name not in equipment_map:
-                equipment_response = (
-                    client.table("equipments")
-                    .upsert(
-                        {"name": machine_name, "tenant_id": tenant_id},
-                        on_conflict="tenant_id, name",
-                    )
-                    .execute()
-                )
-                equipment_id = equipment_response.data[0]["id"]  # type: ignore
-                equipment_map[machine_name] = equipment_id  # type: ignore
+                equipment_id = _get_or_create_equipment(client, tenant_id, machine_name)
+                equipment_map[machine_name] = equipment_id
                 print(f"    ✓ Created equipment: {machine_name} (ID: {equipment_id})")
             else:
                 equipment_id = equipment_map[machine_name]

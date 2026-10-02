@@ -13,9 +13,36 @@ export function equipmentDisplayName(equipment: Pick<Equipment, "name" | "short_
   return equipment.short_name || equipment.name
 }
 
-const compareName = (a: Equipment, b: Equipment) => a.name.localeCompare(b.name, "ja")
+/**
+ * 表示名の補足（正式名称・メーカー・製造番号）。設備名は一意ではなく同名の設備があるので
+ * （Issue #501）、選択肢で表示名の下に出して見分けられるようにする。補足が無ければ null。
+ * 正式名称は呼称があるとき（表示名が設備名と異なるとき）だけ出す
+ */
+export function equipmentDetailLabel(
+  equipment: Pick<Equipment, "name" | "short_name" | "maker" | "serial_no">,
+): string | null {
+  const parts = [
+    equipment.short_name ? equipment.name : null,
+    equipment.maker,
+    equipment.serial_no ? `製造No.${equipment.serial_no}` : null,
+  ].filter((part): part is string => !!part)
+  return parts.length > 0 ? parts.join(" ／ ") : null
+}
+
+/** 設備の検索対象の文字列（表示名・正式名称・メーカー・製造番号） */
+export function equipmentSearchKeywords(
+  equipment: Pick<Equipment, "name" | "short_name" | "maker" | "serial_no">,
+): string[] {
+  return [equipment.name, equipment.short_name, equipment.maker, equipment.serial_no].filter(
+    (k): k is string => !!k,
+  )
+}
+
 const compareDisplayName = (a: Equipment, b: Equipment) =>
   equipmentDisplayName(a).localeCompare(equipmentDisplayName(b), "ja")
+// 設備名は同名があり得る（Issue #501）ので、同名同士は表示名（呼称）順にする
+const compareName = (a: Equipment, b: Equipment) =>
+  a.name.localeCompare(b.name, "ja") || compareDisplayName(a, b)
 
 /**
  * 設備一覧の並び替え（Issue #486）。
@@ -97,12 +124,16 @@ export function parseLedgerForm(form: LedgerFormValues): LedgerFormParseResult {
   }
 }
 
-/** 設備の作成・更新失敗時のトースト文言。重複（409）はどの項目が重複したかを出し分ける */
+/**
+ * 設備の作成・更新失敗時のトースト文言。重複（409）はどの項目が重複したかを出し分ける。
+ * 設備名は一意ではなく、一意なのは表示名（呼称、無ければ設備名。Issue #501）
+ */
 export function equipmentSaveErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.errorCode === "duplicate_ledger_no") return "同じ台帳番号の設備が既に登録されています"
-    if (error.errorCode === "duplicate_short_name") return "同じ呼称の設備が既に登録されています"
-    if (error.errorCode === "duplicate_equipment_name") return "同じ名前の設備が既に登録されています"
+    if (error.errorCode === "duplicate_display_name") {
+      return "同じ名前（呼称）の設備が既に登録されています。他の設備と重ならない呼称を入力して区別してください"
+    }
   }
   return fallback
 }

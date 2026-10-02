@@ -51,7 +51,17 @@ class TestUtils:
 class TestImporters:
     """インポート処理のロジックテスト"""
 
+    @staticmethod
+    def _existing_equipments(mock_db, data):
+        """`select("id").eq().eq().order().limit().execute()` の結果（同名の既存設備）を設定する"""
+        (
+            mock_db[
+                "table"
+            ].select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value
+        ).data = data
+
     def test_import_groups(self, mock_db):
+        self._existing_equipments(mock_db, [])
         test_data = [{"name": "Group1", "machines": ["Machine1"]}]
 
         with patch("scripts.seed_scenario.load_json", return_value=test_data):
@@ -60,6 +70,21 @@ class TestImporters:
         assert "Group1" in result
         # upsertが呼ばれたかを確認
         assert mock_db["table"].upsert.called
+        # 設備名は一意ではない（Issue #501）ので、同名の設備が無ければ insert する
+        mock_db["table"].insert.assert_called_once_with(
+            {"name": "Machine1", "tenant_id": "tenant-1"}
+        )
+
+    def test_import_groups_reuses_existing_equipment(self, mock_db):
+        self._existing_equipments(mock_db, [{"id": 42}])
+        test_data = [{"name": "Group1", "machines": ["Machine1"]}]
+
+        with patch("scripts.seed_scenario.load_json", return_value=test_data):
+            import_groups(mock_db["client"], "tenant-1", "/path")
+
+        mock_db["table"].insert.assert_not_called()
+        member = mock_db["table"].upsert.call_args_list[-1].args[0]
+        assert member["equipment_id"] == 42
 
     def test_import_products(self, mock_db):
         # このテスト固有のID設定

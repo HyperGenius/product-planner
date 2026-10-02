@@ -15,7 +15,8 @@ backend/scripts/migrate/migrate_from_json.py
      (machine_name が equipment_groups.name と一致しない場合は equipment_group_id = NULL)
 
 冪等性:
-  - equipment_groups / equipments は (tenant_id, name) でupsert
+  - equipment_groups は (tenant_id, name) でupsert
+  - equipments は設備名が一意ではない（Issue #501）ため、同名の設備を select して無ければ insert
   - equipment_group_members は (equipment_group_id, equipment_id) でupsert
   - products は tenant内で同名の製品が存在する場合スキップ
   - process_routings は (product_id, sequence_order) でupsert
@@ -262,13 +263,22 @@ def import_equipments(client: Client, tenant_id: str) -> dict[str, int]:
 
     for row in data:
         name: str = row["name"]
-        res = (
+        existing = (
             client.table("equipments")
-            .upsert(
-                {"name": name, "tenant_id": tenant_id}, on_conflict="tenant_id, name"
-            )
+            .select("id")
+            .eq("tenant_id", tenant_id)
+            .eq("name", name)
+            .order("id")
+            .limit(1)
             .execute()
         )
+        res = existing
+        if not existing.data:
+            res = (
+                client.table("equipments")
+                .insert({"name": name, "tenant_id": tenant_id})
+                .execute()
+            )
         eq_id: int = res.data[0]["id"]  # type: ignore
         equipment_map[name] = eq_id
         print(f"  ✓ {name} (ID: {eq_id})")
