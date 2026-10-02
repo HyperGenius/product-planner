@@ -16,7 +16,12 @@ import { useCustomers } from "@/hooks/use-customers"
 import { useEquipments } from "@/hooks/use-equipments"
 import { useProducts } from "@/hooks/use-products"
 import { useMasterProcessNames } from "@/hooks/use-daily-report-names"
-import { equipmentDisplayName, sortEquipments } from "@/lib/equipment-utils"
+import {
+  equipmentDetailLabel,
+  equipmentDisplayName,
+  equipmentSearchKeywords,
+  sortEquipments,
+} from "@/lib/equipment-utils"
 import { cn } from "@/lib/utils"
 import type { ProductCandidate } from "@/types/daily-report-names"
 
@@ -29,6 +34,8 @@ interface TargetOption {
   id: number
   label: string
   hint?: string
+  /** label の下に小さく出す補足（同名の設備を見分ける正式名称・メーカー等） */
+  description?: string
   /** 検索対象の文字列（label・hint 以外。品番・正式名称等） */
   keywords?: string[]
 }
@@ -110,7 +117,14 @@ function TargetCombobox({
                           selectedId === option.id ? "opacity-100" : "opacity-0",
                         )}
                       />
-                      <span className="truncate">{option.label}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate">{option.label}</span>
+                        {option.description && (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {option.description}
+                          </span>
+                        )}
+                      </span>
                       {option.hint && (
                         <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
                           {option.hint}
@@ -145,7 +159,8 @@ export function EquipmentPicker({
     id: e.id,
     label: equipmentDisplayName(e),
     hint: e.ledger_no != null ? `台帳No.${e.ledger_no}` : undefined,
-    keywords: [e.name, e.short_name ?? ""],
+    description: equipmentDetailLabel(e) ?? undefined,
+    keywords: equipmentSearchKeywords(e),
   }))
   return (
     <TargetCombobox
@@ -153,7 +168,7 @@ export function EquipmentPicker({
       groups={[{ options }]}
       triggerLabel={triggerLabel}
       loading={isLoading}
-      searchPlaceholder="設備名・呼称・台帳番号で検索..."
+      searchPlaceholder="設備名・呼称・台帳番号・メーカーで検索..."
       emptyText="設備が見つかりません"
     />
   )

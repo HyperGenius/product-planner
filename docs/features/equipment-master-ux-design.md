@@ -140,8 +140,7 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 現場で使う短い名前（例: 「ワシノ25t」）を**呼称** `short_name` として持つ（マイグレーション
 `20261002000000_add_short_name_to_equipments.sql`）。
 
-- `short_name text` は NULL 可。空白だけの値は CHECK で禁止（API は前後の空白を除去し、空欄を NULL にする）。
-  表示で設備を見分けられるよう `(tenant_id, short_name)` の部分 UNIQUE（`short_name IS NOT NULL`）を張る
+- `short_name text` は NULL 可。空白だけの値は CHECK で禁止（API は前後の空白を除去し、空欄を NULL にする）
 - **画面表示は「呼称があれば呼称、無ければ `name`」**。Backend は `equipment_display_name()`（`equipment_repo.py`）、
   Frontend は `equipmentDisplayName()`（`lib/equipment-utils.ts`）に集約し、両者の規則を揃える
   - スケジュール取得（`GET /production-schedules` 等の `equipment_name`）・シミュ結果の `equipment_name`
@@ -151,19 +150,38 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
   （台帳反映スクリプトが揃える。後述）
 - `name`（正式名称）は台帳との照合・設備マスタ画面での確認用に残す
 
+### 一意性: 設備名ではなく表示名を一意にする（Issue #501）
+
+顧客の台帳には**同名の設備が複数ある**（例: 同じ「15Tシングルクランクプレス」が5台あり、同じメーカーの数台は
+製造番号だけが異なる）。現場は呼称（例: `メーカーA 15t(1)` / `メーカーA 15t(2)`）で区別している。
+そのため `name` の UNIQUE はやめ、**画面に出す名前（表示名）`COALESCE(short_name, name)` をテナント内で一意**にする
+（マイグレーション `20261007000000_unique_equipment_display_name.sql`、式インデックス
+`equipments_tenant_id_display_name_key`。`short_name` の部分 UNIQUE はこれに包含されるので削除した）。
+
+- 同名の設備は2台目以降に呼称が必須になる（全設備に呼称を必須化はしない）
+- 「設備Aの呼称＝設備B（呼称なし）の設備名」のような、画面上で見分けられない組み合わせも拒否される
+- 設備の識別はシステム内部が `id`、台帳・日報の照合が `ledger_no`、人が見るのが表示名。
+  日報の名寄せは設備名の一致で候補が複数なら照合しない（`daily_report_name_matcher.py`）ので、同名の設備は台帳番号・呼称・別名辞書で照合される
+- 正式名称に連番を付けて一意にする案（台帳と乖離する）・`(name, serial_no)` を一意にする案（製造番号は欠損があり、人が見分ける値でもない）は採らない
+- 設備名で ON CONFLICT していたシードスクリプト（`seed_scenario.py` / `migrate_from_json.py`）は、同名の設備を select して無ければ insert する
+
 ### API
 
 `POST /equipments` / `PATCH /equipments/{id}` は台帳の列をそのまま受け付ける（`EquipmentBase`）。
 呼称 `short_name` も同様に受け付ける。
-`equipments` の UNIQUE は `(tenant_id, name)`・`(tenant_id, ledger_no)`・`(tenant_id, short_name)` の3本で、違反時は **409** ＋
-`{"error": "duplicate_equipment_name" | "duplicate_ledger_no" | "duplicate_short_name", "message": <固定文言>}` を返す
-（制約名で判別し、生の制約名・例外文言はレスポンスに載せない）。
+`equipments` の UNIQUE は `(tenant_id, ledger_no)` と表示名 `(tenant_id, COALESCE(short_name, name))` の2本で、違反時は **409** ＋
+`{"error": "duplicate_ledger_no" | "duplicate_display_name", "message": <固定文言>}` を返す
+（制約名で判別し、生の制約名・例外文言はレスポンスに載せない）。`duplicate_display_name` の文言は呼称の入力を促す。
 
 ### 画面
 
 - 設備一覧に呼称・台帳番号・メーカー・型式・製造年月・製造番号・備考の列を表示。既定は台帳番号順（台帳番号の無い設備は末尾に名称順）で、
   「台帳番号」「呼称」（呼称が無い設備は設備名で比較）「設備名」の見出しで並び替えられる（`lib/equipment-utils.ts` の `sortEquipments()`）
 - 作成・編集ダイアログに呼称と設備台帳の欄を追加（台帳に無い設備は台帳番号を空欄）。409 はどの項目の重複かをトーストで出し分ける
+- 同名の設備を見分けられるよう、設備の選択肢（日報の未照合キューの `EquipmentPicker`）とグループのメンバー管理ダイアログ
+  （`EquipmentList`）は表示名の下に補足（呼称があるときの正式名称・メーカー・製造番号。`equipmentDetailLabel()`）を出す。
+  選択肢の検索は正式名称・呼称・メーカー・製造番号を対象にする（`equipmentSearchKeywords()`）。
+  設備名順の並び替えは同名同士を表示名順にする
 
 ### 台帳の反映（運用スクリプト）
 
@@ -173,15 +191,19 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 - 既存レコードは `id` を維持したまま名称・台帳の列を更新する（`production_schedules.equipment_id` / `equipment_group_members` の参照を壊さない）
 - 既存設備との対応は「設定済みの `ledger_no`」→「対応表（旧名称 → 台帳番号）」→「同名かつ `ledger_no` 未設定」の順で決め、
   どれにも当たらない台帳の設備は新規登録する。同じメーカー・同じトン数が複数台ある設備の対応は顧客に確認して対応表に書く
-- 台帳の名称に変わる設備は、旧名称（対応表の `current_name`。無ければ現在の設備名）を**呼称**として残す。
-  呼称が設定済み（画面での手動設定を含む）の設備は上書きしない
+  - 対応表の旧名称は表示名（呼称）を優先して引き、無ければ設備名で引く。同名の設備が複数当たる場合はエラー（呼称で指定する）
+  - 「同名かつ `ledger_no` 未設定」は、該当する既存設備が1台だけで、台帳にもその名称が1行だけのときに限る（それ以外はエラーにして対応表での指定を求める）
+- 呼称は、設定済み（画面での手動設定を含む）なら上書きしない。未設定なら台帳 CSV の `short_name` 列（任意）、それも無く
+  台帳の名称に変わる設備は旧名称（対応表の `current_name`。無ければ現在の設備名）を**呼称**として残す
+- 台帳に同名の設備がある場合、新規登録する設備には台帳 CSV の `short_name` 列で呼称を指定する（反映後の表示名が重複するとエラー）
 - 初期移行で設備ごとに同名のグループを作っているため、**メンバーがその設備1台だけの同名グループ**
   （旧名称・台帳の名称・呼称のいずれかと同名）は名称を設備の表示名（呼称、無ければ台帳の名称）に揃える。
   通常は旧名称＝呼称なのでグループ名は変わらない。旧版のスクリプト（呼称導入前）で台帳の名称に変えたグループと
   設備は、同じ対応表で再実行すると呼称が復元され、グループ名も呼称に戻る。
   グループ構成（どの工程でどの設備を使えるか）は台帳から読み取れないため変更しない
-- `(tenant_id, name)` が UNIQUE なので、名称の入れ替え・玉突きは一時名（`__ledger_tmp__<id>`）を経由する
-  （`order_renames()`）。台帳番号を名称変更より先に書き込むので、途中で失敗しても再実行で続きから反映できる
+- 設備は表示名、グループは名称が UNIQUE なので、入れ替え・玉突きは一時名（`__ledger_tmp__<id>`。設備は呼称に入れる）を経由する
+  （`order_renames()` / `_equipment_name_steps()`）。設備の名称と呼称は1回の UPDATE でまとめて書くので、旧名称が呼称に残る通常の
+  名称変更は表示名が変わらず一時名を経由しない。台帳番号を名称変更より先に書き込むので、途中で失敗しても再実行で続きから反映できる
 
 ---
 

@@ -174,7 +174,8 @@ function ShortNameField({
         autoComplete="off"
       />
       <p className="text-xs text-muted-foreground">
-        ガントチャート等の表示に使う短い名前です。空欄なら設備名を表示します
+        ガントチャート等の表示に使う短い名前です。空欄なら設備名を表示します。
+        同じ設備名の設備が既にある場合は、区別できる呼称を入力してください
       </p>
     </div>
   )

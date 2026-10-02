@@ -271,10 +271,15 @@ python scripts/issue_agent_token.py revoke --token-id <token_uuid>
 
 | ファイル | 列 |
 |---|---|
-| 台帳（`--csv`） | `ledger_no,name,maker,model,manufactured_on,serial_no,note`（`ledger_no` / `name` 必須。空欄は NULL） |
+| 台帳（`--csv`） | `ledger_no,name,maker,model,manufactured_on,serial_no,note[,short_name]`（`ledger_no` / `name` 必須。空欄は NULL。`name` は重複してよい） |
 | 対応表（`--mapping`） | `current_name,ledger_no`（既存設備の現在の名称 → 台帳番号。`current_name` は呼称として残る） |
 
-対応表に無い台帳の行は、同名の既存設備（台帳番号未設定）があればそれに対応付け、無ければ新規登録する。
+対応表に無い台帳の行は、同名の既存設備（台帳番号未設定）が1台だけあればそれに対応付け、無ければ新規登録する
+（同名の既存設備が複数ある・台帳に同名の行が複数ある場合はエラーにするので、対応表で指定する）。
+
+`short_name`（呼称、任意）は呼称が未設定の設備にだけ設定する。設備名は一意ではなく、一意なのは表示名（呼称、無ければ設備名。
+Issue #501）なので、**台帳に同名の設備があって新規登録する場合は `short_name` で区別できる呼称を指定する**
+（指定しないと表示名の重複でエラーになる）。
 
 ### 使い方
 

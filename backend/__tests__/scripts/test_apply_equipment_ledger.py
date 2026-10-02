@@ -1,8 +1,9 @@
 """
 apply_equipment_ledger.py のユニットテスト (Issue #486)
 
-呼称（short_name）の引き継ぎも含む。計画（build_plan）は純粋関数なので、計画をインメモリの設備・グループに順に適用する
-簡易シミュレータで「id が維持される」「UNIQUE (tenant_id, name) を途中で踏まない」
+呼称（short_name）の引き継ぎ・同名の設備（Issue #501）も含む。計画（build_plan）は純粋関数なので、
+計画をインメモリの設備・グループに順に適用する簡易シミュレータで「id が維持される」
+「UNIQUE（設備は表示名 COALESCE(short_name, name)、グループは名称）を途中で踏まない」
 「再実行で変更が出ない（冪等）」を確認する。フィクスチャは全てダミー値。
 """
 
@@ -56,27 +57,33 @@ def _simulate(
     equipments: list[dict[str, Any]],
     groups: list[dict[str, Any]],
 ) -> None:
-    """apply_plan と同じ順序でインメモリに適用し、各ステップで名前の一意性を検証する"""
+    """apply_plan と同じ順序でインメモリに適用し、各ステップで UNIQUE を検証する"""
     by_id = {e["id"]: e for e in equipments}
 
-    def assert_unique(rows: list[dict[str, Any]]) -> None:
-        names = [r["name"] for r in rows]
+    def assert_unique(names: list[str]) -> None:
         assert len(names) == len(set(names)), names
 
+    def assert_unique_display_names() -> None:
+        assert_unique([e.get("short_name") or e["name"] for e in equipments])
+
     for u in plan.updates:
-        by_id[u.id].update({k: v for k, v in u.changes.items() if k != "name"})
-    for eq_id, name in plan.equipment_rename_steps:
-        by_id[eq_id]["name"] = name
-        assert_unique(equipments)
+        by_id[u.id].update(
+            {k: v for k, v in u.changes.items() if k not in ("name", "short_name")}
+        )
+    for eq_id, fields in plan.equipment_name_steps:
+        by_id[eq_id].update(fields)
+        assert_unique_display_names()
     next_id = max(by_id, default=0) + 1
     for entry in plan.inserts:
-        equipments.append({"id": next_id, **entry.as_fields()})
+        equipments.append(
+            {"id": next_id, **entry.as_fields(), "short_name": entry.short_name}
+        )
         next_id += 1
-        assert_unique(equipments)
+        assert_unique_display_names()
     group_by_id = {g["id"]: g for g in groups}
     for group_id, name in plan.group_rename_steps:
         group_by_id[group_id]["name"] = name
-        assert_unique(groups)
+        assert_unique([g["name"] for g in groups])
 
 
 LEDGER = [
@@ -182,7 +189,7 @@ class TestBuildPlan:
         plan = build_plan(LEDGER[:1], {1: "メーカーA15t-1"}, equipments, groups)
         _simulate(plan, equipments, groups)
 
-        assert plan.equipment_rename_steps == []
+        assert plan.equipment_name_steps == [(101, {"short_name": "メーカーA15t-1"})]
         assert equipments[0]["short_name"] == "メーカーA15t-1"
         assert {g["id"]: g["name"] for g in groups} == {
             201: "メーカーA15t-1",
@@ -192,7 +199,7 @@ class TestBuildPlan:
     def test_rejects_short_name_collision(self):
         equipments = [_eq(101, "旧A"), _eq(102, "その他", short_name="旧A")]
 
-        with pytest.raises(LedgerError, match="呼称「旧A」が重複"):
+        with pytest.raises(LedgerError, match="表示名.*「旧A」が重複"):
             build_plan(LEDGER[:1], {1: "旧A"}, equipments, [])
 
     def test_does_not_rename_group_with_other_name(self):
@@ -234,7 +241,8 @@ class TestBuildPlan:
 
         assert plan.group_renames == {201: (f"{TEMP_NAME_PREFIX}201", "旧名")}
 
-    def test_swapping_names_goes_through_temp_name(self):
+    def test_swapping_names_keeps_display_names(self):
+        """名称の入れ替えでも旧名称が呼称に残り表示名は変わらないので、一時名を経由しない"""
         equipments = [_eq(101, "B"), _eq(102, "A")]
         groups = [_group(201, "B", 101), _group(202, "A", 102)]
         ledger = [LedgerEntry(1, "A"), LedgerEntry(2, "B")]
@@ -246,9 +254,60 @@ class TestBuildPlan:
         assert {e["id"]: e["short_name"] for e in equipments} == {101: "B", 102: "A"}
         # グループ名は呼称（＝旧名称）のまま
         assert {g["id"]: g["name"] for g in groups} == {201: "B", 202: "A"}
+        assert plan.equipment_name_steps == [
+            (101, {"name": "A", "short_name": "B"}),
+            (102, {"name": "B", "short_name": "A"}),
+        ]
+
+    def test_swapping_display_names_goes_through_temp_short_name(self):
+        """台帳 CSV の呼称で表示名が入れ替わる場合は、呼称に一時名を入れて UNIQUE を避ける"""
+        equipments = [_eq(101, "P"), _eq(102, "Q")]
+        groups = [_group(201, "P", 101), _group(202, "Q", 102)]
+        ledger = [
+            LedgerEntry(1, "15T", short_name="Q"),
+            LedgerEntry(2, "15T", short_name="P"),
+        ]
+
+        plan = build_plan(ledger, {1: "P", 2: "Q"}, equipments, groups)
+        _simulate(plan, equipments, groups)
+
+        assert {e["id"]: (e["name"], e["short_name"]) for e in equipments} == {
+            101: ("15T", "Q"),
+            102: ("15T", "P"),
+        }
         assert any(
-            n.startswith(TEMP_NAME_PREFIX) for _, n in plan.equipment_rename_steps
+            str(f.get("short_name", "")).startswith(TEMP_NAME_PREFIX)
+            for _, f in plan.equipment_name_steps
         )
+        # 1台グループも新しい呼称に揃う（グループ名の入れ替えも一時名を経由する）
+        assert {g["id"]: g["name"] for g in groups} == {201: "Q", 202: "P"}
+
+    def test_restores_short_name_after_parking_equipment_without_short_name(self):
+        """呼称の無い設備を一時名で退避した場合も、最後に呼称を元（NULL）に戻す"""
+        equipments = [
+            _eq(101, f"{TEMP_NAME_PREFIX}101", ledger_no=1),
+            _eq(102, "A", ledger_no=2),
+        ]
+        ledger = [LedgerEntry(1, "A"), LedgerEntry(2, "B", short_name="Z")]
+
+        plan = build_plan(ledger, {}, equipments, [])
+        _simulate(plan, equipments, [])
+
+        assert {e["id"]: (e["name"], e["short_name"]) for e in equipments} == {
+            101: ("A", None),
+            102: ("B", "Z"),
+        }
+
+    def test_resumes_from_temp_short_name(self):
+        """呼称が一時名のまま中断した設備は、再実行で呼称を設定し直す"""
+        equipments = [_eq(101, "旧A", short_name=f"{TEMP_NAME_PREFIX}101", ledger_no=1)]
+
+        plan = build_plan(
+            [LedgerEntry(1, "15T", short_name="A号")], {1: "旧A"}, equipments, []
+        )
+        _simulate(plan, equipments, [])
+
+        assert (equipments[0]["name"], equipments[0]["short_name"]) == ("15T", "A号")
 
     def test_auto_matches_same_name_without_mapping(self):
         equipments = [_eq(101, "15t 1号機")]
@@ -275,8 +334,8 @@ class TestBuildPlan:
                 [_eq(101, "旧A", ledger_no=5)],
                 "既に台帳番号 5 に対応付け済み",
             ),
-            # 台帳に対応しない既存設備と同名になる
-            ({1: "旧A"}, [_eq(101, "旧A"), _eq(102, "15t 1号機", ledger_no=7)], "重複"),
+            # 新規登録する設備の表示名が、台帳に対応しない既存設備と重なる
+            ({}, [_eq(102, "15t 1号機", ledger_no=7)], "表示名.*重複"),
         ],
     )
     def test_rejects_inconsistent_input(self, mapping, equipments, message):
@@ -289,6 +348,97 @@ class TestBuildPlan:
 
         with pytest.raises(LedgerError, match="設備グループ名"):
             build_plan(LEDGER[:1], {1: "旧A"}, equipments, groups)
+
+
+class TestSameNameEquipments:
+    """台帳に同名の設備がある場合（Issue #501）。設備名は一意ではなく、表示名で区別する"""
+
+    SAME_NAME_LEDGER = [
+        LedgerEntry(1, "15Tプレス", maker="メーカーA", serial_no="S-1"),
+        LedgerEntry(2, "15Tプレス", maker="メーカーA", serial_no="S-2"),
+    ]
+
+    def test_existing_equipments_become_same_name(self):
+        """対応表で対応付けた設備は旧名称が呼称に残るので、同名になっても区別できる"""
+        equipments = [_eq(101, "A15t(1)"), _eq(102, "A15t(2)")]
+
+        plan = build_plan(
+            self.SAME_NAME_LEDGER, {1: "A15t(1)", 2: "A15t(2)"}, equipments, []
+        )
+        _simulate(plan, equipments, [])
+
+        assert {e["id"]: (e["name"], e["short_name"]) for e in equipments} == {
+            101: ("15Tプレス", "A15t(1)"),
+            102: ("15Tプレス", "A15t(2)"),
+        }
+
+    def test_inserts_same_name_with_short_names_from_csv(self):
+        ledger = [
+            LedgerEntry(1, "15Tプレス", short_name="A15t(1)"),
+            LedgerEntry(2, "15Tプレス", short_name="A15t(2)"),
+        ]
+        equipments: list[dict[str, Any]] = []
+
+        plan = build_plan(ledger, {}, equipments, [])
+        _simulate(plan, equipments, [])
+
+        assert [(e["name"], e["short_name"]) for e in equipments] == [
+            ("15Tプレス", "A15t(1)"),
+            ("15Tプレス", "A15t(2)"),
+        ]
+
+    def test_rejects_same_name_inserts_without_short_name(self):
+        with pytest.raises(
+            LedgerError, match="表示名.*「15Tプレス」が重複.*short_name"
+        ):
+            build_plan(self.SAME_NAME_LEDGER, {}, [], [])
+
+    def test_csv_short_name_does_not_overwrite_existing_one(self):
+        equipments = [_eq(101, "旧A", short_name="A号")]
+
+        plan = build_plan(
+            [LedgerEntry(1, "15Tプレス", short_name="別名")], {1: "旧A"}, equipments, []
+        )
+
+        assert "short_name" not in plan.updates[0].changes
+
+    def test_rejects_auto_match_when_master_has_same_names(self):
+        """同名の設備が複数あると名称だけでは対応を決められない"""
+        equipments = [
+            _eq(101, "15Tプレス", short_name="a"),
+            _eq(102, "15Tプレス", short_name="b"),
+        ]
+
+        with pytest.raises(LedgerError, match="名称から決められません"):
+            build_plan(self.SAME_NAME_LEDGER[:1], {}, equipments, [])
+
+    def test_rejects_auto_match_when_ledger_has_same_names(self):
+        """台帳に同名の行が複数あると、既存の同名設備がどの行に当たるか決められない"""
+        equipments = [_eq(101, "15Tプレス")]
+
+        with pytest.raises(LedgerError, match="名称から決められません"):
+            build_plan(self.SAME_NAME_LEDGER, {}, equipments, [])
+
+    def test_mapping_resolves_by_short_name(self):
+        """対応表の旧名称は表示名（呼称）でも引ける。同名の設備を呼称で指定できる"""
+        equipments = [
+            _eq(101, "15Tプレス", short_name="a"),
+            _eq(102, "15Tプレス", short_name="b"),
+        ]
+
+        plan = build_plan(self.SAME_NAME_LEDGER, {1: "a", 2: "b"}, equipments, [])
+        _simulate(plan, equipments, [])
+
+        assert {e["id"]: e["ledger_no"] for e in equipments} == {101: 1, 102: 2}
+
+    def test_rejects_ambiguous_mapping_name(self):
+        equipments = [
+            _eq(101, "15Tプレス", short_name="a"),
+            _eq(102, "15Tプレス", short_name="b"),
+        ]
+
+        with pytest.raises(LedgerError, match="当たる設備が複数"):
+            build_plan(self.SAME_NAME_LEDGER[:1], {1: "15Tプレス"}, equipments, [])
 
 
 class TestOrderRenames:
@@ -317,6 +467,18 @@ class TestLoadCsv:
 
         assert entries == [
             LedgerEntry(1, "15t 1号機", maker="メーカーA", manufactured_on="1993年5月")
+        ]
+
+    def test_ledger_csv_allows_duplicate_names_with_short_name(self, tmp_path):
+        path = tmp_path / "ledger.csv"
+        path.write_text(
+            "ledger_no,name,short_name\n1,15Tプレス,A15t(1)\n2,15Tプレス,\n",
+            encoding="utf-8",
+        )
+
+        assert load_ledger_csv(str(path)) == [
+            LedgerEntry(1, "15Tプレス", short_name="A15t(1)"),
+            LedgerEntry(2, "15Tプレス"),
         ]
 
     def test_ledger_csv_rejects_duplicate_ledger_no(self, tmp_path):
@@ -426,10 +588,11 @@ class TestRun:
 
         run(self._args(tmp_path, dry_run=False), client=client)
 
+        client.tables["equipments"].update.assert_any_call({"ledger_no": 1})
+        # 名称と呼称は1回の UPDATE でまとめて書く（表示名「旧A」は変わらない）
         client.tables["equipments"].update.assert_any_call(
-            {"ledger_no": 1, "short_name": "旧A"}
+            {"name": "15t 1号機", "short_name": "旧A"}
         )
-        client.tables["equipments"].update.assert_any_call({"name": "15t 1号機"})
         # 1台グループは呼称（＝旧名称）と同名なので変更しない
         client.tables["equipment_groups"].update.assert_not_called()
 

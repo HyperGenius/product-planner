@@ -18,9 +18,10 @@ logger = get_logger(__name__)
 def _duplicate_equipment_conflict(e: DuplicateRecordError) -> HTTPException:
     """設備の一意制約違反を 409 Conflict へ変換する。
 
-    `equipments` の UNIQUE は (tenant_id, name)・(tenant_id, ledger_no)（Issue #486）・
-    (tenant_id, short_name) の3本。どれに当たったかは制約名で判別する。レスポンスに生の DB
-    制約名・例外文言は載せない（orders の `_duplicate_order_conflict_exception()` と同方針）。
+    `equipments` の UNIQUE は (tenant_id, ledger_no)（Issue #486）と表示名
+    (tenant_id, COALESCE(short_name, name))（Issue #501）の2本。設備名 `name` 自体は台帳に同名の
+    設備があるため一意ではなく、同名の設備は呼称で区別する。どれに当たったかは制約名で判別する。
+    レスポンスに生の DB 制約名・例外文言は載せない（orders の `_duplicate_order_conflict_exception()` と同方針）。
     """
     if e.constraint and "ledger_no" in e.constraint:
         return HTTPException(
@@ -30,19 +31,11 @@ def _duplicate_equipment_conflict(e: DuplicateRecordError) -> HTTPException:
                 "message": "同じ台帳番号の設備が既に登録されています",
             },
         )
-    if e.constraint and "short_name" in e.constraint:
-        return HTTPException(
-            status_code=409,
-            detail={
-                "error": "duplicate_short_name",
-                "message": "同じ呼称の設備が既に登録されています",
-            },
-        )
     return HTTPException(
         status_code=409,
         detail={
-            "error": "duplicate_equipment_name",
-            "message": "同じ名前の設備が既に登録されています",
+            "error": "duplicate_display_name",
+            "message": "同じ名前の設備が既に登録されています。呼称を入力して区別してください",
         },
     )
 

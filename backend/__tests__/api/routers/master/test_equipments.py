@@ -184,25 +184,32 @@ class TestEquipmentRouter:
         assert detail["error"] == "duplicate_ledger_no"
         assert "equipments_tenant_id_ledger_no_key" not in response.text
 
-    def test_create_equipment_duplicate_name_returns_409(self, headers, mock_repo):
-        """POST /: 設備名の重複は 409 duplicate_equipment_name"""
-        mock_repo.create.side_effect = DuplicateRecordError(
-            "dup",
-            constraint='duplicate key value violates unique constraint "equipments_tenant_id_name_key"',
-        )
-
-        response = client.post("/equipments", json={"name": "X"}, headers=headers)
-
-        assert response.status_code == 409
-        assert response.json()["detail"]["error"] == "duplicate_equipment_name"
-
-    def test_update_equipment_duplicate_short_name_returns_409(
+    def test_create_equipment_duplicate_display_name_returns_409(
         self, headers, mock_repo
     ):
-        """PATCH /{id}: 呼称の重複は 409 duplicate_short_name（制約名は返さない）"""
+        """POST /: 表示名（呼称、無ければ設備名）の重複は 409 duplicate_display_name"""
+        mock_repo.create.side_effect = DuplicateRecordError(
+            "dup",
+            constraint='duplicate key value violates unique constraint "equipments_tenant_id_display_name_key"',
+        )
+
+        response = client.post(
+            "/equipments", json={"name": "15Tシングルクランクプレス"}, headers=headers
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_display_name"
+        assert "呼称" in detail["message"]
+        assert "equipments_tenant_id_display_name_key" not in response.text
+
+    def test_update_equipment_duplicate_display_name_returns_409(
+        self, headers, mock_repo
+    ):
+        """PATCH /{id}: 呼称が他の設備の表示名と重なる場合も 409 duplicate_display_name"""
         mock_repo.update.side_effect = DuplicateRecordError(
             "dup",
-            constraint='duplicate key value violates unique constraint "equipments_tenant_id_short_name_key"',
+            constraint='duplicate key value violates unique constraint "equipments_tenant_id_display_name_key"',
         )
 
         response = client.patch(
@@ -212,8 +219,7 @@ class TestEquipmentRouter:
         )
 
         assert response.status_code == 409
-        assert response.json()["detail"]["error"] == "duplicate_short_name"
-        assert "equipments_tenant_id_short_name_key" not in response.text
+        assert response.json()["detail"]["error"] == "duplicate_display_name"
 
     @pytest.mark.parametrize(
         "short_name, expected", [(" 25tプレス ", "25tプレス"), ("  ", None), ("", None)]
