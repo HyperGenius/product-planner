@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { GanttChart } from "@/components/schedule/gantt-chart"
 import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
 import { useSchedules, useUpdateSchedule } from "@/hooks/use-schedules"
+import { useOrderProgressList } from "@/hooks/use-daily-report-progress"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
 import { useCalendars } from "@/hooks/use-calendars"
 import type { GanttViewMode, GroupByMode, Schedule } from "@/types/schedule"
@@ -76,6 +77,13 @@ export default function SchedulePage() {
     ...dateRange,
     equipment_group_id: equipmentGroupId,
   })
+
+  // 日報の実績による進捗（Issue #491）。表示中の受注をまとめて1リクエストで取得する
+  const scheduleOrderIds = useMemo(
+    () => (schedules ?? []).map((s) => s.order_id),
+    [schedules],
+  )
+  const { data: orderProgress } = useOrderProgressList(scheduleOrderIds)
 
   // 週次表示用カレンダーデータ（月跨ぎ対応のため2ヶ月分を取得）
   const weekStart = useMemo(() => startOfWeek(currentDate, { locale: ja }), [currentDate])
@@ -304,6 +312,14 @@ export default function SchedulePage() {
         </div>
       </div>
 
+      {/* 進捗表示の凡例（日報の進捗を一度でも計算したテナントのみ） */}
+      {orderProgress?.computed_at && (
+        <p className="mb-2 text-xs text-muted-foreground" style={{ width: viewWidth }}>
+          バーの暗い塗り＝日報の実績による進捗、赤枠＝計画の終了を過ぎて未完了の工程（
+          {format(new Date(orderProgress.computed_at), "M/d HH:mm", { locale: ja })} 時点の日報）
+        </p>
+      )}
+
       {/* メインエリア - ガントチャート */}
       <div
         className="rounded-lg border bg-card shadow-sm p-4"
@@ -339,6 +355,7 @@ export default function SchedulePage() {
             currentDate={currentDate}
             nonWorkingDays={nonWorkingDays}
             onTaskClick={handleTaskClick}
+            progress={orderProgress?.items}
           />
         ) : (
           <div className="flex h-96 items-center justify-center">

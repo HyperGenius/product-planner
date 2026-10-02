@@ -26,6 +26,7 @@ import { RequestApprovalConfirmDialog } from "@/components/orders/request-approv
 import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
+import { OrderProcessProgress } from "@/components/orders/order-process-progress"
 import {
   useOrder,
   useOrderAttachments,
@@ -331,6 +332,11 @@ export default function OrderDetailPage() {
               </div>
             </dl>
           </div>
+
+          {/* 工程の進捗（日報の実績の割り付け対象＝確定済み・生産中のみ。Issue #491） */}
+          {(order.status === "confirmed" || order.status === "in_progress") && (
+            <OrderProcessProgress orderId={order.id} />
+          )}
 
           {/* 差し戻し理由パネル (draft かつ 直近に差し戻された場合のみ) */}
           {isDraft && order.rejection_reason && (
