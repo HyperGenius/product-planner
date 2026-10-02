@@ -24,7 +24,7 @@ backend/app/
   routers/transaction/  # 業務データ API (注文・スケジュール)
     orders/             # 受注 API はパッケージ化済み（責務別ファイル、Issue #376）
   routers/tenant/       # テナントメンバー管理 API
-  routers/daily_reports/  # 日報の名寄せ・別名辞書・未照合キュー API（Issue #488 / #489）
+  routers/daily_reports/  # 日報の名寄せ・別名辞書・未照合キュー・進捗参照 API（Issue #488 / #489 / #490）
   repositories/         # Supabase データアクセス層
   scheduler_logic.py    # コアスケジューリングアルゴリズム
   services/             # カレンダー・シミュレーションサービス
@@ -142,6 +142,18 @@ cd backend && ruff check . && mypy .
     `DAILY_REPORT_NAME_EDITOR_ROLES` を揃える
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
+- **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は
+  `daily_report_allocation_service`。結果（`order_process_progress` / `daily_report_unallocated_actuals`）は**差分更新せず
+  テナント単位で全量を再計算し**、RPC `replace_daily_report_allocation` で丸ごと置き換える（`p_computed_at` より新しい結果が
+  あれば `'stale'`、現存する受注・工程・明細に JOIN して INSERT するので計算後に消えた行で失敗しない）。書き込みは service role
+  のみなので、**別名辞書の変更 API（ユーザー JWT）から同期的に再計算しない**（cron `compute-daily-report-progress` が
+  `parse-daily-reports` の直後に毎回回り、次の実行で反映される）。割り付けの候補は `confirmed` / `in_progress` の受注で、
+  加工日が受注日（`order_date` の JST 暦日）より前の実績は充当しない（出荷済みで候補から外れた受注の実績が後の受注を完了に
+  見せないため。未割当 `before_order_date` に残る）。詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
+- **マイグレーションの CHECK 制約名**: 列の CHECK（`status text CHECK (...)`）には Postgres が `<table>_<column>_check` という名前を
+  自動で付けるので、表の制約に同じ形の名前（例: `CONSTRAINT order_process_progress_completed_by_check`）を付けると
+  `already exists` で失敗する。ローカル DB へ手で適用するときは `psql --single-transaction -v ON_ERROR_STOP=1` で流す
+  （付けないと途中まで作られたテーブルが残る）
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。

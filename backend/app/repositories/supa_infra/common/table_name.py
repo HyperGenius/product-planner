@@ -29,3 +29,7 @@ class SupabaseTableName(Enum):
     CUSTOMER_NAME_ALIASES = "customer_name_aliases"
     DAILY_REPORT_ENTRIES = "daily_report_entries"
     DAILY_REPORT_IGNORED_NAMES = "daily_report_ignored_names"
+    DAILY_REPORT_SHEETS = "daily_report_sheets"
+    DAILY_REPORT_ALLOCATION_RUNS = "daily_report_allocation_runs"
+    DAILY_REPORT_UNALLOCATED_ACTUALS = "daily_report_unallocated_actuals"
+    ORDER_PROCESS_PROGRESS = "order_process_progress"
