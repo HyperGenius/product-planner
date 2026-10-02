@@ -150,6 +150,12 @@ cd backend && ruff check . && mypy .
   `parse-daily-reports` の直後に毎回回り、次の実行で反映される）。割り付けの候補は `confirmed` / `in_progress` の受注で、
   加工日が受注日（`order_date` の JST 暦日）より前の実績は充当しない（出荷済みで候補から外れた受注の実績が後の受注を完了に
   見せないため。未割当 `before_order_date` に残る）。詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
+  - **ガント・受注詳細への進捗表示（Issue #491）**: ガントは表示中の受注 ID をまとめて `GET /daily-reports/order-progress` で
+    1リクエスト取得し (`order_id`, `process_routing_id`) で結合する（スケジュール API には混ぜない）。遅れの基準の計画終了日時は
+    **バックエンドの `planned_end_datetime`（その工程の全セグメントの `end_datetime` の最大）を使う**。ガントは表示範囲の
+    セグメントしか取得しないので、フロントの手元のセグメントで求めると範囲外へ続く工程を誤って遅れにする。進捗の行が無い工程
+    （割り付け対象外の受注・未計算のテナント）は遅れにしない。表示規則は `lib/daily-report-progress-utils.ts` に集約し、
+    `src/gantt` には汎用の `GanttTask.progress` / `isDelayed` だけを足す（ドメイン知識を入れない）
 - **マイグレーションの CHECK 制約名**: 列の CHECK（`status text CHECK (...)`）には Postgres が `<table>_<column>_check` という名前を
   自動で付けるので、表の制約に同じ形の名前（例: `CONSTRAINT order_process_progress_completed_by_check`）を付けると
   `already exists` で失敗する。ローカル DB へ手で適用するときは `psql --single-transaction -v ON_ERROR_STOP=1` で流す

@@ -167,6 +167,7 @@ def tenants(admin_db, auth_user_id):
             "process_name_aliases",
             "daily_report_files",
             "agent_tokens",
+            "production_schedules",
             "orders",
             "process_routings",
             "products",
@@ -459,6 +460,22 @@ class TestProgressApi:
         own, other = tenants["own"], tenants["other"]
         _replace_entries(admin_db, own, ENTRY_ROWS, "2026-09-12T18:00:00+09:00")
         recompute_tenant_allocation(admin_db, own["id"])
+        # プレスのスケジュール（2セグメント）。計画の終了日時は最後のセグメントの終了
+        admin_db.table("production_schedules").insert(
+            [
+                {
+                    "tenant_id": own["id"],
+                    "order_id": own["orders"]["early"],
+                    "process_routing_id": own["routing_ids"]["プレス"],
+                    "start_datetime": start,
+                    "end_datetime": end,
+                }
+                for start, end in (
+                    ("2026-09-10T09:00:00+09:00", "2026-09-10T17:00:00+09:00"),
+                    ("2026-09-11T09:00:00+09:00", "2026-09-11T12:00:00+09:00"),
+                )
+            ]
+        ).execute()
         client = TestClient(app)
         headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
 
@@ -466,6 +483,14 @@ class TestProgressApi:
         assert res.status_code == 200
         body = res.json()
         assert body["computed_at"] is not None
+        assert {p["order_quantity"] for p in body["processes"]} == {100}
+        planned_ends = {
+            p["process_name"]: p["planned_end_datetime"] for p in body["processes"]
+        }
+        assert datetime.fromisoformat(planned_ends["プレス"]) == datetime.fromisoformat(
+            "2026-09-11T12:00:00+09:00"
+        )
+        assert planned_ends["カシメ"] is None
         assert [
             (p["sequence_order"], p["process_name"], p["good_qty"], p["status"])
             for p in body["processes"]

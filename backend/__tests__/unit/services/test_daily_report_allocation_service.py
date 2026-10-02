@@ -418,6 +418,7 @@ class TestFetch:
                 "good_qty": 0,
                 "status": "not_started",
                 "process_routings": {"sequence_order": 2, "process_name": "カシメ"},
+                "orders": {"quantity": 100},
             },
             {
                 "tenant_id": TENANT,
@@ -426,6 +427,7 @@ class TestFetch:
                 "good_qty": 5,
                 "status": "in_progress",
                 "process_routings": {"sequence_order": 1, "process_name": "プレス"},
+                "orders": {"quantity": 100},
             },
             {
                 "tenant_id": TENANT,
@@ -441,13 +443,71 @@ class TestFetch:
         result = service.fetch_order_progress(db, TENANT, [1])
 
         assert [
-            (r["process_routing_id"], r["sequence_order"], r["process_name"])
+            (
+                r["process_routing_id"],
+                r["sequence_order"],
+                r["process_name"],
+                r["order_quantity"],
+            )
             for r in result
         ] == [
-            (14, 1, "プレス"),
-            (13, 2, "カシメ"),
+            (14, 1, "プレス", 100),
+            (13, 2, "カシメ", 100),
         ]
         assert "process_routings" not in result[0]
+        assert "orders" not in result[0]
+        assert result[0]["planned_end_datetime"] is None
+
+    def test_fetch_order_progress_attaches_latest_planned_end_per_routing(self):
+        progress = [
+            {
+                "tenant_id": TENANT,
+                "order_id": 1,
+                "process_routing_id": 14,
+                "good_qty": 5,
+                "status": "in_progress",
+                "process_routings": {"sequence_order": 1, "process_name": "プレス"},
+                "orders": {"quantity": 100},
+            },
+            {
+                "tenant_id": TENANT,
+                "order_id": 1,
+                "process_routing_id": 13,
+                "good_qty": 0,
+                "status": "not_started",
+                "process_routings": {"sequence_order": 2, "process_name": "カシメ"},
+                "orders": {"quantity": 100},
+            },
+        ]
+
+        def schedule(schedule_id, routing_id, end, tenant=TENANT, order_id=1):
+            return {
+                "id": schedule_id,
+                "tenant_id": tenant,
+                "order_id": order_id,
+                "process_routing_id": routing_id,
+                "end_datetime": end,
+            }
+
+        schedules = [
+            # 日をまたぐ工程は複数のセグメントに分かれる。最後のセグメントの終了を使う
+            schedule(1, 14, "2026-09-10T08:00:00+00:00"),
+            schedule(2, 14, "2026-09-11T03:00:00Z"),
+            schedule(3, 14, "2026-09-09T08:00:00+00:00"),
+            # 他テナント・他の受注のスケジュールは使わない
+            schedule(4, 13, "2026-12-31T08:00:00+00:00", tenant=OTHER_TENANT),
+            schedule(5, 13, "2026-12-31T08:00:00+00:00", order_id=2),
+        ]
+        db = _fake_db(
+            {"order_process_progress": progress, "production_schedules": schedules}
+        )
+
+        result = service.fetch_order_progress(db, TENANT, [1])
+
+        assert {r["process_routing_id"]: r["planned_end_datetime"] for r in result} == {
+            14: datetime(2026, 9, 11, 3, 0, tzinfo=UTC),
+            13: None,
+        }
 
     def test_fetch_unallocated_actuals_attaches_entry_columns(self):
         rows = [

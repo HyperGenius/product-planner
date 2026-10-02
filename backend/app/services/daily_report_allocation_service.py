@@ -274,16 +274,19 @@ def recompute_all_tenants(db: Client) -> dict[str, int]:
 _PROGRESS_COLUMNS = (
     "order_id, process_routing_id, good_qty, first_actual_date, last_actual_date, "
     "status, completed_by, computed_at, "
-    "process_routings(sequence_order, process_name)"
+    "process_routings(sequence_order, process_name), orders(quantity)"
 )
 
 
 def _flatten_progress(row: dict[str, Any]) -> dict[str, Any]:
     routing = row.pop("process_routings", None) or {}
+    order = row.pop("orders", None) or {}
     return {
         **row,
         "sequence_order": routing.get("sequence_order"),
         "process_name": routing.get("process_name"),
+        # 進捗率（good_qty ÷ 受注数量）の分母。ガントチャートの塗り（Issue #491）
+        "order_quantity": order.get("quantity"),
     }
 
 
@@ -303,8 +306,45 @@ def fetch_order_progress(
         return query.order("order_id").order("process_routing_id")
 
     rows = [_flatten_progress(row) for row in fetch_all_rows(build_query)]
+    planned_ends = _fetch_planned_ends(db, tenant_id, order_ids)
+    for row in rows:
+        row["planned_end_datetime"] = planned_ends.get(
+            (row["order_id"], row["process_routing_id"])
+        )
     rows.sort(key=lambda r: (r["order_id"], r["sequence_order"] or 0))
     return rows
+
+
+def _fetch_planned_ends(
+    db: Client, tenant_id: str, order_ids: list[int] | None
+) -> dict[tuple[int, int], datetime]:
+    """受注×工程ごとの計画の終了日時（スケジュールのセグメントの `end_datetime` の最大）。
+
+    ガントチャートの遅れの判定（Issue #491）に使う。ガントは表示範囲のセグメントしか
+    取得しないので、範囲の外へ続く工程の終了日時はフロントでは求められない。
+    """
+    if order_ids is not None and not order_ids:
+        return {}
+
+    def build_query():
+        query = (
+            db.table(SupabaseTableName.PRODUCTION_SCHEDULES.value)
+            .select("id, order_id, process_routing_id, end_datetime")
+            .eq("tenant_id", tenant_id)
+        )
+        if order_ids is not None:
+            query = query.in_("order_id", order_ids)
+        return query.order("id")
+
+    ends: dict[tuple[int, int], datetime] = {}
+    for row in fetch_all_rows(build_query):
+        if row.get("end_datetime") is None or row.get("process_routing_id") is None:
+            continue
+        end = datetime.fromisoformat(str(row["end_datetime"]).replace("Z", "+00:00"))
+        key = (row["order_id"], row["process_routing_id"])
+        if key not in ends or end > ends[key]:
+            ends[key] = end
+    return ends
 
 
 def fetch_last_computed_at(db: Client, tenant_id: str) -> str | None:

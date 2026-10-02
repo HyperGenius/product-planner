@@ -14,6 +14,16 @@ import { ja } from 'date-fns/locale'
 import { GanttChart as GanttChartLib } from '@/gantt'
 import type { GanttTask } from '@/gantt'
 import type { Schedule, GanttViewMode, GroupByMode } from '@/types/schedule'
+import type { ProcessProgress } from '@/types/daily-report-progress'
+import {
+  formatActualDateRange,
+  formatProgressQuantity,
+  indexProgress,
+  isProgressDelayed,
+  progressKey,
+  progressRatio,
+  progressStatusLabel,
+} from '@/lib/daily-report-progress-utils'
 import {
   Tooltip,
   TooltipContent,
@@ -59,6 +69,11 @@ export interface GanttChartProps {
    * タスクバーがクリックされた際に発火するコールバック
    */
   onTaskClick?: (schedule: Schedule) => void
+  /**
+   * 日報の実績による受注×工程の進捗（Issue #491）。指定するとバーに進捗率の塗り・遅れの強調を付け、
+   * ツールチップに実績を出す。進捗の行が無い工程（割り付けの対象外の受注等）は現状どおりの表示
+   */
+  progress?: readonly ProcessProgress[]
 }
 
 /**
@@ -267,6 +282,57 @@ function transformSchedulesToGroupedTasks(
 }
 
 /**
+ * バーに進捗率・遅れを載せる。週次の集約バーは先頭セグメントの (受注, 工程) で引く
+ * （集約は同じ受注・工程名の単位なので、どのセグメントでも同じ進捗になる）。
+ * 進捗は工程単位なので、日次・月次で工程が複数のセグメントに分かれる場合は各セグメントに同じ進捗を出す
+ */
+function applyProgress(
+  tasks: GanttTask[],
+  scheduleMap: Map<string, Schedule>,
+  progressIndex: Map<string, ProcessProgress>,
+  now: Date,
+): GanttTask[] {
+  if (progressIndex.size === 0) return tasks
+  return tasks.map((task) => {
+    if (task.isGroupHeader) return task
+    const schedule = scheduleMap.get(task.id)
+    const progress = schedule
+      ? progressIndex.get(progressKey(schedule.order_id, schedule.process_routing_id))
+      : undefined
+    if (!progress) return task
+    return {
+      ...task,
+      progress: progressRatio(progress) ?? undefined,
+      isDelayed: isProgressDelayed(progress, now),
+    }
+  })
+}
+
+/** ツールチップの進捗の行（実績数量・初回／最終実績日・状態） */
+function ProgressTooltipLines({ progress, delayed }: { progress: ProcessProgress; delayed: boolean }) {
+  const ratio = progressRatio(progress)
+  const dateRange = formatActualDateRange(progress)
+  return (
+    <div className="mt-1 border-t border-background/30 pt-1">
+      <p>
+        状態: {progressStatusLabel(progress)}
+        {delayed && <span className="ml-1 font-semibold">（遅れ）</span>}
+      </p>
+      <p>
+        実績: {formatProgressQuantity(progress)}
+        {ratio !== null && progress.status !== 'completed' && ` (${Math.round(ratio * 100)}%)`}
+      </p>
+      {dateRange && <p>実績日: {dateRange}</p>}
+      {delayed && progress.planned_end_datetime && (
+        <p>
+          計画終了: {format(new Date(progress.planned_end_datetime), 'M/d HH:mm', { locale: ja })}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * ガントチャート表示コンポーネント（プロダクト固有ラッパー）
  *
  * バックエンドから取得したスケジュールデータを src/gantt の汎用ガントチャートに渡して表示する。
@@ -279,6 +345,7 @@ export function GanttChart({
   currentDate,
   nonWorkingDays,
   onTaskClick,
+  progress,
 }: GanttChartProps) {
   // タイムライン表示範囲の計算（表示モードに応じた前後を含む期間）
   const { rangeStart, rangeEnd } = useMemo(() => {
@@ -304,17 +371,32 @@ export function GanttChart({
     }
   }, [currentDate, viewMode])
 
-  const ganttTasks = useMemo(
-    () => transformSchedulesToGroupedTasks(tasks, groupBy, colorMode, viewMode),
-    [tasks, groupBy, colorMode, viewMode],
-  )
-
   // GanttTask.id → Schedule の逆引きマップ
   const scheduleMap = useMemo(() => {
     const map = new Map<string, Schedule>()
     tasks.forEach((s) => map.set(`schedule-${s.id}`, s))
     return map
   }, [tasks])
+
+  const progressIndex = useMemo(() => indexProgress(progress), [progress])
+
+  const ganttTasks = useMemo(
+    () =>
+      applyProgress(
+        transformSchedulesToGroupedTasks(tasks, groupBy, colorMode, viewMode),
+        scheduleMap,
+        progressIndex,
+        new Date(),
+      ),
+    [tasks, groupBy, colorMode, viewMode, scheduleMap, progressIndex],
+  )
+
+  const progressOf = (task: GanttTask): ProcessProgress | undefined => {
+    const schedule = scheduleMap.get(task.id)
+    return schedule
+      ? progressIndex.get(progressKey(schedule.order_id, schedule.process_routing_id))
+      : undefined
+  }
 
   const handleTaskClick = onTaskClick
     ? (task: GanttTask) => {
@@ -345,19 +427,25 @@ export function GanttChart({
       workHours={workHoursForLib}
       nonWorkingDays={nonWorkingDaysForLib}
       onTaskClick={handleTaskClick}
-      wrapTaskBar={(task: GanttTask, children) => (
-        <Tooltip>
-          <TooltipTrigger asChild>{children}</TooltipTrigger>
-          <TooltipContent>
-            <p className="font-semibold">{task.name}</p>
-            <p>
-              {task.isMilestone
-                ? format(task.start, 'MM/dd HH:mm', { locale: ja })
-                : `${format(task.start, 'HH:mm', { locale: ja })} - ${format(task.end, 'HH:mm', { locale: ja })}`}
-            </p>
-          </TooltipContent>
-        </Tooltip>
-      )}
+      wrapTaskBar={(task: GanttTask, children) => {
+        const taskProgress = task.isGroupHeader ? undefined : progressOf(task)
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>{children}</TooltipTrigger>
+            <TooltipContent>
+              <p className="font-semibold">{task.name}</p>
+              <p>
+                {task.isMilestone
+                  ? format(task.start, 'MM/dd HH:mm', { locale: ja })
+                  : `${format(task.start, 'HH:mm', { locale: ja })} - ${format(task.end, 'HH:mm', { locale: ja })}`}
+              </p>
+              {taskProgress && (
+                <ProgressTooltipLines progress={taskProgress} delayed={task.isDelayed === true} />
+              )}
+            </TooltipContent>
+          </Tooltip>
+        )
+      }}
     />
   )
 }

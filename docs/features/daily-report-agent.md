@@ -8,7 +8,8 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 「[日報のパースと明細の保存](#日報のパースと明細の保存issue-487)」に、名寄せと別名辞書（#488）は
 「[日報の名寄せと別名辞書](#日報の名寄せと別名辞書issue-488)」に、未照合キューの画面（#489）は
 「[未照合キューの画面](#未照合キューの画面issue-489)」に、受注への割り付けと進捗（#490）は
-「[受注への割り付けと進捗の算出](#受注への割り付けと進捗の算出issue-490)」に記載する。
+「[受注への割り付けと進捗の算出](#受注への割り付けと進捗の算出issue-490)」に、ガントチャート・受注詳細への進捗表示（#491）は
+「[ガントチャート・受注詳細への進捗表示](#ガントチャート受注詳細への進捗表示issue-491)」に記載する。
 
 ## 実装の進め方（サブIssue）
 
@@ -23,6 +24,7 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 | #488 | 名寄せ（設備・工程・顧客・製品）と別名辞書（Epic #485 の 3/6） | 本ドキュメントに記載 |
 | #489 | 未照合キューの画面（Epic #485 の 4/6） | 本ドキュメントに記載 |
 | #490 | 受注への割り付けと進捗の算出（Epic #485 の 5/6） | 本ドキュメントに記載 |
+| #491 | ガントチャート・受注詳細への進捗表示（Epic #485 の 6/6） | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -570,9 +572,47 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 
 | メソッド・パス | 内容 |
 |---|---|
-| `GET /orders/{order_id}/progress`（`routers/transaction/orders/progress.py`） | `{order_id, computed_at, processes: [...]}`。`processes` は工程順で、各行は `process_routing_id` / `sequence_order` / `process_name` / `good_qty` / `first_actual_date` / `last_actual_date` / `status` / `completed_by`。割り付けの対象外（確定済み・生産中以外）の受注は空配列、他テナント・存在しない受注は 404。`computed_at` は一度も計算していなければ `null` |
+| `GET /orders/{order_id}/progress`（`routers/transaction/orders/progress.py`） | `{order_id, computed_at, processes: [...]}`。`processes` は工程順で、各行は `process_routing_id` / `sequence_order` / `process_name` / `good_qty` / `order_quantity` / `first_actual_date` / `last_actual_date` / `status` / `completed_by` / `planned_end_datetime`（#491 で `order_quantity`・`planned_end_datetime` を追加）。割り付けの対象外（確定済み・生産中以外）の受注は空配列、他テナント・存在しない受注は 404。`computed_at` は一度も計算していなければ `null` |
 | `GET /daily-reports/order-progress?order_id=1&order_id=2`（`routers/daily_reports/progress.py`） | ガントチャート向けに複数受注をまとめて返す `{computed_at, items: [...]}`（`items` の各行は上と同じ＋`order_id`）。`order_id` 省略時は全件、指定は500件まで |
 | `GET /daily-reports/unallocated-actuals` | 未割当の実績を加工日の新しい順に。日報上の位置と表記（`sheet_name` / `row_no` / `customer_raw` / `product_raw` / `process_raw`）を添える |
+
+## ガントチャート・受注詳細への進捗表示（Issue #491）
+
+#490 で保存した受注×工程の進捗を、ガントチャート（`/schedule`）のバーと受注詳細の「工程の進捗」に表示する。
+
+### API（#490 の参照 API に列を追加）
+
+- スケジュール取得 API（`GET /production-schedules`）には進捗を含めず、ガントは表示中のスケジュールの受注 ID をまとめて
+  `GET /daily-reports/order-progress?order_id=...` で**1リクエスト**取得し、(`order_id`, `process_routing_id`) で結合する（N+1 にしない。
+  500件を超えるときはフロントで分割して並列に取得し結合する、`hooks/use-daily-report-progress.ts`）
+- `fetch_order_progress()`（`services/daily_report_allocation_service.py`）の各行に2列を追加
+  - `order_quantity`: 受注数量（`orders(quantity)` を埋め込み）。進捗率の分母
+  - `planned_end_datetime`: 計画の終了日時＝その受注×工程の `production_schedules` の `end_datetime` の最大（未スケジュールは `null`）。
+    ガントは表示範囲のセグメントしか取得しないので、範囲の外へ続く工程（週末をまたぐ等）の終了日時はフロントでは求められず、
+    表示中のセグメントだけで判定すると誤って遅れになるためバックエンドで求める
+
+### 表示の規則（`lib/daily-report-progress-utils.ts`）
+
+| 項目 | 規則 |
+|---|---|
+| 進捗率 | `good_qty ÷ order_quantity`（上限 100%）。`completed` は 100%（`later_process` も含む）。`not_started`・受注数量不明は塗らない（現状どおりの表示） |
+| 遅れ | `planned_end_datetime` を過ぎても `completed` でない工程（未着手を含む）。タイムスタンプ同士の比較なので端末の TZ に依存しない（JST 基準と同じ結果） |
+| 進捗の行が無い工程 | 割り付けの対象外（確定済み・生産中以外）の受注、一度も計算していないテナント等。塗り・遅れとも出さない（日報を使っていないテナントで全工程が遅れに見えないように） |
+
+- ガントのバー（`gantt/components/task-bar.tsx`）: `GanttTask.progress`（0〜1）の割合をバーの左から暗いレイヤーで塗り、
+  `GanttTask.isDelayed` で赤枠＋ラベルを赤字にする。マイルストーンは遅れ（ひし形を赤）だけ、グループヘッダーは何も出さない。
+  `src/gantt` はドメイン非依存のまま（進捗の算出・結合は `components/schedule/gantt-chart.tsx` の `progress` prop 側で行う）
+- 進捗は工程単位なので、日次・月次で工程が複数のセグメントに分かれる場合は各セグメントに同じ進捗を出す。週次の集約バーは先頭セグメントの (受注, 工程) で引く
+- ツールチップ: 状態・実績数量（`良品数 / 受注数量`、進行中は %）・初回〜最終実績日、遅れのときは計画終了日時
+- **後工程の実績から推定した完了**（日報に出てこない工程を含む）はバーでは区別せず（100% の塗り）、ツールチップ・受注詳細の状態を
+  「完了（後工程の実績から推定）」と表示して分かるようにした
+- **実績の設備が計画の設備と違う場合の印**は付けない（#490 で進捗に実績の設備を持たせていないため）
+- ガントの上に凡例と「何時点の日報か」（`computed_at`）を出す（一度も計算していないテナントでは出さない）
+
+### 受注詳細（`components/orders/order-process-progress.tsx`）
+
+- 確定済み・生産中の受注（割り付けの対象）でだけ「工程の進捗」カードを出す。`GET /orders/{order_id}/progress` で取得し、
+  工程・実績数量・状態（遅れのときは「遅れ」バッジ）・実績日を工程順に表示する
 
 ## テスト
 
@@ -622,9 +662,14 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 - `backend/__tests__/integration/test_daily_report_allocation.py`（`--run-integration`）: 実 DB での割り付けと保存、再計算の冪等性、
   別名辞書の追加・明細の置き換え・受注の出荷後の再計算、RPC の `stale` と消えた／他テナントの ID の除外、RLS（所属テナントのみ・
   書き込み不可・RPC 実行不可）、ユーザー JWT での進捗 API
+- #491: 上記の unit / integration テストに `order_quantity`・`planned_end_datetime`（複数セグメントの最大・他テナント／他の受注を使わない）を追加。
+  Frontend（Vitest + MSW）: `lib/daily-report-progress-utils.test.ts`（進捗率・遅れ・ラベル・日付の整形）、
+  `hooks/use-daily-report-progress.test.ts`（1リクエストへのまとめ・500件超の分割）、`gantt/components/task-bar.test.tsx`（塗り・遅れの強調）、
+  `components/schedule/gantt-chart.test.tsx`（進捗の結合・週次の集約バー・ツールチップ）、`components/orders/order-process-progress.test.tsx`
 
 ## スコープ外（PoC ではやらない）
 
-- ガントチャートへの進捗表示（#491）。Excel のパースと明細の保存は #487、マスタとの照合は #488、未照合キューの画面は #489、受注への割り付けと進捗の算出は #490 で実装済み
+- 実績の設備と計画の設備の違いの表示（進捗に実績の設備を持たせていない）。Excel のパースと明細の保存は #487、マスタとの照合は #488、
+  未照合キューの画面は #489、受注への割り付けと進捗の算出は #490、ガントチャート・受注詳細への進捗表示は #491 で実装済み
 - heartbeat 途絶のアラート通知（記録のみ行い、PoC 期間中は手動で確認）
 - エージェントの自動アップデート、管理画面UI

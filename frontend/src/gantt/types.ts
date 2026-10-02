@@ -24,6 +24,13 @@ export interface GanttTask {
    * 幅0のバーではなくひし形マーカーで描画する場合 true
    */
   isMilestone?: boolean
+  /**
+   * 進捗率（0〜1）。指定するとバーの左からこの割合を塗る。未指定なら塗らない。
+   * グループヘッダー・マイルストーンでは無視する
+   */
+  progress?: number
+  /** 遅れとして強調表示する場合 true（グループヘッダーでは無視する） */
+  isDelayed?: boolean
 }
 
 /**

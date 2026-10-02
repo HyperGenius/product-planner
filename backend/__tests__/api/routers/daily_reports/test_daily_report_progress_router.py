@@ -20,10 +20,12 @@ PROGRESS_ROW = {
     "sequence_order": 1,
     "process_name": "プレス",
     "good_qty": 100,
+    "order_quantity": 100,
     "first_actual_date": "2026-09-10",
     "last_actual_date": "2026-09-12",
     "status": "completed",
     "completed_by": "quantity",
+    "planned_end_datetime": "2026-09-12T08:00:00Z",
     "computed_at": COMPUTED_AT,
 }
 PROGRESS_RESPONSE = {k: v for k, v in PROGRESS_ROW.items() if k != "computed_at"}

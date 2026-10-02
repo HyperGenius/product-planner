@@ -19,11 +19,16 @@ class ProcessProgressResponse(BaseModel):
     process_name: str | None
     # 割り付けた良品数（受注数量が上限）
     good_qty: int
+    # 受注数量（進捗率 good_qty ÷ order_quantity の分母。Issue #491）
+    order_quantity: int | None
     first_actual_date: date | None
     last_actual_date: date | None
     status: ProgressStatus
     # completed の根拠（quantity: 良品数が受注数量以上 / later_process: 後の工程に実績がある）
     completed_by: CompletedBy | None
+    # 計画の終了日時（この工程のスケジュールの最後のセグメントの終了）。未スケジュールなら None。
+    # 遅れ（計画の終了日時を過ぎても completed でない）の判定に使う（Issue #491）
+    planned_end_datetime: datetime | None
 
 
 class OrderProgressResponse(BaseModel):
