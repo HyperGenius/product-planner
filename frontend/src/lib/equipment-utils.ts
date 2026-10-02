@@ -1,6 +1,6 @@
 /* frontend/src/lib/equipment-utils.ts */
 import { ApiError } from "@/lib/api-client"
-import type { Equipment, EquipmentLedgerFields } from "@/types/equipment"
+import type { Equipment, EquipmentCreate, EquipmentLedgerFields } from "@/types/equipment"
 
 /** `short_name` は表示名（呼称、無ければ設備名）の順 */
 export type EquipmentSortKey = "ledger_no" | "short_name" | "name"
@@ -120,6 +120,62 @@ export function parseLedgerForm(form: LedgerFormValues): LedgerFormParseResult {
       manufactured_on: optionalText(form.manufacturedOn),
       serial_no: optionalText(form.serialNo),
       note: optionalText(form.note),
+    },
+  }
+}
+
+/** 設備の作成・編集フォームの入力値（input の value なので全て文字列。Issue #503） */
+export interface EquipmentFormValues {
+  name: string
+  shortName: string
+  guardTime: string
+  minSlot: string
+  maxFragments: string
+  ledger: LedgerFormValues
+}
+
+export const EMPTY_EQUIPMENT_FORM: EquipmentFormValues = {
+  name: "",
+  shortName: "",
+  guardTime: "",
+  minSlot: "",
+  maxFragments: "",
+  ledger: EMPTY_LEDGER_FORM,
+}
+
+const optionalIntText = (value: number | null | undefined) => (value != null ? String(value) : "")
+
+export function equipmentFormFromEquipment(equipment: Equipment): EquipmentFormValues {
+  return {
+    name: equipment.name,
+    shortName: equipment.short_name ?? "",
+    guardTime: optionalIntText(equipment.guard_time_minutes),
+    minSlot: optionalIntText(equipment.min_slot_minutes),
+    maxFragments: optionalIntText(equipment.max_fragments),
+    ledger: ledgerFormFromEquipment(equipment),
+  }
+}
+
+const optionalInt = (value: string) => (value.trim() === "" ? null : parseInt(value, 10))
+
+export type EquipmentFormParseResult =
+  | { ok: true; value: EquipmentCreate }
+  | { ok: false; error: string }
+
+/** フォームの入力値を作成・更新 API のペイロードへ変換する。空欄の呼称・スケジューリング設定は null */
+export function parseEquipmentForm(form: EquipmentFormValues): EquipmentFormParseResult {
+  if (!form.name.trim()) return { ok: false, error: "設備名を入力してください" }
+  const ledger = parseLedgerForm(form.ledger)
+  if (!ledger.ok) return ledger
+  return {
+    ok: true,
+    value: {
+      name: form.name,
+      short_name: form.shortName.trim() || null,
+      guard_time_minutes: optionalInt(form.guardTime),
+      min_slot_minutes: optionalInt(form.minSlot),
+      max_fragments: optionalInt(form.maxFragments),
+      ...ledger.value,
     },
   }
 }

@@ -4,12 +4,15 @@ import { ApiError } from "@/lib/api-client"
 import type { Equipment } from "@/types/equipment"
 
 import {
+  EMPTY_EQUIPMENT_FORM,
   EMPTY_LEDGER_FORM,
   equipmentDetailLabel,
   equipmentDisplayName,
+  equipmentFormFromEquipment,
   equipmentSearchKeywords,
   equipmentSaveErrorMessage,
   ledgerFormFromEquipment,
+  parseEquipmentForm,
   parseLedgerForm,
   sortEquipments,
 } from "./equipment-utils"
@@ -129,5 +132,54 @@ describe("equipmentSaveErrorMessage", () => {
   it("それ以外は既定の文言", () => {
     expect(equipmentSaveErrorMessage(new Error("x"), "失敗")).toBe("失敗")
     expect(equipmentSaveErrorMessage(new ApiError(500, {}), "失敗")).toBe("失敗")
+  })
+})
+
+describe("equipmentFormFromEquipment / parseEquipmentForm", () => {
+  it("設備の値をフォームに入れて、そのまま API のペイロードへ戻せる", () => {
+    const equipment: Equipment = {
+      ...eq(1, "25Tシングルクランクプレス", 1),
+      short_name: "プレス25t",
+      maker: "メーカーA",
+      model: "M-25",
+      manufactured_on: "1993年5月",
+      serial_no: "S-001",
+      note: null,
+      guard_time_minutes: 30,
+      min_slot_minutes: null,
+      max_fragments: 2,
+    }
+    const form = equipmentFormFromEquipment(equipment)
+    expect(form).toMatchObject({ name: "25Tシングルクランクプレス", shortName: "プレス25t", guardTime: "30", minSlot: "", maxFragments: "2" })
+    expect(parseEquipmentForm(form)).toEqual({
+      ok: true,
+      value: {
+        name: "25Tシングルクランクプレス",
+        short_name: "プレス25t",
+        guard_time_minutes: 30,
+        min_slot_minutes: null,
+        max_fragments: 2,
+        ledger_no: 1,
+        maker: "メーカーA",
+        model: "M-25",
+        manufactured_on: "1993年5月",
+        serial_no: "S-001",
+        note: null,
+      },
+    })
+  })
+
+  it("空欄の呼称は null にする", () => {
+    const result = parseEquipmentForm({ ...EMPTY_EQUIPMENT_FORM, name: "プレス", shortName: "  " })
+    expect(result.ok && result.value.short_name).toBeNull()
+  })
+
+  it("設備名が空・台帳番号が不正ならエラー", () => {
+    expect(parseEquipmentForm({ ...EMPTY_EQUIPMENT_FORM, name: " " })).toEqual({
+      ok: false,
+      error: "設備名を入力してください",
+    })
+    const invalidLedger = { ...EMPTY_EQUIPMENT_FORM, name: "プレス", ledger: { ...EMPTY_LEDGER_FORM, ledgerNo: "0" } }
+    expect(parseEquipmentForm(invalidLedger).ok).toBe(false)
   })
 })

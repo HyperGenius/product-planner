@@ -200,6 +200,14 @@ cd backend && ruff check . && mypy .
     「呼称があれば呼称、無ければ `name`」の表示名を使う（Backend `equipment_display_name()` /
     Frontend `equipmentDisplayName()`。`equipment.name` を直接描画しない）。同名の設備を見分ける補足（正式名称・メーカー・
     製造番号）は `equipmentDetailLabel()`。ガントは設備名ではなく**設備グループ名**を出すので、1台グループの名前は呼称に揃える
+  - **設備マスタ画面（Issue #503）**: 用途は社長・設備管理者の棚卸し。一覧は台帳番号・呼称・正式名称・所属グループの4列に絞り、
+    台帳の全項目・編集・削除・グループ設定は行クリックで開く詳細シート（`components/equipments/equipment-detail-sheet.tsx`）に置く。
+    編集はシート内でフォームに切り替え、ダイアログを重ねるのは削除確認とグループ設定だけにする。一覧に列を足すときはマスタ共通の
+    幅（`max-w-[860px]`）に収まるかを確認する
+- **一覧のセルを折り返さず省略するとき**: shadcn の `Table` は自動レイアウトなので、`td` の `truncate` / `max-w-*` は効かない
+  （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
+- **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
+  閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）

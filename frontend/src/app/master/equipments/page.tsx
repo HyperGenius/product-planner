@@ -1,15 +1,10 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ArrowUpDown, Pencil, Plus, Trash2, Users, Layers } from "lucide-react"
+import { ArrowUpDown, Pencil, Plus, Trash2, Users } from "lucide-react"
 import { toast } from "sonner"
 
-import {
-  useEquipments,
-  useCreateEquipment,
-  useUpdateEquipment,
-  useDeleteEquipment,
-} from "@/hooks/use-equipments"
+import { useEquipments } from "@/hooks/use-equipments"
 import {
   useEquipmentGroups,
   useCreateEquipmentGroup,
@@ -18,17 +13,7 @@ import {
   type EquipmentGroup,
 } from "@/lib/hooks/use-equipment-groups"
 import { useAllEquipmentGroupMembers } from "@/hooks/use-equipment-group-members"
-import type { Equipment } from "@/types/equipment"
-import {
-  EMPTY_LEDGER_FORM,
-  equipmentDisplayName,
-  equipmentSaveErrorMessage,
-  ledgerFormFromEquipment,
-  parseLedgerForm,
-  sortEquipments,
-  type EquipmentSortKey,
-  type LedgerFormValues,
-} from "@/lib/equipment-utils"
+import { sortEquipments, type EquipmentSortKey } from "@/lib/equipment-utils"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -62,66 +47,10 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EquipmentGroupMembersDialog } from "@/components/equipment-group-members-dialog"
-import { EquipmentGroupAssignmentDialog } from "@/components/equipment-group-assignment-dialog"
+import { EquipmentDetailSheet } from "@/components/equipments/equipment-detail-sheet"
+import { SchedulingParamFields } from "@/components/equipments/equipment-form-fields"
 
 type GroupDialogMode = "create" | "edit" | null
-
-interface SchedulingParamFieldsProps {
-  guardTime: string
-  minSlot: string
-  maxFragments: string
-  onGuardTimeChange: (v: string) => void
-  onMinSlotChange: (v: string) => void
-  onMaxFragmentsChange: (v: string) => void
-  idPrefix: string
-}
-
-function SchedulingParamFields({
-  guardTime, minSlot, maxFragments,
-  onGuardTimeChange, onMinSlotChange, onMaxFragmentsChange,
-  idPrefix,
-}: SchedulingParamFieldsProps) {
-  return (
-    <div className="space-y-3 border-t pt-3">
-      <p className="text-xs font-medium text-muted-foreground">
-        スケジューリング設定（空欄 = グローバル設定を使用）
-      </p>
-      <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-guard`}>ガードタイム（分）</Label>
-        <Input
-          id={`${idPrefix}-guard`}
-          type="number"
-          min={0}
-          value={guardTime}
-          onChange={(e) => onGuardTimeChange(e.target.value)}
-          placeholder="デフォルト使用中"
-        />
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-min-slot`}>最低時間スロット（分）</Label>
-        <Input
-          id={`${idPrefix}-min-slot`}
-          type="number"
-          min={0}
-          value={minSlot}
-          onChange={(e) => onMinSlotChange(e.target.value)}
-          placeholder="デフォルト使用中"
-        />
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-max-frag`}>最大断片数</Label>
-        <Input
-          id={`${idPrefix}-max-frag`}
-          type="number"
-          min={1}
-          value={maxFragments}
-          onChange={(e) => onMaxFragmentsChange(e.target.value)}
-          placeholder="デフォルト使用中"
-        />
-      </div>
-    </div>
-  )
-}
 
 function SortableHeader({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
@@ -138,114 +67,14 @@ function SortableHeader({ label, active, onClick }: { label: string; active: boo
   )
 }
 
-function OptionalTextCell({ value, truncate = false }: { value?: string | null; truncate?: boolean }) {
-  if (!value) {
-    return (
-      <TableCell>
-        <span className="text-muted-foreground">—</span>
-      </TableCell>
-    )
-  }
-  return (
-    <TableCell className={truncate ? "max-w-[200px] truncate" : "whitespace-nowrap"} title={truncate ? value : undefined}>
-      {value}
-    </TableCell>
-  )
-}
-
-/** 呼称（現場で使う短い名前）。ガントチャート等の表示に使う */
-function ShortNameField({
-  value,
-  onChange,
-  id,
-}: {
-  value: string
-  onChange: (v: string) => void
-  id: string
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>呼称</Label>
-      <Input
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="例: ワシノ25t"
-        autoComplete="off"
-      />
-      <p className="text-xs text-muted-foreground">
-        ガントチャート等の表示に使う短い名前です。空欄なら設備名を表示します。
-        同じ設備名の設備が既にある場合は、区別できる呼称を入力してください
-      </p>
-    </div>
-  )
-}
-
-interface LedgerFieldsProps {
-  values: LedgerFormValues
-  onChange: (values: LedgerFormValues) => void
-  idPrefix: string
-}
-
-const LEDGER_TEXT_FIELDS: { key: Exclude<keyof LedgerFormValues, "ledgerNo">; label: string; placeholder: string }[] = [
-  { key: "maker", label: "メーカー", placeholder: "" },
-  { key: "model", label: "型式", placeholder: "" },
-  { key: "manufacturedOn", label: "製造年月", placeholder: "例: 1993年5月" },
-  { key: "serialNo", label: "製造番号", placeholder: "" },
-  { key: "note", label: "備考", placeholder: "" },
-]
-
-/** 設備台帳（顧客の正典）の情報。台帳に無い設備は台帳番号を空欄にする（Issue #486） */
-function LedgerFields({ values, onChange, idPrefix }: LedgerFieldsProps) {
-  return (
-    <div className="space-y-3 border-t pt-3">
-      <p className="text-xs font-medium text-muted-foreground">
-        設備台帳（台帳に無い設備は台帳番号を空欄）
-      </p>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-2">
-          <Label htmlFor={`${idPrefix}-ledger-no`}>台帳番号</Label>
-          <Input
-            id={`${idPrefix}-ledger-no`}
-            type="number"
-            min={1}
-            value={values.ledgerNo}
-            onChange={(e) => onChange({ ...values, ledgerNo: e.target.value })}
-            placeholder="例: 3"
-          />
-        </div>
-        {LEDGER_TEXT_FIELDS.map(({ key, label, placeholder }) => (
-          <div key={key} className={key === "note" ? "col-span-2 grid gap-2" : "grid gap-2"}>
-            <Label htmlFor={`${idPrefix}-${key}`}>{label}</Label>
-            <Input
-              id={`${idPrefix}-${key}`}
-              value={values[key]}
-              onChange={(e) => onChange({ ...values, [key]: e.target.value })}
-              placeholder={placeholder}
-              autoComplete="off"
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export default function EquipmentsPage() {
   // ── 設備一覧タブの状態 ──────────────────────────────────────────
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null)
-  const [equipmentName, setEquipmentName] = useState("")
-  const [equipmentShortName, setEquipmentShortName] = useState("")
-  const [equipGuardTime, setEquipGuardTime] = useState("")
-  const [equipMinSlot, setEquipMinSlot] = useState("")
-  const [equipMaxFragments, setEquipMaxFragments] = useState("")
-  const [ledgerForm, setLedgerForm] = useState<LedgerFormValues>(EMPTY_LEDGER_FORM)
   const [sortKey, setSortKey] = useState<EquipmentSortKey>("ledger_no")
-  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
-  const [equipmentForAssignment, setEquipmentForAssignment] = useState<Equipment | null>(null)
+  // 詳細シート。開くたびに sheetSession を変えてシートの状態（モード・入力値）を初期化する
+  const [isSheetOpen, setIsSheetOpen] = useState(false)
+  const [sheetSession, setSheetSession] = useState(0)
+  /** シートに表示する設備の ID。null なら新規作成 */
+  const [sheetEquipmentId, setSheetEquipmentId] = useState<number | null>(null)
 
   // ── グループ管理タブの状態 ──────────────────────────────────────
   const [groupDialogMode, setGroupDialogMode] = useState<GroupDialogMode>(null)
@@ -263,10 +92,6 @@ export default function EquipmentsPage() {
   const { data: equipments, isLoading: isLoadingEquipments, error: equipmentError } = useEquipments()
   const { data: groups, isLoading: isLoadingGroups, error: groupError } = useEquipmentGroups()
   const { data: allMembers = [] } = useAllEquipmentGroupMembers()
-
-  const createEquipmentMutation = useCreateEquipment()
-  const updateEquipmentMutation = useUpdateEquipment()
-  const deleteEquipmentMutation = useDeleteEquipment()
 
   const createGroupMutation = useCreateEquipmentGroup()
   const updateGroupMutation = useUpdateEquipmentGroup()
@@ -297,113 +122,17 @@ export default function EquipmentsPage() {
     return map
   }, [allMembers, groups, sharedGroupIds])
 
+  // 一覧の再取得後も最新の値を表示するよう、シートの設備は一覧のデータから ID で引く
+  const sheetEquipment = equipments?.find((e) => e.id === sheetEquipmentId) ?? null
+
   // ── 設備タブのハンドラ ────────────────────────────────────────
-  const handleOpenCreateDialog = () => {
-    setEquipmentName("")
-    setEquipmentShortName("")
-    setEquipGuardTime("")
-    setEquipMinSlot("")
-    setEquipMaxFragments("")
-    setLedgerForm(EMPTY_LEDGER_FORM)
-    setIsCreateDialogOpen(true)
-  }
-
-  const handleOpenEditDialog = (equipment: Equipment) => {
-    setSelectedEquipment(equipment)
-    setEquipmentName(equipment.name)
-    setEquipmentShortName(equipment.short_name ?? "")
-    setEquipGuardTime(equipment.guard_time_minutes != null ? String(equipment.guard_time_minutes) : "")
-    setEquipMinSlot(equipment.min_slot_minutes != null ? String(equipment.min_slot_minutes) : "")
-    setEquipMaxFragments(equipment.max_fragments != null ? String(equipment.max_fragments) : "")
-    setLedgerForm(ledgerFormFromEquipment(equipment))
-    setIsEditDialogOpen(true)
-  }
-
-  const handleOpenDeleteDialog = (equipment: Equipment) => {
-    setSelectedEquipment(equipment)
-    setIsDeleteDialogOpen(true)
-  }
-
-  const handleOpenAssignmentDialog = (equipment: Equipment) => {
-    setEquipmentForAssignment(equipment)
-    setAssignmentDialogOpen(true)
+  const handleOpenSheet = (equipmentId: number | null) => {
+    setSheetEquipmentId(equipmentId)
+    setSheetSession((n) => n + 1)
+    setIsSheetOpen(true)
   }
 
   const parseOptionalInt = (val: string) => (val.trim() === "" ? null : parseInt(val, 10))
-
-  const handleCreate = async () => {
-    if (!equipmentName.trim()) {
-      toast.error("設備名を入力してください")
-      return
-    }
-    const ledger = parseLedgerForm(ledgerForm)
-    if (!ledger.ok) {
-      toast.error(ledger.error)
-      return
-    }
-    try {
-      await createEquipmentMutation.mutateAsync({
-        name: equipmentName,
-        short_name: equipmentShortName.trim() || null,
-        guard_time_minutes: parseOptionalInt(equipGuardTime),
-        min_slot_minutes: parseOptionalInt(equipMinSlot),
-        max_fragments: parseOptionalInt(equipMaxFragments),
-        ...ledger.value,
-      })
-      toast.success("設備を作成しました")
-      setIsCreateDialogOpen(false)
-      setEquipmentName("")
-    } catch (error) {
-      toast.error(equipmentSaveErrorMessage(error, "設備の作成に失敗しました"))
-      console.error(error)
-    }
-  }
-
-  const handleUpdate = async () => {
-    if (!selectedEquipment) return
-    if (!equipmentName.trim()) {
-      toast.error("設備名を入力してください")
-      return
-    }
-    const ledger = parseLedgerForm(ledgerForm)
-    if (!ledger.ok) {
-      toast.error(ledger.error)
-      return
-    }
-    try {
-      await updateEquipmentMutation.mutateAsync({
-        id: selectedEquipment.id,
-        data: {
-          name: equipmentName,
-          short_name: equipmentShortName.trim() || null,
-          guard_time_minutes: parseOptionalInt(equipGuardTime),
-          min_slot_minutes: parseOptionalInt(equipMinSlot),
-          max_fragments: parseOptionalInt(equipMaxFragments),
-          ...ledger.value,
-        },
-      })
-      toast.success("設備を更新しました")
-      setIsEditDialogOpen(false)
-      setEquipmentName("")
-      setSelectedEquipment(null)
-    } catch (error) {
-      toast.error(equipmentSaveErrorMessage(error, "設備の更新に失敗しました"))
-      console.error(error)
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!selectedEquipment) return
-    try {
-      await deleteEquipmentMutation.mutateAsync(selectedEquipment.id)
-      toast.success("設備を削除しました")
-      setIsDeleteDialogOpen(false)
-      setSelectedEquipment(null)
-    } catch (error) {
-      toast.error("設備の削除に失敗しました")
-      console.error(error)
-    }
-  }
 
   // ── グループタブのハンドラ ────────────────────────────────────
   const handleOpenGroupCreateDialog = () => {
@@ -510,7 +239,7 @@ export default function EquipmentsPage() {
         {/* ── タブ1: 設備一覧 ─────────────────────────────────── */}
         <TabsContent value="equipments">
           <div className="mb-4 flex justify-end">
-            <Button onClick={handleOpenCreateDialog}>
+            <Button onClick={() => handleOpenSheet(null)}>
               <Plus className="mr-2 h-4 w-4" />
               新規作成
             </Button>
@@ -520,7 +249,7 @@ export default function EquipmentsPage() {
             <div className="text-center py-10 text-muted-foreground">読み込み中...</div>
           ) : (
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[100px]">
@@ -530,7 +259,7 @@ export default function EquipmentsPage() {
                         onClick={() => setSortKey("ledger_no")}
                       />
                     </TableHead>
-                    <TableHead>
+                    <TableHead className="w-[160px]">
                       <SortableHeader
                         label="呼称"
                         active={sortKey === "short_name"}
@@ -539,38 +268,49 @@ export default function EquipmentsPage() {
                     </TableHead>
                     <TableHead>
                       <SortableHeader
-                        label="設備名"
+                        label="正式名称"
                         active={sortKey === "name"}
                         onClick={() => setSortKey("name")}
                       />
                     </TableHead>
-                    <TableHead>メーカー</TableHead>
-                    <TableHead>型式</TableHead>
-                    <TableHead>製造年月</TableHead>
-                    <TableHead>製造番号</TableHead>
-                    <TableHead>備考</TableHead>
-                    <TableHead>所属グループ</TableHead>
-                    <TableHead className="w-[150px] text-right">操作</TableHead>
+                    <TableHead className="w-[200px]">所属グループ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sortedEquipments.length > 0 ? (
                     sortedEquipments.map((equipment) => {
                       const groupNames = equipmentGroupMap.get(equipment.id) ?? []
-                      const displayName = equipmentDisplayName(equipment)
                       return (
-                        <TableRow key={equipment.id}>
-                          <TableCell className="tabular-nums">
+                        <TableRow
+                          key={equipment.id}
+                          className="cursor-pointer"
+                          data-state={isSheetOpen && sheetEquipmentId === equipment.id ? "selected" : undefined}
+                          onClick={() => handleOpenSheet(equipment.id)}
+                        >
+                          <TableCell className="py-2.5 tabular-nums">
                             {equipment.ledger_no ?? <span className="text-muted-foreground">—</span>}
                           </TableCell>
-                          <OptionalTextCell value={equipment.short_name} />
-                          <TableCell>{equipment.name}</TableCell>
-                          <OptionalTextCell value={equipment.maker} />
-                          <OptionalTextCell value={equipment.model} />
-                          <OptionalTextCell value={equipment.manufactured_on} />
-                          <OptionalTextCell value={equipment.serial_no} />
-                          <OptionalTextCell value={equipment.note} truncate />
-                          <TableCell>
+                          <TableCell className="py-2.5">
+                            {equipment.short_name ? (
+                              <div className="truncate font-medium" title={equipment.short_name}>
+                                {equipment.short_name}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          {/* 正式名称は長いので折り返さず省略する。行のクリックはこのボタン経由でキーボードでも開ける */}
+                          <TableCell className="py-2.5">
+                            <button
+                              type="button"
+                              aria-haspopup="dialog"
+                              className="block w-full truncate text-left outline-none focus-visible:underline"
+                              title={equipment.name}
+                            >
+                              {equipment.name}
+                            </button>
+                          </TableCell>
+                          <TableCell className="py-2.5">
                             {groupNames.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
                                 {groupNames.map((name) => (
@@ -583,41 +323,12 @@ export default function EquipmentsPage() {
                               <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => handleOpenAssignmentDialog(equipment)}
-                                title="グループ管理"
-                                aria-label={`${displayName}のグループ管理`}
-                              >
-                                <Layers className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => handleOpenEditDialog(equipment)}
-                                aria-label={`${displayName}を編集`}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                onClick={() => handleOpenDeleteDialog(equipment)}
-                                aria-label={`${displayName}を削除`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
                         </TableRow>
                       )
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center py-10">
+                      <TableCell colSpan={4} className="text-center py-10">
                         設備がありません
                       </TableCell>
                     </TableRow>
@@ -697,115 +408,14 @@ export default function EquipmentsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* ── 設備: 作成ダイアログ ─────────────────────────────────── */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>設備の新規作成</DialogTitle>
-            <DialogDescription>新しい設備を作成します。設備名（台帳の正式名称）・呼称と設備台帳の情報を入力してください。</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="create-name">設備名</Label>
-              <Input
-                id="create-name"
-                value={equipmentName}
-                onChange={(e) => setEquipmentName(e.target.value)}
-                placeholder="例: 25Tシングルクランクプレス"
-              />
-            </div>
-            <ShortNameField id="create-short-name" value={equipmentShortName} onChange={setEquipmentShortName} />
-            <LedgerFields values={ledgerForm} onChange={setLedgerForm} idPrefix="create-equip" />
-            <SchedulingParamFields
-              guardTime={equipGuardTime}
-              minSlot={equipMinSlot}
-              maxFragments={equipMaxFragments}
-              onGuardTimeChange={setEquipGuardTime}
-              onMinSlotChange={setEquipMinSlot}
-              onMaxFragmentsChange={setEquipMaxFragments}
-              idPrefix="create-equip"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-              キャンセル
-            </Button>
-            <Button onClick={handleCreate} disabled={createEquipmentMutation.isPending}>
-              {createEquipmentMutation.isPending ? "作成中..." : "作成"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── 設備: 編集ダイアログ ─────────────────────────────────── */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>設備の編集</DialogTitle>
-            <DialogDescription>設備名（台帳の正式名称）・呼称・設備台帳の情報を変更してください。</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-name">設備名</Label>
-              <Input
-                id="edit-name"
-                value={equipmentName}
-                onChange={(e) => setEquipmentName(e.target.value)}
-                placeholder="例: 25Tシングルクランクプレス"
-              />
-            </div>
-            <ShortNameField id="edit-short-name" value={equipmentShortName} onChange={setEquipmentShortName} />
-            <LedgerFields values={ledgerForm} onChange={setLedgerForm} idPrefix="edit-equip" />
-            <SchedulingParamFields
-              guardTime={equipGuardTime}
-              minSlot={equipMinSlot}
-              maxFragments={equipMaxFragments}
-              onGuardTimeChange={setEquipGuardTime}
-              onMinSlotChange={setEquipMinSlot}
-              onMaxFragmentsChange={setEquipMaxFragments}
-              idPrefix="edit-equip"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              キャンセル
-            </Button>
-            <Button onClick={handleUpdate} disabled={updateEquipmentMutation.isPending}>
-              {updateEquipmentMutation.isPending ? "更新中..." : "更新"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── 設備: 削除確認ダイアログ ─────────────────────────────── */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>設備の削除</DialogTitle>
-            <DialogDescription>
-              本当に「{selectedEquipment ? equipmentDisplayName(selectedEquipment) : ""}」を削除しますか？この操作は取り消せません。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              キャンセル
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteEquipmentMutation.isPending}
-            >
-              {deleteEquipmentMutation.isPending ? "削除中..." : "削除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── 設備: グループ管理ダイアログ（設備視点） ─────────────── */}
-      <EquipmentGroupAssignmentDialog
-        equipment={equipmentForAssignment}
-        open={assignmentDialogOpen}
-        onOpenChange={setAssignmentDialogOpen}
+      {/* ── 設備: 詳細シート（閲覧・編集・新規作成・削除・グループ設定） ── */}
+      <EquipmentDetailSheet
+        key={sheetSession}
+        open={isSheetOpen}
+        onOpenChange={setIsSheetOpen}
+        equipment={sheetEquipment}
+        groupNames={sheetEquipment ? (equipmentGroupMap.get(sheetEquipment.id) ?? []) : []}
+        onCreated={setSheetEquipmentId}
       />
 
       {/* ── グループ: 作成/編集ダイアログ ────────────────────────── */}
