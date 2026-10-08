@@ -300,6 +300,15 @@ cd backend && ruff check . && mypy .
 
 - 経路は3段: **pg_cron（Supabase、手動登録）→ Edge Function `supabase/functions/parse-order-pdfs-trigger/index.ts` → バックエンドの `GET /api/cron/*`**（`CRON_SECRET` の Bearer 認証、`routers/cron/_auth.py` の `validate_cron_secret`）。Edge Function は1回の起動で全 `/api/cron/*` を順に叩く薄いプロキシ。詳細は [docs/infra/supabase-pgcron-parse-order-pdfs.md](docs/infra/supabase-pgcron-parse-order-pdfs.md)
 - **新しい定期処理を足すとき**: (1) `backend/app/routers/cron/` にルーターを追加し `cron/__init__.py` と `app/main.py` に登録、(2) `parse-order-pdfs-trigger/index.ts` に `callCronEndpoint(...)` 呼び出しを1行追加。**新しい pg_cron ジョブの登録は不要**（既存トリガーに相乗りする）
+- **`parse-order-pdfs-trigger/index.ts` を変えたら、マージ後に手で再デプロイする**。マイグレーションは GitHub Actions で自動適用されるが、
+  この Edge Function は `infra/terraform` の `terraform apply` でしか本番に出ない。漏れると、バックエンドに cron を足しても本番では
+  一度も呼ばれない（#400 の `advance-order-status`、#487 / #490 の日報パース・進捗が本番で動いていなかった）。デプロイ済みの中身は
+  `supabase functions download parse-order-pdfs-trigger --project-ref <ref> --use-api` で取得して確認できる
+  - GCS の state を読むので先に `gcloud auth application-default login`（VS Code タスク「GCloud Auth Application Login Product Planner」。
+    `backend/.env` の `PRODUCT_PLANNER_GCP_PJ_ID` を使う）。Supabase provider は `SUPABASE_ACCESS_TOKEN` が必要で、
+    ログイン済みの CLI のトークンは `security find-generic-password -s 'Supabase CLI' -w`（`sbp_...` の平文。base64 デコードしない）で取れる
+  - apply で `Provider produced inconsistent result after apply`（`version` / `checksum` / `updated_at`）が出るが provider の不具合で、
+    デプロイ自体は成功している。もう一度 `terraform plan` して `No changes` なら state も一致している
 - cron は高頻度（10〜15分間隔）で回るため、処理は**冪等**に作る。全テナント横断で動くので `get_supabase_admin_client()` を使う（権限チェックは `CRON_SECRET` で代替）
 - エラー時のレスポンスに例外メッセージ（`{exc}`）をそのまま入れない。詳細は `logger.error(..., exc_info=True)` でログにのみ残し、レスポンスは固定文言にする
 
