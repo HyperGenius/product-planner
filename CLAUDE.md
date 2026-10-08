@@ -208,6 +208,11 @@ cd backend && ruff check . && mypy .
   （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
   閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
+- **マスタを選ぶ検索付きコンボボックス（`Popover` + `Command`）**: 件数が増えうるマスタの選択は `Select` を使わずこちらにする
+  （`SelectContent` は最大高さが無く、ダイアログ内で画面からはみ出す。Issue #509）。`CommandItem` の `value` を ID にするときは、
+  表示名・略称等を `keywords` に渡して `Command` の `filter` で照合する（cmdk 既定は `value` 照合なので ID で検索されてしまう）。
+  任意項目は「選択を解除」項目を `keywords` 無しで置くと検索中は自動で隠れる。分割ダイアログ等で1画面に複数並ぶ部品はラベルと
+  トリガーの `id` を固定にせず `React.useId()` にする（前例は `components/customer-selector.tsx`）
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）

@@ -294,12 +294,20 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 `desired_deadline`（DB上は `deadline_date`）・`confirmed_deadline` はいずれも「日付のみ」(`YYYY-MM-DD`) で、時刻情報を持たない。`new Date(dateStr)` でパースして `format` すると環境のタイムゾーンによって存在しない時刻が表示されてしまうため、`lib/order-utils.ts` の `formatDeadlineDate`（表示用、文字列の先頭10文字をそのまま整形）・`toDateInputValue`（`<input type="date">` バインド用）に処理を統一した。`EditOrderDialog` と新規注文作成ページの希望納期入力欄も `type="datetime-local"` から `type="date"` に変更している。`BulkSimulateSummaryDialog` の希望納期表示も同様に対応済み。なお、シミュレーション結果の `calculated_deadline` はスケジューラが計算した実際の日時（時刻を持つ）のため対象外。
 
 **Dialog 内プルダウンのマウスホイールスクロール不具合 (#319)**
-`Dialog`（`@radix-ui/react-dialog`）が modal 表示中に行うボディスクロールロック（`react-remove-scroll`）は、`Portal` 経由で `document.body` 直下に描画される要素へのホイールイベントもブロックしてしまう。このため `ProductSelector`（`Popover` + `Command`）・`CustomerSelector`（`Select`）を `Dialog` 内（`EditOrderDialog`・`SplitOrderDialog`）で使うと、一覧をマウスホイールでスクロールできない不具合があった（矢印キーでの操作は影響を受けないため気づきにくい）。
+`Dialog`（`@radix-ui/react-dialog`）が modal 表示中に行うボディスクロールロック（`react-remove-scroll`）は、`Portal` 経由で `document.body` 直下に描画される要素へのホイールイベントもブロックしてしまう。このため `ProductSelector`（`Popover` + `Command`）・`CustomerSelector`（当時は `Select`。#509 で `Popover` + `Command` に変更）を `Dialog` 内（`EditOrderDialog`・`SplitOrderDialog`）で使うと、一覧をマウスホイールでスクロールできない不具合があった（矢印キーでの操作は影響を受けないため気づきにくい）。
 対応として、共通コンポーネント側でスクロール対象要素に対しネイティブ（非 passive）の `wheel` イベントリスナーを登録し、`scrollTop` を直接更新することでロックを迂回している。
 - `frontend/src/components/ui/command.tsx` の `CommandList`
 - `frontend/src/components/ui/select.tsx` の `SelectContent`（内部の `SelectPrimitive.Viewport`）
 
 いずれも共通 UI コンポーネント側の対応のため、`Dialog` 内外を問わず両セレクタを使う画面すべてに適用される。
+
+**顧客選択の検索付きコンボボックス化 (#509)**
+顧客数が増え、`Select` のプルダウン（`SelectContent` は `position="popper"` で最大高さの指定が無く、項目数ぶん伸びる）が編集・分割ダイアログでブラウザの表示領域からはみ出していた。`CustomerSelector`（`components/customer-selector.tsx`）を `ProductSelector` と同じ `Popover` + `Command` に置き換え、候補リストは `CommandList` の `max-h-[300px]` でポップオーバー内スクロールにした。共通部品のため、編集ダイアログ・分割ダイアログ・新規受注・メール起票のすべてに反映される。
+- 検索は顧客名（`name`）・略称（`alias`）の部分一致（大文字小文字無視）。`CommandItem` の `value` は顧客 ID なので、`keywords` に名前・略称を渡し `Command` の `filter` で照合する（cmdk 既定の `value` 照合だと ID で検索されてしまう）
+- 顧客は任意項目なので、選択中のときだけ先頭に「選択を解除」を出し、選ぶと `onValueChange("")` を呼ぶ。`keywords` を持たないので検索中は出ない
+- 該当なしは「顧客が見つかりません」、顧客0件は「顧客が登録されていません」。下書き顧客（`status === "draft"`）は候補・トリガーの両方に「下書き」バッジを出す
+- トリガーとラベルの `id` は `React.useId()`。分割ダイアログのように1画面に複数並ぶため、固定 `id` だと重複してラベルのクリックが1つ目に飛ぶ
+- `value` / `onValueChange`（空文字＝未選択）の props は従来どおりで、呼び出し側の変更は無い
 
 ---
 
