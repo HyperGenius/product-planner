@@ -87,7 +87,25 @@ terraform apply -var-file=environments/prod/terraform.tfvars
 
 `terraform.tfvars` に `supabase_project_ref`（ダッシュボード → Settings → General の Reference ID）を追記しておく（`terraform.tfvars.example` 参照）。
 
-これにより `supabase/functions/parse-order-pdfs-trigger/index.ts` が Edge Function `parse-order-pdfs-trigger` としてデプロイされる。関数のロジックは `BACKEND_URL` と `CRON_SECRET` を環境変数（Edge Function Secrets）から読み、Render の `/api/cron/gmail-poll` → `/api/cron/parse-order-pdfs` を順に `Authorization: Bearer <CRON_SECRET>` 付きで fetch するだけ。
+これにより `supabase/functions/parse-order-pdfs-trigger/index.ts` が Edge Function `parse-order-pdfs-trigger` としてデプロイされる。関数のロジックは `BACKEND_URL` と `CRON_SECRET` を環境変数（Edge Function Secrets）から読み、Render の `/api/cron/*` を順に `Authorization: Bearer <CRON_SECRET>` 付きで fetch するだけ（呼ぶエンドポイントの一覧は `index.ts` 冒頭のコメント参照）。
+
+### `index.ts` を変更したときの再デプロイ
+
+マイグレーションと違い、この Edge Function は GitHub Actions では自動デプロイされない。`index.ts` に cron の呼び出しを足したら、マージ後に上の `terraform apply` を手で実行する（漏れると、そのエンドポイントは本番で一度も呼ばれない）。
+
+- GCS の state を読むため、先に `gcloud auth application-default login` を実行する（`invalid_rapt` で state を開けないときも同じ）。VS Code タスク「GCloud Auth Application Login Product Planner」は `backend/.env` の `PRODUCT_PLANNER_GCP_PJ_ID` をプロジェクトに指定して実行する
+- `SUPABASE_ACCESS_TOKEN` は、ログイン済みの Supabase CLI のトークンを macOS のキーチェーンから取れる（`sbp_...` の平文で保存されているので base64 デコードしない）
+
+  ```bash
+  export SUPABASE_ACCESS_TOKEN="$(security find-generic-password -s 'Supabase CLI' -w)"
+  ```
+
+- apply の最後に `Provider produced inconsistent result after apply`（`.version` / `.checksum` / `.updated_at`）が出るが、supabase provider の不具合でデプロイ自体は成功している。もう一度 `terraform plan` して `No changes` になれば state も一致している
+- デプロイ済みの中身は次で取得して確認できる
+
+  ```bash
+  supabase functions download parse-order-pdfs-trigger --project-ref <supabase_project_ref> --use-api
+  ```
 
 ---
 

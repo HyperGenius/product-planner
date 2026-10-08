@@ -2,6 +2,16 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "GCloud Auth Application Login Product Planner",
+            "type": "shell",
+            "command": "source ${workspaceFolder}/backend/.env && gcloud auth application-default login --project=${PRODUCT_PLANNER_GCP_PJ_ID}",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "terraform",
+                "panel": "dedicated"
+            }
+        },
+        {
             "label": "Backend (Uvicorn)",
             "type": "shell",
             // 仮想環境を起動してから uvicorn を実行
