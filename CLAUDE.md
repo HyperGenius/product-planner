@@ -188,8 +188,9 @@ cd backend && ruff check . && mypy .
   一覧ではバッジ無し
 - **設備台帳（`equipments.ledger_no` 等、Issue #486）**: 設備マスタは顧客の設備台帳が正典で、日報の `〇〇t N号機` の
   `N` を `ledger_no` で照合する。`equipments` の UNIQUE は `(tenant_id, ledger_no)`（部分）と表示名（後述）の2本で、
-  ルーターは制約名で振り分けて 409 `duplicate_ledger_no` / `duplicate_display_name` を返す。設備と同名の1台グループが
-  初期移行で作られているので、**設備名を一括で変えるときは同名1台グループも合わせる**。表示名・グループ名の入れ替え・玉突きは
+  ルーターは制約名で振り分けて 409 `duplicate_ledger_no` / `duplicate_display_name` を返す。設備ごとに表示名と同名の
+  1台グループがある（初期移行で作成。以降は `equipments` の INSERT トリガー `trg_create_solo_equipment_group` が作る。Issue #512）ので、
+  **設備名を一括で変えるときは同名1台グループも合わせる**。表示名・グループ名の入れ替え・玉突きは
   UNIQUE を踏むので一時名を経由する（`scripts/equipment_ledger/apply_equipment_ledger.py` の `order_renames()`）。
   台帳の実データは `scripts/equipment_ledger/_data/`（git 管理外）に置き、リポジトリ・テストに入れない
   - **設備名 `name` は一意ではない**（台帳に同名の設備がある。Issue #501）。一意なのは表示名 `COALESCE(short_name, name)`
@@ -207,6 +208,9 @@ cd backend && ruff check . && mypy .
   - **設備グループのキャッシュ**: グループの `member_names` / `member_count` はグループ一覧（`['equipment-groups']`、
     `GET /equipment-groups`）が返すので、メンバーや設備を変えるミューテーションはメンバーのクエリだけでなくグループ一覧も
     無効化する（工程ルーティングのプルダウンのラベル・グループ管理タブの絞り込みが古いまま残る。Issue #512）
+  - **1台グループの表示**: 画面では1台のグループをグループ名ではなくメンバーの設備の表示名で出す（`groupDisplayName()` /
+    `formatGroupLabel()`）。1台グループの名前は設備名・呼称の変更に追従しないため。integration テストで設備を作ったら、
+    テナントを消す前に `equipment_groups` も消す（トリガーが作ったグループが `equipment_groups.tenant_id` の FK で残り 23503 になる）
 - **一覧のセルを折り返さず省略するとき**: shadcn の `Table` は自動レイアウトなので、`td` の `truncate` / `max-w-*` は効かない
   （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って

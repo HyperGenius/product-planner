@@ -28,6 +28,8 @@ class EquipmentGroupResponse(EquipmentGroupBase):
     tenant_id: str
     member_names: list[str] = Field(default_factory=list)
     member_count: int = Field(default=0)
+    # このグループを参照している工程（process_routings）の数
+    routing_count: int = Field(default=0)
 
 
 class EquipmentGroupCreate(EquipmentGroupBase):

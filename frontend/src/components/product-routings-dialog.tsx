@@ -38,7 +38,12 @@ import {
   useUpdateProcessRouting,
   useBulkSaveProcessRoutings,
 } from "@/hooks/use-process-routings"
-import { useEquipmentGroups, formatGroupLabel } from "@/lib/hooks/use-equipment-groups"
+import {
+  useEquipmentGroups,
+  formatGroupLabel,
+  groupDisplayName,
+  routingGroupOptionSections,
+} from "@/lib/hooks/use-equipment-groups"
 import { useSimulateOrder } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import type { Product } from "@/types/product"
@@ -375,7 +380,7 @@ export function ProductRoutingsDialog({
   const getEquipmentGroupName = (equipmentGroupId: number | null) => {
     if (equipmentGroupId === null) return "設備なし"
     const group = equipmentGroups?.find((g) => g.id === equipmentGroupId)
-    return group?.name || "不明"
+    return group ? groupDisplayName(group) : "不明"
   }
 
   const isPending = updateMutation.isPending || bulkSaveMutation.isPending
@@ -630,10 +635,14 @@ export function ProductRoutingsDialog({
                   >
                     <option value="">選択してください</option>
                     <option value="none">設備なし</option>
-                    {equipmentGroups?.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {formatGroupLabel(group)}
-                      </option>
+                    {routingGroupOptionSections(equipmentGroups ?? [], equipmentGroupId).map((section) => (
+                      <optgroup key={section.label} label={section.label}>
+                        {section.groups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {formatGroupLabel(group)}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 )}

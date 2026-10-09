@@ -621,7 +621,7 @@ def apply_plan(client: Client, tenant_id: str, plan: LedgerPlan) -> None:
     for eq_id, fields in plan.equipment_name_steps:
         equipments.update(fields).eq("id", eq_id).eq("tenant_id", tenant_id).execute()
 
-    # 3. 台帳にあってマスタに無い設備
+    # 3. 台帳にあってマスタに無い設備。1台グループは equipments の INSERT トリガーが作る（Issue #512）
     if plan.inserts:
         equipments.insert(
             [
