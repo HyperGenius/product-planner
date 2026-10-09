@@ -90,6 +90,25 @@ process_routings    (工程定義: equipment_group_id を参照 ← ここがポ
 - `GET /equipment-groups/members` で全グループのメンバーを一括取得（N+1なし）
 - グループへの追加: `POST /equipment-groups/{groupId}/members`
 - グループからの削除: `DELETE /equipment-groups/{groupId}/members/{equipmentId}`
+- 追加・削除の後は `['equipment-group-members']` に加えて `['equipment-groups']` も無効化する。グループ一覧の
+  `member_names` / `member_count`（工程ルーティングのプルダウンのラベル、グループ管理タブの絞り込みに使う）は
+  `GET /equipment-groups` が返すため、メンバーのクエリだけを無効化すると古い台数・メンバー名が残る（Issue #512）
+
+## グループ管理タブの表示対象（Issue #512）
+
+設備マスタ（`app/master/equipments/page.tsx`）のグループ管理タブは、既定では **2台以上の共有グループだけ**を出す。
+1台のグループは設備ごとに作られる「システムグループ」で、設備一覧で見えるため（#192）。
+
+ただし、1台・0台のグループが画面から見えないと、次のようなデータのずれに気付けず、直すこともできない
+（工程ルーティングのプルダウンには全グループが出るので、マスタと食い違って見える）。
+
+- 工程用のグループ（例:「〇〇乾燥機」）に、台帳の反映で増えた号機が入っておらず1台のままになっている
+- 設備を削除してメンバーが0台になったグループ、作ったがメンバーを登録していないグループが残っている。
+  工程から参照されている0台のグループは、スケジューラーが**設備なし**として扱う（`scheduler_logic.py`）
+
+そこで、タブ上部の「1台以下のグループも表示」トグル（`Switch`、既定 OFF）で1台・0台のグループも出せるようにしている。
+絞り込みは `groupsForManagement()`（`lib/hooks/use-equipment-groups.ts`）に置く。トグルの状態は保存しない
+（ページを開き直すと OFF に戻る）。
 
 ---
 
