@@ -25,12 +25,19 @@ class EquipmentRepository(BaseRepository[T]):
     # --- Equipment Groups (別テーブル操作) ---
 
     def get_all_groups(self) -> list[T]:
-        """設備グループのリストを取得する。member_names / member_count を付与して返す。"""
+        """設備グループのリストを名前順で取得する。
+
+        member_names / member_count と、そのグループを参照している工程の数 routing_count を付与する。
+        routing_count は、メンバー0台のグループを工程ルーティングの選択肢に残すか（参照されていれば
+        残す）の判定に使う（Issue #512）。
+        """
         res = (
             self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
             .select(
-                f"*, equipment_group_members(equipments(id, {EQUIPMENT_DISPLAY_COLUMNS}))"
+                f"*, equipment_group_members(equipments(id, {EQUIPMENT_DISPLAY_COLUMNS})),"
+                " process_routings(count)"
             )
+            .order("name")
             .execute()
         )
         groups = cast(list[dict[str, Any]], res.data)
@@ -43,6 +50,9 @@ class EquipmentRepository(BaseRepository[T]):
             ]
             group["member_names"] = sorted(member_names)
             group["member_count"] = len(member_names)
+            # 埋め込みの count は [{"count": N}] で返る
+            routings = group.pop("process_routings", None) or [{"count": 0}]
+            group["routing_count"] = routings[0]["count"]
         return cast(list[T], groups)
 
     def create_group(self, data: dict[str, Any]) -> T:

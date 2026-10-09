@@ -27,7 +27,7 @@ class TestEquipmentRepository:
         """設備グループ一覧取得テスト"""
         expected = [{"id": 1, "name": "Group A"}]
         (
-            mock_client.table.return_value.select.return_value.execute.return_value.data
+            mock_client.table.return_value.select.return_value.order.return_value.execute.return_value.data
         ) = expected
 
         result = equipment_repo.get_all_groups()
@@ -40,7 +40,7 @@ class TestEquipmentRepository:
     ):
         """メンバー名は呼称があれば呼称、無ければ設備名で返す"""
         (
-            mock_client.table.return_value.select.return_value.execute.return_value.data
+            mock_client.table.return_value.select.return_value.order.return_value.execute.return_value.data
         ) = [
             {
                 "id": 1,
@@ -68,6 +68,23 @@ class TestEquipmentRepository:
 
         assert result[0]["member_names"] == ["ワシノ25t", "汎用プレス"]
         assert result[0]["member_count"] == 2
+
+    def test_get_all_groups_routing_count(self, equipment_repo, mock_client):
+        """参照している工程の数を routing_count で返し、名前順で取得する"""
+        (
+            mock_client.table.return_value.select.return_value.order.return_value.execute.return_value.data
+        ) = [
+            {"id": 1, "name": "A", "process_routings": [{"count": 3}]},
+            {"id": 2, "name": "B", "process_routings": []},
+        ]
+
+        result = equipment_repo.get_all_groups()
+
+        assert [g["routing_count"] for g in result] == [3, 0]
+        assert "process_routings" not in result[0]
+        mock_client.table.return_value.select.return_value.order.assert_called_with(
+            "name"
+        )
 
     @pytest.mark.parametrize(
         "group_name, expected",

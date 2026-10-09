@@ -11,7 +11,7 @@ export interface EquipmentGroupMember {
   equipment_id: number
 }
 
-const ALL_MEMBERS_KEY = ["equipment-group-members"]
+export const ALL_MEMBERS_KEY = ["equipment-group-members"]
 const getEquipmentGroupMembersKey = (groupId: number) => ["equipment-group-members", groupId]
 
 /**

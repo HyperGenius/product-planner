@@ -1,11 +1,23 @@
 "use client"
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
+import { ALL_MEMBERS_KEY } from "@/hooks/use-equipment-group-members"
+import { EQUIPMENT_GROUPS_KEY } from "@/lib/hooks/use-equipment-groups"
 import type { Equipment, EquipmentCreate, EquipmentUpdate } from "@/types/equipment"
 
 // クエリキーを定数化
 const EQUIPMENTS_QUERY_KEY = ["equipments"]
+
+/**
+ * 設備の作成・更新・削除後に再取得するクエリ。設備の作成では DB のトリガーが1台グループを作り、
+ * 名前の変更はグループの member_names に、削除はメンバーに及ぶので、グループ側も再取得する（Issue #512）
+ */
+function invalidateEquipmentQueries(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
+  queryClient.invalidateQueries({ queryKey: EQUIPMENT_GROUPS_KEY })
+  queryClient.invalidateQueries({ queryKey: ALL_MEMBERS_KEY })
+}
 
 /**
  * 設備一覧を取得するフック
@@ -30,8 +42,7 @@ export function useCreateEquipment() {
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      // 設備一覧を再取得
-      queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
+      invalidateEquipmentQueries(queryClient)
     },
   })
 }
@@ -49,8 +60,7 @@ export function useUpdateEquipment() {
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      // 設備一覧を再取得
-      queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
+      invalidateEquipmentQueries(queryClient)
     },
   })
 }
@@ -67,8 +77,7 @@ export function useDeleteEquipment() {
         method: "DELETE",
       }),
     onSuccess: () => {
-      // 設備一覧を再取得
-      queryClient.invalidateQueries({ queryKey: EQUIPMENTS_QUERY_KEY })
+      invalidateEquipmentQueries(queryClient)
     },
   })
 }

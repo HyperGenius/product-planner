@@ -146,6 +146,8 @@ def tenants(admin_db, auth_user_id):
             "products",
             "customers",
             "equipments",
+            # 設備の作成時にトリガーが1台グループを作る（Issue #512）
+            "equipment_groups",
         ):
             admin_db.table(table).delete().eq("tenant_id", tid).execute()
     admin_db.table("organization_members").delete().eq("user_id", auth_user_id).eq(

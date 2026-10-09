@@ -42,7 +42,10 @@ class TestEquipmentGroupRouter:
         app.dependency_overrides = {}
 
     def test_get_equipment_groups(self, mock_repo):
-        """GET /: 全件取得のテスト。member_names / member_count が付与されて返ること。"""
+        """GET /: 全件取得のテスト。member_names / member_count / routing_count が付与されて返ること。
+
+        routing_count を返さない行は 0 になる。
+        """
         mock_repo.get_all_groups.return_value = [
             {
                 "id": 1,
@@ -50,6 +53,7 @@ class TestEquipmentGroupRouter:
                 "tenant_id": "uuid-1",
                 "member_names": ["設備A", "設備B"],
                 "member_count": 2,
+                "routing_count": 3,
             },
             {
                 "id": 2,
@@ -69,6 +73,7 @@ class TestEquipmentGroupRouter:
                 "max_fragments": None,
                 "member_names": ["設備A", "設備B"],
                 "member_count": 2,
+                "routing_count": 3,
             },
             {
                 "id": 2,
@@ -79,6 +84,7 @@ class TestEquipmentGroupRouter:
                 "max_fragments": None,
                 "member_names": ["設備C"],
                 "member_count": 1,
+                "routing_count": 0,
             },
         ]
 

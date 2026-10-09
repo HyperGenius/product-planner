@@ -12,6 +12,8 @@ export interface EquipmentGroup {
   max_fragments?: number | null
   member_names: string[]
   member_count: number
+  /** このグループを参照している工程（process_routings）の数 */
+  routing_count: number
 }
 
 export interface EquipmentGroupCreate {
@@ -90,9 +92,46 @@ function formatMemberNames(names: string[], max = 3): string {
   return `${names.slice(0, max).join(' / ')} 他${names.length - max}台`
 }
 
+/**
+ * 画面に出すグループ名。1台のグループは、グループ名ではなくメンバーの設備の表示名（呼称優先）を出す。
+ * 1台グループの名前は設備名・呼称を変えても追従しないため（Issue #512）
+ */
+export function groupDisplayName(group: Pick<EquipmentGroup, 'name' | 'member_names'>): string {
+  return group.member_names.length === 1 ? group.member_names[0] : group.name
+}
+
+/** 工程ルーティングの選択肢のラベル。複数台のグループはメンバーの設備名を補足する */
 export function formatGroupLabel(group: Pick<EquipmentGroup, 'name' | 'member_names'>): string {
-  if (group.member_names.length <= 1) return group.name
+  if (group.member_names.length === 0) return `${group.name}（メンバー未登録・設備なしで計画）`
+  if (group.member_names.length === 1) return group.member_names[0]
   return `${group.name} (${formatMemberNames(group.member_names)})`
+}
+
+export interface RoutingGroupOptionSection<T> {
+  label: string
+  groups: T[]
+}
+
+/**
+ * 工程ルーティングの設備グループの選択肢を、複数台のグループ・設備（1台のグループ）・メンバー未登録の
+ * グループに分けて表示名順に並べる（Issue #512）。
+ * メンバー0台のグループは、工程から参照されているもの（スケジューラーは設備なしとして扱う）と
+ * 編集中の工程が選んでいるものだけを残す。参照の無い0台のグループは設備の削除で残った残骸なので出さない
+ */
+export function routingGroupOptionSections<
+  T extends Pick<EquipmentGroup, 'id' | 'name' | 'member_names' | 'routing_count'>,
+>(groups: T[], selectedId: number | null | ''): RoutingGroupOptionSection<T>[] {
+  const byLabel = (a: T, b: T) => groupDisplayName(a).localeCompare(groupDisplayName(b), 'ja')
+  const shared = groups.filter((g) => g.member_names.length >= 2).sort(byLabel)
+  const single = groups.filter((g) => g.member_names.length === 1).sort(byLabel)
+  const empty = groups
+    .filter((g) => g.member_names.length === 0 && (g.routing_count > 0 || g.id === selectedId))
+    .sort(byLabel)
+  return [
+    { label: '設備グループ（複数台）', groups: shared },
+    { label: '設備', groups: single },
+    { label: 'メンバー未登録（設備なしで計画）', groups: empty },
+  ].filter((section) => section.groups.length > 0)
 }
 
 /**
