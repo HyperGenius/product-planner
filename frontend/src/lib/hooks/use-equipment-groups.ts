@@ -28,7 +28,7 @@ export interface EquipmentGroupUpdate {
   max_fragments?: number | null
 }
 
-const EQUIPMENT_GROUPS_KEY = ['equipment-groups']
+export const EQUIPMENT_GROUPS_KEY = ['equipment-groups']
 
 // 一覧取得
 export function useEquipmentGroups() {
@@ -93,4 +93,18 @@ function formatMemberNames(names: string[], max = 3): string {
 export function formatGroupLabel(group: Pick<EquipmentGroup, 'name' | 'member_names'>): string {
   if (group.member_names.length <= 1) return group.name
   return `${group.name} (${formatMemberNames(group.member_names)})`
+}
+
+/**
+ * 設備マスタのグループ管理タブに出すグループ。
+ * 既定は2台以上の共有グループだけ（1台のグループは設備一覧で見えるため、Issue #192）で、
+ * `includeSmall` なら1台以下（0台を含む）のグループも出す。メンバーの欠けた工程用グループや、
+ * 設備の削除で残った0台のグループを画面から見つけて直せるようにする（Issue #512）
+ */
+export function groupsForManagement<T extends Pick<EquipmentGroup, 'member_count'>>(
+  groups: T[],
+  includeSmall: boolean,
+): T[] {
+  if (includeSmall) return groups
+  return groups.filter((g) => g.member_count >= 2)
 }

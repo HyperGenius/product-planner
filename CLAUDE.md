@@ -204,6 +204,9 @@ cd backend && ruff check . && mypy .
     台帳の全項目・編集・削除・グループ設定は行クリックで開く詳細シート（`components/equipments/equipment-detail-sheet.tsx`）に置く。
     編集はシート内でフォームに切り替え、ダイアログを重ねるのは削除確認とグループ設定だけにする。一覧に列を足すときはマスタ共通の
     幅（`max-w-[860px]`）に収まるかを確認する
+  - **設備グループのキャッシュ**: グループの `member_names` / `member_count` はグループ一覧（`['equipment-groups']`、
+    `GET /equipment-groups`）が返すので、メンバーや設備を変えるミューテーションはメンバーのクエリだけでなくグループ一覧も
+    無効化する（工程ルーティングのプルダウンのラベル・グループ管理タブの絞り込みが古いまま残る。Issue #512）
 - **一覧のセルを折り返さず省略するとき**: shadcn の `Table` は自動レイアウトなので、`td` の `truncate` / `max-w-*` は効かない
   （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って

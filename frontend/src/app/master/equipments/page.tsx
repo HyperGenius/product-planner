@@ -10,6 +10,7 @@ import {
   useCreateEquipmentGroup,
   useUpdateEquipmentGroup,
   useDeleteEquipmentGroup,
+  groupsForManagement,
   type EquipmentGroup,
 } from "@/lib/hooks/use-equipment-groups"
 import { useAllEquipmentGroupMembers } from "@/hooks/use-equipment-group-members"
@@ -37,6 +38,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -77,6 +79,7 @@ export default function EquipmentsPage() {
   const [sheetEquipmentId, setSheetEquipmentId] = useState<number | null>(null)
 
   // ── グループ管理タブの状態 ──────────────────────────────────────
+  const [showSmallGroups, setShowSmallGroups] = useState(false)
   const [groupDialogMode, setGroupDialogMode] = useState<GroupDialogMode>(null)
   const [selectedGroup, setSelectedGroup] = useState<EquipmentGroup | null>(null)
   const [groupName, setGroupName] = useState("")
@@ -96,6 +99,11 @@ export default function EquipmentsPage() {
   const createGroupMutation = useCreateEquipmentGroup()
   const updateGroupMutation = useUpdateEquipmentGroup()
   const deleteGroupMutation = useDeleteEquipmentGroup()
+
+  const managedGroups = useMemo(
+    () => groupsForManagement(groups ?? [], showSmallGroups),
+    [groups, showSmallGroups]
+  )
 
   const sortedEquipments = useMemo(
     () => (equipments ? sortEquipments(equipments, sortKey) : []),
@@ -341,7 +349,15 @@ export default function EquipmentsPage() {
 
         {/* ── タブ2: グループ管理 ──────────────────────────────── */}
         <TabsContent value="groups">
-          <div className="mb-4 flex justify-end">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-small-groups-filter"
+                checked={showSmallGroups}
+                onCheckedChange={setShowSmallGroups}
+              />
+              <Label htmlFor="show-small-groups-filter">1台以下のグループも表示</Label>
+            </div>
             <Button onClick={handleOpenGroupCreateDialog}>
               <Plus className="mr-2 h-4 w-4" />
               新規作成
@@ -361,8 +377,8 @@ export default function EquipmentsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {groups && groups.filter((g) => g.member_count >= 2).length > 0 ? (
-                    groups.filter((g) => g.member_count >= 2).map((group) => (
+                  {managedGroups.length > 0 ? (
+                    managedGroups.map((group) => (
                       <TableRow key={group.id}>
                         <TableCell>{group.name}</TableCell>
                         <TableCell className="text-right text-sm text-muted-foreground">{group.member_count}台</TableCell>

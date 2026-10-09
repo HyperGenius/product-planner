@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
+import { EQUIPMENT_GROUPS_KEY } from "@/lib/hooks/use-equipment-groups"
 import type { Equipment } from "@/types/equipment"
 
 export interface EquipmentGroupMember {
@@ -50,6 +51,8 @@ export function useAddEquipmentToGroup() {
     onSuccess: () => {
       // ALL_MEMBERS_KEY のprefixで全件キャッシュ（特定グループ含む）を一括無効化
       queryClient.invalidateQueries({ queryKey: ALL_MEMBERS_KEY })
+      // グループ一覧の member_names / member_count も変わる
+      queryClient.invalidateQueries({ queryKey: EQUIPMENT_GROUPS_KEY })
     },
   })
 }
@@ -68,6 +71,8 @@ export function useRemoveEquipmentFromGroup() {
     onSuccess: () => {
       // ALL_MEMBERS_KEY のprefixで全件キャッシュ（特定グループ含む）を一括無効化
       queryClient.invalidateQueries({ queryKey: ALL_MEMBERS_KEY })
+      // グループ一覧の member_names / member_count も変わる
+      queryClient.invalidateQueries({ queryKey: EQUIPMENT_GROUPS_KEY })
     },
   })
 }
