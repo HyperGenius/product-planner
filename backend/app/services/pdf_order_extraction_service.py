@@ -1,8 +1,14 @@
+import base64
+import copy
 import json
 import os
 from typing import Any
 
 import anthropic
+
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -85,6 +91,44 @@ _EXTRACT_SCHEMA: Any = {
 }
 
 
+def _build_prompt(lead: str, customer_extraction_prompt: str | None) -> str:
+    """汎用の抽出指示に、顧客固有の抽出指示（あれば）を追記する。"""
+    prompt = lead
+    if customer_extraction_prompt and customer_extraction_prompt.strip():
+        prompt += (
+            f"\n\n【この顧客固有の抽出指示】\n{customer_extraction_prompt.strip()}"
+        )
+    return prompt
+
+
+def _parse_response(response: Any) -> dict[str, Any]:
+    """構造化出力のレスポンスを dict に戻す。
+
+    output_config.format 指定時は最初の text ブロックに valid JSON が入るが、
+    モデル都合で非JSON／dict以外が返っても呼び出し側（dict/list 前提）が壊れないよう
+    空結果へフォールバックする（旧・強制ツール呼び出し時の未検出フォールバックと同じ挙動）
+    """
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    try:
+        parsed = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        parsed = None
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _normalize_result(data: dict[str, Any]) -> dict[str, Any]:
+    line_items = data.get("line_items")
+    document_order_no = data.get("document_order_no")
+    return {
+        "document_order_no": (
+            document_order_no if isinstance(document_order_no, str) else None
+        ),
+        # スキーマ上は list だが、LLM が null/不正型を返しても
+        # 呼び出し側（list 前提）が壊れないよう空配列にフォールバックする
+        "line_items": line_items if isinstance(line_items, list) else [],
+    }
+
+
 def extract_order_lines(
     pdf_text: str, customer_extraction_prompt: str | None = None
 ) -> dict[str, Any]:
@@ -98,16 +142,13 @@ def extract_order_lines(
     戻り値: {"document_order_no": str | None, "line_items": list[dict]}
     """
     model = os.environ.get("PDF_EXTRACTION_MODEL", "claude-sonnet-5")
-    prompt = (
+    prompt = _build_prompt(
         "以下は受注PDFから抽出したテキストです。"
         "文書レベルの注文番号(document_order_no)と、明細行ごとに"
         "品番・品名・数量・納期・確度、および明細レベルの注文No.(line_order_no)を"
-        "抽出してください。"
+        "抽出してください。",
+        customer_extraction_prompt,
     )
-    if customer_extraction_prompt and customer_extraction_prompt.strip():
-        prompt += (
-            f"\n\n【この顧客固有の抽出指示】\n{customer_extraction_prompt.strip()}"
-        )
     prompt += f"\n\n{pdf_text}"
 
     response = _client.messages.create(
@@ -121,22 +162,119 @@ def extract_order_lines(
         },
         messages=[{"role": "user", "content": prompt}],
     )
-    # output_config.format 指定時は最初の text ブロックに valid JSON が入るが、
-    # モデル都合で非JSON／dict以外が返っても呼び出し側（dict/list 前提）が壊れないよう
-    # 空結果へフォールバックする（旧・強制ツール呼び出し時の未検出フォールバックと同じ挙動）
-    text = next((b.text for b in response.content if b.type == "text"), None)
+    return _normalize_result(_parse_response(response))
+
+
+# 画像PDF用のスキーマ。テキストPDFと同じ項目に、顧客を解決し直すための発行元の
+# 会社名を足す。テキストPDFは文面テキストそのもので顧客を照合する（Issue #385）が、
+# 画像PDFには照合に使える文面テキストが無いため、モデルに読み取らせる（Issue #520）。
+_IMAGE_EXTRACT_SCHEMA: Any = copy.deepcopy(_EXTRACT_SCHEMA)
+_IMAGE_EXTRACT_SCHEMA["properties"]["issuer_company_name"] = {
+    "type": ["string", "null"],
+    "description": (
+        "この注文書を発行した会社（発注元）の会社名。"
+        "宛先・送付先として記載されている受注側の会社名ではない。"
+        "FAXの送信元ヘッダーや社印・署名欄に会社名がある場合はそれを使う。"
+        "読み取れない場合は null。"
+    ),
+}
+_IMAGE_EXTRACT_SCHEMA["required"] = [
+    *_EXTRACT_SCHEMA["required"],
+    "issuer_company_name",
+]
+
+
+class PdfDocumentRejectedError(Exception):
+    """Claude API が PDF を処理できない文書として拒否した（再試行しても通らない）。"""
+
+
+def extract_order_lines_from_pdf(
+    pdf_content: bytes, customer_extraction_prompt: str | None = None
+) -> dict[str, Any]:
+    """
+    テキストを持たない画像PDF（FAX受信・スキャン）を PDF のまま Claude に渡し、
+    注文番号（文書レベル）・明細行・発行元の会社名を抽出する（Issue #520）。
+
+    PDFの `document` ブロックはページを画像として読むため、pdfplumber で
+    1文字も取れない PDF でも中身を読める。
+
+    - API が文書を受け付けない（400 / 413 / 422）場合は PdfDocumentRejectedError を
+      送出する。呼び出し側は読み取り不能PDFとして扱う
+    - レート制限・5xx・接続エラー等の一時的な失敗はそのまま送出する（cron の次回
+      実行でステージング行を再処理させる。テキストPDFの抽出と同じ扱い）
+    - 拒否（stop_reason='refusal'）・出力打ち切りは空結果として返す
+
+    戻り値: {"document_order_no": str | None, "line_items": list[dict],
+             "issuer_company_name": str | None}
+    """
+    # FAX は解像度が低く数字の読み違いが起きやすいため、テキストPDFとは別に
+    # 読み取り精度を優先したモデルを設定できるようにする
+    model = os.environ.get("PDF_IMAGE_EXTRACTION_MODEL", "claude-opus-5-5")
+    prompt = _build_prompt(
+        "添付は受注の注文書PDF（FAX受信やスキャンによる画像）です。"
+        "文書レベルの注文番号(document_order_no)、注文書の発行元の会社名"
+        "(issuer_company_name)と、明細行ごとに品番・品名・数量・納期・確度、"
+        "および明細レベルの注文No.(line_order_no)を抽出してください。"
+        "かすれ・つぶれで判読できない値は推測で埋めず null にしてください。",
+        customer_extraction_prompt,
+    )
+
     try:
-        parsed = json.loads(text) if text else None
-    except json.JSONDecodeError:
-        parsed = None
-    data: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
-    line_items = data.get("line_items")
-    document_order_no = data.get("document_order_no")
+        response = _client.messages.create(
+            model=model,
+            max_tokens=16000,
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": _IMAGE_EXTRACT_SCHEMA,
+                }
+            },
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": base64.standard_b64encode(pdf_content).decode(
+                                    "ascii"
+                                ),
+                            },
+                        },
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
+        )
+    except (
+        anthropic.BadRequestError,
+        anthropic.RequestTooLargeError,
+        anthropic.UnprocessableEntityError,
+    ) as exc:
+        raise PdfDocumentRejectedError(
+            f"Claude API rejected the PDF (status={exc.status_code})"
+        ) from exc
+
+    if response.stop_reason in ("refusal", "max_tokens"):
+        logger.warning(
+            "pdf_order_extraction: image PDF extraction stopped "
+            f"(stop_reason={response.stop_reason})"
+        )
+        return {
+            "document_order_no": None,
+            "line_items": [],
+            "issuer_company_name": None,
+        }
+
+    data = _parse_response(response)
+    issuer_company_name = data.get("issuer_company_name")
     return {
-        "document_order_no": (
-            document_order_no if isinstance(document_order_no, str) else None
+        **_normalize_result(data),
+        "issuer_company_name": (
+            issuer_company_name.strip()
+            if isinstance(issuer_company_name, str) and issuer_company_name.strip()
+            else None
         ),
-        # スキーマ上は list だが、LLM が null/不正型を返しても
-        # 呼び出し側（list 前提）が壊れないよう空配列にフォールバックする
-        "line_items": line_items if isinstance(line_items, list) else [],
     }

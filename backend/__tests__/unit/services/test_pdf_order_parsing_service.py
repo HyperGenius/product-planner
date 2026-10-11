@@ -1,6 +1,8 @@
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from app.services.pdf_order_extraction_service import PdfDocumentRejectedError
 from app.services.pdf_order_parsing_service import (
     _generate_auto_customer_order_no,
     _normalize_order_no_digits,
@@ -1507,3 +1509,286 @@ class TestPerPdfCustomerResolution:
         _no_pdf_customer_match.assert_not_called()
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
         assert rpc_params["p_customer_id"] == 7
+
+
+@pytest.mark.unit
+class TestImagePdfExtraction:
+    """テキストを持たない画像PDF（FAX受信・スキャン）を Claude に画像として読ませて
+    起票する（Issue #520）。"""
+
+    _LINE = {
+        "product_name_raw": "製品A",
+        "product_number_raw": None,
+        "quantity": 5,
+        "delivery_date": "2026-08-01",
+        "line_order_no": None,
+        "certainty": "confirmed",
+    }
+
+    def _staging_row(self, **overrides):
+        # 社長が件名・本文なしで転送してくるため、本文は空。customer_id=7 は
+        # 社長のアドレスから解決された（誤った）メール単位の値を想定する。
+        row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "gmail_message_id": "msg-1",
+            "source_raw": "",
+            "storage_path": "tenant-1/inbox/msg-1/fax.pdf",
+            "original_filename": "fax.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 1234,
+            "parse_status": "pending",
+        }
+        row.update(overrides)
+        return row
+
+    def _mock_db(self, action="inserted"):
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": action}]
+        )
+        # 既存の parse_log なし・顧客固有の抽出指示なし
+        mock_db.table().select().eq().limit().execute.return_value = MagicMock(data=[])
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        return mock_db
+
+    def _base_patches(self):
+        return (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fax",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(text=None, failure_reason="failed_image"),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=None,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+                return_value={"product_id": 100, "candidates": []},
+            ),
+        )
+
+    @staticmethod
+    def _parse_log_reasons(mock_db):
+        return [
+            c.args[0]["reason"]
+            for c in mock_db.table().insert.call_args_list
+            if isinstance(c.args[0], dict) and "reason" in c.args[0]
+        ]
+
+    def test_image_pdf_lines_are_created_as_orders(self):
+        mock_db = self._mock_db()
+        p1, p2, p3, p4 = self._base_patches()
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                return_value={
+                    "document_order_no": "PO-1",
+                    "line_items": [self._LINE, {**self._LINE, "quantity": 10}],
+                    "issuer_company_name": None,
+                },
+            ) as mock_image_extract,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines"
+            ) as mock_text_extract,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_order_lines"
+            ) as mock_body_extract,
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 2, "errors": 0}
+        # PDFのバイト列をそのまま画像抽出に渡し、テキスト抽出・本文抽出は行わない
+        assert mock_image_extract.call_args.args[0] == b"%PDF-fax"
+        mock_text_extract.assert_not_called()
+        mock_body_extract.assert_not_called()
+
+        upsert_calls = [
+            c
+            for c in mock_db.rpc.call_args_list
+            if c.args and c.args[0] == "upsert_order_by_dedupe_key"
+        ]
+        assert [c.args[1]["p_quantity"] for c in upsert_calls] == [5, 10]
+        assert all(c.args[1]["p_customer_order_no"] == "PO-1" for c in upsert_calls)
+
+        # 起票した受注の添付行は要確認表示用の success_image
+        attachment_inserts = [
+            c.args[0]
+            for c in mock_db.table().insert.call_args_list
+            if isinstance(c.args[0], dict) and "order_id" in c.args[0]
+        ]
+        assert [a["parse_status"] for a in attachment_inserts] == [
+            "success_image",
+            "success_image",
+        ]
+        assert self._parse_log_reasons(mock_db) == ["image_extracted"]
+
+        update_calls = mock_db.table().update.call_args_list
+        assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
+    def test_customer_is_re_resolved_from_issuer_company_name(
+        self, _no_pdf_customer_match
+    ):
+        _no_pdf_customer_match.return_value = 55
+        mock_db = self._mock_db()
+        p1, p2, p3, p4 = self._base_patches()
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [self._LINE],
+                    "issuer_company_name": "株式会社ABC製作所",
+                },
+            ),
+        ):
+            parse_pending_order_pdfs(mock_db)
+
+        assert _no_pdf_customer_match.call_args.args[1:] == (
+            "tenant-1",
+            "株式会社ABC製作所",
+        )
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_id"] == 55
+
+    def test_re_extracts_with_resolved_customer_prompt(self, _no_pdf_customer_match):
+        _no_pdf_customer_match.return_value = 55
+        mock_db = self._mock_db()
+        p1, p2, p3, p4 = self._base_patches()
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service._get_customer_extraction_prompt",
+                side_effect=lambda _db, _tenant, customer_id: (
+                    "数量はケース数×12で換算する" if customer_id == 55 else None
+                ),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                side_effect=[
+                    {
+                        "document_order_no": None,
+                        "line_items": [self._LINE],
+                        "issuer_company_name": "ABC製作所",
+                    },
+                    {
+                        "document_order_no": None,
+                        "line_items": [{**self._LINE, "quantity": 60}],
+                        "issuer_company_name": "ABC製作所",
+                    },
+                ],
+            ) as mock_image_extract,
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result["orders_created"] == 1
+        assert [c.args[1] for c in mock_image_extract.call_args_list] == [
+            None,
+            "数量はケース数×12で換算する",
+        ]
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_id"] == 55
+        assert rpc_params["p_quantity"] == 60
+
+    @pytest.mark.parametrize("failure", ["no_lines", "rejected"])
+    def test_unreadable_image_falls_back_to_empty_draft(self, failure):
+        mock_db = self._mock_db()
+        p1, p2, p3, p4 = self._base_patches()
+        image_extract_kwargs: dict[str, Any] = (
+            {
+                "return_value": {
+                    "document_order_no": None,
+                    "line_items": [],
+                    "issuer_company_name": None,
+                }
+            }
+            if failure == "no_lines"
+            else {"side_effect": PdfDocumentRejectedError("status=400")}
+        )
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                **image_extract_kwargs,
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] is None
+        assert rpc_params["p_quantity"] is None
+        assert rpc_params["p_customer_id"] == 7
+        attachment_insert = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert attachment_insert["parse_status"] == "failed_image"
+        assert self._parse_log_reasons(mock_db) == ["failed_image"]
+
+    def test_transient_api_error_keeps_row_pending_for_retry(self):
+        mock_db = self._mock_db()
+        p1, p2, p3, p4 = self._base_patches()
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                side_effect=RuntimeError("overloaded"),
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 0, "orders_created": 0, "errors": 1}
+        # 空の下書きを作らず、ステージング行も pending のまま次回の cron に回す
+        assert not any(
+            c.args and c.args[0] == "upsert_order_by_dedupe_key"
+            for c in mock_db.rpc.call_args_list
+        )
+        update_calls = mock_db.table().update.call_args_list
+        assert not any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
+    def test_all_lines_skipped_notifies_no_order_created_without_image_log(self):
+        mock_db = self._mock_db(action="skipped_no_change")
+        p1, p2, p3, p4 = self._base_patches()
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [self._LINE],
+                    "issuer_company_name": None,
+                },
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+        assert self._parse_log_reasons(mock_db) == ["no_order_created"]

@@ -40,7 +40,9 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
    - パスワード保護 (PPAP等) で開けない → `product_id`/`quantity`/`deadline_date` が
      すべて `NULL` の下書き order を1件起票し、対応する `order_attachments` 行の
      `parse_status='failed_encrypted'` とする（Issue #304、詳細後述）
-   - テキストが1文字も取れない (画像PDF等) → 同様に下書き order を1件起票し
+   - テキストが1文字も取れない (画像PDF等) → PDF のまま Claude に画像として読ませて
+     明細・発行元の会社名を抽出し、明細ごとに起票する（Issue #520、詳細後述）。
+     それでも明細が取れない場合のみ、同様に下書き order を1件起票し
      `parse_status='failed_image'` とする（Issue #304）
    - テキスト抽出成功時、続けて **PDF文面から顧客を解決し直す**
      (`customer_matching_service.match_customer_by_pdf_text`、Issue #385)。
@@ -399,6 +401,52 @@ supersede されない。確度が判定できていない行を「旧内示」�
 - `order_parse_log`・`notifications` への記録は従来どおり行う（`reason`/`notif_type` に
   `failed_encrypted`/`failed_image` を使用。新しい値の追加やCHECK制約変更は不要）
 
+### 画像PDF（FAX受信・スキャン）の読み取り（Issue #520）
+
+FAX で受けた注文書や、ファイル共有システムで受領したスキャンの注文書は、社長（社内の
+共通メールアカウント）が件名・本文なしで PDF を添付して転送してくる。中身が画像のため
+pdfplumber ではテキストが1文字も取れず（`failed_image`）、本文も空なので本文フォールバック
+（Issue #278）も効かない。以前は空の下書きを1件作るだけで、担当者が全項目を手入力していた。
+
+- `pdf_order_parsing_service._process_image_pdf()` が、`failed_image` の PDF を
+  `pdf_order_extraction_service.extract_order_lines_from_pdf()` に渡す。PDF を
+  `document` ブロック（base64）で Claude に送り、ページを画像として読ませる。
+  抽出スキーマはテキストPDFの `_EXTRACT_SCHEMA` に発行元の会社名
+  （`issuer_company_name`。宛先＝自社ではなく発注元）を足した `_IMAGE_EXTRACT_SCHEMA`
+- 抽出した明細はテキストPDFと同じ `_process_line_item()` に流す（製品照合・
+  `upsert_order_by_dedupe_key`・supersede・自動シミュは共通）
+- **顧客の付け直し**: `issuer_company_name` を `match_customer_by_pdf_text()` に渡し、
+  #385 と同じ照合（正規化した `customers.name` / `alias` の部分一致、一意の場合のみ）を行う。
+  社長からの転送ではメール単位の `customer_id` は社長のアドレスから解決された値なので、
+  付け直せないと誤った顧客で起票される（社内転送者の扱いは Issue #521）
+- **顧客固有の抽出指示**: 1回目はメール単位の顧客の指示で読む。付け直した顧客に別の
+  指示があれば、その指示でもう一度読み、明細が取れればそちらを採用する（テキストPDFが
+  付け直し後の顧客の指示で抽出しているのと揃えるため。API 呼び出しが増えるのはこの場合だけ）
+- **注文番号の自動採番**: 文面テキストが無いので、`_generate_auto_customer_order_no()` には
+  PDF の中身の SHA-256 を渡す（同じファイルを再パースしても同じ番号）
+- **要確認の表示**: FAX は 6/8・1/7 等の読み違いが起きうる。起票した受注の
+  `order_attachments` 行は `parse_status='success_image'`（マイグレーション
+  `20261011000000_add_order_attachments_success_image_status.sql` で CHECK に追加）とし、
+  受注詳細・参照元メールパネルで「数量・納期を元ファイルと照合してください」と出す。
+  ステージング行には `order_parse_log.reason='image_extracted'` を残し、受信結果一覧
+  （`/orders/email-intake`）では「起票＋要確認」になる（`_EMAIL_INTAKE_ATTENTION_REASONS`）。
+  `image_extracted` は起票が1件以上のときだけ残す（0件のときに残すと
+  `_notify_if_no_order_created()` の「既にログがある」判定を満たして `no_order_created` が出なくなる）
+- **失敗時の扱い**:
+
+  | 状況 | 扱い |
+  |---|---|
+  | 明細が0件・拒否（`stop_reason='refusal'`）・出力打ち切り（`max_tokens`） | 従来どおり空の下書き＋`failed_image`（`_process_unreadable_pdf()`） |
+  | API が文書を受け付けない（400 / 413 / 422 → `PdfDocumentRejectedError`） | 同上 |
+  | レート制限・5xx・接続エラー・認証エラー | 例外をそのまま送出し、ステージング行を `pending` のまま残す（次回の cron で再処理。テキストPDFの抽出失敗と同じ） |
+
+- **モデル**: `PDF_IMAGE_EXTRACTION_MODEL`（既定 `claude-opus-5-5`）。FAX の画質を考慮し、
+  テキストPDFの `PDF_EXTRACTION_MODEL` とは別に設定できるようにした。PDF のサイズ・ページ数は
+  `extract_text()` の上限（20MB / 50ページ）を通過したものだけが届くので、API の上限
+  （リクエスト 32MB）に収まる
+- **スコープ外**: 画像ファイル（JPEG/TIFF）の添付（FAX は PDF で届くことを確認済み）、
+  パスワード付きPDF（`failed_encrypted`）、FAX 番号による顧客照合（Issue #521）
+
 ### 確度を判定できなかった受注の扱い（Issue #474）
 
 以下の2経路では顧客側の確度を判定できないため、`orders.customer_certainty` を NULL
@@ -638,6 +686,7 @@ CHECK 制約・型定義・RPC の変更は無い。
   - `extract_text(content: bytes) -> PdfTextResult`
 - `backend/app/services/pdf_order_extraction_service.py`
   - `extract_order_lines(pdf_text: str) -> dict`（Claude 構造化出力 `output_config.format`、`PDF_EXTRACTION_MODEL`）
+  - `extract_order_lines_from_pdf(pdf_content: bytes) -> dict`（画像PDFを `document` ブロックで渡す、`PDF_IMAGE_EXTRACTION_MODEL`。Issue #520）
 - `backend/app/services/pdf_order_parsing_service.py`
   - `parse_pending_order_pdfs(db) -> dict[str, int]`
 - `backend/app/routers/cron/_auth.py`
@@ -814,6 +863,7 @@ Webインスタンス自身に高負荷を掛ける構造・`pdf_text_service` �
 ```
 # Claude API
 PDF_EXTRACTION_MODEL=claude-sonnet-5  # デフォルト。EMAIL_EXTRACTION_MODEL とは別軸で管理
+PDF_IMAGE_EXTRACTION_MODEL=claude-opus-5-5  # 画像PDF（FAX・スキャン）の読み取り（Issue #520）
 
 # 製品マッチング (pg_trgm) の自動確定しきい値
 PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD=0.75  # 最上位候補スコアの下限

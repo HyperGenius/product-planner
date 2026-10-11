@@ -388,6 +388,22 @@ export default function OrderDetailPage() {
                           </a>
                         )}
                       </span>
+                    ) : att.parse_status === 'success_image' ? (
+                      <span className="flex flex-col gap-0.5">
+                        <a
+                          href={att.signed_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-primary underline"
+                        >
+                          <Download className="h-3 w-3 shrink-0" />
+                          {att.original_filename}
+                        </a>
+                        <span className="flex items-center gap-1 text-amber-600">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          画像（FAX等）から自動で読み取りました — 数量・納期を元ファイルと照合してください
+                        </span>
+                      </span>
                     ) : (
                       <a
                         href={att.signed_url}

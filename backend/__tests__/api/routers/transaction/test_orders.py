@@ -316,6 +316,8 @@ class TestOrderRouter:
             ("success", 2, ["multi_order_suspected"], ("created", True, False)),
             # 起票あり＋一部明細が数量不正（他明細は起票済み）
             ("success", 1, ["invalid_quantity"], ("created", True, False)),
+            # 起票あり＋画像PDF（FAX等）から読み取り（元ファイルとの照合を促す: Issue #520）
+            ("success", 2, ["image_extracted"], ("created", True, False)),
             # スキップ（正常に処理されたが意図的に起票しなかった）
             ("success", 0, ["no_order_created"], ("skipped", False, False)),
             ("success", 0, ["non_order_email"], ("skipped", False, False)),

@@ -37,6 +37,7 @@ const REASON_LABELS: Record<string, string> = {
   no_order_created: "起票0件（全明細が重複）",
   non_order_email: "対象外メール",
   invalid_quantity: "数量不正",
+  image_extracted: "画像から読み取り",
   failed_encrypted: "暗号化PDF",
   failed_image: "画像PDF",
   failed_no_attachment: "添付なし",

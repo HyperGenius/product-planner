@@ -276,6 +276,8 @@ export interface OrderAttachment {
   parse_status:
     | 'pending'
     | 'success'
+    /** 画像PDF（FAX等）から読み取って起票した（数量・納期の確認を促す。Issue #520） */
+    | 'success_image'
     | 'failed_encrypted'
     | 'failed_image'
     | 'failed_no_attachment'
