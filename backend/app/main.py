@@ -28,7 +28,7 @@ from app.routers.master import (
     product_router,
     scheduling_settings_router,
 )
-from app.routers.tenant import member_router
+from app.routers.tenant import internal_sender_router, member_router
 from app.routers.transaction import (
     notifications_router,
     orders_router,
@@ -75,6 +75,7 @@ app.include_router(notifications_router)
 app.include_router(production_schedules_router)
 app.include_router(scheduling_settings_router)
 app.include_router(member_router)
+app.include_router(internal_sender_router)
 app.include_router(device_router)
 app.include_router(admin_router)
 app.include_router(cron_router)

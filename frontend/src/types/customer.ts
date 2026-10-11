@@ -7,6 +7,8 @@ export interface Customer {
   alias?: string
   representative_name?: string
   phone_number?: string
+  /** FAX 番号。注文書の送信元番号での顧客照合に使う（Issue #521） */
+  fax_number?: string
   email?: string
   status: "active" | "draft"
   tenant_id: string
@@ -22,6 +24,7 @@ export interface CustomerCreate {
   alias?: string
   representative_name?: string
   phone_number?: string
+  fax_number?: string
   email?: string
 }
 
@@ -36,5 +39,6 @@ export interface CustomerUpdate {
   alias?: string | null
   representative_name?: string | null
   phone_number?: string | null
+  fax_number?: string | null
   email?: string | null
 }

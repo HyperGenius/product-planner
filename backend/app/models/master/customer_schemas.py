@@ -13,6 +13,9 @@ class CustomerBase(BaseSchema):
     alias: str | None = Field(default=None, description="通称（画面表示用）")
     representative_name: str | None = Field(default=None, description="代表者名")
     phone_number: str | None = Field(default=None, description="電話番号")
+    fax_number: str | None = Field(
+        default=None, description="FAX番号（注文書の送信元番号での照合に使う）"
+    )
     email: str | None = Field(default=None, description="メールアドレス")
 
 
@@ -38,4 +41,7 @@ class CustomerUpdateSchema(BaseSchema):
     alias: str | None = Field(default=None, description="通称（画面表示用）")
     representative_name: str | None = Field(default=None, description="代表者名")
     phone_number: str | None = Field(default=None, description="電話番号")
+    fax_number: str | None = Field(
+        default=None, description="FAX番号（注文書の送信元番号での照合に使う）"
+    )
     email: str | None = Field(default=None, description="メールアドレス")

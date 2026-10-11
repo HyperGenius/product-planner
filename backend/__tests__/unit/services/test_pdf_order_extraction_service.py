@@ -49,6 +49,7 @@ class TestExtractOrderLinesFromPdf:
                 {
                     "document_order_no": "PO-1",
                     "issuer_company_name": "  株式会社ABC製作所 ",
+                    "issuer_fax_number": "03-1234-5678",
                     "line_items": [_LINE],
                 }
             )
@@ -58,6 +59,7 @@ class TestExtractOrderLinesFromPdf:
             "document_order_no": "PO-1",
             "line_items": [_LINE],
             "issuer_company_name": "株式会社ABC製作所",
+            "issuer_fax_number": "03-1234-5678",
         }
         kwargs = mock_client.messages.create.call_args.kwargs
         document, text = kwargs["messages"][0]["content"]
@@ -67,6 +69,7 @@ class TestExtractOrderLinesFromPdf:
         assert "顧客固有の指示" in text["text"]
         schema = kwargs["output_config"]["format"]["schema"]
         assert "issuer_company_name" in schema["required"]
+        assert "issuer_fax_number" in schema["required"]
 
     def test_model_can_be_overridden_by_env(self, monkeypatch):
         monkeypatch.setenv("PDF_IMAGE_EXTRACTION_MODEL", "claude-sonnet-5-5")
@@ -96,6 +99,7 @@ class TestExtractOrderLinesFromPdf:
             "document_order_no": None,
             "line_items": [],
             "issuer_company_name": None,
+            "issuer_fax_number": None,
         }
 
     def test_non_json_response_returns_empty(self):

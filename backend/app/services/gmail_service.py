@@ -11,6 +11,7 @@ from app.services.attachment_service import upload_staged_attachment
 from app.services.customer_matching_service import (
     extract_effective_sender_email,
     extract_email_address,
+    load_internal_sender_emails,
     resolve_or_create_customer,
 )
 from app.services.notification_service import create_notification
@@ -273,11 +274,21 @@ def _process_message(
             staged_attachments = []
 
         # 5. 顧客マッチング（メールの受注可否に関わらず、ソース単位で1回解決する）
-        #    転送ヘッダーが本文に無い場合、実際のGmail Fromヘッダーを最優先シグナルとして使う
+        #    転送ヘッダーが本文に無い場合、実際のGmail Fromヘッダーを最優先シグナルとして使う。
+        #    差出人が社内転送者（社長など）なら差出人では突合せず、決まらなければ
+        #    customer_id=None（顧客不明）のままパース時に添付の中身から決める（Issue #521）
         real_from_email = _get_real_from_email(msg)
-        sender_email = extract_effective_sender_email(body, real_from_email)
+        internal_senders = load_internal_sender_emails(db, tenant_id)
+        sender_email = extract_effective_sender_email(
+            body, real_from_email, internal_senders
+        )
         customer_id, created_draft = resolve_or_create_customer(
-            db, tenant_id, body, msg.get("internalDate"), real_from_email
+            db,
+            tenant_id,
+            body,
+            msg.get("internalDate"),
+            real_from_email,
+            internal_senders,
         )
         if created_draft:
             create_notification(

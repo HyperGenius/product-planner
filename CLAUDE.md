@@ -173,6 +173,14 @@ cd backend && ruff check . && mypy .
   なので値を足すときはマイグレーションで張り直す。ステージング行へ要確認のログ（`image_extracted`）を残すのは起票1件以上の
   ときだけにする（先に残すと `_notify_if_no_order_created()` が「ログあり」と判定して起票0件の通知が出ない）。
   詳細は [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md)
+- **社内転送者と顧客不明（Issue #521）**: `tenant_internal_senders` に登録したアドレス（社長など）からのメールは、
+  差出人での顧客の突合・下書き顧客の作成をせず、本文の候補でも決まらなければ**ステージング行・受注の
+  `customer_id` を NULL（顧客不明）にする**。テナント共通の「顧客不明」レコードは作らない（重複判定の UNIQUE に
+  `customer_id` が含まれるので、共通レコードだと品番・納期が同じ別顧客の注文が1件に統合される。NULL 同士は一致しない）。
+  そのため取り込み・パースの処理では `customer_id` が None になりうる前提で書く（顧客単位の別名辞書・内示の無効化は
+  スキップ。PostgREST の `.eq("customer_id", None)` は bigint エラーになる。Issue #262）。顧客の照合は
+  `match_customer_by_pdf_text()` が会社名→FAX 番号（`customers.fax_number`、数字だけで比較）の順で行い、両者が別の
+  顧客に当たったら確定しない。詳細は [docs/features/internal-senders.md](docs/features/internal-senders.md)
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**

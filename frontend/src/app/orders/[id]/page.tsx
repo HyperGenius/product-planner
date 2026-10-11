@@ -267,7 +267,16 @@ export default function OrderDetailPage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">顧客</dt>
-                <dd>{order.customer_id ? getCustomerName(order.customer_id, customers) : <span className="text-muted-foreground">未設定</span>}</dd>
+                <dd>
+                  {order.customer_id ? (
+                    getCustomerName(order.customer_id, customers)
+                  ) : order.source_type === 'email' ? (
+                    // メール取り込みで注文書から顧客を特定できなかった受注（Issue #521）
+                    <span className="text-amber-600">顧客不明（編集から顧客を選んでください）</span>
+                  ) : (
+                    <span className="text-muted-foreground">未設定</span>
+                  )}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">数量</dt>

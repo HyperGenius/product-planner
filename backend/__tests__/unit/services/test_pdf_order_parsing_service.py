@@ -196,13 +196,16 @@ class TestParsePendingOrderPdfs:
         update_calls = mock_db.table().update.call_args_list
         assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
 
-    def test_missing_customer_id_is_treated_as_error_not_silent_null(self):
-        """resolve_or_create_customer は常に customer_id を解決するはずなので、
-        ステージング行に customer_id が無いのは不整合。customer_id=NULL の
-        受注を静かに作らず、エラーとしてカウントされること（PRレビュー指摘対応）。"""
+    def test_unresolved_customer_is_created_as_null_customer(self):
+        """社内転送者からのメールで顧客が決まらなかったステージング行
+        （customer_id=None）は、customer_id=NULL（顧客不明）の受注として起票する
+        （Issue #521。以前は不整合として例外にしていた）。"""
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().order().limit().execute.return_value = (
             MagicMock(data=[self._staging_row(customer_id=None)])
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 99, "action": "inserted"}]
         )
 
         with (
@@ -219,8 +222,9 @@ class TestParsePendingOrderPdfs:
         ):
             result = parse_pending_order_pdfs(mock_db)
 
-        assert result == {"processed": 0, "orders_created": 0, "errors": 1}
-        mock_db.rpc.assert_not_called()
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_id"] is None
 
     def test_pdf_with_no_order_lines_falls_back_to_body_extraction(self):
         """PDFの内容が注文と無関係で明細が0件の場合、メール本文から抽出した
@@ -1657,6 +1661,7 @@ class TestImagePdfExtraction:
                     "document_order_no": None,
                     "line_items": [self._LINE],
                     "issuer_company_name": "株式会社ABC製作所",
+                    "issuer_fax_number": "03-1234-5678",
                 },
             ),
         ):
@@ -1665,6 +1670,7 @@ class TestImagePdfExtraction:
         assert _no_pdf_customer_match.call_args.args[1:] == (
             "tenant-1",
             "株式会社ABC製作所",
+            ["03-1234-5678"],
         )
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
         assert rpc_params["p_customer_id"] == 55
@@ -1792,3 +1798,35 @@ class TestImagePdfExtraction:
 
         assert result == {"processed": 1, "orders_created": 0, "errors": 0}
         assert self._parse_log_reasons(mock_db) == ["no_order_created"]
+
+    def test_unresolved_customer_skips_alias_and_supersede(self, _no_alias_match):
+        """社内転送者からのメールで顧客が決まらない場合（Issue #521）、顧客不明の
+        受注として起票し、顧客単位の別名辞書・内示の無効化は行わない。"""
+        mock_db = self._mock_db()
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row(customer_id=None)])
+        )
+        p1, p2, p3, p4 = self._base_patches()
+        with (
+            p1,
+            p2,
+            p3,
+            p4,
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [self._LINE],
+                    "issuer_company_name": "読み取れた社名",
+                    "issuer_fax_number": None,
+                },
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result["orders_created"] == 1
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_customer_id"] is None
+        _no_alias_match.assert_not_called()
+        update_calls = mock_db.table().update.call_args_list
+        assert not any("superseded_at" in c.args[0] for c in update_calls)

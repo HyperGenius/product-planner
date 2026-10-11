@@ -111,6 +111,19 @@ class TestCustomerRouter:
         call_args = mock_repo.create.call_args[0][0]
         assert call_args["name"] == "New Customer"
 
+    def test_create_customer_with_fax_number(self, mock_repo):
+        """POST /: FAX 番号を保存できる（注文書の送信元番号での照合用。Issue #521）"""
+        payload = {"name": "New Customer", "fax_number": "03-1234-5678"}
+        mock_repo.create.return_value = {**payload, "id": 101}
+
+        response = client.post(
+            "/customers", json=payload, headers={"x-tenant-id": str(uuid.uuid4())}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["fax_number"] == "03-1234-5678"
+        assert mock_repo.create.call_args[0][0]["fax_number"] == "03-1234-5678"
+
     def test_update_customer(self, mock_repo):
         """PATCH /{id}: 更新のテスト"""
         customer_id = 1
@@ -144,6 +157,7 @@ class TestCustomerRouter:
             "alias": None,
             "representative_name": None,
             "phone_number": None,
+            "fax_number": None,
             "email": None,
         }
         mock_repo.update.return_value = {"id": customer_id, **payload}

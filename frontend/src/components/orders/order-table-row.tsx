@@ -182,10 +182,15 @@ export function OrderTableRow({
               <TooltipTrigger asChild>
                 <span className="flex items-center gap-1 text-yellow-500 text-sm cursor-default">
                   <AlertCircle className="h-4 w-4" />
-                  未設定
+                  {/* メール取り込みで注文書から顧客を特定できなかった受注（Issue #521） */}
+                  {order.source_type === "email" ? "顧客不明" : "未設定"}
                 </span>
               </TooltipTrigger>
-              <TooltipContent>顧客が設定されていません</TooltipContent>
+              <TooltipContent>
+                {order.source_type === "email"
+                  ? "注文書から顧客を特定できませんでした。編集から顧客を選んでください"
+                  : "顧客が設定されていません"}
+              </TooltipContent>
             </Tooltip>
           ) : (
             <span className="text-muted-foreground">

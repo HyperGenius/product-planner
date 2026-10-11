@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -41,6 +42,16 @@ _NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-―ー－_/／|｜]+")
 # PDF文面からの顧客照合で、これより短い正規化後の会社名は誤マッチしやすいため使わない。
 _MIN_COMPANY_CORE_LEN = 3
 
+# 国内の固定電話・FAX 番号（0 始まり、市外局番込みで10〜11桁）
+_FAX_DIGITS_RE = re.compile(r"0\d{9,10}")
+# NFKC 正規化後の文面から「FAX」の見出しに続く番号を拾う
+# （例: "FAX 03-1234-5678" / "FAX:(03)1234-5678" / "ファクス 0312345678"）
+_FAX_LABELED_NUMBER_RE = re.compile(
+    r"(?:FAX|ファクス|ファックス)(?:番号)?[ \t]*[:.]?[ \t]*"
+    r"(\(?0\d{1,4}\)?[ \t]*-?[ \t]*\d{1,4}[ \t]*-?[ \t]*\d{3,4})",
+    re.IGNORECASE,
+)
+
 
 def normalize_company_name(value: str) -> str:
     """会社名を照合用に正規化する。
@@ -55,47 +66,40 @@ def normalize_company_name(value: str) -> str:
     return without_noise.strip().lower()
 
 
-def match_customer_by_pdf_text(
-    db: Client, tenant_id: str, pdf_text: str | None
-) -> int | None:
-    """PDF抽出テキストに含まれる発注元企業名から、既存顧客を1件に特定する。
+def normalize_fax_number(value: str) -> str | None:
+    """FAX 番号を照合用に数字だけへ正規化する（全角数字・ハイフン・括弧の表記ゆれを畳む）。
 
-    束ね添付メール（1通に複数顧客の注文書PDFを添付して転送）では、メール単位で
-    解決した `customer_id` が全PDFで同一になってしまう（Issue #385）。各PDFの
-    文面から顧客を解決し直すための入口。
-
-    `customers.name` / `customers.alias` を法人格・記号・空白を無視して正規化し、
-    正規化後の文字列が PDF テキスト（同様に正規化したもの）に部分一致する顧客を
-    探す。一意に定まった場合のみ `customer_id` を返す。0件・複数件（判定不能）の
-    場合は None を返し、呼び出し側はメール単位で解決済みの `customer_id` に
-    フォールバックする（解決できないPDFは「不明な顧客」下書きに紐づく:
-    Issue #263 の挙動を踏襲）。
-
-    画像PDF（FAX受信・スキャン）では文面テキストが無いため、Claude に読み取らせた
-    発行元の会社名を `pdf_text` として渡して同じ照合を行う（Issue #520）。
-
-    メールアドレスは PDF 文面から安定して取れないため、既存の email 突合
-    （`resolve_or_create_customer`）とは別経路で、企業名のみで突合する。
-    新規の下書き顧客はここでは作成しない（作成はメール単位で1回のまま）。
-
-    このサービスは cron から管理者クライアント（RLS バイパス）で呼ばれるため、
-    RLS の tenant isolation に依存せず明示的に `tenant_id` で絞り込む。
+    国内の固定電話・FAX 番号（0 始まりの10〜11桁）でなければ None を返す。
     """
-    if not pdf_text:
+    digits = re.sub(r"\D", "", unicodedata.normalize("NFKC", value))
+    if not _FAX_DIGITS_RE.fullmatch(digits):
         return None
-    normalized_text = normalize_company_name(pdf_text)
+    return digits
+
+
+def extract_fax_numbers(text: str | None) -> set[str]:
+    """文面から「FAX」の見出しが付いた番号を抜き出し、正規化した集合で返す。
+
+    注文書には発行元（顧客）と宛先（自社）の両方の FAX 番号が載っていることが多いが、
+    自社の番号は顧客マスタに無いので照合に当たらない。TEL の番号は拾わない（別の
+    顧客の FAX 番号と偶然一致して誤照合するのを避けるため）。
+    """
+    if not text:
+        return set()
+    normalized = unicodedata.normalize("NFKC", text)
+    numbers: set[str] = set()
+    for m in _FAX_LABELED_NUMBER_RE.finditer(normalized):
+        number = normalize_fax_number(m.group(1))
+        if number:
+            numbers.add(number)
+    return numbers
+
+
+def _customer_ids_by_name(rows: list[dict[str, Any]], normalized_text: str) -> set[int]:
+    """正規化した会社名（name / alias）が文面に部分一致する顧客の ID。"""
     if not normalized_text:
-        return None
-
-    result = (
-        db.table(SupabaseTableName.CUSTOMERS.value)
-        .select("id, name, alias")
-        .eq("tenant_id", tenant_id)
-        .execute()
-    )
-    rows = cast(list[dict[str, Any]], result.data or [])
-
-    matched_ids: set[int] = set()
+        return set()
+    matched: set[int] = set()
     for row in rows:
         for raw_name in (row.get("name"), row.get("alias")):
             if not isinstance(raw_name, str):
@@ -104,19 +108,97 @@ def match_customer_by_pdf_text(
             if len(normalized_name) < _MIN_COMPANY_CORE_LEN:
                 continue
             if normalized_name in normalized_text:
-                matched_ids.add(int(row["id"]))
+                matched.add(int(row["id"]))
                 break
+    return matched
 
-    if len(matched_ids) == 1:
-        customer_id = next(iter(matched_ids))
+
+def _customer_ids_by_fax(rows: list[dict[str, Any]], numbers: set[str]) -> set[int]:
+    """FAX 番号（数字だけに正規化）が `numbers` のいずれかと一致する顧客の ID。"""
+    if not numbers:
+        return set()
+    return {
+        int(row["id"])
+        for row in rows
+        if isinstance(row.get("fax_number"), str)
+        and normalize_fax_number(row["fax_number"]) in numbers
+    }
+
+
+def match_customer_by_pdf_text(
+    db: Client,
+    tenant_id: str,
+    pdf_text: str | None,
+    fax_numbers: Iterable[str | None] = (),
+) -> int | None:
+    """PDF抽出テキストに含まれる発注元企業名・FAX 番号から、既存顧客を1件に特定する。
+
+    束ね添付メール（1通に複数顧客の注文書PDFを添付して転送）では、メール単位で
+    解決した `customer_id` が全PDFで同一になってしまう（Issue #385）。また社内転送者
+    （社長）が件名・本文なしで転送してくる注文書は、メール単位では顧客が決まらない
+    （Issue #521）。各PDFの文面から顧客を解決し直すための入口。
+
+    - 会社名: `customers.name` / `customers.alias` を法人格・記号・空白を無視して正規化し、
+      正規化後の文字列が PDF テキスト（同様に正規化したもの）に部分一致する顧客
+    - FAX 番号: 文面の「FAX」見出し付きの番号（`extract_fax_numbers`）と、呼び出し側が
+      渡す `fax_numbers`（画像PDFでモデルに読み取らせた送信元番号）を、
+      `customers.fax_number` と数字だけで突合した顧客（Issue #521）
+
+    会社名で一意に決まればその顧客、決まらなければ FAX 番号で一意に決まった顧客を返す。
+    会社名と FAX 番号が別の顧客に一意に当たった場合は確定しない。どちらでも決まらない
+    場合は None を返し、呼び出し側はメール単位で解決済みの `customer_id`（社内転送者からの
+    メールでは NULL＝顧客不明）にフォールバックする。
+
+    画像PDF（FAX受信・スキャン）では文面テキストが無いため、Claude に読み取らせた
+    発行元の会社名を `pdf_text` として渡して同じ照合を行う（Issue #520）。
+
+    メールアドレスは PDF 文面から安定して取れないため、既存の email 突合
+    （`resolve_or_create_customer`）とは別経路で突合する。
+    新規の下書き顧客はここでは作成しない（作成はメール単位で1回のまま）。
+
+    このサービスは cron から管理者クライアント（RLS バイパス）で呼ばれるため、
+    RLS の tenant isolation に依存せず明示的に `tenant_id` で絞り込む。
+    """
+    normalized_text = normalize_company_name(pdf_text) if pdf_text else ""
+    numbers = extract_fax_numbers(pdf_text) | {
+        number
+        for number in (normalize_fax_number(n) for n in fax_numbers if n)
+        if number
+    }
+    if not normalized_text and not numbers:
+        return None
+
+    result = (
+        db.table(SupabaseTableName.CUSTOMERS.value)
+        .select("id, name, alias, fax_number")
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+
+    name_ids = _customer_ids_by_name(rows, normalized_text)
+    fax_ids = _customer_ids_by_fax(rows, numbers)
+    name_id = next(iter(name_ids)) if len(name_ids) == 1 else None
+    fax_id = next(iter(fax_ids)) if len(fax_ids) == 1 else None
+    if name_id is not None and fax_id is not None and name_id != fax_id:
         logger.info(
-            f"customer resolved from PDF text: id={customer_id} tenant={tenant_id}"
+            f"PDF company name matched customer {name_id} but FAX number matched "
+            f"{fax_id} for tenant={tenant_id}; not resolving"
+        )
+        return None
+
+    customer_id = name_id if name_id is not None else fax_id
+    if customer_id is not None:
+        logger.info(
+            f"customer resolved from PDF: id={customer_id} tenant={tenant_id} "
+            f"by={'name' if name_id is not None else 'fax'}"
         )
         return customer_id
-    if len(matched_ids) > 1:
+    if len(name_ids) > 1 or len(fax_ids) > 1:
         logger.info(
-            f"PDF text matched multiple customers {sorted(matched_ids)} "
-            f"for tenant={tenant_id}; falling back to email-level customer"
+            f"PDF matched multiple customers name={sorted(name_ids)} "
+            f"fax={sorted(fax_ids)} for tenant={tenant_id}; "
+            "falling back to email-level customer"
         )
     return None
 
@@ -167,20 +249,55 @@ def extract_email_address(text: str) -> str | None:
     return match.group(0) if match else None
 
 
+def load_internal_sender_emails(db: Client, tenant_id: str) -> frozenset[str]:
+    """テナントの社内転送者のメールアドレス（小文字）を返す（Issue #521）。
+
+    cron（service role）から呼ばれるため、明示的に `tenant_id` で絞り込む。
+    """
+    result = (
+        db.table(SupabaseTableName.TENANT_INTERNAL_SENDERS.value)
+        .select("email")
+        .eq("tenant_id", tenant_id)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    return frozenset(
+        str(row["email"]).strip().lower() for row in rows if row.get("email")
+    )
+
+
+def _without_internal_senders(
+    candidates: list[str], internal_senders: frozenset[str]
+) -> list[str]:
+    """候補から社内転送者のアドレスを除く（社長の署名欄・多段転送のヘッダー等）。"""
+    return [c for c in candidates if c.lower() not in internal_senders]
+
+
+def _is_internal_sender(email: str | None, internal_senders: frozenset[str]) -> bool:
+    return bool(email) and cast(str, email).strip().lower() in internal_senders
+
+
 def extract_effective_sender_email(
-    body: str, real_from_email: str | None = None
+    body: str,
+    real_from_email: str | None = None,
+    internal_senders: frozenset[str] = frozenset(),
 ) -> str | None:
     """`resolve_or_create_customer` と同じ優先順位で解決した送信者アドレスを返す
     （通知payload等の表示用）。
 
-    優先順位: 本文中の転送ヘッダー行 → 実際のGmail Fromヘッダー → 本文全体
+    優先順位: 本文中の転送ヘッダー行 → 実際のGmail Fromヘッダー → 本文全体。
+    社内転送者のアドレスは顧客の候補にしない（Issue #521）。
     """
-    header_candidates = extract_sender_email_candidates(body)
+    header_candidates = _without_internal_senders(
+        extract_sender_email_candidates(body), internal_senders
+    )
     if header_candidates:
         return header_candidates[-1]
-    if real_from_email:
+    if real_from_email and not _is_internal_sender(real_from_email, internal_senders):
         return real_from_email
-    candidates = extract_body_email_candidates(body)
+    candidates = _without_internal_senders(
+        extract_body_email_candidates(body), internal_senders
+    )
     return candidates[-1] if candidates else None
 
 
@@ -300,7 +417,8 @@ def resolve_or_create_customer(
     body: str,
     received_at: str | int | None = None,
     real_from_email: str | None = None,
-) -> tuple[int, bool]:
+    internal_senders: frozenset[str] = frozenset(),
+) -> tuple[int | None, bool]:
     """
     本文から抽出した候補メールアドレス群と既存顧客（customers.email）を突合し、
     customer_id を解決する。
@@ -321,11 +439,22 @@ def resolve_or_create_customer(
         ヘッダー行が本文化されないケース）では実際の Gmail `From` ヘッダーが
         社内担当者のアドレスになり、本文の署名欄の方が信頼できるため
         （0件の場合のみ署名ブロックから customer_name を抽出し、下書きのnameに使う）
+    - 実際の差出人が社内転送者（`internal_senders`。社長など、注文書を件名・本文なしで
+      転送してくる社内のアドレス）の場合は、差出人での突合・下書き顧客の作成を行わない。
+      本文の候補（転送ヘッダー・署名欄。社内転送者のアドレスは除く）で決まらなければ
+      `customer_id=None`（顧客不明）を返し、添付の中身から顧客を決める処理に委ねる
+      （Issue #521）
 
-    Returns: (customer_id, 新規に下書き作成したかどうか)
+    Returns: (customer_id, 新規に下書き作成したかどうか)。customer_id は社内転送者からの
+    メールで顧客が決まらない場合のみ None
     """
     table = SupabaseTableName.CUSTOMERS.value
-    header_candidates = extract_sender_email_candidates(body)
+    from_internal_sender = _is_internal_sender(real_from_email, internal_senders)
+    if from_internal_sender:
+        real_from_email = None
+    header_candidates = _without_internal_senders(
+        extract_sender_email_candidates(body), internal_senders
+    )
 
     if not header_candidates and real_from_email:
         result = (
@@ -345,7 +474,9 @@ def resolve_or_create_customer(
             )
             return customer_id, False
 
-    candidates = header_candidates or extract_body_email_candidates(body)
+    candidates = header_candidates or _without_internal_senders(
+        extract_body_email_candidates(body), internal_senders
+    )
 
     if candidates:
         result = (
@@ -363,6 +494,13 @@ def resolve_or_create_customer(
                 f"candidates={candidates}"
             )
             return customer_id, False
+
+    if from_internal_sender and not candidates:
+        logger.info(
+            f"mail from internal sender has no customer candidates; "
+            f"leaving customer unresolved (tenant={tenant_id})"
+        )
+        return None, False
 
     email: str | None
     if candidates:
