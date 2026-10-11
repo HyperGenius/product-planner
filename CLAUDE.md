@@ -165,6 +165,14 @@ cd backend && ruff check . && mypy .
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。
   Edge Runtime は**クライアントのボディを読み切らずに応答すると 504（約60秒）になる**ため、ボディ付きリクエストを
   中継・拒否するときは必ず最後まで読んでから応答する（ストリーム中継すると、上流がボディを読む前に返す 401/413 で踏む）
+- **画像PDF（FAX・スキャン）の受注取り込み（Issue #520）**: pdfplumber でテキストが取れない PDF（`failed_image`）は
+  `extract_order_lines_from_pdf()` が PDF のまま `document` ブロックで Claude に渡す。API の失敗は**再試行で通らないもの
+  （400 / 413 / 422 → `PdfDocumentRejectedError`）だけを読み取り不能（空の下書き）に落とし**、レート制限・5xx・認証エラーは
+  送出してステージング行を `pending` のまま次回の cron に回す（空の下書きを作ると再処理されない）。画像から起票した受注の
+  添付行は `parse_status='success_image'`。`order_attachments.parse_status` は列の CHECK（`order_attachments_parse_status_check`）
+  なので値を足すときはマイグレーションで張り直す。ステージング行へ要確認のログ（`image_extracted`）を残すのは起票1件以上の
+  ときだけにする（先に残すと `_notify_if_no_order_created()` が「ログあり」と判定して起票0件の通知が出ない）。
+  詳細は [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md)
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
