@@ -56,6 +56,7 @@ describe("CustomersPage", () => {
       alias: null,
       representative_name: "代表 太郎",
       phone_number: null,
+      fax_number: null,
       email: null,
     })
   })
@@ -75,7 +76,20 @@ describe("CustomersPage", () => {
       alias: "A社",
       representative_name: "代表 太郎",
       phone_number: "03-0000-0000",
+      fax_number: null,
       email: "new@example.com",
     })
+  })
+
+  it("FAX番号を入力すると送る（注文書の送信元番号での照合用。Issue #521）", async () => {
+    const patches = mockCustomers()
+    render(<CustomersPage />)
+
+    await openEditDialog()
+    await userEvent.type(screen.getByLabelText("FAX番号"), "03-0000-0001")
+    await userEvent.click(screen.getByRole("button", { name: "更新" }))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toMatchObject({ fax_number: "03-0000-0001" })
   })
 })

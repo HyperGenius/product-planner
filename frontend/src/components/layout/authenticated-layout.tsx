@@ -19,6 +19,7 @@ const pageTitleMap: Record<string, string> = {
   "/master/equipment-groups": "設備グループ",
   "/master/calendar": "稼働カレンダー",
   "/settings/members": "メンバー管理",
+  "/settings/internal-senders": "社内転送者",
   "/admin": "利用状況",
 }
 

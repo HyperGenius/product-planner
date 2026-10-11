@@ -18,6 +18,7 @@ import {
   Laptop,
   KeyRound,
   Inbox,
+  MailCheck,
 } from "lucide-react"
 
 import {
@@ -100,6 +101,11 @@ const menuItems: MenuItem[] = [
         title: "メンバー管理",
         url: "/settings/members",
         icon: Users,
+      },
+      {
+        title: "社内転送者",
+        url: "/settings/internal-senders",
+        icon: MailCheck,
       },
       {
         title: "端末管理",

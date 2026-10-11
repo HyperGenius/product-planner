@@ -6,9 +6,11 @@ from app.services.customer_matching_service import (
     extract_customer_name,
     extract_effective_sender_email,
     extract_email_address,
+    extract_fax_numbers,
     extract_sender_email,
     extract_sender_email_candidates,
     match_customer_by_pdf_text,
+    normalize_fax_number,
     resolve_or_create_customer,
 )
 
@@ -576,3 +578,237 @@ class TestMatchCustomerByPdfText:
         match_customer_by_pdf_text(mock_db, "tenant-xyz", "何らかのテキスト")
 
         mock_db.table().select().eq.assert_any_call("tenant_id", "tenant-xyz")
+
+
+_INTERNAL = frozenset({"president@example.com"})
+
+
+@pytest.mark.unit
+class TestResolveOrCreateCustomerInternalSender:
+    """Issue #521: 社内転送者（社長など）からのメールは、差出人で顧客を突合・作成しない。"""
+
+    def test_bodyless_mail_from_internal_sender_leaves_customer_unresolved(self):
+        mock_db = MagicMock()
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            "",
+            real_from_email="President@Example.com",
+            internal_senders=_INTERNAL,
+        )
+
+        assert customer_id is None
+        assert created_draft is False
+        # 差出人での突合も下書き顧客の作成もしない
+        mock_db.table().select().eq().eq().limit().execute.assert_not_called()
+        mock_db.table().insert.assert_not_called()
+
+    def test_forwarded_header_from_internal_sender_still_resolves_customer(self):
+        # 社長が通常の転送機能で転送した場合は、従来どおり本文の転送ヘッダーで決める
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(
+            data=[{"id": 1}]
+        )
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            "From: buyer@customer.example.com\n注文します",
+            real_from_email="president@example.com",
+            internal_senders=_INTERNAL,
+        )
+
+        assert customer_id == 1
+        assert created_draft is False
+
+    def test_internal_sender_signature_is_not_used_as_customer_candidate(self):
+        # 本文に社長自身の署名しか無ければ、社長のアドレスで下書き顧客を作らない
+        mock_db = MagicMock()
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            "よろしくお願いします\n----------\n社長\npresident@example.com",
+            real_from_email="president@example.com",
+            internal_senders=_INTERNAL,
+        )
+
+        assert customer_id is None
+        assert created_draft is False
+        mock_db.table().insert.assert_not_called()
+
+    def test_non_internal_sender_keeps_existing_behavior(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[{"id": 99}]
+        )
+
+        customer_id, _ = resolve_or_create_customer(
+            mock_db,
+            "tenant-1",
+            "",
+            real_from_email="customer@example.com",
+            internal_senders=_INTERNAL,
+        )
+
+        assert customer_id == 99
+
+    def test_effective_sender_email_skips_internal_sender(self):
+        assert (
+            extract_effective_sender_email(
+                "", "president@example.com", internal_senders=_INTERNAL
+            )
+            is None
+        )
+        assert (
+            extract_effective_sender_email(
+                "署名 buyer@customer.example.com",
+                "president@example.com",
+                internal_senders=_INTERNAL,
+            )
+            == "buyer@customer.example.com"
+        )
+
+
+@pytest.mark.unit
+class TestFaxNumbers:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("03-1234-5678", "0312345678"),
+            ("（０３）１２３４－５６７８", "0312345678"),
+            ("0120-123-456", "0120123456"),
+            ("090-1234-5678", "09012345678"),
+            ("1234-5678", None),
+            ("", None),
+        ],
+    )
+    def test_normalize_fax_number(self, value, expected):
+        assert normalize_fax_number(value) == expected
+
+    def test_extracts_only_fax_labeled_numbers(self):
+        text = (
+            "サンプル工業株式会社 TEL 03-1111-2222 FAX 03-1234-5678\n"
+            "ＦＡＸ：（０６）６１２３－４５６７\n"
+            "2026年10月10日"
+        )
+        assert extract_fax_numbers(text) == {"0312345678", "0661234567"}
+
+    def test_does_not_join_digits_across_lines_or_dates(self):
+        assert extract_fax_numbers("FAX 03-1234-5678\n2026/10/10") == {"0312345678"}
+        assert extract_fax_numbers("FAX:0312345678 2026/10/10") == {"0312345678"}
+
+    def test_returns_empty_for_none(self):
+        assert extract_fax_numbers(None) == set()
+
+
+@pytest.mark.unit
+class TestMatchCustomerByFaxNumber:
+    """Issue #521: 会社名に加え、FAX 番号（customers.fax_number）でも顧客を照合する。"""
+
+    def _mock_db(self, customers):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().execute.return_value = MagicMock(data=customers)
+        return mock_db
+
+    def test_resolves_by_fax_number_in_text(self):
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 10,
+                    "name": "株式会社ABC製作所",
+                    "alias": None,
+                    "fax_number": "03-1234-5678",
+                },
+                {
+                    "id": 11,
+                    "name": "有限会社XYZ工業",
+                    "alias": None,
+                    "fax_number": "06-6123-4567",
+                },
+            ]
+        )
+        # 会社名は載っていない（ロゴ画像等）が FAX 番号の見出しはある
+        text = "注文書\nFAX (03)1234-5678\n宛先 当社 FAX 045-000-0000"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", text) == 10
+
+    def test_resolves_by_passed_fax_number(self):
+        # 画像PDFでモデルに読み取らせた送信元の番号を渡す
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 20,
+                    "name": "株式会社ABC製作所",
+                    "alias": None,
+                    "fax_number": "0312345678",
+                }
+            ]
+        )
+
+        assert (
+            match_customer_by_pdf_text(mock_db, "tenant-1", None, ["03-1234-5678"])
+            == 20
+        )
+
+    def test_fax_number_disambiguates_multiple_name_matches(self):
+        mock_db = self._mock_db(
+            [
+                {"id": 40, "name": "ABC製作所", "alias": None, "fax_number": None},
+                {
+                    "id": 41,
+                    "name": "XYZ工業",
+                    "alias": None,
+                    "fax_number": "03-1234-5678",
+                },
+            ]
+        )
+        text = "ABC製作所 と XYZ工業 の連名注文書 FAX 03-1234-5678"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", text) == 41
+
+    def test_conflicting_name_and_fax_matches_are_not_resolved(self):
+        mock_db = self._mock_db(
+            [
+                {"id": 50, "name": "ABC製作所", "alias": None, "fax_number": None},
+                {
+                    "id": 51,
+                    "name": "無関係株式会社",
+                    "alias": None,
+                    "fax_number": "03-1234-5678",
+                },
+            ]
+        )
+
+        assert (
+            match_customer_by_pdf_text(
+                mock_db, "tenant-1", "ABC製作所", ["03-1234-5678"]
+            )
+            is None
+        )
+
+    def test_name_match_wins_when_fax_is_ambiguous(self):
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 60,
+                    "name": "ABC製作所",
+                    "alias": None,
+                    "fax_number": "03-1234-5678",
+                },
+                {
+                    "id": 61,
+                    "name": "ABC製作所 第二工場",
+                    "alias": "別名工場",
+                    "fax_number": "03-1234-5678",
+                },
+            ]
+        )
+        # 2社が同じ FAX 番号（判定不能）でも、会社名で一意なら会社名で決める
+        assert (
+            match_customer_by_pdf_text(
+                mock_db, "tenant-1", "株式会社ABC製作所", ["03-1234-5678"]
+            )
+            == 60
+        )

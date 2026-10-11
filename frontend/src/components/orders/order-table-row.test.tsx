@@ -84,6 +84,19 @@ describe("OrderTableRow", () => {
     expect(screen.getByText("未設定")).toBeInTheDocument()
   })
 
+  it("メール取り込みで顧客を特定できなかった受注は「顧客不明」と表示する（Issue #521）", () => {
+    renderRow(makeOrder({ customer_id: undefined, source_type: "email" }))
+
+    expect(screen.getByText("顧客不明")).toBeInTheDocument()
+  })
+
+  it("手入力で顧客が未設定の受注は従来どおり「未設定」と表示する", () => {
+    renderRow(makeOrder({ customer_id: undefined, source_type: "manual" }))
+
+    expect(screen.getByText("未設定")).toBeInTheDocument()
+    expect(screen.queryByText("顧客不明")).not.toBeInTheDocument()
+  })
+
   describe("顧客側の確度バッジ（Issue #474）", () => {
     it("確度が NULL（判定できなかった受注）なら確度バッジを出さない", () => {
       renderRow(makeOrder({ customer_certainty: null }))

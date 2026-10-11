@@ -246,7 +246,8 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         # 束ね添付メール（Issue #384）では全ステージング行がメール単位で解決した
         # 同じ customer_id を持つ。各PDFの文面から顧客を解決し直し、一意に定まれば
         # この添付だけその顧客へ紐づけ直す（Issue #385）。解決できなければメール
-        # 単位の customer_id をそのまま使う（「不明な顧客」下書きを含む: Issue #263）。
+        # 単位の customer_id をそのまま使う（「不明な顧客」下書き: Issue #263、
+        # 社内転送者からのメールでは None＝顧客不明: Issue #521 を含む）。
         #
         # 再解決した customer_id は「PDF明細から起票する order」にだけ適用する。
         # PDFから明細が取れずメール本文へフォールバックする場合（下記 else）は、
@@ -424,9 +425,9 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
     テキストを持たない画像PDF（FAX受信・スキャン）を Claude に画像として読ませ、
     明細ごとに order を生成する（Issue #520）。
 
-    - 顧客は、モデルに読み取らせた発行元の会社名で #385 と同じ照合を行い、一意に
-      決まった場合だけ付け直す。社長が件名・本文なしで転送してくるため、メール単位の
-      customer_id は社長のアドレスから解決された誤った値であることが多い
+    - 顧客は、モデルに読み取らせた発行元の会社名・FAX 番号で #385 と同じ照合を行い、
+      一意に決まった場合だけ付け直す。社内転送者（社長）が件名・本文なしで転送してくる
+      ため、メール単位の customer_id は None（顧客不明。Issue #521）であることが多い
     - 付け直した顧客に固有の抽出指示があれば、その指示でもう一度読み取る
       （テキストPDFでは再解決後の顧客の指示で抽出しているのと揃える）
     - 明細が取れない・API が文書を受け付けない場合は、従来どおり空の下書きを
@@ -445,7 +446,10 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
 
         pdf_row = row
         resolved_customer_id = match_customer_by_pdf_text(
-            db, tenant_id, extraction.get("issuer_company_name")
+            db,
+            tenant_id,
+            extraction.get("issuer_company_name"),
+            [extraction.get("issuer_fax_number")],
         )
         if resolved_customer_id is not None and resolved_customer_id != row.get(
             "customer_id"
@@ -510,20 +514,18 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
     return created_count
 
 
-def _require_customer_id(staging_row: dict[str, Any], attachment_id: str) -> int:
+def _staging_customer_id(staging_row: dict[str, Any]) -> int | None:
     """
-    staging_row.customer_id を取得する。resolve_or_create_customer は必ず
-    customer_id を解決する（顧客未特定時も"不明な顧客"下書きを作成する）ため、
-    ここで欠落している場合はステージング行自体の不整合（想定外の経路での
-    直接INSERT等）であり、customer_id=NULL の受注を静かに作らず早期に検知する。
+    staging_row.customer_id を取得する。
+
+    None になるのは、社内転送者（社長など）が件名・本文なしで転送してきたメールで
+    顧客が決まらず、添付の中身からも決まらなかった場合（顧客不明。Issue #521）。
+    以前は「resolve_or_create_customer は必ず customer_id を解決する」前提で None を
+    不整合として例外にしていたが、顧客不明は customer_id=NULL の受注として起票し、
+    受注一覧の「顧客未設定」から担当者に顧客を選ばせる。
     """
     customer_id = staging_row.get("customer_id")
-    if customer_id is None:
-        raise ValueError(
-            f"staging row {attachment_id} has no customer_id; "
-            "resolve_or_create_customer should have set it"
-        )
-    return cast(int, customer_id)
+    return int(customer_id) if customer_id is not None else None
 
 
 def _process_unreadable_pdf(
@@ -531,7 +533,8 @@ def _process_unreadable_pdf(
 ) -> int:
     """
     PDFのテキストが抽出できず明細抽出自体を行えない場合でも、判明している情報
-    （顧客等。顧客未特定時は"不明な顧客"下書きに解決済み）だけで product_id・
+    （顧客等。顧客未特定時は"不明な顧客"下書き、社内転送者からのメールでは
+    None＝顧客不明）だけで product_id・
     quantity・deadline_date が NULL の下書き order を1件起票し、ユーザーが手動で
     内容を補完する起点とする。product_id・deadline_date が共に NULL の行は
     upsert_order_by_dedupe_key が常に新規行としてINSERTするため、他の解析失敗
@@ -541,7 +544,7 @@ def _process_unreadable_pdf(
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
-    customer_id = _require_customer_id(staging_row, attachment_id)
+    customer_id = _staging_customer_id(staging_row)
 
     rpc_result = db.rpc(
         "upsert_order_by_dedupe_key",
@@ -663,7 +666,7 @@ def _check_multi_order_suspected(
 def _resolve_product_id(
     db: Client,
     tenant_id: str,
-    customer_id: int,
+    customer_id: int | None,
     product_number_raw: str | None,
     product_name_raw: str | None,
 ) -> int | None:
@@ -679,7 +682,8 @@ def _resolve_product_id(
     の順にフォールバックして product_id を解決する。
     """
     alias_raw_text = product_name_raw or product_number_raw
-    if alias_raw_text:
+    # 別名は顧客単位なので、顧客不明（Issue #521）の明細では引かない
+    if alias_raw_text and customer_id is not None:
         alias_product_id = match_product_by_alias(
             db, tenant_id, customer_id, alias_raw_text
         )
@@ -719,7 +723,7 @@ def _process_line_item(
     """
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
-    customer_id = _require_customer_id(staging_row, attachment_id)
+    customer_id = _staging_customer_id(staging_row)
     customer_order_no = _resolve_customer_order_no(
         line, document_order_no, auto_order_no
     )
@@ -893,7 +897,8 @@ def _mark_superseded_orders(
     別レコードとして新規INSERTされる。旧レコードが一覧に残り続けないようにする
     最低限のケア（Issue #252）。
     """
-    if deadline_date is None:
+    if deadline_date is None or staging_row.get("customer_id") is None:
+        # 顧客不明（Issue #521）の受注は、どの顧客の内示を無効化すべきか判断できない
         return
 
     now = datetime.now(UTC).isoformat()

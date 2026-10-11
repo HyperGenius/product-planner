@@ -74,6 +74,13 @@
   候補」ロジックを維持）
 - 同一会社の別担当者アドレスをドメイン単位でマッチさせる拡張
 
+## 社内転送者からのメール（Issue #521）
+
+差出人が社内転送者（社長など、注文書を件名・本文なしで転送してくる社内のアドレス）の場合は、
+上記の「実Fromヘッダーでの突合」と「実Fromヘッダーでの下書き作成」を行わない。本文の候補からも
+社内転送者のアドレスを除き、決まらなければ `customer_id=None`（顧客不明）を返す。
+詳細は [internal-senders.md](internal-senders.md)。
+
 ## 関連
 
 - [customer-draft-auto-create.md](customer-draft-auto-create.md): 下書き顧客自動作成の基本設計

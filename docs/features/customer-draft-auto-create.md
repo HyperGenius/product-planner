@@ -276,6 +276,7 @@ Issue #265 の前提「ユーザが intake 用 Gmail アドレスへ**転送す�
 
 ## 関連
 
+- [internal-senders.md](internal-senders.md): 社内転送者（社長）からのメールでは下書き顧客を作らず、注文書の中身から顧客を決める（Issue #521）
 - [email-order-intake.md](email-order-intake.md): メール起票の基盤設計、`customer_matching_service.py` の位置づけ
 - [notifications.md](notifications.md): `notifications` テーブル・`create_notification` の共通設計
 - Issue #262: `customer_id=NULL` によるbigint型エラー（本Issueで新規発生分はほぼ解消見込み）

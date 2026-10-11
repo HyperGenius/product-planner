@@ -11,6 +11,18 @@ from app.services.gmail_service import (
     poll_unread_emails,
 )
 
+_INTERNAL_SENDERS = frozenset({"president@example.com"})
+
+
+@pytest.fixture(autouse=True)
+def _internal_senders():
+    """テナントの社内転送者（Issue #521）の読み込みを固定値に差し替える。"""
+    with patch(
+        "app.services.gmail_service.load_internal_sender_emails",
+        return_value=_INTERNAL_SENDERS,
+    ) as mock_load:
+        yield mock_load
+
 
 @pytest.mark.unit
 class TestPollUnreadEmails:
@@ -321,7 +333,7 @@ class TestProcessMessagePdfStaging:
             mock_db, "tenant-1", "msg-1", "order.pdf", b"%PDF-1.4", "application/pdf"
         )
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000", None
+            mock_db, "tenant-1", "", "1751500000000", None, _INTERNAL_SENDERS
         )
 
         inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
@@ -374,7 +386,7 @@ class TestProcessMessagePdfStaging:
 
         # メールアドレスが取れない場合も customer_id は必ず設定され、下書き作成の通知が記録される
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000", None
+            mock_db, "tenant-1", "", "1751500000000", None, _INTERNAL_SENDERS
         )
         notif_inserts = [
             call.args[0]
@@ -598,5 +610,65 @@ class TestProcessMessagePdfStaging:
             _process_message(mock_service, mock_db, "msg-4", "tenantA", {})
 
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000", "customer@example.com"
+            mock_db,
+            "tenant-1",
+            "",
+            "1751500000000",
+            "customer@example.com",
+            _INTERNAL_SENDERS,
+        )
+
+    def test_unresolved_customer_from_internal_sender_is_staged_as_null(
+        self, _internal_senders
+    ):
+        """社内転送者（社長）から件名・本文なしで届いたメールは、差出人で顧客を作らず
+        customer_id=NULL（顧客不明）でステージングする（Issue #521）。"""
+        mock_service = MagicMock()
+        mock_service.users().messages().get().execute.return_value = {
+            "payload": {
+                "parts": [],
+                "headers": [{"name": "From", "value": "社長 <president@example.com>"}],
+            },
+            "internalDate": "1751500000000",
+        }
+        mock_db = MagicMock()
+
+        with (
+            patch(
+                "app.services.gmail_service._lookup_tenant_id",
+                return_value="tenant-1",
+            ),
+            patch(
+                "app.services.gmail_service._get_attachments",
+                return_value=[
+                    {
+                        "filename": "fax.pdf",
+                        "content_type": "application/pdf",
+                        "data": b"%PDF-1.4",
+                    }
+                ],
+            ),
+            patch(
+                "app.services.gmail_service.upload_staged_attachment",
+                return_value="tenant-1/inbox/msg-5/fax.pdf",
+            ),
+        ):
+            # resolve_or_create_customer は差し替えず、社内転送者の判定まで通す
+            mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+                data=[]
+            )
+            _process_message(mock_service, mock_db, "msg-5", "tenantA", {})
+
+        _internal_senders.assert_called_once_with(mock_db, "tenant-1")
+        inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
+        assert inserted_row["customer_id"] is None
+        # 下書き顧客は作らない（customers への INSERT・作成通知なし）
+        assert not any(
+            isinstance(call.args[0], dict) and call.args[0].get("status") == "draft"
+            for call in mock_db.table().insert.call_args_list
+        )
+        assert not any(
+            isinstance(call.args[0], dict)
+            and call.args[0].get("notif_type") == "customer_draft_created"
+            for call in mock_db.table().insert.call_args_list
         )

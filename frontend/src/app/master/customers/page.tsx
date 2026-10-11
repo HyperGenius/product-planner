@@ -45,6 +45,7 @@ export default function CustomersPage() {
   const [customerAlias, setCustomerAlias] = useState("")
   const [representativeName, setRepresentativeName] = useState("")
   const [phoneNumber, setPhoneNumber] = useState("")
+  const [faxNumber, setFaxNumber] = useState("")
   const [email, setEmail] = useState("")
 
   // データ取得・操作のフック
@@ -59,6 +60,7 @@ export default function CustomersPage() {
     setCustomerAlias("")
     setRepresentativeName("")
     setPhoneNumber("")
+    setFaxNumber("")
     setEmail("")
     setIsCreateDialogOpen(true)
   }
@@ -70,6 +72,7 @@ export default function CustomersPage() {
     setCustomerAlias(customer.alias || "")
     setRepresentativeName(customer.representative_name || "")
     setPhoneNumber(customer.phone_number || "")
+    setFaxNumber(customer.fax_number || "")
     setEmail(customer.email || "")
     setIsEditDialogOpen(true)
   }
@@ -93,6 +96,7 @@ export default function CustomersPage() {
         alias: customerAlias || undefined,
         representative_name: representativeName || undefined,
         phone_number: phoneNumber || undefined,
+        fax_number: faxNumber.trim() || undefined,
         email: email || undefined,
       })
       toast.success("顧客を作成しました")
@@ -101,6 +105,7 @@ export default function CustomersPage() {
       setCustomerAlias("")
       setRepresentativeName("")
       setPhoneNumber("")
+      setFaxNumber("")
       setEmail("")
     } catch (error) {
       toast.error("顧客の作成に失敗しました")
@@ -127,6 +132,7 @@ export default function CustomersPage() {
           alias: customerAlias.trim() || null,
           representative_name: representativeName.trim() || null,
           phone_number: phoneNumber.trim() || null,
+          fax_number: faxNumber.trim() || null,
           email: email.trim() || null,
         },
       })
@@ -136,6 +142,7 @@ export default function CustomersPage() {
       setCustomerAlias("")
       setRepresentativeName("")
       setPhoneNumber("")
+      setFaxNumber("")
       setEmail("")
       setSelectedCustomer(null)
     } catch (error) {
@@ -200,6 +207,7 @@ export default function CustomersPage() {
                 <TableHead className="w-[140px] whitespace-nowrap">通称</TableHead>
                 <TableHead className="w-[140px] whitespace-nowrap">代表者名</TableHead>
                 <TableHead className="w-[140px] whitespace-nowrap">電話番号</TableHead>
+                <TableHead className="w-[140px] whitespace-nowrap">FAX番号</TableHead>
                 <TableHead className="w-[220px]">Email</TableHead>
                 <TableHead className="w-[100px] whitespace-nowrap text-right">操作</TableHead>
               </TableRow>
@@ -222,6 +230,7 @@ export default function CustomersPage() {
                     <TableCell className="truncate">{customer.alias || "-"}</TableCell>
                     <TableCell className="truncate">{customer.representative_name || "-"}</TableCell>
                     <TableCell className="whitespace-nowrap">{customer.phone_number || "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{customer.fax_number || "-"}</TableCell>
                     <TableCell className="truncate">{customer.email || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
@@ -247,7 +256,7 @@ export default function CustomersPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10">
+                  <TableCell colSpan={8} className="text-center py-10">
                     顧客がありません
                   </TableCell>
                 </TableRow>
@@ -302,6 +311,18 @@ export default function CustomersPage() {
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 placeholder="例: 03-1234-5678"
               />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="create-fax">FAX番号</Label>
+              <Input
+                id="create-fax"
+                value={faxNumber}
+                onChange={(e) => setFaxNumber(e.target.value)}
+                placeholder="例: 03-1234-5679"
+              />
+              <p className="text-xs text-muted-foreground">
+                FAX・スキャンの注文書に載っている送信元の番号で、顧客を自動で照合します
+              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="create-email">Email</Label>
@@ -376,6 +397,18 @@ export default function CustomersPage() {
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 placeholder="例: 03-1234-5678"
               />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-fax">FAX番号</Label>
+              <Input
+                id="edit-fax"
+                value={faxNumber}
+                onChange={(e) => setFaxNumber(e.target.value)}
+                placeholder="例: 03-1234-5679"
+              />
+              <p className="text-xs text-muted-foreground">
+                FAX・スキャンの注文書に載っている送信元の番号で、顧客を自動で照合します
+              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-email">Email</Label>
