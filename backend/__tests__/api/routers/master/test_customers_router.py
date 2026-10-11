@@ -136,6 +136,26 @@ class TestCustomerRouter:
         assert called_id == customer_id
         assert called_data == {"name": "Updated Name", "status": "active"}
 
+    def test_update_customer_clears_optional_fields_with_null(self, mock_repo):
+        """PATCH /{id}: null を送った任意項目は NULL で更新される（Issue #517）"""
+        customer_id = 1
+        payload = {
+            "name": "Customer A",
+            "alias": None,
+            "representative_name": None,
+            "phone_number": None,
+            "email": None,
+        }
+        mock_repo.update.return_value = {"id": customer_id, **payload}
+
+        response = client.patch(f"/customers/{customer_id}", json=payload)
+
+        assert response.status_code == 200
+        called_id, called_data = mock_repo.update.call_args[0]
+        assert called_id == customer_id
+        # 送られてきた null は exclude_unset で落とさずに更新対象へ含める
+        assert called_data == {**payload, "status": "active"}
+
     def test_delete_customer_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""
         customer_id = 1

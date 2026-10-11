@@ -27,11 +27,14 @@ export interface CustomerCreate {
 
 /**
  * 顧客更新時のデータ型
+ *
+ * PATCH は送ったキーだけを更新するので、任意項目を消すときは `null` を送る
+ * （`undefined` は JSON からキーごと落ちて更新されない。Issue #517）
  */
 export interface CustomerUpdate {
   name?: string
-  alias?: string
-  representative_name?: string
-  phone_number?: string
-  email?: string
+  alias?: string | null
+  representative_name?: string | null
+  phone_number?: string | null
+  email?: string | null
 }

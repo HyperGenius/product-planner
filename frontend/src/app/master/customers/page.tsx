@@ -120,12 +120,14 @@ export default function CustomersPage() {
     try {
       await updateMutation.mutateAsync({
         id: selectedCustomer.id,
+        // 空欄の任意項目は null で送って消す（undefined だとキーごと落ちて
+        // 更新されないまま成功扱いになる。Issue #517）
         data: {
           name: customerName,
-          alias: customerAlias || undefined,
-          representative_name: representativeName || undefined,
-          phone_number: phoneNumber || undefined,
-          email: email || undefined,
+          alias: customerAlias.trim() || null,
+          representative_name: representativeName.trim() || null,
+          phone_number: phoneNumber.trim() || null,
+          email: email.trim() || null,
         },
       })
       toast.success("顧客を更新しました")

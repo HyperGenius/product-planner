@@ -269,6 +269,10 @@ cd backend && ruff check . && mypy .
 - **型安全**: Backend の Pydantic スキーマと Frontend の TypeScript interface を一致させること
   - Union 文字列型（`Order["status"]` 等）でルックアップテーブルを引くときは `Record<string, T>` ではなく
     `Record<Order["status"], T>` で全ケースを明示する。値が増えたときに型エラーで気づける（PR #409）
+- **PATCH で任意項目を空欄にして消すとき**: 更新系のルーターは `model_dump(exclude_unset=True)` で送られたキーだけを
+  更新するので、フロントで `value || undefined` と組むと空欄のキーが `JSON.stringify` で落ち、**更新されないまま 200（成功トースト）**
+  になる。編集フォームの任意項目は `value.trim() || null` で送り、更新用の型も `string | null` にする（作成時の `undefined` は可）。
+  顧客マスタで修正済み（Issue #517）、受注の編集ダイアログは #518
 - **日付文字列のパース（Frontend）**: `orders` の `confirmed_deadline` / `simulated_deadline` /
   `desired_deadline` / `scheduling_start_date` / `order_date` 等は**日付のみ（`"YYYY-MM-DD"`、時刻を持たない）**。
   `new Date("2026-09-08")` は **UTC 深夜**として解釈されるため、端末のタイムゾーン次第で日付が前日にズレる
