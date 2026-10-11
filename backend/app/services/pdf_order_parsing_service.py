@@ -9,7 +9,11 @@ from app.services.customer_matching_service import match_customer_by_pdf_text
 from app.services.email_extraction_service import extract_email_order_lines
 from app.services.notification_service import create_notification
 from app.services.order_simulation_service import auto_simulate_intake_order
-from app.services.pdf_order_extraction_service import extract_order_lines
+from app.services.pdf_order_extraction_service import (
+    PdfDocumentRejectedError,
+    extract_order_lines,
+    extract_order_lines_from_pdf,
+)
 from app.services.pdf_text_service import MAX_PDF_BYTES, PdfTooLargeError, extract_text
 from app.services.product_matching_service import (
     match_product_by_alias,
@@ -221,6 +225,15 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         except PdfTooLargeError as exc:
             return _process_oversized_pdf(db, row, str(exc))
 
+        if text_result.failure_reason == "failed_image":
+            # テキストを持たない画像PDF（FAX受信・スキャン）は、PDFのまま Claude に
+            # 画像として読ませる（Issue #520）。読めなければ従来どおり空の下書き。
+            created_count = _process_image_pdf(db, row, content)
+            db.table(table).update({"parse_status": "success"}).eq(
+                "id", attachment_id
+            ).execute()
+            return created_count
+
         if text_result.failure_reason is not None:
             # テキストが取れないPDFは文面から顧客を解決し直せないため、メール単位で
             # 解決済みの customer_id をそのまま使う（挙動不変）。
@@ -403,6 +416,97 @@ def _process_email_body(
         f"extracted {len(line_items)} line items from email body, "
         f"created {created_count} orders"
     )
+    return created_count
+
+
+def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
+    """
+    テキストを持たない画像PDF（FAX受信・スキャン）を Claude に画像として読ませ、
+    明細ごとに order を生成する（Issue #520）。
+
+    - 顧客は、モデルに読み取らせた発行元の会社名で #385 と同じ照合を行い、一意に
+      決まった場合だけ付け直す。社長が件名・本文なしで転送してくるため、メール単位の
+      customer_id は社長のアドレスから解決された誤った値であることが多い
+    - 付け直した顧客に固有の抽出指示があれば、その指示でもう一度読み取る
+      （テキストPDFでは再解決後の顧客の指示で抽出しているのと揃える）
+    - 明細が取れない・API が文書を受け付けない場合は、従来どおり空の下書きを
+      `failed_image` で起票する（`_process_unreadable_pdf`）
+    - FAX は数字の読み違いが起きうるため、起票した受注の添付行は `success_image`、
+      ステージング行には `image_extracted` のログを残し、要確認として扱わせる
+    """
+    attachment_id = row["id"]
+    tenant_id = row["tenant_id"]
+    email_prompt = _get_customer_extraction_prompt(
+        db, tenant_id, row.get("customer_id")
+    )
+    try:
+        extraction = extract_order_lines_from_pdf(content, email_prompt)
+        line_items = cast(list[dict[str, Any]], extraction["line_items"])
+
+        pdf_row = row
+        resolved_customer_id = match_customer_by_pdf_text(
+            db, tenant_id, extraction.get("issuer_company_name")
+        )
+        if resolved_customer_id is not None and resolved_customer_id != row.get(
+            "customer_id"
+        ):
+            logger.info(
+                f"pdf_order_parsing: attachment {attachment_id} customer re-resolved "
+                f"from image PDF issuer: {row.get('customer_id')} -> "
+                f"{resolved_customer_id}"
+            )
+            pdf_row = {**row, "customer_id": resolved_customer_id}
+            resolved_prompt = _get_customer_extraction_prompt(
+                db, tenant_id, resolved_customer_id
+            )
+            if resolved_prompt is not None and resolved_prompt != email_prompt:
+                reextraction = extract_order_lines_from_pdf(content, resolved_prompt)
+                if reextraction["line_items"]:
+                    extraction = reextraction
+                    line_items = cast(list[dict[str, Any]], reextraction["line_items"])
+    except PdfDocumentRejectedError as exc:
+        logger.warning(
+            f"pdf_order_parsing: attachment {attachment_id} image PDF rejected: {exc}"
+        )
+        return _process_unreadable_pdf(db, row, "failed_image")
+
+    logger.info(
+        f"pdf_order_parsing: attachment {attachment_id} "
+        f"extracted {len(line_items)} line items from image PDF"
+    )
+    if not line_items:
+        return _process_unreadable_pdf(db, row, "failed_image")
+
+    document_order_no: str | None = extraction.get("document_order_no")
+    # 画像PDFは文面テキストが無いため、ファイルの中身のハッシュから採番する
+    # （同じファイルを再パースしても同じ番号になる）
+    auto_order_no = _generate_auto_customer_order_no(
+        pdf_row.get("customer_id"), hashlib.sha256(content).hexdigest()
+    )
+    created_count = sum(
+        1
+        for line in line_items
+        if _process_line_item(
+            db,
+            pdf_row,
+            line,
+            document_order_no,
+            auto_order_no,
+            attachment_parse_status="success_image",
+        )
+    )
+
+    _notify_if_no_order_created(db, row, created_count)
+    if created_count > 0:
+        # 起票0件のときに残すと _notify_if_no_order_created の「既にログがある」判定を
+        # 先に満たしてしまうため、起票できたときだけ残す
+        _log_parse_event(
+            db,
+            tenant_id,
+            attachment_id,
+            "image_extracted",
+            {"line_item_count": len(line_items)},
+        )
     return created_count
 
 
@@ -600,6 +704,8 @@ def _process_line_item(
     line: dict[str, Any],
     document_order_no: str | None = None,
     auto_order_no: str | None = None,
+    *,
+    attachment_parse_status: str = "success",
 ) -> bool:
     """
     抽出された1明細から order を生成する。
@@ -736,10 +842,8 @@ def _process_line_item(
     # action == "inserted" or "updated"
     order_id = rpc_rows[0]["order_id"]
     # ソースに添付ファイル本体が無い場合（非PDF添付・添付なしメール由来）は、
-    # フロントエンドの表示分岐と揃えるため parse_status を "failed_no_attachment" にする
-    attachment_parse_status = (
-        "success" if staging_row.get("storage_path") else "failed_no_attachment"
-    )
+    # フロントエンドの表示分岐と揃えるため parse_status を "failed_no_attachment" にする。
+    # 画像PDFから読み取った明細は "success_image"（要確認の表示用。Issue #520）
     db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
         {
             "order_id": order_id,
@@ -748,7 +852,11 @@ def _process_line_item(
             "original_filename": staging_row.get("original_filename", ""),
             "content_type": staging_row.get("content_type"),
             "size_bytes": staging_row.get("size_bytes"),
-            "parse_status": attachment_parse_status,
+            "parse_status": (
+                attachment_parse_status
+                if staging_row.get("storage_path")
+                else "failed_no_attachment"
+            ),
         }
     ).execute()
     logger.info(

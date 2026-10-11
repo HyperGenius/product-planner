@@ -84,6 +84,22 @@ export function SourceEmailPanel({ order, className }: SourceEmailPanelProps) {
                       </a>
                     )}
                   </span>
+                ) : att.parse_status === "success_image" ? (
+                  <span className="flex flex-col gap-0.5">
+                    <a
+                      href={att.signed_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-primary underline"
+                    >
+                      <Download className="h-3 w-3 shrink-0" />
+                      {att.original_filename}
+                    </a>
+                    <span className="flex items-center gap-1 text-amber-600">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      画像から自動読み取り — 数量・納期を確認してください
+                    </span>
+                  </span>
                 ) : (
                   <a
                     href={att.signed_url}

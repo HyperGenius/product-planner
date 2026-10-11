@@ -47,9 +47,11 @@ logger = get_logger(__name__)
 _EMAIL_INTAKE_FAIL_REASONS = frozenset(
     {"failed_encrypted", "failed_image", "failed_no_attachment"}
 )
-# 起票はされたが運用者の確認が必要なことを示す理由
+# 起票はされたが運用者の確認が必要なことを示す理由。
+# image_extracted は画像PDF（FAX等）から読み取って起票したもの（数字の読み違いが
+# 起きうるため元ファイルとの照合を促す。Issue #520）
 _EMAIL_INTAKE_ATTENTION_REASONS = frozenset(
-    {"no_product_match", "multi_order_suspected", "invalid_quantity"}
+    {"no_product_match", "multi_order_suspected", "invalid_quantity", "image_extracted"}
 )
 # 正常に処理された上で意図的に起票しなかったことを示す理由
 _EMAIL_INTAKE_SKIP_REASONS = frozenset(

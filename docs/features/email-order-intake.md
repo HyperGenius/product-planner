@@ -514,4 +514,5 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 手動での「メール起票」モード（`POST /orders/email-intake`、本文＋添付＋分納の複数明細） | ✅ #358 |
 | 複数PDF添付メールの添付ごとステージング（1メール:N添付）＋ 添付収集のネスト再帰化（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#複数pdf添付の分割ステージングissue-384)） | ✅ #384 |
 | 束ね添付メールでのPDF単位の顧客解決（パース時に PDF 文面の企業名で `customers` を突合し、一意なら添付ごとに `customer_id` を再解決。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)） | ✅ #385 |
+| 画像PDF（FAX受信・スキャン）を Claude に画像として読ませて明細・発行元の会社名を抽出し起票（読み取った受注は要確認表示。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#画像pdffax受信スキャンの読み取りissue-520)） | ✅ #520 |
 | 自動起票時の作業開始日（JST 翌日）設定とシミュ納期の自動算出（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#起票後の自動シミュレーションissue-477)） | ✅ #477 |
