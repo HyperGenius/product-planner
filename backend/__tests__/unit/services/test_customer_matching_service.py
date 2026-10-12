@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -6,11 +7,11 @@ from app.services.customer_matching_service import (
     extract_customer_name,
     extract_effective_sender_email,
     extract_email_address,
-    extract_fax_numbers,
+    extract_phone_numbers,
     extract_sender_email,
     extract_sender_email_candidates,
     match_customer_by_pdf_text,
-    normalize_fax_number,
+    normalize_phone_number,
     resolve_or_create_customer,
 )
 
@@ -672,40 +673,88 @@ class TestResolveOrCreateCustomerInternalSender:
 
 
 @pytest.mark.unit
-class TestFaxNumbers:
+class TestPhoneNumbers:
+    """電話・FAX 番号の正規化と抽出（Issue #521 / #524）。番号はダミー。"""
+
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
             ("03-1234-5678", "0312345678"),
             ("（０３）１２３４－５６７８", "0312345678"),
+            ("0480(12)3456", "0480123456"),
             ("0120-123-456", "0120123456"),
             ("090-1234-5678", "09012345678"),
             ("1234-5678", None),
             ("", None),
         ],
     )
-    def test_normalize_fax_number(self, value, expected):
-        assert normalize_fax_number(value) == expected
+    def test_normalize_phone_number(self, value, expected):
+        assert normalize_phone_number(value) == expected
 
-    def test_extracts_only_fax_labeled_numbers(self):
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "FAX 0480-12-3456",
+            "FAX 0480123456",  # ハイフンなし
+            "FAX (0480)12-3456",  # 市外局番を括弧で囲む
+            "FAX 0480(12)3456",  # 市内局番を括弧で囲む
+            "ＦＡＸ ０４８０（１２）３４５６",  # 全角
+            "FAX 0480‐12‐3456",  # U+2010
+            "FAX 0480−12−3456",  # U+2212
+            "0480ー12ー3456",  # 長音
+            "0480 12 3456",  # 空白区切り
+            "2026/10/10 09:12  0480-12-3456  サンプル工業  P.1",  # 見出しなし（FAX ヘッダー）
+            "TEL 0480-12-3456",  # 電話番号
+        ],
+    )
+    def test_extracts_number_formats(self, text):
+        assert extract_phone_numbers(text) == {"0480123456"}
+
+    def test_extracts_both_tel_and_fax(self):
         text = (
             "サンプル工業株式会社 TEL 03-1111-2222 FAX 03-1234-5678\n"
             "ＦＡＸ：（０６）６１２３－４５６７\n"
             "2026年10月10日"
         )
-        assert extract_fax_numbers(text) == {"0312345678", "0661234567"}
+        assert extract_phone_numbers(text) == {
+            "0311112222",
+            "0312345678",
+            "0661234567",
+        }
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "2026/10/10 09:12",  # 日付・時刻
+            "〒123-4567",  # 郵便番号
+            "注文番号 20261010123456",  # 0 始まりでない長い数字列
+            "No.0480123456789",  # 長い数字列の一部
+            "数量 1,200 単価 3,456",
+        ],
+    )
+    def test_does_not_extract_non_phone_numbers(self, text):
+        assert extract_phone_numbers(text) == set()
 
     def test_does_not_join_digits_across_lines_or_dates(self):
-        assert extract_fax_numbers("FAX 03-1234-5678\n2026/10/10") == {"0312345678"}
-        assert extract_fax_numbers("FAX:0312345678 2026/10/10") == {"0312345678"}
+        assert extract_phone_numbers("FAX 03-1234-5678\n2026/10/10") == {"0312345678"}
+        assert extract_phone_numbers("FAX:0312345678 2026/10/10") == {"0312345678"}
 
     def test_returns_empty_for_none(self):
-        assert extract_fax_numbers(None) == set()
+        assert extract_phone_numbers(None) == set()
+
+    def test_long_whitespace_run_does_not_backtrack_quadratically(self):
+        """番号の先頭のような数字の後に長い空白列が続く行でも線形時間で終わる
+        （区切りの正規表現が O(N²) の後戻りをしない。PR #525 Copilotレビュー指摘）。
+        修正前は空白 20000 文字で約7秒かかっていた。"""
+        started = time.perf_counter()
+        assert extract_phone_numbers("0480" + " " * 20000 + "x") == set()
+        assert time.perf_counter() - started < 1.0
 
 
 @pytest.mark.unit
 class TestMatchCustomerByFaxNumber:
-    """Issue #521: 会社名に加え、FAX 番号（customers.fax_number）でも顧客を照合する。"""
+    """Issue #521 / #524: 会社名に加え、FAX・電話番号（customers.fax_number /
+    phone_number）でも顧客を照合する。"""
 
     def _mock_db(self, customers):
         mock_db = MagicMock()
@@ -811,4 +860,89 @@ class TestMatchCustomerByFaxNumber:
                 mock_db, "tenant-1", "株式会社ABC製作所", ["03-1234-5678"]
             )
             == 60
+        )
+
+    def test_resolves_by_phone_number_when_fax_is_missing(self):
+        # 注文書に FAX 番号が無く、電話番号だけが載っている（Issue #524）
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 70,
+                    "name": "株式会社ABC製作所",
+                    "alias": None,
+                    "fax_number": None,
+                    "phone_number": "0480-12-3456",
+                },
+                {
+                    "id": 71,
+                    "name": "有限会社XYZ工業",
+                    "alias": None,
+                    "fax_number": "0480-12-9999",
+                    "phone_number": None,
+                },
+            ]
+        )
+        text = "注文書\nTEL 0480(12)3456\n宛先 当社 TEL 045-000-0000"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", text) == 70
+
+    def test_tel_and_fax_of_same_customer_resolve_to_it(self):
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 80,
+                    "name": "株式会社ABC製作所",
+                    "alias": None,
+                    "fax_number": "0480-12-3457",
+                    "phone_number": "0480-12-3456",
+                }
+            ]
+        )
+        text = "TEL 0480-12-3456 FAX 0480-12-3457"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", text) == 80
+
+    def test_numbers_of_two_customers_are_not_resolved(self):
+        # 納入先など別の顧客の番号が一緒に載っている場合は確定しない
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 90,
+                    "name": "株式会社ABC製作所",
+                    "alias": None,
+                    "fax_number": "0480-12-3456",
+                    "phone_number": None,
+                },
+                {
+                    "id": 91,
+                    "name": "有限会社XYZ工業",
+                    "alias": None,
+                    "fax_number": None,
+                    "phone_number": "06-6123-4567",
+                },
+            ]
+        )
+        text = "発注元 FAX 0480-12-3456\n納入先 TEL 06-6123-4567"
+
+        assert match_customer_by_pdf_text(mock_db, "tenant-1", text) is None
+
+    def test_resolves_by_passed_phone_number(self):
+        # 画像PDFでモデルに読み取らせた発行元の電話番号を渡す（FAX 番号は読めなかった）
+        mock_db = self._mock_db(
+            [
+                {
+                    "id": 95,
+                    "name": "株式会社ABC製作所",
+                    "alias": None,
+                    "fax_number": None,
+                    "phone_number": "0480123456",
+                }
+            ]
+        )
+
+        assert (
+            match_customer_by_pdf_text(
+                mock_db, "tenant-1", None, [None, "0480(12)3456"]
+            )
+            == 95
         )

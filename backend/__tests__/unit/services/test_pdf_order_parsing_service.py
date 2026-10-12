@@ -1662,6 +1662,7 @@ class TestImagePdfExtraction:
                     "line_items": [self._LINE],
                     "issuer_company_name": "株式会社ABC製作所",
                     "issuer_fax_number": "03-1234-5678",
+                    "issuer_phone_number": "03-1234-5670",
                 },
             ),
         ):
@@ -1670,7 +1671,7 @@ class TestImagePdfExtraction:
         assert _no_pdf_customer_match.call_args.args[1:] == (
             "tenant-1",
             "株式会社ABC製作所",
-            ["03-1234-5678"],
+            ["03-1234-5678", "03-1234-5670"],
         )
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
         assert rpc_params["p_customer_id"] == 55

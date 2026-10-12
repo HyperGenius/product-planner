@@ -425,7 +425,7 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
     テキストを持たない画像PDF（FAX受信・スキャン）を Claude に画像として読ませ、
     明細ごとに order を生成する（Issue #520）。
 
-    - 顧客は、モデルに読み取らせた発行元の会社名・FAX 番号で #385 と同じ照合を行い、
+    - 顧客は、モデルに読み取らせた発行元の会社名・FAX/電話番号で #385 と同じ照合を行い、
       一意に決まった場合だけ付け直す。社内転送者（社長）が件名・本文なしで転送してくる
       ため、メール単位の customer_id は None（顧客不明。Issue #521）であることが多い
     - 付け直した顧客に固有の抽出指示があれば、その指示でもう一度読み取る
@@ -449,7 +449,10 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
             db,
             tenant_id,
             extraction.get("issuer_company_name"),
-            [extraction.get("issuer_fax_number")],
+            [
+                extraction.get("issuer_fax_number"),
+                extraction.get("issuer_phone_number"),
+            ],
         )
         if resolved_customer_id is not None and resolved_customer_id != row.get(
             "customer_id"

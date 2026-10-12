@@ -42,14 +42,22 @@ _NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-―ー－_/／|｜]+")
 # PDF文面からの顧客照合で、これより短い正規化後の会社名は誤マッチしやすいため使わない。
 _MIN_COMPANY_CORE_LEN = 3
 
-# 国内の固定電話・FAX 番号（0 始まり、市外局番込みで10〜11桁）
-_FAX_DIGITS_RE = re.compile(r"0\d{9,10}")
-# NFKC 正規化後の文面から「FAX」の見出しに続く番号を拾う
-# （例: "FAX 03-1234-5678" / "FAX:(03)1234-5678" / "ファクス 0312345678"）
-_FAX_LABELED_NUMBER_RE = re.compile(
-    r"(?:FAX|ファクス|ファックス)(?:番号)?[ \t]*[:.]?[ \t]*"
-    r"(\(?0\d{1,4}\)?[ \t]*-?[ \t]*\d{1,4}[ \t]*-?[ \t]*\d{3,4})",
-    re.IGNORECASE,
+# 国内の電話・FAX 番号（0 始まり、市外局番込みで10〜11桁）
+_PHONE_DIGITS_RE = re.compile(r"0\d{9,10}")
+# 番号の区切り（NFKC 後）。ハイフン類・長音・空白、または区切りなし。
+# `[ \t]*` を2つ隣り合わせにすると（`[ \t]*-?[ \t]*`）、長い空白列の後に数字が続かない行で
+# 空白の分け方を総当たりして O(N²) の後戻りになるので、2つ目はハイフン類があるときだけ
+# 置く（PR #525 Copilotレビュー指摘）
+_PHONE_SEP = r"[ \t]*(?:[-‐‑‒–—―−ー][ \t]*)?"
+# NFKC 正規化後の文面から、見出し（FAX / TEL）の有無に関わらず電話番号の形をした番号を拾う
+# （Issue #524）。行はまたがず、前後が数字の場合（長い数字列の一部）は拾わない。
+#   "0480-12-3456" / "0480123456" / "(0480)12-3456" / "0480(12)3456" / "0480 12 3456"
+_PHONE_NUMBER_RE = re.compile(
+    r"(?<!\d)(?:"
+    rf"\(0\d{{1,4}}\){_PHONE_SEP}\d{{1,4}}{_PHONE_SEP}\d{{3,4}}"
+    r"|0\d{1,4}[ \t]*\(\d{1,4}\)[ \t]*\d{3,4}"
+    rf"|0\d{{1,4}}{_PHONE_SEP}\d{{1,4}}{_PHONE_SEP}\d{{3,4}}"
+    r")(?!\d)"
 )
 
 
@@ -66,30 +74,30 @@ def normalize_company_name(value: str) -> str:
     return without_noise.strip().lower()
 
 
-def normalize_fax_number(value: str) -> str | None:
-    """FAX 番号を照合用に数字だけへ正規化する（全角数字・ハイフン・括弧の表記ゆれを畳む）。
+def normalize_phone_number(value: str) -> str | None:
+    """電話・FAX 番号を照合用に数字だけへ正規化する（全角数字・ハイフン・括弧の表記ゆれを畳む）。
 
-    国内の固定電話・FAX 番号（0 始まりの10〜11桁）でなければ None を返す。
+    国内の電話・FAX 番号（0 始まりの10〜11桁）でなければ None を返す。
     """
     digits = re.sub(r"\D", "", unicodedata.normalize("NFKC", value))
-    if not _FAX_DIGITS_RE.fullmatch(digits):
+    if not _PHONE_DIGITS_RE.fullmatch(digits):
         return None
     return digits
 
 
-def extract_fax_numbers(text: str | None) -> set[str]:
-    """文面から「FAX」の見出しが付いた番号を抜き出し、正規化した集合で返す。
+def extract_phone_numbers(text: str | None) -> set[str]:
+    """文面から電話番号の形をした番号を抜き出し、正規化した集合で返す（Issue #521 / #524）。
 
-    注文書には発行元（顧客）と宛先（自社）の両方の FAX 番号が載っていることが多いが、
-    自社の番号は顧客マスタに無いので照合に当たらない。TEL の番号は拾わない（別の
-    顧客の FAX 番号と偶然一致して誤照合するのを避けるため）。
+    FAX の送信元番号が見出し無しで印字されている注文書や、FAX 番号が無く電話番号だけの
+    注文書があるため、見出し（FAX / TEL）の有無は問わない。注文書には宛先（自社）の
+    番号も載っているが、自社は顧客マスタに無いので照合に当たらない。
     """
     if not text:
         return set()
     normalized = unicodedata.normalize("NFKC", text)
     numbers: set[str] = set()
-    for m in _FAX_LABELED_NUMBER_RE.finditer(normalized):
-        number = normalize_fax_number(m.group(1))
+    for m in _PHONE_NUMBER_RE.finditer(normalized):
+        number = normalize_phone_number(m.group(0))
         if number:
             numbers.add(number)
     return numbers
@@ -113,15 +121,18 @@ def _customer_ids_by_name(rows: list[dict[str, Any]], normalized_text: str) -> s
     return matched
 
 
-def _customer_ids_by_fax(rows: list[dict[str, Any]], numbers: set[str]) -> set[int]:
-    """FAX 番号（数字だけに正規化）が `numbers` のいずれかと一致する顧客の ID。"""
+def _customer_ids_by_number(rows: list[dict[str, Any]], numbers: set[str]) -> set[int]:
+    """FAX 番号・電話番号（数字だけに正規化）が `numbers` のいずれかと一致する顧客の ID。"""
     if not numbers:
         return set()
     return {
         int(row["id"])
         for row in rows
-        if isinstance(row.get("fax_number"), str)
-        and normalize_fax_number(row["fax_number"]) in numbers
+        if any(
+            isinstance(row.get(column), str)
+            and normalize_phone_number(row[column]) in numbers
+            for column in ("fax_number", "phone_number")
+        )
     }
 
 
@@ -129,9 +140,9 @@ def match_customer_by_pdf_text(
     db: Client,
     tenant_id: str,
     pdf_text: str | None,
-    fax_numbers: Iterable[str | None] = (),
+    phone_numbers: Iterable[str | None] = (),
 ) -> int | None:
-    """PDF抽出テキストに含まれる発注元企業名・FAX 番号から、既存顧客を1件に特定する。
+    """PDF抽出テキストに含まれる発注元企業名・FAX/電話番号から、既存顧客を1件に特定する。
 
     束ね添付メール（1通に複数顧客の注文書PDFを添付して転送）では、メール単位で
     解決した `customer_id` が全PDFで同一になってしまう（Issue #385）。また社内転送者
@@ -140,12 +151,13 @@ def match_customer_by_pdf_text(
 
     - 会社名: `customers.name` / `customers.alias` を法人格・記号・空白を無視して正規化し、
       正規化後の文字列が PDF テキスト（同様に正規化したもの）に部分一致する顧客
-    - FAX 番号: 文面の「FAX」見出し付きの番号（`extract_fax_numbers`）と、呼び出し側が
-      渡す `fax_numbers`（画像PDFでモデルに読み取らせた送信元番号）を、
-      `customers.fax_number` と数字だけで突合した顧客（Issue #521）
+    - 番号: 文面の電話番号の形をした番号（`extract_phone_numbers`。見出しの有無は問わない）と、
+      呼び出し側が渡す `phone_numbers`（画像PDFでモデルに読み取らせた発行元の FAX・電話番号）を、
+      `customers.fax_number` / `customers.phone_number` と数字だけで突合した顧客
+      （Issue #521 / #524）
 
-    会社名で一意に決まればその顧客、決まらなければ FAX 番号で一意に決まった顧客を返す。
-    会社名と FAX 番号が別の顧客に一意に当たった場合は確定しない。どちらでも決まらない
+    会社名で一意に決まればその顧客、決まらなければ番号で一意に決まった顧客を返す。
+    会社名と番号が別の顧客に一意に当たった場合は確定しない。どちらでも決まらない
     場合は None を返し、呼び出し側はメール単位で解決済みの `customer_id`（社内転送者からの
     メールでは NULL＝顧客不明）にフォールバックする。
 
@@ -160,9 +172,9 @@ def match_customer_by_pdf_text(
     RLS の tenant isolation に依存せず明示的に `tenant_id` で絞り込む。
     """
     normalized_text = normalize_company_name(pdf_text) if pdf_text else ""
-    numbers = extract_fax_numbers(pdf_text) | {
+    numbers = extract_phone_numbers(pdf_text) | {
         number
-        for number in (normalize_fax_number(n) for n in fax_numbers if n)
+        for number in (normalize_phone_number(n) for n in phone_numbers if n)
         if number
     }
     if not normalized_text and not numbers:
@@ -170,34 +182,34 @@ def match_customer_by_pdf_text(
 
     result = (
         db.table(SupabaseTableName.CUSTOMERS.value)
-        .select("id, name, alias, fax_number")
+        .select("id, name, alias, fax_number, phone_number")
         .eq("tenant_id", tenant_id)
         .execute()
     )
     rows = cast(list[dict[str, Any]], result.data or [])
 
     name_ids = _customer_ids_by_name(rows, normalized_text)
-    fax_ids = _customer_ids_by_fax(rows, numbers)
+    number_ids = _customer_ids_by_number(rows, numbers)
     name_id = next(iter(name_ids)) if len(name_ids) == 1 else None
-    fax_id = next(iter(fax_ids)) if len(fax_ids) == 1 else None
-    if name_id is not None and fax_id is not None and name_id != fax_id:
+    number_id = next(iter(number_ids)) if len(number_ids) == 1 else None
+    if name_id is not None and number_id is not None and name_id != number_id:
         logger.info(
-            f"PDF company name matched customer {name_id} but FAX number matched "
-            f"{fax_id} for tenant={tenant_id}; not resolving"
+            f"PDF company name matched customer {name_id} but phone/FAX number "
+            f"matched {number_id} for tenant={tenant_id}; not resolving"
         )
         return None
 
-    customer_id = name_id if name_id is not None else fax_id
+    customer_id = name_id if name_id is not None else number_id
     if customer_id is not None:
         logger.info(
             f"customer resolved from PDF: id={customer_id} tenant={tenant_id} "
-            f"by={'name' if name_id is not None else 'fax'}"
+            f"by={'name' if name_id is not None else 'number'}"
         )
         return customer_id
-    if len(name_ids) > 1 or len(fax_ids) > 1:
+    if len(name_ids) > 1 or len(number_ids) > 1:
         logger.info(
             f"PDF matched multiple customers name={sorted(name_ids)} "
-            f"fax={sorted(fax_ids)} for tenant={tenant_id}; "
+            f"number={sorted(number_ids)} for tenant={tenant_id}; "
             "falling back to email-level customer"
         )
     return None
