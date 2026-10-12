@@ -419,8 +419,8 @@ pdfplumber ではテキストが1文字も取れず（`failed_image`）、本文
   #385 と同じ照合（正規化した `customers.name` / `alias` の部分一致、一意の場合のみ）を行う。
   社長からの転送ではメール単位の `customer_id` は社長のアドレスから解決された値なので、
   付け直せないと誤った顧客で起票される。社内転送者からのメールではメール単位の `customer_id` は
-  NULL（顧客不明）になり、モデルが読み取った発行元の FAX 番号（`issuer_fax_number`）でも照合する
-  （Issue #521、[internal-senders.md](internal-senders.md)）
+  NULL（顧客不明）になり、モデルが読み取った発行元の FAX・電話番号（`issuer_fax_number` /
+  `issuer_phone_number`）でも照合する（Issue #521 / #524、[internal-senders.md](internal-senders.md)）
 - **顧客固有の抽出指示**: 1回目はメール単位の顧客の指示で読む。付け直した顧客に別の
   指示があれば、その指示でもう一度読み、明細が取れればそちらを採用する（テキストPDFが
   付け直し後の顧客の指示で抽出しているのと揃えるため。API 呼び出しが増えるのはこの場合だけ）

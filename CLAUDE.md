@@ -179,8 +179,9 @@ cd backend && ruff check . && mypy .
   `customer_id` が含まれるので、共通レコードだと品番・納期が同じ別顧客の注文が1件に統合される。NULL 同士は一致しない）。
   そのため取り込み・パースの処理では `customer_id` が None になりうる前提で書く（顧客単位の別名辞書・内示の無効化は
   スキップ。PostgREST の `.eq("customer_id", None)` は bigint エラーになる。Issue #262）。顧客の照合は
-  `match_customer_by_pdf_text()` が会社名→FAX 番号（`customers.fax_number`、数字だけで比較）の順で行い、両者が別の
-  顧客に当たったら確定しない。詳細は [docs/features/internal-senders.md](docs/features/internal-senders.md)
+  `match_customer_by_pdf_text()` が会社名→番号（`customers.fax_number` / `phone_number`、数字だけで比較）の順で行い、
+  両者が別の顧客に当たったら確定しない。テキスト PDF の番号は見出し（FAX / TEL）の有無を問わず電話番号の形で拾う
+  （FAX 送信元が見出し無しで印字される・`0480(12)3456` のような市内局番の括弧がある。Issue #524）。詳細は [docs/features/internal-senders.md](docs/features/internal-senders.md)
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**

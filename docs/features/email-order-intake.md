@@ -516,4 +516,5 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 束ね添付メールでのPDF単位の顧客解決（パース時に PDF 文面の企業名で `customers` を突合し、一意なら添付ごとに `customer_id` を再解決。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#束ね添付での-pdf-単位の顧客解決issue-385)） | ✅ #385 |
 | 画像PDF（FAX受信・スキャン）を Claude に画像として読ませて明細・発行元の会社名を抽出し起票（読み取った受注は要確認表示。詳細は[pdf-order-parsing.md](pdf-order-parsing.md#画像pdffax受信スキャンの読み取りissue-520)） | ✅ #520 |
 | 社内転送者（社長）の登録。差出人で顧客を作らず、注文書の会社名・FAX番号（`customers.fax_number`）から顧客を決め、決まらなければ顧客不明（`customer_id` NULL）で起票（詳細は[internal-senders.md](internal-senders.md)） | ✅ #521 |
+| 注文書からの顧客照合で、番号の表記揺れ（市内局番の括弧等）・見出しの無い番号・電話番号（`customers.phone_number`）に対応（詳細は[internal-senders.md](internal-senders.md)） | ✅ #524 |
 | 自動起票時の作業開始日（JST 翌日）設定とシミュ納期の自動算出（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#起票後の自動シミュレーションissue-477)） | ✅ #477 |

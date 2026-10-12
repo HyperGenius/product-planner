@@ -321,7 +321,7 @@ export default function CustomersPage() {
                 placeholder="例: 03-1234-5679"
               />
               <p className="text-xs text-muted-foreground">
-                FAX・スキャンの注文書に載っている送信元の番号で、顧客を自動で照合します
+                注文書に載っているFAX番号・電話番号で顧客を自動で照合します（ハイフン・括弧の有無は問いません）
               </p>
             </div>
             <div className="grid gap-2">
@@ -407,7 +407,7 @@ export default function CustomersPage() {
                 placeholder="例: 03-1234-5679"
               />
               <p className="text-xs text-muted-foreground">
-                FAX・スキャンの注文書に載っている送信元の番号で、顧客を自動で照合します
+                注文書に載っているFAX番号・電話番号で顧客を自動で照合します（ハイフン・括弧の有無は問いません）
               </p>
             </div>
             <div className="grid gap-2">

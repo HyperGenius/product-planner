@@ -186,10 +186,18 @@ _IMAGE_EXTRACT_SCHEMA["properties"]["issuer_fax_number"] = {
         "読み取れない場合は null。"
     ),
 }
+_IMAGE_EXTRACT_SCHEMA["properties"]["issuer_phone_number"] = {
+    "type": ["string", "null"],
+    "description": (
+        "注文書の発行元（発注元）の電話番号（TEL）。"
+        "宛先・送付先（受注側）の電話番号ではない。読み取れない場合は null。"
+    ),
+}
 _IMAGE_EXTRACT_SCHEMA["required"] = [
     *_EXTRACT_SCHEMA["required"],
     "issuer_company_name",
     "issuer_fax_number",
+    "issuer_phone_number",
 ]
 
 
@@ -202,8 +210,8 @@ def extract_order_lines_from_pdf(
 ) -> dict[str, Any]:
     """
     テキストを持たない画像PDF（FAX受信・スキャン）を PDF のまま Claude に渡し、
-    注文番号（文書レベル）・明細行・発行元の会社名と FAX 番号を抽出する
-    （Issue #520。FAX 番号は顧客の照合用、Issue #521）。
+    注文番号（文書レベル）・明細行・発行元の会社名と FAX・電話番号を抽出する
+    （Issue #520。FAX・電話番号は顧客の照合用、Issue #521 / #524）。
 
     PDFの `document` ブロックはページを画像として読むため、pdfplumber で
     1文字も取れない PDF でも中身を読める。
@@ -215,7 +223,8 @@ def extract_order_lines_from_pdf(
     - 拒否（stop_reason='refusal'）・出力打ち切りは空結果として返す
 
     戻り値: {"document_order_no": str | None, "line_items": list[dict],
-             "issuer_company_name": str | None, "issuer_fax_number": str | None}
+             "issuer_company_name": str | None, "issuer_fax_number": str | None,
+             "issuer_phone_number": str | None}
     """
     # FAX は解像度が低く数字の読み違いが起きやすいため、テキストPDFとは別に
     # 読み取り精度を優先したモデルを設定できるようにする
@@ -223,7 +232,8 @@ def extract_order_lines_from_pdf(
     prompt = _build_prompt(
         "添付は受注の注文書PDF（FAX受信やスキャンによる画像）です。"
         "文書レベルの注文番号(document_order_no)、注文書の発行元の会社名"
-        "(issuer_company_name)・FAX番号(issuer_fax_number)と、"
+        "(issuer_company_name)・FAX番号(issuer_fax_number)・"
+        "電話番号(issuer_phone_number)と、"
         "明細行ごとに品番・品名・数量・納期・確度、"
         "および明細レベルの注文No.(line_order_no)を抽出してください。"
         "かすれ・つぶれで判読できない値は推測で埋めず null にしてください。",
@@ -278,6 +288,7 @@ def extract_order_lines_from_pdf(
             "line_items": [],
             "issuer_company_name": None,
             "issuer_fax_number": None,
+            "issuer_phone_number": None,
         }
 
     data = _parse_response(response)
@@ -285,6 +296,7 @@ def extract_order_lines_from_pdf(
         **_normalize_result(data),
         "issuer_company_name": _optional_str(data.get("issuer_company_name")),
         "issuer_fax_number": _optional_str(data.get("issuer_fax_number")),
+        "issuer_phone_number": _optional_str(data.get("issuer_phone_number")),
     }
 
 
