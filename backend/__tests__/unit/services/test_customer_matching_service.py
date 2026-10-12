@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -740,6 +741,14 @@ class TestPhoneNumbers:
 
     def test_returns_empty_for_none(self):
         assert extract_phone_numbers(None) == set()
+
+    def test_long_whitespace_run_does_not_backtrack_quadratically(self):
+        """番号の先頭のような数字の後に長い空白列が続く行でも線形時間で終わる
+        （区切りの正規表現が O(N²) の後戻りをしない。PR #525 Copilotレビュー指摘）。
+        修正前は空白 20000 文字で約7秒かかっていた。"""
+        started = time.perf_counter()
+        assert extract_phone_numbers("0480" + " " * 20000 + "x") == set()
+        assert time.perf_counter() - started < 1.0
 
 
 @pytest.mark.unit

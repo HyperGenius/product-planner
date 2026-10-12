@@ -181,7 +181,11 @@ cd backend && ruff check . && mypy .
   スキップ。PostgREST の `.eq("customer_id", None)` は bigint エラーになる。Issue #262）。顧客の照合は
   `match_customer_by_pdf_text()` が会社名→番号（`customers.fax_number` / `phone_number`、数字だけで比較）の順で行い、
   両者が別の顧客に当たったら確定しない。テキスト PDF の番号は見出し（FAX / TEL）の有無を問わず電話番号の形で拾う
-  （FAX 送信元が見出し無しで印字される・`0480(12)3456` のような市内局番の括弧がある。Issue #524）。詳細は [docs/features/internal-senders.md](docs/features/internal-senders.md)
+  （FAX 送信元が見出し無しで印字される・`0480(12)3456` のような市内局番の括弧がある。Issue #524）。
+- **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
+  隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
+  2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する
+  （PR #525 Copilotレビュー指摘、`customer_matching_service._PHONE_SEP`）詳細は [docs/features/internal-senders.md](docs/features/internal-senders.md)
 - **DB 変更**: `supabase/migrations/` に SQL ファイルを追加すること。直接スキーマ変更禁止
 - **`upsert_order_by_dedupe_key` の再定義**: このRPCは何度も `CREATE OR REPLACE` で更新されており、
   DEFAULT 付き引数の追加でシグネチャが変わっている。**必ず最新シグネチャの本文をベースにする**
