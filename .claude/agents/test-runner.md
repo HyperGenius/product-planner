@@ -10,7 +10,7 @@ model: haiku
 
 ## 実行コマンド
 
-作業ディレクトリはリポジトリルート（`product-planner-api/`）を起点とし、各コマンドは絶対パスか `cd <dir> &&` 付きで実行する。
+作業ディレクトリは git のリポジトリルート（`git rev-parse --show-toplevel` で得られるパス。clone 先によってディレクトリ名が変わるので名前で決め打ちしない）を起点とし、各コマンドは絶対パスか `cd <dir> &&` 付きで実行する。
 
 ### Backend（venv は `backend/.venv`。`uv run --no-sync` で実行する）
 
