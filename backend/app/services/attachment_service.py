@@ -95,8 +95,11 @@ def create_signed_urls(
         paths=storage_paths,
         expires_in=expires_in,
     )
+    # storage3 2.29.0 以降は失敗した項目の signedURL が None になりうる（Issue #430）
     return {
-        response["path"]: response["signedURL"]
+        response["path"]: signed_url
         for response in responses
-        if response.get("path") and not response.get("error")
+        if response.get("path")
+        and not response.get("error")
+        and (signed_url := response.get("signedURL"))
     }
