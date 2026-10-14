@@ -92,6 +92,16 @@ cd backend && ruff check . && mypy .
     `tenant_id` は使わない**。以降のクエリはすべて `.eq("tenant_id", tenant_id)` でアプリ側から明示的に絞り込む。
     エージェント API は `Depends(get_agent_context)` で `AgentContext` を受け取り、その値だけを使うこと。
     詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
+  - **admin クライアントでセッションを作ると以降はユーザー権限になる**: `admin_client.auth.verify_otp()` 等で
+    サインインすると supabase-py が `SIGNED_IN` を受けてクライアントの `Authorization` をそのユーザーのトークンに
+    差し替える（2.26.0 / 2.31.0 とも。2.31.0 からは `auth` の admin API 呼び出しも同様）。同じクライアントで後から
+    DB を書くと RLS が効き、ポリシーの無いテーブルでは 0件更新のまま黙って成功する。サインイン後に service role で
+    書くときは `get_supabase_admin_client()` で別のクライアントを作る（Issue #430 の調査で判明）
+- **supabase-py のバージョンを上げるとき（Issue #430）**: `requirements.txt` は推移的依存まで固定しているので、
+  一式（`supabase`/`postgrest`/`storage3`/`realtime`/`supabase-auth`/`supabase-functions`）と、それらが要求する
+  下限（例: `supabase-auth` 2.31.0 → `PyJWT>=2.12.0`）をクリーンな venv（`uv venv -p 3.11`）で解決して確かめる。
+  使わなくなった依存を消すときは `uv pip tree --invert --package <name>` で他に依存元が無いか見る
+  （`pyparsing` は `httplib2` 経由で必要）
 - **Storage の「上書きしない」アップロード**: `upload(..., file_options={"upsert": "false"})` で既存キーに書くと
   storage3 は `StorageApiError` を投げ、実 Storage では `status == "409"`（文字列）/ `code == "Duplicate"` になる
   （ローカル Supabase で確認済み。既存オブジェクトは上書きされない）。重複を正常系として扱う場合はこれで判定し、

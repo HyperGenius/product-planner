@@ -856,7 +856,34 @@ Webインスタンス自身に高負荷を掛ける構造・`pdf_text_service` �
   任意依存・遅延import（`TYPE_CHECKING`／関数内import）に変更されているのを確認済みで、
   正しい直し方は `supabase` 一式を 2.26.0 → 2.31.0 へ更新することだが、
   auth/DB/Storage/Realtime全経路に影響するバージョンアップは本Issueのスコープ外として
-  見送った（別Issueで検証してから実施する）
+  見送った（別Issueで検証してから実施する）→ **Issue #430 で更新・除去済み**（下記）
+
+Issue #430 での変更（supabase SDK 2.26.0 → 2.31.0、pyiceberg の除去）:
+
+- `backend/requirements.txt`: `supabase`・`postgrest`・`storage3`・`realtime`・`supabase-auth`・
+  `supabase-functions` を `2.31.0` に更新。`supabase-auth==2.31.0` が `pyjwt[crypto]>=2.12.0` を
+  要求するため `PyJWT` も `2.10.1` → `2.12.1` に上げた（アプリは PyJWT を直接 import していない）
+- `pyiceberg`・`mmh3`・`pyroaring`・`sortedcontainers`・`strictyaml`・`fsspec` を削除し、
+  `pip install -r requirements.txt` の結果にこれらが含まれないことを確認した。**`pyparsing` は残した** —
+  pyiceberg 専用ではなく `google-api-python-client` → `httplib2` の依存（Gmail 取り込みで使用）で、
+  行を消すとピン留めが外れて無関係に新しい版へ上がるため
+- SDK の差分で呼び出し側に影響したのは `storage3` の署名付きURLの型だけだった
+  （2.29.0 で `signedURL` が `Optional[str]` に変わった）。`attachment_service.create_signed_urls()` は
+  URL が `None` の項目も「生成に失敗したパス」として結果から除外する。そのほか
+  - `maybe_single()` は実装が書き換わったが、0件 → `None`・複数件 → `APIError` の挙動は同じ
+  - postgrest の GET が 503 / 520（Cloudflare）のとき最大3回リトライするようになった（待ち時間は最大 1+2+4 秒）
+  - `StorageApiError` の組み立ては同じで、`upsert="false"` で既存キーへ書いたときの `status == "409"` 判定はそのまま使える
+- メモリ削減量（ローカル、Python 3.11 のクリーンな venv に変更前後の `requirements.txt` を入れ、
+  `resource.getrusage` の `ru_maxrss` で import 前後の差を計測。各5回の定常値）:
+
+  | 計測対象 | 2.26.0 | 2.31.0 | 削減 |
+  |---|---|---|---|
+  | `import supabase` | 60.1MB | 41.7MB | 約18MB |
+  | `import app.main`（アプリ起動相当） | 143.9MB | 132.0MB | 約12MB |
+
+  Issue #425 で見込んだ「約40MB」は `import pyiceberg.catalog.rest` 単体の値で、その中には
+  `pydantic`・`httpx` などアプリが元から読み込むモジュールも含まれていたため、アプリ全体で
+  見た削減は約12MBにとどまった
 
 ---
 
