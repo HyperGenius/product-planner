@@ -234,6 +234,11 @@ cd backend && ruff check . && mypy .
     テナントを消す前に `equipment_groups` も消す（トリガーが作ったグループが `equipment_groups.tenant_id` の FK で残り 23503 になる）
 - **一覧のセルを折り返さず省略するとき**: shadcn の `Table` は自動レイアウトなので、`td` の `truncate` / `max-w-*` は効かない
   （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
+- **一覧の行全体をクリック可能にするとき**: 行内の `DropdownMenu` / `Popover` の中身はポータルに描画されるが、React の合成イベントは
+  ポータルからも React ツリー上の親（行）へ伝播するので、メニュー項目のクリックで行の `onClick` も発火する。行のハンドラでは
+  `e.currentTarget.contains(e.target)` で DOM 上の行外（ポータル）のクリックを除外し、行内のボタン・リンク等も `closest()` で除外する
+  （前例は受注一覧の `order-table-row.tsx`、Issue #527）。確定済み注文の確認モーダルは編集モーダルと外枠
+  （`components/orders/order-dialog-layout.tsx`）を共有しているので、どちらかの見た目を変えるときはここを直す
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
   閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
 - **マスタを選ぶ検索付きコンボボックス（`Popover` + `Command`）**: 件数が増えうるマスタの選択は `Select` を使わずこちらにする

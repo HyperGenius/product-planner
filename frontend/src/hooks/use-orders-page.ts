@@ -64,6 +64,9 @@ export function useOrdersPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [editDialogGeneration, setEditDialogGeneration] = useState(0)
+  // 確認モーダル（読み取り専用、Issue #527）。一覧の再取得（送品済み等）を反映するため ID で持つ
+  const [viewingOrderId, setViewingOrderId] = useState<number | null>(null)
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
   const [deleteTargetOrder, setDeleteTargetOrder] = useState<Order | null>(null)
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
   const [expandedSimResult, setExpandedSimResult] = useState<OrderSimulateResponse | null>(null)
@@ -325,6 +328,13 @@ export function useOrdersPage() {
     setEditDialogGeneration((prev) => prev + 1)
   }
 
+  const handleOpenViewDialog = (order: Order) => {
+    setViewingOrderId(order.id)
+    setIsViewDialogOpen(true)
+  }
+
+  const viewingOrder = orders?.find((o) => o.id === viewingOrderId) ?? null
+
   const handleConfirmDelete = () => {
     if (!deleteTargetOrder) return
     const targetId = deleteTargetOrder.id
@@ -553,6 +563,9 @@ export function useOrdersPage() {
     setIsEditDialogOpen,
     selectedOrder,
     editDialogGeneration,
+    viewingOrder,
+    isViewDialogOpen,
+    setIsViewDialogOpen,
     deleteTargetOrder,
     setDeleteTargetOrder,
     expandedOrderId,
@@ -581,6 +594,7 @@ export function useOrdersPage() {
     handleConfirmReject,
     handleSimulate,
     handleOpenEditDialog,
+    handleOpenViewDialog,
     handleConfirmDelete,
     closeSimResult,
     // Reject dialog state
