@@ -1,6 +1,6 @@
 import type React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@/test-utils/render"
+import { render, screen, userEvent } from "@/test-utils/render"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Table, TableBody } from "@/components/ui/table"
 import type { Order } from "@/types/order"
@@ -56,6 +56,7 @@ const rowProps = {
   onEdit: vi.fn(),
   onDelete: vi.fn(),
   onToggleSelect: vi.fn(),
+  onView: vi.fn(),
 }
 
 function renderRow(order: Order) {
@@ -188,5 +189,77 @@ describe("OrderTableRow", () => {
       expect(row).toHaveClass("bg-destructive/5")
       expect(row).not.toHaveClass("bg-red-50")
     })
+  })
+
+  describe("確定済みの行のクリックで確認モーダルを開く（Issue #527）", () => {
+    function renderViewableRow(order: Order) {
+      const onView = vi.fn()
+      const onDelete = vi.fn()
+      const utils = render(
+        <TooltipProvider>
+          <Table>
+            <TableBody>
+              <OrderTableRow
+                order={order}
+                {...rowProps}
+                statusFilter="confirmed"
+                onView={onView}
+                onDelete={onDelete}
+              />
+            </TableBody>
+          </Table>
+        </TooltipProvider>,
+      )
+      return { ...utils, onView, onDelete }
+    }
+
+    it.each(["confirmed", "in_progress"] as const)(
+      "%s の行をクリックすると onView が呼ばれる",
+      async (status) => {
+        const order = makeOrder({ status, source_type: "manual" })
+        const { onView } = renderViewableRow(order)
+
+        await userEvent.setup().click(screen.getByText("O-1"))
+
+        expect(onView).toHaveBeenCalledWith(order)
+      },
+    )
+
+    it("行にフォーカスして Enter を押すと onView が呼ばれる", async () => {
+      const order = makeOrder({ status: "confirmed", source_type: "manual" })
+      const { onView } = renderViewableRow(order)
+
+      screen.getByRole("row", { name: "注文 O-1 の内容を確認" }).focus()
+      await userEvent.setup().keyboard("{Enter}")
+
+      expect(onView).toHaveBeenCalledTimes(1)
+    })
+
+    it("ケバブメニューを開いて項目を選んでも onView は呼ばれない", async () => {
+      const { onView, onDelete } = renderViewableRow(
+        makeOrder({ status: "confirmed", source_type: "manual" }),
+      )
+      const user = userEvent.setup()
+
+      await user.click(screen.getByRole("button", { name: "メニューを開く" }))
+      await user.click(await screen.findByRole("menuitem", { name: "削除" }))
+
+      expect(onDelete).toHaveBeenCalledTimes(1)
+      expect(onView).not.toHaveBeenCalled()
+    })
+
+    it.each(["draft", "pending_approval", "shipped"] as const)(
+      "%s の行はクリックしても onView を呼ばず、フォーカスもできない",
+      async (status) => {
+        const { onView, container } = renderViewableRow(
+          makeOrder({ status, source_type: "manual" }),
+        )
+
+        await userEvent.setup().click(screen.getByText("O-1"))
+
+        expect(onView).not.toHaveBeenCalled()
+        expect(container.querySelector("tr")).not.toHaveAttribute("tabindex")
+      },
+    )
   })
 })

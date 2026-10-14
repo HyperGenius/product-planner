@@ -26,6 +26,7 @@ import { BulkRequestApprovalConfirmDialog } from "@/components/orders/bulk-reque
 import { BulkApproveConfirmDialog } from "@/components/orders/bulk-approve-confirm-dialog"
 import { ShipOverdueDraftsConfirmDialog } from "@/components/orders/ship-overdue-drafts-confirm-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
+import { OrderViewDialog } from "@/components/orders/order-view-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
@@ -58,6 +59,9 @@ export default function OrdersPage() {
     setIsEditDialogOpen,
     selectedOrder,
     editDialogGeneration,
+    viewingOrder,
+    isViewDialogOpen,
+    setIsViewDialogOpen,
     deleteTargetOrder,
     setDeleteTargetOrder,
     expandedOrderId,
@@ -82,6 +86,7 @@ export default function OrdersPage() {
     handleConfirmReject,
     handleSimulate,
     handleOpenEditDialog,
+    handleOpenViewDialog,
     handleConfirmDelete,
     closeSimResult,
     rejectTargetOrder,
@@ -283,6 +288,7 @@ export default function OrdersPage() {
                     onEdit={handleOpenEditDialog}
                     onDelete={setDeleteTargetOrder}
                     onToggleSelect={handleToggleSelect}
+                    onView={handleOpenViewDialog}
                   />
                 ))}
               </TableBody>
@@ -320,6 +326,14 @@ export default function OrdersPage() {
             onOpenChange={setIsEditDialogOpen}
           />
         )}
+
+        <OrderViewDialog
+          order={viewingOrder}
+          products={products}
+          customers={customers}
+          open={isViewDialogOpen}
+          onOpenChange={setIsViewDialogOpen}
+        />
 
         <DeleteOrderDialog
           order={deleteTargetOrder}

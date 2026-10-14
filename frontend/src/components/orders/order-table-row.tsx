@@ -3,6 +3,7 @@
 import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Truck, Undo2 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import type React from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TableCell, TableRow } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import {
   Tooltip,
   TooltipContent,
@@ -65,7 +67,12 @@ interface OrderTableRowProps {
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
   onToggleSelect: (orderId: number) => void
+  /** 確定済み・生産中の行のクリックで読み取り専用の確認モーダルを開く（Issue #527） */
+  onView: (order: Order) => void
 }
+
+// 行内でクリックしても確認モーダルを開かない操作要素
+const INTERACTIVE_SELECTOR = "button, a, input, [role='button'], [role='menuitem'], [role='checkbox']"
 
 export function OrderTableRow({
   order,
@@ -92,6 +99,7 @@ export function OrderTableRow({
   onEdit,
   onDelete,
   onToggleSelect,
+  onView,
 }: OrderTableRowProps) {
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
@@ -127,8 +135,43 @@ export function OrderTableRow({
     rowClassName = "bg-blue-50/60"
   }
 
+  // 確定済み・生産中は編集できないので、行のクリックで内容を確認できるようにする（Issue #527）
+  const isViewable = order.status === "confirmed" || order.status === "in_progress"
+
+  const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
+    const target = e.target as Element
+    // ケバブメニューの項目はポータルに描画され、DOM 上は行の外にあるが React のイベントは
+    // 行まで伝播してくる。行の DOM に含まれないクリックと、行内の操作要素のクリックは無視する
+    if (!e.currentTarget.contains(target)) return
+    if (target.closest(INTERACTIVE_SELECTOR)) return
+    onView(order)
+  }
+
+  const handleRowKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+    // 行内のボタン等にフォーカスがあるときのキー操作は、その要素に任せる
+    if (e.target !== e.currentTarget) return
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      onView(order)
+    }
+  }
+
   return (
-      <TableRow className={rowClassName}>
+      <TableRow
+        className={cn(
+          rowClassName,
+          isViewable &&
+            "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        )}
+        {...(isViewable
+          ? {
+              onClick: handleRowClick,
+              onKeyDown: handleRowKeyDown,
+              tabIndex: 0,
+              "aria-label": `注文 ${order.order_no ?? order.id} の内容を確認`,
+            }
+          : {})}
+      >
         <TableCell className="w-10">
           {order.status === "draft" ||
           (order.status === "pending_approval" && currentUserRole === "president") ? (

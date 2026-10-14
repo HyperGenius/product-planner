@@ -180,6 +180,15 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 | `completed` | (なし) | (メニューなし) |
 | その他 | (なし) | 削除 |
 
+**確定済み・生産中の行のクリック（Issue #527）**
+`confirmed` / `in_progress` は編集できないため、行（`TableRow`）のクリックで読み取り専用の確認モーダル（`OrderViewDialog`）を開く。
+行は `tabIndex=0` で、フォーカスして Enter / Space でも開ける（`aria-label="注文 {注文番号} の内容を確認"`）。
+- 行内の操作要素（ボタン・リンク・メニュー項目等。`order-table-row.tsx` の `INTERACTIVE_SELECTOR`）のクリックでは開かない
+- ケバブメニューの項目はポータルに描画されるが、React の合成イベントはポータルからも行まで伝播する。行の DOM に含まれない
+  クリック（`!e.currentTarget.contains(e.target)`）は無視して、「送品済みにする」「削除」で確認モーダルが開かないようにしている
+- キー操作は `e.target === e.currentTarget`（行そのものにフォーカスがあるとき）だけ扱う
+- それ以外のステータスの行はクリックしても何も起きない（`tabIndex` も付けない）
+
 **シミュレーション実行**（`POST /orders/{order_id}/simulate`）の結果は、画面右からスライドインするサイドシート（shadcn/ui `Sheet`）で表示する。Sheet フッターに「閉じる」「この内容で確定」ボタンを固定表示し、シミュレーション結果を確認後に confirm へ移行する。同時に開けるシートは 1 件のみで、別の注文のシミュレーション実行で自動的に切り替わる。
 
 ### 入力不足の警告表示
@@ -311,6 +320,21 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 ---
 
+## 注文の確認ダイアログ（読み取り専用、Issue #527）
+
+一覧で確定済み・生産中の行をクリックすると開くダイアログ（`components/orders/order-view-dialog.tsx`）。
+
+- 外枠（幅・メール起票時の参照元メール2カラム・ヘッダー・フッター）は編集ダイアログと共通の `OrderDialogLayout`
+  （`components/orders/order-dialog-layout.tsx`）を使い、見た目を揃える。外枠を変えるときはこのファイルだけを直す
+- 項目は編集ダイアログと同じ順（注文番号 / 製品 / 顧客 / 数量 / 希望納期 / 作業開始日）に、確定納期・ステータス・顧客側の確度を足す。
+  入力欄は `Input` の `readOnly` で、製品・顧客はコンボボックスではなく表示名を入れる。入力用の注記（「（任意）」「*」・作業開始日の説明・警告）は出さない
+- 未設定の項目は空欄＋プレースホルダ「未設定」（メール起票で顧客不明なら「顧客不明」、Issue #521）。確度 NULL は「－」（Issue #474）
+- フッターは「閉じる」と「詳細ページを開く」（`/orders/{id}`）。保存ボタンは無い
+- 一覧の `use-orders-page.ts` は表示中の注文を **ID**（`viewingOrderId`）で持ち、`orders` から引き直す。送品済み等で一覧が再取得されたときに古い内容を出さないため
+- 編集ダイアログに `readOnly` フラグを足す案は採らなかった（保存・409 の重複ハンドリング・作業開始日の権限チェック等、編集専用の処理が多いため）
+
+---
+
 ## バックエンド追加事項
 
 ### `confirmed_deadline` カラム追加
@@ -435,6 +459,8 @@ frontend/src/
     page.tsx                              # エントリーポイント（~160行）
   components/orders/
     edit-order-dialog.tsx                 # 注文編集ダイアログ
+    order-view-dialog.tsx                 # 注文の確認ダイアログ（読み取り専用、#527）
+    order-dialog-layout.tsx               # 編集・確認ダイアログ共通の外枠（#527）
     delete-order-dialog.tsx               # 削除確認 AlertDialog（注文番号/製品/顧客/数量/希望納期/確定納期のサマリー表示、#284）
     order-notification-cards.tsx          # 下書き/情報不足サマリーカード
     orders-filter-bar.tsx                 # ステータスタブ + ソートセレクト
@@ -454,8 +480,8 @@ frontend/src/
 | URL state | `statusFilter`, `sortKey`, `page`, `setParam()` |
 | データ | `orders`, `products`, `customers`, `isLoading` |
 | 派生値 | `draftCount`, `incompleteCount`, `filteredOrders`, `pagedOrders` |
-| ダイアログ state | `selectedOrder`, `deleteTargetOrder`, `expandedOrderId`, `expandedSimResult` |
-| ハンドラー | `handleSimulate`, `handleConfirmFromRow`, `handleOpenEditDialog`, `handleConfirmDelete`, `closeSimResult` |
+| ダイアログ state | `selectedOrder`, `viewingOrder`, `deleteTargetOrder`, `expandedOrderId`, `expandedSimResult` |
+| ハンドラー | `handleSimulate`, `handleConfirmFromRow`, `handleOpenEditDialog`, `handleOpenViewDialog`, `handleConfirmDelete`, `closeSimResult` |
 
 ---
 
@@ -506,6 +532,7 @@ frontend/src/
 | 一覧ページ: シミュレーション結果をサイドシート方式に変更 | 高 | ✅ 実装済 (#132) |
 | 一覧ページ: AlertDialogによる削除確認 | 高 | ✅ 実装済 (#115) |
 | 注文編集ダイアログ | 中 | ✅ 実装済 (#116) |
+| 一覧ページ: 確定済み・生産中の行クリックで読み取り専用の確認ダイアログ | 中 | ✅ 実装済 (#527) |
 | 新規注文: 3ステップインジケーター | 中 | ✅ 実装済 (#117) |
 | 新規注文: 入力促進ヒント | 中 | ✅ 実装済 (#117) |
 | 新規注文: 確定前サマリー表示 | 中 | ✅ 実装済 (#117) |
