@@ -20,6 +20,12 @@ import { SourceEmailPanel } from "@/components/orders/source-email-panel"
 import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
 import { ApiError } from "@/lib/api-client"
 import { useSplitOrder } from "@/hooks/use-orders"
+import {
+  isSplitDeadlineMissing,
+  isSplitQuantityInvalid,
+  validateSplitItems,
+} from "@/lib/split-order-validation"
+import { cn } from "@/lib/utils"
 import type { ConflictingOrder, Order } from "@/types/order"
 
 interface SplitOrderDialogProps {
@@ -54,6 +60,8 @@ export function SplitOrderDialog({
   const splitOrder = useSplitOrder()
   const [items, setItems] = useState<SplitLineItemForm[]>([])
   const [error, setError] = useState("")
+  // 「一度触った項目」だけ赤枠にするための状態（開いた直後にエラー色で埋め尽くさない。Issue #508）
+  const [touched, setTouched] = useState<Set<string>>(new Set())
   // 重複起票（顧客×製品×希望納期）を検知した際の通知モーダル状態（Issue #415 PR3）
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [conflictingOrder, setConflictingOrder] = useState<ConflictingOrder | undefined>()
@@ -63,15 +71,24 @@ export function SplitOrderDialog({
     if (open && order) {
       setItems([emptyLineItem(order), emptyLineItem(order)])
       setError("")
+      setTouched(new Set())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, order?.id])
 
   if (!order) return null
 
+  const validation = validateSplitItems(items)
+
   const updateItem = (index: number, patch: Partial<SplitLineItemForm>) => {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)))
   }
+
+  const markTouched = (index: number, field: string) => {
+    setTouched((prev) => new Set(prev).add(`${index}-${field}`))
+  }
+
+  const isTouched = (index: number, field: string) => touched.has(`${index}-${field}`)
 
   const addItem = () => setItems((prev) => [...prev, emptyLineItem(order)])
 
@@ -83,6 +100,7 @@ export function SplitOrderDialog({
     if (!nextOpen) {
       setItems([])
       setError("")
+      setTouched(new Set())
     }
     onOpenChange(nextOpen)
   }
@@ -90,34 +108,17 @@ export function SplitOrderDialog({
   const handleSubmit = () => {
     setError("")
 
-    if (items.length < 2) {
-      setError("分割後の明細は2件以上入力してください")
+    if (!validation.ok) {
+      setError(validation.message)
       return
     }
 
-    const lineItems = []
-    for (const item of items) {
-      const parsedProductId = parseInt(item.productId, 10)
-      const parsedQuantity = parseInt(item.quantity, 10)
-      if (!item.productId || isNaN(parsedProductId)) {
-        setError("すべての明細で製品を選択してください")
-        return
-      }
-      if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
-        setError("すべての明細で数量を正しく入力してください")
-        return
-      }
-      if (!item.desiredDeadline) {
-        setError("すべての明細で希望納期を入力してください")
-        return
-      }
-      lineItems.push({
-        product_id: parsedProductId,
-        quantity: parsedQuantity,
-        desired_deadline: item.desiredDeadline,
-        customer_id: item.customerId ? parseInt(item.customerId, 10) : undefined,
-      })
-    }
+    const lineItems = items.map((item) => ({
+      product_id: parseInt(item.productId, 10),
+      quantity: parseInt(item.quantity, 10),
+      desired_deadline: item.desiredDeadline,
+      customer_id: item.customerId ? parseInt(item.customerId, 10) : undefined,
+    }))
 
     splitOrder.mutate(
       { id: order.id, data: { line_items: lineItems } },
@@ -195,6 +196,12 @@ export function SplitOrderDialog({
                       min={1}
                       value={item.quantity}
                       onChange={(e) => updateItem(index, { quantity: e.target.value })}
+                      onBlur={() => markTouched(index, "quantity")}
+                      className={cn(
+                        isTouched(index, "quantity") &&
+                          isSplitQuantityInvalid(item) &&
+                          "border-destructive"
+                      )}
                     />
                   </div>
                   <div className="space-y-2">
@@ -206,6 +213,12 @@ export function SplitOrderDialog({
                       onChange={(e) =>
                         updateItem(index, { desiredDeadline: e.target.value })
                       }
+                      onBlur={() => markTouched(index, "deadline")}
+                      className={cn(
+                        isTouched(index, "deadline") &&
+                          isSplitDeadlineMissing(item) &&
+                          "border-destructive"
+                      )}
                     />
                   </div>
                 </div>
@@ -221,13 +234,18 @@ export function SplitOrderDialog({
           </div>
         </div>
 
-        <DialogFooter className="border-t px-6 py-4">
-          <Button variant="outline" onClick={() => handleClose(false)}>
-            キャンセル
-          </Button>
-          <Button onClick={handleSubmit} disabled={splitOrder.isPending}>
-            {splitOrder.isPending ? "分割中..." : `${items.length}件に分割する`}
-          </Button>
+        <DialogFooter className="flex-col items-end gap-2 border-t px-6 py-4 sm:flex-col">
+          {!validation.ok && (
+            <p className="text-sm text-muted-foreground">{validation.message}</p>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => handleClose(false)}>
+              キャンセル
+            </Button>
+            <Button onClick={handleSubmit} disabled={splitOrder.isPending || !validation.ok}>
+              {splitOrder.isPending ? "分割中..." : `${items.length}件に分割する`}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
