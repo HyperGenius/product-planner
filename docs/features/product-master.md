@@ -13,6 +13,7 @@
 | `/master` | マスタデータカード一覧（各マスタへのナビゲーション） |
 | `/master/products` | 製品マスタ一覧 |
 | `/master/products?sort=product_code&page=2` | ソート・ページ状態付き URL の例 |
+| `/master/products/merge` | 重複製品の統合（`president` / `platform_admin` のみ。Issue #515） |
 
 ## データモデル
 
@@ -122,6 +123,12 @@ const displayName = product.name   // 品名として表示（NOT NULL のため
 | `backend/app/routers/master/products.py` | REST API エンドポイント（`GET` / `PATCH` / `DELETE /products/{id}/aliases[/{alias_id}]` を含む） |
 | `backend/app/services/product_alias_service.py` | 製品名別名の記録サービス（#347 / #350 / #351） |
 | `backend/app/repositories/supa_infra/master/product_name_alias_repo.py` | `product_name_aliases` / `product_name_alias_history` のリポジトリ |
+| `backend/app/services/product_spec_parser.py` | 品名から (接頭辞, 直径, 長さ, 材質) を読み取る純粋関数（#515。#516 の類似警告でも使う） |
+| `backend/app/services/product_merge_service.py` | 重複製品の統合の候補検索・事前チェック・実行（#515） |
+| `supabase/migrations/20261016000000_add_merge_products.sql` | RPC `merge_products` と `product_name_alias_history` の UPDATE ポリシー（#515） |
+| `frontend/src/components/product-merge/` | 重複製品の統合画面（#515） |
+| `frontend/src/hooks/use-product-merge.ts` | 統合の候補・プレビュー・実行のフック（#515） |
+| `frontend/src/lib/product-merge-utils.ts` | 統合画面の表示規則（統合できない理由・止める理由の文言等）（#515） |
 
 ## 工程ルーティング (process_routings)
 
@@ -266,6 +273,85 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 
 ---
 
+## 重複製品の統合（Issue #515）
+
+フィルター製品は品名が「直径×長さ 材質」の形だが、φ の位置（数字の前／後）・`×` の字形（`×` / `x` / `X` / `Ｘ`）・
+`L` の位置（`×20L` / `×L20`）・全角半角・空白・材質の括弧（`(SUS100)`）の揺れで、同一製品が複数レコードに分かれている。
+受注・工程・別名が重複先に分散するほか、日報の製品照合は「候補が複数なら照合しない」ため照合できない表記が出る。
+初回の整理で使う想定で、自動の一括統合はせず、人が1グループずつ確認して実行する。
+
+製品マスタのヘッダの「重複の統合」（`president` / `platform_admin` のみ表示）から `/master/products/merge` を開く。
+
+### 品名の読み取り（`product_spec_parser.parse_product_spec()`）
+
+品名を NFKC で正規化してから `接頭辞 + (φ数字 | 数字φ) + × + (L数字 | 数字L?) + 材質` として読み取る。読み取れない品名は候補にならない。
+
+| 項目 | 比較のしかた |
+|---|---|
+| 直径・長さ | `Decimal` で数値として比べる（`14.5` と `14.50` は同じ） |
+| 材質 | 全角半角・英字の大小・空白・ハイフン・括弧を無視したキー（`normalize_material()`）で比べる |
+| 接頭辞 | 品名の先頭の会社名らしき部分（`A社φ10×20L` の `A社`）。空白を除き大文字化したキー（`prefix_key`）で比べる |
+
+日報の製品照合の正規化 `normalize_product_name()` とは別物（あちらは `L` の位置・接頭辞を吸収しない照合キー）。
+`L` の直後に英字の材質が続く表記（`×20LCP`）は `L` を長さの記号として読むので、材質が `L` で始まる場合は誤読しうる。
+
+### 候補の検索と残す製品の選択
+
+`GET /products/merge-candidates?diameter=&length=&material=` が、テナントの全製品（**無効な製品を含む**）の品名を読み取り、
+直径・長さ・材質が一致する製品を返す。各候補の件数: 工程数・工程時間（`unit_time_seconds > 0`）が登録された工程数・
+工程時間に小数があるか・受注件数（ステータス別）・別名の件数。
+
+残す製品の初期選択（`default_keep_product_id`）は「正しさ」の順位（`correctness_rank()`）が最上位の候補。
+**工程時間が小数まで登録されている（3） > 工程時間が登録されている（2） > 工程が登録されている（1） > 工程なし（0）**。
+最上位が複数なら初期選択しない（人が選ぶ）。統合される側はチェックボックスで個別に外せる。
+
+**接頭辞が残す製品と異なる候補（有無の違いを含む）は統合できない**（顧客ごとの別製品の想定。ヒアリング後に製品マスタから手で削除する）。
+一覧には参考として出し、チェックできないようにして理由を表示する（Frontend `mergeIneligibleReason()`、Backend も `prefix_mismatch` で止める）。
+
+### 事前チェック（`product_merge_service.plan_merge()`）
+
+`POST /products/merge/preview`（body `{keep_product_id, merge_product_ids}`）が付け替え・削除の件数と、統合を止める理由（`blockers`）を返す。
+画面は選択が変わるたびに取得し、止める理由があれば実行ボタンを無効にして理由と該当受注を表示する。`POST /products/merge` も
+実行直前に同じチェックをやり直し、止める理由があれば **409 `merge_blocked`**（`blockers` 付き）を返す。
+
+| 止める理由 | 条件 |
+|---|---|
+| `spec_mismatch` | 統合される製品の直径・長さ・材質が残す製品と違う（読み取れない場合を含む） |
+| `prefix_mismatch` | 接頭辞が残す製品と違う |
+| `order_conflict` | 付け替えで `orders_dedupe_key`（顧客・製品・納期）が衝突し、統合される側の受注が**送品済み（`shipped`）以外** |
+| `routing_mismatch` | 統合される側のスケジュール済みの受注のセグメントが参照する工程の `sequence_order` が残す製品に無い |
+
+受注の重複キーの衝突は (顧客, 納期) ごとに判定する。残す製品の受注があればそれが枠を持ち、無ければ統合される側の送品済み以外
+（無ければ送品済み）のうち ID の若い受注が枠を持つ。枠を持てなかった統合される側の受注は、**送品済みなら削除して進め**、それ以外なら止める
+（残す側が送品済みで統合される側が生産中の衝突も止める）。顧客・納期が NULL の受注は UNIQUE で衝突しないので対象外。
+止まったときは、受注の製品・納期の付け替えや工程の登録を手作業で行ってから再実行する。
+
+### 実行（RPC `merge_products`、1トランザクション・取り消し不可）
+
+`SECURITY INVOKER`（ユーザー JWT、RLS 下）。RPC 自身も `organization_members` でロール（`president` / `platform_admin`）を確認する。
+日報の割り付けの置き換え（`replace_daily_report_allocation`）と同じ advisory lock を取り、製品を `FOR UPDATE` でロックしてから、統合される各製品について:
+
+1. 重複キーが衝突する送品済みの受注（プレビューの `deleted_orders`）を削除する（スケジュール等は CASCADE）
+2. **スケジュール**（`production_schedules.process_routing_id`）を残す製品の**同じ `sequence_order` の工程**へ付け替える。時刻・設備は変えない（ガントの配置は変わらない）
+3. **受注**（`orders.product_id`、ステータスを問わない）・**別名**（`product_name_aliases.product_id`）・**別名履歴**（`product_name_alias_history.product_id`）を残す製品へ付け替える
+4. 統合される側の**工程**・**製品**を物理削除する
+
+日報の進捗・未割当実績（`order_process_progress` / `daily_report_unallocated_actuals`）は工程・製品の削除の CASCADE で消え、
+cron `compute-daily-report-progress` の次回の再計算で反映される（参照整合性の CASCADE は RLS を受けない）。
+
+プレビュー後に他の操作で状況が変わった場合は、受注の UNIQUE 違反（23505）・付け替えられなかったセグメントによる工程の削除の FK 違反（23503）・
+削除する受注の件数の不一致（`P0001`）で全体を失敗させ、API は **409 `merge_conflict`**（固定文言）を返す。削除する送品済みの受注の
+添付（`order_attachments`）を別の受注が `source_attachment_id` で参照している場合も FK 違反で止まる。レスポンスに生の DB 例外文言は載せない。
+
+`product_name_alias_history` は追記のみの履歴で UPDATE ポリシーが無かったが、統合で `product_id` を付け替えるため
+**`product_id` 列だけ**（列単位の `GRANT UPDATE (product_id)`）を `president` / `platform_admin` に更新できるようにした
+（付け替えないと製品の削除で `ON DELETE SET NULL` になり、どの製品の履歴か追えなくなる）。
+
+統合後、Frontend は製品一覧・表記ゆれ履歴（`["products"]` 配下）・受注・ガント・日報の進捗と名寄せのクエリを無効化する
+（統合済みの製品 ID で 404 になるプレビューは除く）。
+
+---
+
 ## 変更履歴
 
 | PR | 内容 |
@@ -282,3 +368,4 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 | #351 | 製品マスタの表記ゆれ履歴から別名エントリを直接付け替え（`PATCH`）・削除（`DELETE /products/{id}/aliases/{alias_id}`）できるように。`president` 承認不要。履歴 `action` に `deleted` を追加、削除しても監査履歴は保持（Issue #351） |
 | #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化。作成ダイアログが `name`/`code` を旧UI前提で逆に書き込んでいた不整合を修正し、作成・編集とも 図番=`code` / 品名=`name` にラベル・バリデーション・ペイロードを統一。編集で図番を空にした場合は空文字ではなく `null` を送る（`UNIQUE(tenant_id, code)` 対策）。読み取りモデル `Product.code` / フロント型 / `ProductUpdate.code` を nullable にし、作成時のみ `code` 必須（`ProductCreateSchema`）。突合スクリプトは CSV の図番重複を正規化キーで判定して非決定的 UPDATE を防止（Issue #352） |
 | #488 | 日報の名寄せで、日報の商品名の別名を `source='daily_report'` で登録できるように（`register_daily_report_alias()`）。確認済みの由来として `auto_match_unreviewed` より優先（Issue #488） |
+| #515 | 表記ゆれで重複登録された製品の統合画面（`/master/products/merge`）を追加。品名から (接頭辞, 直径, 長さ, 材質) を読み取る `product_spec_parser`、候補検索・事前チェック（受注の重複キーの衝突・工程の対応）の `product_merge_service`、1トランザクションで付け替え・削除する RPC `merge_products`。`product_name_alias_history` の `product_id` 列だけ president / platform_admin に UPDATE を許可（Issue #515） |

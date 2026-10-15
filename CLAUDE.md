@@ -252,6 +252,16 @@ cd backend && ruff check . && mypy .
   - **1台グループの表示**: 画面では1台のグループをグループ名ではなくメンバーの設備の表示名で出す（`groupDisplayName()` /
     `formatGroupLabel()`）。1台グループの名前は設備名・呼称の変更に追従しないため。integration テストで設備を作ったら、
     テナントを消す前に `equipment_groups` も消す（トリガーが作ったグループが `equipment_groups.tenant_id` の FK で残り 23503 になる）
+- **重複製品の統合（Issue #515）**: 事前チェック（受注の重複キーの衝突・工程の `sequence_order` の対応・接頭辞）は純粋関数
+  `product_merge_service.plan_merge()` で行い、プレビュー API と実行 API の再検証で共有する。実行は RPC `merge_products`
+  （`SECURITY INVOKER`）で、プレビュー後の変化は計画を信用せず **DB の制約違反（23505 / 23503）で全体を失敗させる**設計
+  （スケジュールを付け替えられないと工程の削除が FK で落ちる）。**製品・工程を参照する FK を新しく足すときは、RPC の付け替え対象に
+  入れるか CASCADE にするかを決める**（`ON DELETE` 無しだと統合が 409 になる）。品名の読み取り `product_spec_parser.parse_product_spec()`
+  は #516（類似製品の警告）でも使う。`product_name_alias_history` は追記のみだが、統合のため `product_id` 列だけ列単位の
+  `GRANT UPDATE (product_id)` ＋ president / platform_admin のポリシーで更新を許可している（他の列の UPDATE は 42501）。
+  詳細は [docs/features/product-master.md](docs/features/product-master.md#重複製品の統合issue-515)
+  - Frontend で `["products"]` と日報のクエリキーを両方無効化するフックは `use-products.ts` に置かない
+    （`use-daily-report-names.ts` が `use-products.ts` を import しているので循環 import になる）。前例は `hooks/use-product-merge.ts`
 - **一覧のセルを折り返さず省略するとき**: shadcn の `Table` は自動レイアウトなので、`td` の `truncate` / `max-w-*` は効かない
   （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
 - **一覧の行全体をクリック可能にするとき**: 行内の `DropdownMenu` / `Popover` の中身はポータルに描画されるが、React の合成イベントは

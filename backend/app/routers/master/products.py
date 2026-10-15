@@ -1,7 +1,8 @@
 # routers/master/products.py
+from decimal import Decimal
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from postgrest.exceptions import APIError
 
 from app.dependencies import (
@@ -19,11 +20,18 @@ from app.models.master import (
     ProductNameAliasUpdateSchema,
     ProductUpdateSchema,
 )
+from app.models.master.product_merge_schemas import (
+    ProductMergeCandidatesResponse,
+    ProductMergeCounts,
+    ProductMergePreview,
+    ProductMergeRequest,
+)
 from app.repositories.supa_infra.master.product_name_alias_repo import (
     ProductNameAliasHistoryRepository,
     ProductNameAliasRepository,
 )
 from app.repositories.supa_infra.master.product_repo import ProductRepository
+from app.services import product_merge_service
 from app.services.product_alias_service import record_direct_alias_change
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
@@ -49,6 +57,105 @@ def get_products(repo: ProductRepository = Depends(get_product_repo)):
     """製品を全件取得"""
     logger.info("Fetching all products")
     return repo.get_all()
+
+
+def _require_merge_editor(tenant_id: str, user_id: str, client: Client) -> None:
+    role = get_current_user_role(tenant_id, user_id, client)
+    if role not in product_merge_service.MERGE_EDITOR_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="製品の統合は president または platform_admin のみ操作できます",
+        )
+
+
+_MERGE_PRODUCT_NOT_FOUND = "統合する製品が見つかりません"
+
+
+# /{product_id} より先に登録する（"merge-candidates" が product_id として解釈されないように）
+@product_router.get("/merge-candidates", response_model=ProductMergeCandidatesResponse)
+def get_product_merge_candidates(
+    diameter: Decimal = Query(gt=0, max_digits=12),
+    length: Decimal = Query(gt=0, max_digits=12),
+    material: str = Query(default="", max_length=100),
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """品名の直径・長さ・材質が一致する製品を、統合の候補として返す（Issue #515）。"""
+    _require_merge_editor(tenant_id, user_id, client)
+    return product_merge_service.find_merge_candidates(
+        client, tenant_id, diameter, length, material
+    )
+
+
+def _load_merge_preview(
+    client: Client, tenant_id: str, payload: ProductMergeRequest
+) -> ProductMergePreview:
+    try:
+        return product_merge_service.load_merge_preview(
+            client, tenant_id, payload.keep_product_id, payload.merge_product_ids
+        )
+    except product_merge_service.MergeProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_MERGE_PRODUCT_NOT_FOUND) from exc
+
+
+@product_router.post("/merge/preview", response_model=ProductMergePreview)
+def preview_product_merge(
+    payload: ProductMergeRequest,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """統合で付け替え・削除される件数と、統合を止める理由を返す（Issue #515）。"""
+    _require_merge_editor(tenant_id, user_id, client)
+    return _load_merge_preview(client, tenant_id, payload)
+
+
+@product_router.post("/merge", response_model=ProductMergeCounts)
+def merge_products(
+    payload: ProductMergeRequest,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """重複製品を残す製品へ統合する（Issue #515、取り消し不可）。
+
+    実行直前に事前チェックをやり直し、止める理由があれば 409（`merge_blocked`）を返す。
+    チェック後に他の操作と競合して RPC が失敗した場合も 409（`merge_conflict`）。
+    どちらもレスポンスに生の DB 例外文言を載せない。
+    """
+    _require_merge_editor(tenant_id, user_id, client)
+    preview = _load_merge_preview(client, tenant_id, payload)
+    if preview.blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "merge_blocked",
+                "message": "統合できない理由があります",
+                "blockers": [b.model_dump() for b in preview.blockers],
+            },
+        )
+
+    logger.info(
+        f"Merging products {payload.merge_product_ids} into {payload.keep_product_id}"
+    )
+    try:
+        return product_merge_service.execute_merge(client, tenant_id, preview)
+    except product_merge_service.MergeForbiddenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="製品の統合は president または platform_admin のみ操作できます",
+        ) from exc
+    except product_merge_service.MergeProductNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_MERGE_PRODUCT_NOT_FOUND) from exc
+    except product_merge_service.MergeConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "merge_conflict",
+                "message": "他の操作と競合したため統合できませんでした。候補の検索からやり直してください",
+            },
+        ) from exc
 
 
 @product_router.get("/{product_id}")
