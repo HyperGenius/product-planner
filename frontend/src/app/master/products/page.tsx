@@ -1,8 +1,9 @@
 "use client"
 
 import { useMemo, useState, useEffect, useRef } from "react"
+import Link from "next/link"
 import { useSearchParams, useRouter } from "next/navigation"
-import { AlertTriangle, Circle, MoreHorizontal, Plus, Search } from "lucide-react"
+import { AlertTriangle, Circle, Merge, MoreHorizontal, Plus, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
@@ -13,6 +14,7 @@ import {
   useToggleProductActive,
 } from "@/hooks/use-products"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
+import { PRODUCT_MERGE_ROLES } from "@/types/member"
 import type { Product } from "@/types/product"
 import { Button } from "@/components/ui/button"
 import {
@@ -104,6 +106,8 @@ export default function ProductsPage() {
   const { data: currentMember } = useCurrentMember()
   const isAdmin =
     currentMember?.role === "president" || currentMember?.role === "platform_admin"
+  const canMergeProducts =
+    currentMember != null && PRODUCT_MERGE_ROLES.includes(currentMember.role)
 
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
@@ -315,10 +319,20 @@ export default function ProductsPage() {
             製品の一覧表示、作成、編集、削除を行います
           </p>
         </div>
-        <Button onClick={handleOpenCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          新規作成
-        </Button>
+        <div className="flex gap-2">
+          {canMergeProducts && (
+            <Button variant="outline" asChild>
+              <Link href="/master/products/merge">
+                <Merge className="mr-2 h-4 w-4" />
+                重複の統合
+              </Link>
+            </Button>
+          )}
+          <Button onClick={handleOpenCreateDialog}>
+            <Plus className="mr-2 h-4 w-4" />
+            新規作成
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-3 mb-4">

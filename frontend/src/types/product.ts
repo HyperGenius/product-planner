@@ -76,3 +76,93 @@ export interface ProductNameAliasHistoryEntry {
 export interface ProductNameAliasUpdate {
   product_id: number
 }
+
+/**
+ * 重複製品の統合（Issue #515）の候補。
+ * Backend `models/master/product_merge_schemas.py` の `ProductMergeCandidate` と一致させる。
+ */
+export interface ProductMergeCandidate {
+  id: number
+  name: string
+  code: string | null
+  is_active: boolean
+  /** 品名の先頭の接頭辞（無ければ空文字） */
+  prefix: string
+  /** 接頭辞の比較用キー。残す製品と違う候補は統合できない */
+  prefix_key: string
+  routing_count: number
+  /** 工程時間が登録された工程数 */
+  timed_routing_count: number
+  has_decimal_time: boolean
+  /** 受注件数（ステータス別） */
+  order_counts: Record<string, number>
+  alias_count: number
+  /** 正しさの順位。3: 工程時間が小数まで / 2: 工程時間あり / 1: 工程のみ / 0: 工程なし */
+  rank: number
+}
+
+export interface ProductMergeCandidatesResponse {
+  diameter: string
+  length: string
+  material: string
+  candidates: ProductMergeCandidate[]
+  /** 残す製品の初期選択。正しさの順位が最上位の候補が1件だけのときに入る */
+  default_keep_product_id: number | null
+}
+
+export interface ProductMergeCandidatesParams {
+  diameter: string
+  length: string
+  material: string
+}
+
+export interface ProductMergeRequest {
+  keep_product_id: number
+  merge_product_ids: number[]
+}
+
+export type ProductMergeBlockerReason =
+  | "spec_mismatch"
+  | "prefix_mismatch"
+  | "order_conflict"
+  | "routing_mismatch"
+
+export interface ProductMergeBlocker {
+  reason: ProductMergeBlockerReason
+  product_id: number
+  product_name: string
+  order_id: number | null
+  order_number: string | null
+  order_status: string | null
+  /** order_conflict の衝突先の受注 */
+  conflicting_order_id: number | null
+  conflicting_order_number: string | null
+  /** routing_mismatch で残す製品に無い工程の順序 */
+  sequence_order: number | null
+}
+
+export interface ProductMergeCounts {
+  orders_reassigned: number
+  schedules_reassigned: number
+  aliases_reassigned: number
+  alias_history_reassigned: number
+  orders_deleted: number
+  routings_deleted: number
+  products_deleted: number
+}
+
+export interface ProductMergeOrderRef {
+  id: number
+  order_number: string | null
+  product_id: number
+  status: string
+}
+
+export interface ProductMergePreview {
+  keep_product_id: number
+  merge_product_ids: number[]
+  counts: ProductMergeCounts
+  /** 衝突のため削除される出荷済みの受注 */
+  deleted_orders: ProductMergeOrderRef[]
+  blockers: ProductMergeBlocker[]
+}

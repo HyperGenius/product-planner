@@ -47,3 +47,9 @@ export const DAILY_REPORT_NAME_EDITOR_ROLES: MemberRole[] = [
   "president",
   "platform_admin",
 ]
+
+/**
+ * 重複製品の統合（/master/products/merge）を操作できるロール。
+ * Backend `services/product_merge_service.py` の `MERGE_EDITOR_ROLES` と揃える（Issue #515）。
+ */
+export const PRODUCT_MERGE_ROLES: MemberRole[] = ["president", "platform_admin"]
