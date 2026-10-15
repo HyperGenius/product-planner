@@ -469,6 +469,36 @@ class TestOrderRouter:
         assert called_id == order_id
         assert called_data == payload
 
+    def test_update_order_clears_optional_fields_with_null(self, headers, mock_repo):
+        """PATCH /{id}: null を送った任意項目（注文番号・希望納期・顧客）は NULL で更新される（Issue #518）"""
+        order_id = 1
+        payload = {
+            "order_no": None,
+            "desired_deadline": None,
+            "customer_id": None,
+            "product_id": 5,
+            "quantity": 60,
+        }
+        mock_repo.get_by_id.return_value = {
+            "id": order_id,
+            "order_number": "ORD-001",
+            "deadline_date": "2026-10-01",
+            "customer_id": 10,
+            "product_id": 5,
+            "quantity": 50,
+        }
+        mock_repo.update.return_value = {"id": order_id, **payload}
+
+        response = client.patch(f"/orders/{order_id}", json=payload, headers=headers)
+
+        assert response.status_code == 200
+        called_id, called_data = mock_repo.update.call_args[0]
+        assert called_id == order_id
+        # 送られてきた null は exclude_unset で落とさずに更新対象へ含める
+        assert called_data["order_number"] is None
+        assert called_data["deadline_date"] is None
+        assert called_data["customer_id"] is None
+
     def test_update_order_duplicate_returns_409(self, headers, mock_repo):
         """PATCH /{id}: dedupe_key 重複時は 500 ではなく 409 + 構造化 detail を返す（Issue #415）"""
         from app.repositories.supa_infra.common import DuplicateRecordError

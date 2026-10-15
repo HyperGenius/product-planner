@@ -34,5 +34,5 @@
 
 ## 関連
 
-- Issue #518: 受注の編集ダイアログ（`edit-order-dialog.tsx`）にも同じパターンがある。
-  受注番号・希望納期・顧客は空に戻してよいかの仕様判断が要るため別 Issue で対応する
+- Issue #518: 受注の編集ダイアログ（`edit-order-dialog.tsx`）にも同じパターンがあり、
+  同方針で修正した。[order-edit-clear-optional-fields.md](order-edit-clear-optional-fields.md) 参照

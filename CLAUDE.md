@@ -308,7 +308,10 @@ cd backend && ruff check . && mypy .
 - **PATCH で任意項目を空欄にして消すとき**: 更新系のルーターは `model_dump(exclude_unset=True)` で送られたキーだけを
   更新するので、フロントで `value || undefined` と組むと空欄のキーが `JSON.stringify` で落ち、**更新されないまま 200（成功トースト）**
   になる。編集フォームの任意項目は `value.trim() || null` で送り、更新用の型も `string | null` にする（作成時の `undefined` は可）。
-  顧客マスタで修正済み（Issue #517）、受注の編集ダイアログは #518
+  顧客マスタ（Issue #517）・受注の編集ダイアログ（Issue #518）で修正済み。受注側は `desired_deadline` /
+  `customer_id`（`orders_dedupe_key` の列）も含め3項目とも空に戻せる方針（DB列がNOT NULLでなく、
+  メール起票の下書き等で元々未設定の受注があり既存の「情報不足」運用と整合するため）。
+  詳細は [docs/features/order-edit-clear-optional-fields.md](docs/features/order-edit-clear-optional-fields.md)
 - **日付文字列のパース（Frontend）**: `orders` の `confirmed_deadline` / `simulated_deadline` /
   `desired_deadline` / `scheduling_start_date` / `order_date` 等は**日付のみ（`"YYYY-MM-DD"`、時刻を持たない）**。
   `new Date("2026-09-08")` は **UTC 深夜**として解釈されるため、端末のタイムゾーン次第で日付が前日にズレる
