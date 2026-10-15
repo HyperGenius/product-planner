@@ -7,6 +7,7 @@ import type {
   ProductMergeBlocker,
   ProductMergeCandidate,
   ProductMergeCandidatesResponse,
+  ProductMergeGroup,
   ProductMergePreview,
   ProductMergeRequest,
 } from "@/types/product"
@@ -39,6 +40,25 @@ const CANDIDATES = [
   candidate({ id: 4, name: "A社φ10×20L SUS100", prefix: "A社", prefix_key: "A社" }),
 ]
 
+const GROUPS: ProductMergeGroup[] = [
+  {
+    diameter: "10",
+    length: "20",
+    material: "SUS100",
+    product_count: 4,
+    mergeable: true,
+    product_names: CANDIDATES.map((c) => c.name),
+  },
+  {
+    diameter: "8",
+    length: "10",
+    material: "",
+    product_count: 2,
+    mergeable: false,
+    product_names: ["A社φ8×10L", "φ8×10L"],
+  },
+]
+
 function previewFor(
   request: ProductMergeRequest,
   blockers: ProductMergeBlocker[] = []
@@ -68,8 +88,17 @@ function mockApi({
   response?: Pick<ProductMergeCandidatesResponse, "candidates" | "default_keep_product_id">
   blockers?: ProductMergeBlocker[]
 } = {}) {
-  const calls = { candidates: [] as string[], previews: [] as ProductMergeRequest[], merges: [] as ProductMergeRequest[] }
+  const calls = {
+    groups: 0,
+    candidates: [] as string[],
+    previews: [] as ProductMergeRequest[],
+    merges: [] as ProductMergeRequest[],
+  }
   server.use(
+    http.get(`${API_BASE}/products/merge-groups`, () => {
+      calls.groups += 1
+      return HttpResponse.json({ groups: GROUPS })
+    }),
     http.get(`${API_BASE}/tenant/members/me`, () =>
       HttpResponse.json({ user_id: "u1", email: "user@example.com", full_name: null, role })
     ),
@@ -152,6 +181,49 @@ describe("ProductMerge", () => {
       expect(calls.merges).toEqual([{ keep_product_id: 1, merge_product_ids: [2] }])
     )
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    // 重複の候補の抽出は「候補を抽出」を押さない限り呼ばない
+    expect(calls.groups).toBe(0)
+  })
+
+  it("「候補を抽出」を押したときだけ組を抽出し、選んだ組の候補を出す", async () => {
+    const calls = mockApi()
+
+    render(<ProductMerge />)
+    const extract = await screen.findByRole("button", { name: "候補を抽出" })
+    expect(calls.groups).toBe(0)
+
+    await userEvent.click(extract)
+
+    expect(await screen.findByText("2組")).toBeInTheDocument()
+    expect(calls.groups).toBe(1)
+    expect(screen.getByText("接頭辞違いのみ")).toBeInTheDocument()
+    expect(calls.candidates).toEqual([])
+
+    await userEvent.click(screen.getByRole("button", { name: /φ10 × 20 SUS100/ }))
+
+    await waitFor(() => expect(calls.candidates).toHaveLength(1))
+    const query = new URLSearchParams(calls.candidates[0])
+    expect([query.get("diameter"), query.get("length"), query.get("material")]).toEqual([
+      "10",
+      "20",
+      "SUS100",
+    ])
+    expect(screen.getByLabelText("直径 *")).toHaveValue("10")
+
+    // 統合しても組は自動で抽出し直さず、実行済みの印を付ける
+    const execute = await screen.findByRole("button", { name: "2件を統合" })
+    await waitFor(() => expect(execute).toBeEnabled())
+    await userEvent.click(execute)
+    await userEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "統合する" })
+    )
+    expect(await screen.findByText("統合を実行済み")).toBeInTheDocument()
+    expect(calls.groups).toBe(1)
+
+    // 押し直すと抽出し直し、印を消す
+    await userEvent.click(screen.getByRole("button", { name: "候補を抽出" }))
+    await waitFor(() => expect(calls.groups).toBe(2))
+    await waitFor(() => expect(screen.queryByText("統合を実行済み")).not.toBeInTheDocument())
   })
 
   it("正しさが同順位なら残す製品を初期選択しない", async () => {

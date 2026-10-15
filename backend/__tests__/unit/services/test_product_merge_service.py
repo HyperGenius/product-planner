@@ -19,6 +19,7 @@ from app.services.product_merge_service import (
     MergeProductNotFoundError,
     correctness_rank,
     execute_merge,
+    group_duplicate_products,
     plan_merge,
     summarize_candidates,
 )
@@ -91,6 +92,77 @@ class TestCorrectnessRank:
         routings = [_routing(i, 1, i, u) for i, u in enumerate(units, start=1)]
 
         assert correctness_rank(routings) == rank
+
+
+@pytest.mark.unit
+class TestGroupDuplicateProducts:
+    def _product(self, pid: int, name: str) -> dict[str, Any]:
+        return {"id": pid, "name": name, "code": None, "is_active": True}
+
+    def test_groups_same_spec_and_skips_singletons(self):
+        groups = group_duplicate_products(
+            [
+                self._product(3, "φ10x20 sus100"),
+                self._product(1, "φ10.0×20L SUS100"),
+                self._product(2, "10φ×L20 (SUS100)"),
+                self._product(4, "φ12×20L SUS100"),
+                self._product(5, "フィルター"),
+                self._product(6, "φ14.5×30L"),
+                self._product(7, "14.50φ×30"),
+            ]
+        )
+
+        assert [g.model_dump() for g in groups] == [
+            {
+                "diameter": "10",
+                "length": "20",
+                "material": "SUS100",
+                "product_count": 3,
+                "mergeable": True,
+                "product_names": [
+                    "φ10.0×20L SUS100",
+                    "10φ×L20 (SUS100)",
+                    "φ10x20 sus100",
+                ],
+            },
+            {
+                "diameter": "14.5",
+                "length": "30",
+                "material": "",
+                "product_count": 2,
+                "mergeable": True,
+                "product_names": ["φ14.5×30L", "14.50φ×30"],
+            },
+        ]
+
+    def test_prefix_only_group_is_not_mergeable_and_sorted_last(self):
+        groups = group_duplicate_products(
+            [
+                self._product(1, "A社φ8×10L SUS100"),
+                self._product(2, "φ8×10L SUS100"),
+                self._product(3, "φ20×40L SUS100"),
+                self._product(4, "φ20×40L SUS100"),
+            ]
+        )
+
+        assert [(g.diameter, g.mergeable) for g in groups] == [
+            ("20", True),
+            ("8", False),
+        ]
+
+    def test_mergeable_when_same_prefix_pair_exists(self):
+        groups = group_duplicate_products(
+            [
+                self._product(1, "A社φ8×10L SUS100"),
+                self._product(2, "A社 8φ×10L SUS100"),
+                self._product(3, "φ8×10L SUS100"),
+            ]
+        )
+
+        assert [(g.product_count, g.mergeable) for g in groups] == [(3, True)]
+
+    def test_empty(self):
+        assert group_duplicate_products([]) == []
 
 
 @pytest.mark.unit

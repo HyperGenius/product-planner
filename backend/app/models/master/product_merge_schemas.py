@@ -45,6 +45,25 @@ class ProductMergeCandidatesResponse(BaseModel):
     )
 
 
+class ProductMergeGroup(BaseModel):
+    """品名の直径・長さ・材質が一致する製品が2件以上ある組（重複の候補の抽出）。"""
+
+    diameter: str
+    length: str
+    material: str = Field(
+        description="候補の検索に入れる材質。グループ内で最も多い表記（無ければ空文字）"
+    )
+    product_count: int
+    mergeable: bool = Field(
+        description="接頭辞が同じ製品が2件以上あるか。False なら接頭辞違いのみで統合できない"
+    )
+    product_names: list[str] = Field(description="グループ内の製品の品名（ID 順）")
+
+
+class ProductMergeGroupsResponse(BaseModel):
+    groups: list[ProductMergeGroup]
+
+
 class ProductMergeRequest(BaseModel):
     keep_product_id: int
     merge_product_ids: list[int] = Field(min_length=1, max_length=50)

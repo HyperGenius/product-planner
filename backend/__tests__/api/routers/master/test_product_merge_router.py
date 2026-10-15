@@ -14,6 +14,8 @@ from app.models.master.product_merge_schemas import (
     ProductMergeBlocker,
     ProductMergeCandidatesResponse,
     ProductMergeCounts,
+    ProductMergeGroup,
+    ProductMergeGroupsResponse,
     ProductMergePreview,
 )
 from app.services import product_merge_service
@@ -70,6 +72,20 @@ class TestProductMergeRouter:
     @pytest.fixture
     def service(self, monkeypatch):
         mocks = {
+            "find_merge_groups": MagicMock(
+                return_value=ProductMergeGroupsResponse(
+                    groups=[
+                        ProductMergeGroup(
+                            diameter="10",
+                            length="20",
+                            material="SUS100",
+                            product_count=2,
+                            mergeable=True,
+                            product_names=["φ10×20L SUS100", "10φ×20L SUS100"],
+                        )
+                    ]
+                )
+            ),
             "find_merge_candidates": MagicMock(
                 return_value=ProductMergeCandidatesResponse(
                     diameter="14.5",
@@ -85,6 +101,19 @@ class TestProductMergeRouter:
         for name, mock in mocks.items():
             monkeypatch.setattr(product_merge_service, name, mock)
         return mocks
+
+    # --- GET /products/merge-groups ---
+
+    def test_groups_route_resolves_before_product_id(
+        self, headers, service, mock_client
+    ):
+        response = client.get("/products/merge-groups", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["groups"][0]["product_count"] == 2
+        service["find_merge_groups"].assert_called_once_with(
+            mock_client, headers["x-tenant-id"]
+        )
 
     # --- GET /products/merge-candidates ---
 
@@ -127,6 +156,7 @@ class TestProductMergeRouter:
     @pytest.mark.parametrize(
         ("method", "path", "body"),
         [
+            ("get", "/products/merge-groups", None),
             ("get", "/products/merge-candidates?diameter=10&length=20", None),
             (
                 "post",

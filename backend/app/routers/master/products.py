@@ -23,6 +23,7 @@ from app.models.master import (
 from app.models.master.product_merge_schemas import (
     ProductMergeCandidatesResponse,
     ProductMergeCounts,
+    ProductMergeGroupsResponse,
     ProductMergePreview,
     ProductMergeRequest,
 )
@@ -71,7 +72,21 @@ def _require_merge_editor(tenant_id: str, user_id: str, client: Client) -> None:
 _MERGE_PRODUCT_NOT_FOUND = "統合する製品が見つかりません"
 
 
-# /{product_id} より先に登録する（"merge-candidates" が product_id として解釈されないように）
+# /{product_id} より先に登録する（"merge-groups" / "merge-candidates" が product_id として解釈されないように）
+@product_router.get("/merge-groups", response_model=ProductMergeGroupsResponse)
+def get_product_merge_groups(
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """品名の直径・長さ・材質が一致する製品の組を、重複の候補として抽出する（Issue #515）。
+
+    全製品の品名を読み取るので、画面では「候補を抽出」の操作時だけ呼ぶ。
+    """
+    _require_merge_editor(tenant_id, user_id, client)
+    return product_merge_service.find_merge_groups(client, tenant_id)
+
+
 @product_router.get("/merge-candidates", response_model=ProductMergeCandidatesResponse)
 def get_product_merge_candidates(
     diameter: Decimal = Query(gt=0, max_digits=12),
