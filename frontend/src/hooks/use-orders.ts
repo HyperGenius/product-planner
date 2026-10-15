@@ -16,6 +16,7 @@ import type {
   OrderSimulateResponse,
   OrderSplitRequest,
   OrderSplitResponse,
+  OrderUpdate,
   ShipOverdueDraftsResponse,
 } from "@/types/order"
 
@@ -151,7 +152,7 @@ export function useUpdateOrder() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<OrderCreate> }) =>
+    mutationFn: ({ id, data }: { id: number; data: OrderUpdate }) =>
       apiClient<Order>(`/orders/${id}`, {
         method: "PATCH",
         body: JSON.stringify(data),

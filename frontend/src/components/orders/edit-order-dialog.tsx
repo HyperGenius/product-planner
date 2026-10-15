@@ -68,12 +68,14 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
     updateOrder.mutate(
       {
         id: order.id,
+        // 空欄にした任意項目（注文番号・希望納期・顧客）は null で送って消す
+        // （undefined だとキーごと落ちて更新されないまま成功扱いになる。Issue #518）
         data: {
-          order_no: orderNo.trim() || undefined,
+          order_no: orderNo.trim() || null,
           product_id: parseInt(productId, 10),
-          customer_id: customerId ? parseInt(customerId, 10) : undefined,
+          customer_id: customerId ? parseInt(customerId, 10) : null,
           quantity: parsedQuantity,
-          desired_deadline: desiredDeadline || undefined,
+          desired_deadline: desiredDeadline || null,
           // 変更時のみ送信。クリアした場合は null で解除する
           ...(schedulingStartChanged
             ? { scheduling_start_date: schedulingStartDate || null }

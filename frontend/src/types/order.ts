@@ -68,6 +68,25 @@ export interface OrderCreate {
 }
 
 /**
+ * 注文更新時のデータ型
+ *
+ * PATCH は送ったキーだけを更新するので、空欄に戻す項目は `null` を送る
+ * （`undefined` は JSON からキーごと落ちて更新されない。Issue #518）。
+ * 受注番号・希望納期・顧客はいずれも任意項目で、空に戻すと「情報不足」
+ * （`incomplete`）扱いの下書きに戻る（Issue #518。元々メール起票の下書き等で
+ * これらが未設定の受注は存在するため、既存の運用と整合する）
+ */
+export interface OrderUpdate {
+  order_no?: string | null
+  product_id?: number
+  customer_id?: number | null
+  quantity?: number
+  desired_deadline?: string | null
+  /** 作業開始日 (YYYY-MM-DD)。null で解除。過去日は president / platform_admin のみ（Issue #372） */
+  scheduling_start_date?: string | null
+}
+
+/**
  * 手動メール起票（Issue #358）の1明細
  * 顧客・本文・添付は全明細で共有し、明細ごとに品番・数量・納期を持つ（分納対応）
  */

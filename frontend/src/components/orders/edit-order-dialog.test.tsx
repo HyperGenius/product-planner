@@ -120,4 +120,34 @@ describe("EditOrderDialog", () => {
       expect(screen.queryByText("重複する注文があります")).not.toBeInTheDocument(),
     )
   })
+
+  it("注文番号・希望納期・顧客を空欄にして保存すると null で送る（Issue #518）", async () => {
+    mockCurrentMember()
+    mockCustomers()
+    const patches: unknown[] = []
+    server.use(
+      http.patch(`${API_BASE}/orders/1`, async ({ request }) => {
+        patches.push(await request.json())
+        return HttpResponse.json(makeOrder())
+      }),
+    )
+
+    render(
+      <EditOrderDialog order={makeOrder()} open onOpenChange={vi.fn()} />
+    )
+
+    const user = userEvent.setup()
+    await user.clear(screen.getByLabelText("注文番号（任意）"))
+    await user.clear(screen.getByLabelText("希望納期"))
+    await user.click(screen.getByRole("combobox", { name: "顧客" }))
+    await user.click(screen.getByText("選択を解除"))
+    await user.click(screen.getByRole("button", { name: "保存" }))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toMatchObject({
+      order_no: null,
+      desired_deadline: null,
+      customer_id: null,
+    })
+  })
 })
