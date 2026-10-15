@@ -138,6 +138,26 @@ class TestOrderRepositoryRoutingStatus:
         assert by_id[2]["has_no_routings"] is True
         assert by_id[2]["has_unconfirmed_routings"] is True
 
+    def test_repair_orders_are_not_treated_as_missing_routings(self):
+        """修理（Issue #493）は製品・工程を持たないが「工程未入力」扱いにしない。"""
+        repair = {"id": 3, "product_id": None, "order_type": "repair"}
+        mock_client = self._make_client(
+            [repair, {"id": 4, "product_id": None, "order_type": "production"}], []
+        )
+        repo = OrderRepository(mock_client)
+
+        result = repo.get_all_with_routing_status()
+
+        assert result[0]["has_no_routings"] is False
+        assert result[0]["has_unconfirmed_routings"] is False
+        assert result[1]["has_no_routings"] is True
+
+        cast(Any, repo).get_by_id = MagicMock(return_value=repair)
+        single = repo.get_by_id_with_routing_status(3)
+        assert single is not None
+        assert single["has_no_routings"] is False
+        assert single["has_unconfirmed_routings"] is False
+
 
 @pytest.mark.unit
 class TestOrderRepositoryFindDedupeConflict:

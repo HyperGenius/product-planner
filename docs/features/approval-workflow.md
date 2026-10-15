@@ -2,6 +2,9 @@
 
 ## 概要
 
+> 修理注文（`order_type='repair'`）は承認依頼・承認の条件と処理が異なる（製品ではなく実施開始日・
+> 完了予定日で判定し、スケジュールを組まずに完了予定日を確定する）。[repair-orders.md](repair-orders.md)（Issue #493）
+
 [受注ステータス遷移](order-status-workflow.md)（Issue #324）で用意した `draft → pending_approval →
 confirmed` の土台に対し、実際に状態を遷移させるAPI/UIを実装した。表記揺れ確認・修正は
 order_handler へディスパッチし、president は最終承認（および差し戻し）のみを行うという業務分担を実現する。

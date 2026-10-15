@@ -35,6 +35,7 @@ const REASON_LABELS: Record<string, string> = {
   draft_conflict_skipped: "重複競合スキップ",
   multi_order_suspected: "複数受注の疑い",
   no_order_created: "起票0件（全明細が重複）",
+  repair_duplicate_skipped: "修理の重複スキップ",
   non_order_email: "対象外メール",
   invalid_quantity: "数量不正",
   image_extracted: "画像から読み取り",

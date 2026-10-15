@@ -153,6 +153,24 @@ class TestAutoSimulateIntakeOrder:
         mock_schedule_order.assert_not_called()
         db.table.return_value.update.assert_not_called()
 
+    def test_skips_repair_order(self, mock_schedule_order):
+        """修理（Issue #493）は設備を使わないのでシミュしない。"""
+        db = _mock_db(
+            {
+                "id": 10,
+                "product_id": None,
+                "quantity": None,
+                "scheduling_start_date": None,
+                "order_type": "repair",
+            }
+        )
+
+        ok = auto_simulate_intake_order(db, "tenant-1", 10, today=date(2026, 9, 29))
+
+        assert ok is False
+        mock_schedule_order.assert_not_called()
+        db.table.return_value.update.assert_not_called()
+
     def test_skips_missing_order(self, mock_schedule_order):
         db = _mock_db(None)
 

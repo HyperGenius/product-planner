@@ -1,7 +1,9 @@
 import hashlib
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, cast
+
+from postgrest.exceptions import APIError
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import download_attachment
@@ -19,6 +21,10 @@ from app.services.product_matching_service import (
     match_product_by_alias,
     match_product_by_code,
     match_products,
+)
+from app.services.repair_order_service import (
+    REPAIR_ORDER_TYPE,
+    build_repair_work_description,
 )
 from app.utils.logger import get_logger
 from supabase import Client
@@ -283,7 +289,12 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
             f"(document_order_no={document_order_no!r})"
         )
 
-        if line_items:
+        if _is_repair_extraction(extraction):
+            # 修理の注文書は明細ごとに起票せず、件名と内訳をまとめて1件にする（Issue #493）
+            created_count = _process_repair_order(
+                db, pdf_row, extraction, auto_order_no
+            )
+        elif line_items:
             created_count = sum(
                 1
                 for line in line_items
@@ -481,7 +492,8 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
         f"pdf_order_parsing: attachment {attachment_id} "
         f"extracted {len(line_items)} line items from image PDF"
     )
-    if not line_items:
+    is_repair = _is_repair_extraction(extraction)
+    if not line_items and not is_repair:
         return _process_unreadable_pdf(db, row, "failed_image")
 
     document_order_no: str | None = extraction.get("document_order_no")
@@ -490,18 +502,27 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
     auto_order_no = _generate_auto_customer_order_no(
         pdf_row.get("customer_id"), hashlib.sha256(content).hexdigest()
     )
-    created_count = sum(
-        1
-        for line in line_items
-        if _process_line_item(
+    if is_repair:
+        created_count = _process_repair_order(
             db,
             pdf_row,
-            line,
-            document_order_no,
+            extraction,
             auto_order_no,
             attachment_parse_status="success_image",
         )
-    )
+    else:
+        created_count = sum(
+            1
+            for line in line_items
+            if _process_line_item(
+                db,
+                pdf_row,
+                line,
+                document_order_no,
+                auto_order_no,
+                attachment_parse_status="success_image",
+            )
+        )
 
     _notify_if_no_order_created(db, row, created_count)
     if created_count > 0:
@@ -515,6 +536,133 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
             {"line_item_count": len(line_items)},
         )
     return created_count
+
+
+def _is_repair_extraction(extraction: dict[str, Any]) -> bool:
+    """抽出結果が修理の注文書か（Issue #493）。
+
+    件名も明細も取れていない場合は作業内容を組み立てられないため、修理と判定されても
+    従来の経路（明細なし → メール本文へのフォールバック・読み取り不能扱い）に回す。
+    """
+    return extraction.get("order_type") == REPAIR_ORDER_TYPE and bool(
+        extraction.get("line_items") or extraction.get("subject")
+    )
+
+
+def _earliest_delivery_date(line_items: list[dict[str, Any]]) -> str | None:
+    """明細の納期のうち最も早いもの。日付として読めない値は無視する。"""
+    dates: list[date] = []
+    for line in line_items:
+        raw = line.get("delivery_date")
+        if not isinstance(raw, str):
+            continue
+        try:
+            dates.append(date.fromisoformat(raw))
+        except ValueError:
+            continue
+    return min(dates).isoformat() if dates else None
+
+
+def _single_certainty(line_items: list[dict[str, Any]]) -> str | None:
+    """明細の確度が1種類に揃っていればその値、揃わない・判定できなければ NULL。"""
+    certainties = {line.get("certainty") for line in line_items}
+    if len(certainties) == 1:
+        certainty = next(iter(certainties))
+        if certainty in _VALID_CUSTOMER_CERTAINTIES:
+            return cast(str, certainty)
+    return None
+
+
+_REPAIR_DEDUPE_CONSTRAINT = "orders_repair_customer_order_no_key"
+
+
+def _process_repair_order(
+    db: Client,
+    staging_row: dict[str, Any],
+    extraction: dict[str, Any],
+    auto_order_no: str | None,
+    *,
+    attachment_parse_status: str = "success",
+) -> int:
+    """
+    修理と判定した注文書から、製品・工程を持たない修理の下書きを1件起票する（Issue #493）。
+
+    - 明細ごとの起票（`_process_line_item` → `upsert_order_by_dedupe_key`）は通さない。
+      製品の照合・内示の無効化・自動シミュは修理に当てはまらないため
+    - 件名と各明細（品名・数量）を `work_description` にまとめ、納期は明細の最も早い日にする
+    - 同じ注文書の再受信は部分 UNIQUE `orders_repair_customer_order_no_key`
+      （顧客 × 顧客側の注文番号）に当たるので、既存の注文を上書きせずスキップする
+      （`repair_duplicate_skipped` を記録する）
+    - 実施開始日・完了予定日は受注担当者が入力するので、ここでは入れない
+    """
+    tenant_id = staging_row["tenant_id"]
+    attachment_id = staging_row["id"]
+    customer_id = _staging_customer_id(staging_row)
+    line_items = cast(list[dict[str, Any]], extraction.get("line_items") or [])
+    customer_order_no = _resolve_customer_order_no(
+        {}, extraction.get("document_order_no"), auto_order_no
+    )
+
+    try:
+        result = (
+            db.table(SupabaseTableName.ORDERS.value)
+            .insert(
+                {
+                    "tenant_id": tenant_id,
+                    "order_type": REPAIR_ORDER_TYPE,
+                    "customer_id": customer_id,
+                    "work_description": build_repair_work_description(
+                        extraction.get("subject"), line_items
+                    ),
+                    "deadline_date": _earliest_delivery_date(line_items),
+                    "customer_certainty": _single_certainty(line_items),
+                    "customer_order_no": customer_order_no,
+                    "status": "draft",
+                    "source_type": "email",
+                    "source_raw": staging_row.get("source_raw"),
+                    "source_attachment_id": attachment_id,
+                }
+            )
+            .execute()
+        )
+    except APIError as exc:
+        if exc.code == "23505" and _REPAIR_DEDUPE_CONSTRAINT in (exc.message or ""):
+            _log_parse_event(
+                db,
+                tenant_id,
+                attachment_id,
+                "repair_duplicate_skipped",
+                {"customer_order_no": customer_order_no},
+            )
+            logger.info(
+                f"pdf_order_parsing: attachment {attachment_id} repair order "
+                "already exists, skipped"
+            )
+            return 0
+        raise
+
+    rows = cast(list[dict[str, Any]], result.data or [])
+    if not rows:
+        raise RuntimeError(
+            f"repair order insert returned no rows for attachment {attachment_id}"
+        )
+    order_id = rows[0]["id"]
+    db.table(SupabaseTableName.ORDER_ATTACHMENTS.value).insert(
+        {
+            "order_id": order_id,
+            "tenant_id": tenant_id,
+            "storage_path": staging_row.get("storage_path", ""),
+            "original_filename": staging_row.get("original_filename", ""),
+            "content_type": staging_row.get("content_type"),
+            "size_bytes": staging_row.get("size_bytes"),
+            "parse_status": attachment_parse_status,
+        }
+    ).execute()
+    logger.info(
+        f"pdf_order_parsing: repair order {order_id} inserted as draft from "
+        f"attachment {attachment_id}"
+    )
+    return 1
 
 
 def _staging_customer_id(staging_row: dict[str, Any]) -> int | None:

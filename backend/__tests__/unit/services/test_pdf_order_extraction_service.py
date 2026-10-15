@@ -59,6 +59,8 @@ class TestExtractOrderLinesFromPdf:
         assert result == {
             "document_order_no": "PO-1",
             "line_items": [_LINE],
+            "order_type": "production",
+            "subject": None,
             "issuer_company_name": "株式会社ABC製作所",
             "issuer_fax_number": "03-1234-5678",
             "issuer_phone_number": "03-1234-5670",
@@ -101,6 +103,8 @@ class TestExtractOrderLinesFromPdf:
         assert result == {
             "document_order_no": None,
             "line_items": [],
+            "order_type": "production",
+            "subject": None,
             "issuer_company_name": None,
             "issuer_fax_number": None,
             "issuer_phone_number": None,
@@ -143,3 +147,68 @@ class TestExtractOrderLinesFromPdf:
             mock_client.messages.create.side_effect = _status_error(cls, status_code)
             with pytest.raises(cls):
                 extract_order_lines_from_pdf(b"%PDF-fax")
+
+
+@pytest.mark.unit
+class TestOrderTypeExtraction:
+    """注文書の種別（生産 / 修理）と件名の抽出（Issue #493）。"""
+
+    def test_text_pdf_returns_repair_and_subject(self):
+        from app.services.pdf_order_extraction_service import extract_order_lines
+
+        with patch("app.services.pdf_order_extraction_service._client") as mock_client:
+            mock_client.messages.create.return_value = _response(
+                {
+                    "document_order_no": "R-1",
+                    "order_type": "repair",
+                    "subject": " 基板 はんだ補修 ",
+                    "line_items": [_LINE],
+                }
+            )
+            result = extract_order_lines("件名 基板 はんだ補修")
+
+        assert result["order_type"] == "repair"
+        assert result["subject"] == "基板 はんだ補修"
+        kwargs = mock_client.messages.create.call_args.kwargs
+        schema = kwargs["output_config"]["format"]["schema"]
+        assert {"order_type", "subject"} <= set(schema["required"])
+        assert "order_type" in kwargs["messages"][0]["content"]
+
+    @pytest.mark.parametrize("order_type", [None, "maintenance", 1])
+    def test_unexpected_order_type_falls_back_to_production(self, order_type):
+        from app.services.pdf_order_extraction_service import extract_order_lines
+
+        with patch("app.services.pdf_order_extraction_service._client") as mock_client:
+            mock_client.messages.create.return_value = _response(
+                {
+                    "document_order_no": None,
+                    "order_type": order_type,
+                    "subject": None,
+                    "line_items": [],
+                }
+            )
+            result = extract_order_lines("本文")
+
+        assert result["order_type"] == "production"
+
+    def test_image_pdf_schema_includes_order_type(self):
+        with patch("app.services.pdf_order_extraction_service._client") as mock_client:
+            mock_client.messages.create.return_value = _response(
+                {
+                    "document_order_no": None,
+                    "order_type": "repair",
+                    "subject": "補修",
+                    "issuer_company_name": None,
+                    "issuer_fax_number": None,
+                    "issuer_phone_number": None,
+                    "line_items": [],
+                }
+            )
+            result = extract_order_lines_from_pdf(b"%PDF-fax")
+
+        assert result["order_type"] == "repair"
+        assert result["subject"] == "補修"
+        schema = mock_client.messages.create.call_args.kwargs["output_config"][
+            "format"
+        ]["schema"]
+        assert {"order_type", "subject"} <= set(schema["required"])

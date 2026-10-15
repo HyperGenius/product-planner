@@ -21,6 +21,7 @@ from app.scheduler_logic import (
     RoutingUnconfirmedError,
     schedule_order,
 )
+from app.services.repair_order_service import is_repair_order
 from app.services.scheduling_start_service import (
     default_scheduling_start_date,
     parse_scheduling_start_date,
@@ -102,7 +103,7 @@ def auto_simulate_intake_order(
     作業開始日が未設定なら処理日（JST）の翌日を保存し、その日を起点に dry_run で
     シミュレーションする。設定済みの作業開始日は上書きしない。
 
-    ベストエフォート: 製品未照合（product_id IS NULL）はスキップし、工程未登録・
+    ベストエフォート: 修理（Issue #493）・製品未照合（product_id IS NULL）はスキップし、工程未登録・
     所要時間不正・その他の例外はログに残して握りつぶす（受注起票自体は成功扱いのまま）。
     シミュ納期を保存できた場合 True を返す。
 
@@ -114,7 +115,7 @@ def auto_simulate_intake_order(
     try:
         res = (
             db.table(SupabaseTableName.ORDERS.value)
-            .select("id, product_id, quantity, scheduling_start_date")
+            .select("id, product_id, quantity, scheduling_start_date, order_type")
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
             .limit(1)
@@ -129,6 +130,9 @@ def auto_simulate_intake_order(
             )
             return False
         order = rows[0]
+        if is_repair_order(order):
+            # 修理は設備を使わず、完了予定日は受注担当者が入力する（Issue #493）
+            return False
         if order.get("product_id") is None or order.get("quantity") is None:
             # 製品未照合・数量未抽出の下書きはシミュできない（紐付け後の手動シミュで補完する）
             return False
