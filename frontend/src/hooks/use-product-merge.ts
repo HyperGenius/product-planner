@@ -12,6 +12,7 @@ import type {
   ProductMergeCandidatesParams,
   ProductMergeCandidatesResponse,
   ProductMergeCounts,
+  ProductMergeGroupsResponse,
   ProductMergePreview,
   ProductMergeRequest,
 } from "@/types/product"
@@ -28,6 +29,20 @@ const PREVIEW_KEY = "preview"
 function isPreviewQueryKey(queryKey: readonly unknown[]): boolean {
   return PRODUCT_MERGE_QUERY_KEY.every((k, i) => queryKey[i] === k) &&
     queryKey[PRODUCT_MERGE_QUERY_KEY.length] === PREVIEW_KEY
+}
+
+/**
+ * 重複の候補の組の抽出。全製品の品名を読み取るので自動では取得せず、「候補を抽出」の操作時に
+ * 呼び出し側が `refetch()` したときだけ取得する（`enabled: false` なので統合後の無効化・
+ * ウィンドウのフォーカスでも再取得されない）。画面を離れたら結果は捨てる（`gcTime: 0`）。
+ */
+export function useProductMergeGroups() {
+  return useQuery<ProductMergeGroupsResponse>({
+    queryKey: [...PRODUCT_MERGE_QUERY_KEY, "groups"],
+    queryFn: () => apiClient<ProductMergeGroupsResponse>("/products/merge-groups"),
+    enabled: false,
+    gcTime: 0,
+  })
 }
 
 /** 直径・長さ・材質が一致する統合の候補。`params` が null の間は取得しない */

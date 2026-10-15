@@ -1,11 +1,12 @@
 """表記ゆれで重複登録された製品の統合（Issue #515）。
 
-候補の検索（品名の直径・長さ・材質が一致する製品）と、統合の事前チェック（付け替え・削除の件数と
+重複の候補の抽出（品名の直径・長さ・材質が一致する製品の組）、候補の検索（指定した直径・長さ・材質に
+一致する製品）と、統合の事前チェック（付け替え・削除の件数と
 統合を止める理由）を行う。事前チェックは実行前のプレビューと実行時の再検証の両方で使い、実行は
 RPC `merge_products` で1トランザクションにまとめる。
 
-計算（`summarize_candidates()` / `plan_merge()`）は DB から切り離した純粋関数に保ち、DB の読み込みは
-`find_merge_candidates()` / `load_merge_preview()` に置く。ルーターからユーザー JWT で呼ぶ（RLS 下で動く）。
+計算（`group_duplicate_products()` / `summarize_candidates()` / `plan_merge()`）は DB から切り離した純粋関数に
+保ち、DB の読み込みは `find_merge_groups()` / `find_merge_candidates()` / `load_merge_preview()` に置く。ルーターからユーザー JWT で呼ぶ（RLS 下で動く）。
 """
 
 from collections import Counter, defaultdict
@@ -21,6 +22,8 @@ from app.models.master.product_merge_schemas import (
     ProductMergeCandidate,
     ProductMergeCandidatesResponse,
     ProductMergeCounts,
+    ProductMergeGroup,
+    ProductMergeGroupsResponse,
     ProductMergeOrderRef,
     ProductMergePreview,
 )
@@ -79,6 +82,47 @@ def correctness_rank(routings: list[dict[str, Any]]) -> int:
     if any(t > 0 for t in times):
         return 2
     return 1
+
+
+def group_duplicate_products(
+    products: list[dict[str, Any]],
+) -> list[ProductMergeGroup]:
+    """品名の直径・長さ・材質が一致する製品が2件以上ある組を返す。品名を読み取れない製品は対象外。
+
+    接頭辞だけが違う製品の組も参考として含める（`mergeable=False`）。統合できる組を先に、
+    件数の多い順に並べる。
+    """
+    groups: dict[tuple[Decimal, Decimal, str], list[tuple[dict[str, Any], ProductSpec]]]
+    groups = defaultdict(list)
+    for product in sorted(products, key=lambda p: p["id"]):
+        spec = parse_product_spec(product["name"])
+        if spec is not None:
+            groups[(spec.diameter, spec.length, spec.material_key)].append(
+                (product, spec)
+            )
+
+    result: list[tuple[tuple[Decimal, Decimal, str], ProductMergeGroup]] = []
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+        diameter, length, _ = key
+        prefix_counts = Counter(spec.prefix_key for _, spec in members)
+        material = Counter(spec.material for _, spec in members).most_common(1)[0][0]
+        result.append(
+            (
+                key,
+                ProductMergeGroup(
+                    diameter=format_decimal(diameter),
+                    length=format_decimal(length),
+                    material=material,
+                    product_count=len(members),
+                    mergeable=max(prefix_counts.values()) >= 2,
+                    product_names=[product["name"] for product, _ in members],
+                ),
+            )
+        )
+    result.sort(key=lambda r: (not r[1].mergeable, -r[1].product_count, r[0]))
+    return [group for _, group in result]
 
 
 def summarize_candidates(
@@ -303,17 +347,29 @@ def _select_in(
     )
 
 
-def find_merge_candidates(
-    db: Client, tenant_id: str, diameter: Decimal, length: Decimal, material: str
-) -> ProductMergeCandidatesResponse:
-    """品名の直径・長さ・材質が一致する製品（無効な製品を含む）を候補として返す。"""
-    material_key = normalize_material(material)
-    products = fetch_all_rows(
+def _load_products(db: Client, tenant_id: str) -> list[dict[str, Any]]:
+    """テナントの全製品（無効な製品を含む）。"""
+    return fetch_all_rows(
         lambda: db.table(SupabaseTableName.PRODUCTS.value)
         .select(_PRODUCT_COLUMNS)
         .eq("tenant_id", tenant_id)
         .order("id")
     )
+
+
+def find_merge_groups(db: Client, tenant_id: str) -> ProductMergeGroupsResponse:
+    """テナントの全製品（無効な製品を含む）から重複の候補の組を抽出する。"""
+    return ProductMergeGroupsResponse(
+        groups=group_duplicate_products(_load_products(db, tenant_id))
+    )
+
+
+def find_merge_candidates(
+    db: Client, tenant_id: str, diameter: Decimal, length: Decimal, material: str
+) -> ProductMergeCandidatesResponse:
+    """品名の直径・長さ・材質が一致する製品（無効な製品を含む）を候補として返す。"""
+    material_key = normalize_material(material)
+    products = _load_products(db, tenant_id)
     matched: list[tuple[dict[str, Any], ProductSpec]] = []
     for product in products:
         spec = parse_product_spec(product["name"])

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { ProductMergeBlocker, ProductMergeCandidate } from "@/types/product"
 import {
   blockerMessage,
+  formatMergeSpec,
   formatOrderCounts,
   mergeIneligibleReason,
   orderStatusLabel,
@@ -130,5 +131,14 @@ describe("blockerMessage", () => {
     expect(blockerMessage(blocker({ reason: "prefix_mismatch" }))).toBe(
       "接頭辞が残す製品と違います"
     )
+  })
+})
+
+describe("formatMergeSpec", () => {
+  it("材質が無ければ直径×長さだけ", () => {
+    expect(formatMergeSpec({ diameter: "14.5", length: "30", material: "SUS100" })).toBe(
+      "φ14.5 × 30 SUS100"
+    )
+    expect(formatMergeSpec({ diameter: "8", length: "10", material: "" })).toBe("φ8 × 10")
   })
 })

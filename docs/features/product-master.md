@@ -295,6 +295,22 @@ admin ロール限定の確定 UI はダイアログに実装済み（✅ Issue 
 日報の製品照合の正規化 `normalize_product_name()` とは別物（あちらは `L` の位置・接頭辞を吸収しない照合キー）。
 `L` の直後に英字の材質が続く表記（`×20LCP`）は `L` を長さの記号として読むので、材質が `L` で始まる場合は誤読しうる。
 
+### 重複の候補の抽出
+
+画面上部の「候補を抽出」を押すと `GET /products/merge-groups` が、テナントの全製品（無効な製品を含む）の品名を読み取り、
+(直径, 長さ, 材質のキー) が同じ製品が**2件以上ある組**を返す（`product_merge_service.group_duplicate_products()`）。
+品名を読み取れない製品は対象外。組を選ぶと直径・長さ・材質を検索欄に入れて、下の候補一覧（`merge-candidates`）を開く。
+
+| 項目 | 内容 |
+|---|---|
+| `material` | 検索欄に入れる材質。組の中で最も多い表記（同数なら ID の若い製品の表記） |
+| `mergeable` | 接頭辞が同じ製品が2件以上あるか。`false`（接頭辞違いのみ）の組も参考として出し、「接頭辞違いのみ」と表示する |
+| 並び順 | 統合できる組が先、その中で件数の多い順 |
+
+全製品を読むので**自動では取得しない**。`useProductMergeGroups()` は `enabled: false` で、ボタンの `refetch()` のときだけ取得する
+（統合後のクエリの無効化・ウィンドウのフォーカスでも再取得されない。画面を離れたら結果を捨てる `gcTime: 0`）。
+統合を実行した組には、押し直すまで「統合を実行済み」の印を付ける。
+
 ### 候補の検索と残す製品の選択
 
 `GET /products/merge-candidates?diameter=&length=&material=` が、テナントの全製品（**無効な製品を含む**）の品名を読み取り、
@@ -369,3 +385,4 @@ cron `compute-daily-report-progress` の次回の再計算で反映される（�
 | #352 | カラムの意味を `code`=図番 / `name`=品名（図面管理アプリ「ズメーン」を正）に固定。旧 `type` 列を `DROP COLUMN`。ズメーン CSV と既存 `products` を正規化完全一致で突合し、一致した行の `code` にだけ図番を書き込む 1 回限りスクリプト `backend/scripts/import_zumen_products.py` を追加（品名同期・新規作成・曖昧一致は行わない。カラムリネーム／ヒューリスティック撤去も見送り、全テナント移行後に別 Issue）。あわせて製品マスタのステータスフィルタ既定を「有効」に変更し、無効な製品は製品マスタ以外に一切表示しない方針を明文化。作成ダイアログが `name`/`code` を旧UI前提で逆に書き込んでいた不整合を修正し、作成・編集とも 図番=`code` / 品名=`name` にラベル・バリデーション・ペイロードを統一。編集で図番を空にした場合は空文字ではなく `null` を送る（`UNIQUE(tenant_id, code)` 対策）。読み取りモデル `Product.code` / フロント型 / `ProductUpdate.code` を nullable にし、作成時のみ `code` 必須（`ProductCreateSchema`）。突合スクリプトは CSV の図番重複を正規化キーで判定して非決定的 UPDATE を防止（Issue #352） |
 | #488 | 日報の名寄せで、日報の商品名の別名を `source='daily_report'` で登録できるように（`register_daily_report_alias()`）。確認済みの由来として `auto_match_unreviewed` より優先（Issue #488） |
 | #515 | 表記ゆれで重複登録された製品の統合画面（`/master/products/merge`）を追加。品名から (接頭辞, 直径, 長さ, 材質) を読み取る `product_spec_parser`、候補検索・事前チェック（受注の重複キーの衝突・工程の対応）の `product_merge_service`、1トランザクションで付け替え・削除する RPC `merge_products`。`product_name_alias_history` の `product_id` 列だけ president / platform_admin に UPDATE を許可（Issue #515） |
+| #515 (追加) | 「候補を抽出」で直径・長さ・材質が同じ製品の組を一覧にする `GET /products/merge-groups` を追加。ボタンを押したときだけ取得し、組を選ぶと候補一覧を開く（Issue #515） |

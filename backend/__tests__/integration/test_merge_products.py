@@ -461,6 +461,19 @@ class TestMergeProductsApi:
         client = TestClient(app)
         headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
 
+        res = client.get("/products/merge-groups", headers=headers)
+        assert res.status_code == 200
+        assert res.json()["groups"] == [
+            {
+                "diameter": "10",
+                "length": "20",
+                "material": "SUS100",
+                "product_count": 3,
+                "mergeable": True,
+                "product_names": [KEEP_NAME, MERGE_NAME, "A社φ10×20L SUS100"],
+            }
+        ]
+
         res = client.get(
             "/products/merge-candidates",
             params={"diameter": "10.00", "length": "20", "material": "ｓｕｓ-100"},

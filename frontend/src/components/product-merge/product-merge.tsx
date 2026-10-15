@@ -14,14 +14,20 @@ import {
 } from "@/hooks/use-product-merge"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { ApiError } from "@/lib/api-client"
-import { blockerMessage, selectMergeProductIds } from "@/lib/product-merge-utils"
+import {
+  blockerMessage,
+  mergeSpecKey,
+  selectMergeProductIds,
+} from "@/lib/product-merge-utils"
 import { PRODUCT_MERGE_ROLES } from "@/types/member"
 import type {
   ProductMergeCandidatesParams,
   ProductMergeCandidatesResponse,
+  ProductMergeGroup,
 } from "@/types/product"
 import { MergeCandidateTable } from "./merge-candidate-table"
 import { MergeConfirmDialog } from "./merge-confirm-dialog"
+import { MergeGroupList } from "./merge-group-list"
 
 /**
  * 重複製品の統合画面（Issue #515）。表記ゆれで重複登録された製品を、直径・長さ・材質で探して
@@ -90,6 +96,7 @@ function ProductMergeWorkspace() {
   const [form, setForm] = useState({ diameter: "", length: "", material: "" })
   const [params, setParams] = useState<ProductMergeCandidatesParams | null>(null)
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
+  const [mergedKeys, setMergedKeys] = useState<ReadonlySet<string>>(new Set())
 
   const candidatesQuery = useProductMergeCandidates(params)
   const data = candidatesQuery.data
@@ -134,6 +141,12 @@ function ProductMergeWorkspace() {
     setParams({ diameter, length, material: normalizeInput(form.material) })
   }
 
+  const handleSelectGroup = (group: ProductMergeGroup) => {
+    const spec = { diameter: group.diameter, length: group.length, material: group.material }
+    setForm(spec)
+    setParams(spec)
+  }
+
   const handleExcludedChange = (id: number, excluded: boolean) => {
     setSelection((prev) => {
       const next = new Set(prev.excludedIds)
@@ -148,6 +161,7 @@ function ProductMergeWorkspace() {
     try {
       const counts = await mergeMutation.mutateAsync(request)
       toast.success(`${counts.products_deleted}件の製品を統合しました`)
+      if (params) setMergedKeys((prev) => new Set(prev).add(mergeSpecKey(params)))
       setIsConfirmOpen(false)
       setSelection((prev) => ({ ...prev, keepId: null, excludedIds: new Set() }))
     } catch (error) {
@@ -163,6 +177,13 @@ function ProductMergeWorkspace() {
 
   return (
     <div className="space-y-4">
+      <MergeGroupList
+        activeKey={params ? mergeSpecKey(params) : null}
+        mergedKeys={mergedKeys}
+        onSelect={handleSelectGroup}
+        onExtract={() => setMergedKeys(new Set())}
+        disabled={mergeMutation.isPending}
+      />
       <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="merge-diameter">直径 *</Label>

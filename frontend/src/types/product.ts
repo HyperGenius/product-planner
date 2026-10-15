@@ -110,6 +110,26 @@ export interface ProductMergeCandidatesResponse {
   default_keep_product_id: number | null
 }
 
+/**
+ * 品名の直径・長さ・材質が一致する製品が2件以上ある組（重複の候補の抽出、Issue #515）。
+ * Backend `ProductMergeGroup` と一致させる。
+ */
+export interface ProductMergeGroup {
+  diameter: string
+  length: string
+  /** 候補の検索に入れる材質。グループ内で最も多い表記（無ければ空文字） */
+  material: string
+  product_count: number
+  /** 接頭辞が同じ製品が2件以上あるか。false なら接頭辞違いのみで統合できない */
+  mergeable: boolean
+  /** グループ内の製品の品名（ID 順） */
+  product_names: string[]
+}
+
+export interface ProductMergeGroupsResponse {
+  groups: ProductMergeGroup[]
+}
+
 export interface ProductMergeCandidatesParams {
   diameter: string
   length: string

@@ -108,3 +108,13 @@ export function blockerMessage(blocker: ProductMergeBlocker): string {
       return label
   }
 }
+
+/** 重複の候補の組・候補の検索条件を同一視するためのキー */
+export function mergeSpecKey(spec: { diameter: string; length: string; material: string }): string {
+  return [spec.diameter, spec.length, spec.material].join("|")
+}
+
+/** 「φ10 × 20 SUS100」の形の仕様の表示 */
+export function formatMergeSpec(spec: { diameter: string; length: string; material: string }): string {
+  return `φ${spec.diameter} × ${spec.length}${spec.material ? ` ${spec.material}` : ""}`
+}
