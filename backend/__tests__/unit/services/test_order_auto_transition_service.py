@@ -102,6 +102,18 @@ class TestClassifyStatusTransitions:
         assert to_in_progress == []
         assert to_confirmed == []
 
+    def test_repair_order_without_schedules_goes_in_progress(self):
+        """修理（Issue #493）は production_schedules を持たないが、実施開始日
+        （scheduling_start_date）の到来で生産と同じく in_progress になる。"""
+        candidates = [
+            {"id": 1, "status": "confirmed", "scheduling_start_date": "2026-09-08"},
+        ]
+        to_in_progress, to_confirmed = classify_status_transitions(
+            candidates, {}, self.TODAY
+        )
+        assert to_in_progress == [1]
+        assert to_confirmed == []
+
     def test_in_progress_future_start_rolls_back(self):
         candidates = [
             {"id": 5, "status": "in_progress", "scheduling_start_date": "2026-09-20"},

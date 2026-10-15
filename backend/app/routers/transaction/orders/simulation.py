@@ -29,6 +29,7 @@ from app.scheduler_logic import (
     schedule_order,
 )
 from app.services.order_simulation_service import simulate_and_persist
+from app.services.repair_order_service import is_repair_order
 from app.services.scheduling_start_service import (
     default_scheduling_start_date,
     to_scheduling_start_time,
@@ -161,6 +162,11 @@ def simulate_schedule(
     order = order_repo.get_by_id(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if is_repair_order(order):
+        # 修理は設備を使わず、完了予定日は受注担当者が入力する（Issue #493）
+        raise HTTPException(
+            status_code=422, detail={"error": "repair_order_not_simulatable"}
+        )
     if order.get("product_id") is None:
         raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
 

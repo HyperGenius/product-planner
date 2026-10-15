@@ -6,6 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.common.base_schema import BaseSchema
 
+# 受注種別（Issue #493）。production=生産、repair=修理（製品・設備を使わない）
+OrderType = Literal["production", "repair"]
+
 
 class OrderCreate(BaseSchema):
     """注文を作成するためのスキーマ"""
@@ -22,8 +25,14 @@ class OrderCreate(BaseSchema):
     extracted_product_name: str | None = None
     product_candidates: list[dict] | None = None
     # 作業開始日（工場が着手する日、YYYY-MM-DD）。受注起票日とは別物（Issue #372）。
-    # 過去日は president / platform_admin のみ設定可。
+    # 過去日は president / platform_admin のみ設定可。修理では実施開始日（Issue #493）。
     scheduling_start_date: str | None = None
+    # 受注種別。作成後は変更できない（OrderUpdate には持たない。Issue #493）
+    order_type: OrderType = "production"
+    # 件名・作業内容（修理で使う）
+    work_description: str | None = None
+    # 承認前の完了予定日（YYYY-MM-DD）。修理でのみ受け付ける（生産はシミュで算出する）
+    simulated_deadline: str | None = None
 
 
 class OrderSimulateRequest(BaseSchema):
@@ -62,6 +71,10 @@ class OrderUpdate(BaseSchema):
     customer_id: int | None = None
     # 作業開始日（YYYY-MM-DD）。過去日は president / platform_admin のみ（Issue #372）。
     scheduling_start_date: str | None = None
+    # 件名・作業内容（修理で使う。Issue #493）
+    work_description: str | None = None
+    # 承認前の完了予定日（YYYY-MM-DD）。修理でのみ受け付ける（Issue #493）
+    simulated_deadline: str | None = None
 
 
 class OrderSplitLineItem(BaseSchema):

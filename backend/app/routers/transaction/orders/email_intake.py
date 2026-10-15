@@ -60,6 +60,8 @@ _EMAIL_INTAKE_SKIP_REASONS = frozenset(
         "draft_conflict_skipped",
         "downgrade_skipped",
         "no_order_created",
+        # 同じ修理の注文書の再受信（既存の修理注文を上書きしない。Issue #493）
+        "repair_duplicate_skipped",
     }
 )
 _EMAIL_INTAKE_KNOWN_REASONS = (
@@ -256,6 +258,14 @@ def _rollback_split_creations(
     repo.update(order_id, {"deadline_date": original_deadline_date})
 
 
+def _assert_splittable(order: dict[str, Any]) -> None:
+    if order.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="下書き状態の注文のみ分割できます")
+    if order.get("order_type") == "repair":
+        # 修理は注文書1枚 = 1件で、明細の内訳は作業内容に入れる（Issue #493）
+        raise HTTPException(status_code=400, detail="修理注文は分割できません")
+
+
 @router.post("/{order_id}/split")
 def split_order(
     order_id: int,
@@ -274,8 +284,7 @@ def split_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    if order.get("status") != "draft":
-        raise HTTPException(status_code=400, detail="下書き状態の注文のみ分割できます")
+    _assert_splittable(order)
     source_attachment_id = order.get("source_attachment_id")
     if not source_attachment_id:
         raise HTTPException(

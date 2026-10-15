@@ -11,6 +11,9 @@ PDF文面から抽出した確度（確定/内示/内々示）は `orders.custom
 独立に扱う。`status` は常に `draft` で作成され、`confirmed` への遷移はユーザーの確定操作
 （`POST /orders/{id}/confirm`）でのみ発生する（Issue #267、詳細後述）。
 
+修理の注文書（件名・品名に修理・補修などの作業依頼が書かれたもの）は、明細ごとに起票せず
+製品を持たない修理注文（`order_type='repair'`）を1件起票する。詳細は [repair-orders.md](repair-orders.md)（Issue #493）。
+
 ---
 
 ## 背景と目的

@@ -1831,3 +1831,284 @@ class TestImagePdfExtraction:
         _no_alias_match.assert_not_called()
         update_calls = mock_db.table().update.call_args_list
         assert not any("superseded_at" in c.args[0] for c in update_calls)
+
+
+@pytest.mark.unit
+class TestRepairOrderIntake:
+    """修理と判定した注文書は、製品・工程を持たない修理の下書きを1件起票する（Issue #493）。"""
+
+    _REPAIR_EXTRACTION: dict[str, Any] = {
+        "document_order_no": "R-0001",
+        "order_type": "repair",
+        "subject": "基板 はんだ補修",
+        "line_items": [
+            {
+                "product_name_raw": "補修部1〜3ヶ所",
+                "product_number_raw": None,
+                "quantity": 11,
+                "delivery_date": "2026-11-10",
+                "line_order_no": None,
+                "certainty": "confirmed",
+            },
+            {
+                "product_name_raw": "補修部4〜6ヶ所",
+                "product_number_raw": None,
+                "quantity": 1,
+                "delivery_date": "2026-11-05",
+                "line_order_no": None,
+                "certainty": "confirmed",
+            },
+        ],
+    }
+
+    def _staging_row(self, **overrides):
+        row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "gmail_message_id": "msg-1",
+            "source_raw": "本文",
+            "storage_path": "tenant-1/inbox/msg-1/repair.pdf",
+            "original_filename": "repair.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 1234,
+            "parse_status": "pending",
+        }
+        row.update(overrides)
+        return row
+
+    def _mock_db(self, *, repair_insert_error: Exception | None = None):
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[self._staging_row()])
+        )
+        # 既存の parse_log なし・顧客固有の抽出指示なし
+        mock_db.table().select().eq().limit().execute.return_value = MagicMock(data=[])
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+
+        def insert(payload):
+            chain = MagicMock()
+            if payload.get("order_type") == "repair" and repair_insert_error:
+                chain.execute.side_effect = repair_insert_error
+            else:
+                chain.execute.return_value = MagicMock(data=[{"id": 77}])
+            return chain
+
+        mock_db.table().insert.side_effect = insert
+        return mock_db
+
+    @staticmethod
+    def _inserts(mock_db):
+        return [
+            c.args[0]
+            for c in mock_db.table().insert.call_args_list
+            if c.args and isinstance(c.args[0], dict)
+        ]
+
+    def _run_text_pdf(self, mock_db, extraction):
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(
+                    text="件名 基板 はんだ補修", failure_reason=None
+                ),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value=extraction,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_order_lines"
+            ) as mock_body_extract,
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+        return result, mock_body_extract
+
+    def test_repair_pdf_creates_single_repair_draft(self, _no_auto_simulate):
+        mock_db = self._mock_db()
+
+        result, mock_body_extract = self._run_text_pdf(mock_db, self._REPAIR_EXTRACTION)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        # 明細ごとの起票（upsert_order_by_dedupe_key）・本文フォールバック・自動シミュは通らない
+        assert not [
+            c
+            for c in mock_db.rpc.call_args_list
+            if c.args and c.args[0] == "upsert_order_by_dedupe_key"
+        ]
+        mock_body_extract.assert_not_called()
+        _no_auto_simulate.assert_not_called()
+
+        repair_inserts = [i for i in self._inserts(mock_db) if "order_type" in i]
+        assert repair_inserts == [
+            {
+                "tenant_id": "tenant-1",
+                "order_type": "repair",
+                "customer_id": 7,
+                "work_description": (
+                    "基板 はんだ補修\n・補修部1〜3ヶ所 ×11\n・補修部4〜6ヶ所 ×1"
+                ),
+                # 明細の納期のうち最も早い日
+                "deadline_date": "2026-11-05",
+                "customer_certainty": "confirmed",
+                "customer_order_no": "R-0001",
+                "status": "draft",
+                "source_type": "email",
+                "source_raw": "本文",
+                "source_attachment_id": "att-1",
+            }
+        ]
+        attachment_inserts = [i for i in self._inserts(mock_db) if "order_id" in i]
+        assert len(attachment_inserts) == 1
+        assert attachment_inserts[0]["order_id"] == 77
+        assert attachment_inserts[0]["parse_status"] == "success"
+
+        update_calls = mock_db.table().update.call_args_list
+        assert any(c.args[0] == {"parse_status": "success"} for c in update_calls)
+
+    def test_mixed_certainty_is_null_and_auto_order_no_is_used(self):
+        mock_db = self._mock_db()
+        extraction = {
+            **self._REPAIR_EXTRACTION,
+            "document_order_no": None,
+            "line_items": [
+                {**self._REPAIR_EXTRACTION["line_items"][0], "certainty": "forecast"},
+                self._REPAIR_EXTRACTION["line_items"][1],
+            ],
+        }
+
+        self._run_text_pdf(mock_db, extraction)
+
+        (repair_insert,) = [i for i in self._inserts(mock_db) if "order_type" in i]
+        assert repair_insert["customer_certainty"] is None
+        # 文書に注文番号が無ければ、文書内容から決定的に採番した番号で重複を防ぐ
+        assert repair_insert["customer_order_no"] == _generate_auto_customer_order_no(
+            7, "件名 基板 はんだ補修"
+        )
+
+    def test_duplicate_repair_is_skipped_without_overwriting(self):
+        from postgrest.exceptions import APIError
+
+        mock_db = self._mock_db(
+            repair_insert_error=APIError(
+                {
+                    "code": "23505",
+                    "message": 'duplicate key value violates unique constraint "orders_repair_customer_order_no_key"',
+                }
+            )
+        )
+        # 直前に記録した repair_duplicate_skipped を「既存の parse_log」として読み返す
+        mock_db.table().select().eq().limit().execute.return_value = MagicMock(
+            data=[{"id": "log-1"}]
+        )
+
+        result, _ = self._run_text_pdf(mock_db, self._REPAIR_EXTRACTION)
+
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+        # 既存の注文は UPDATE しない（ステージング行の parse_status 更新のみ）
+        update_payloads = [c.args[0] for c in mock_db.table().update.call_args_list]
+        assert update_payloads == [{"parse_status": "success"}]
+        inserts = self._inserts(mock_db)
+        assert not [i for i in inserts if "order_id" in i]
+        reasons = [i["reason"] for i in inserts if "reason" in i]
+        # 重複スキップの理由が残るので、起票0件の通知（no_order_created）は出さない
+        assert reasons == ["repair_duplicate_skipped"]
+
+    def test_other_insert_error_is_raised(self):
+        from postgrest.exceptions import APIError
+
+        mock_db = self._mock_db(
+            repair_insert_error=APIError({"code": "23514", "message": "check"})
+        )
+
+        result, _ = self._run_text_pdf(mock_db, self._REPAIR_EXTRACTION)
+
+        assert result == {"processed": 0, "orders_created": 0, "errors": 1}
+
+    def test_repair_without_subject_and_lines_uses_existing_flow(self):
+        """件名も明細も無ければ作業内容を組めないので、従来どおり本文へフォールバックする。"""
+        mock_db = self._mock_db()
+        extraction: dict[str, Any] = {
+            "document_order_no": None,
+            "order_type": "repair",
+            "subject": None,
+            "line_items": [],
+        }
+
+        with patch(
+            "app.services.pdf_order_parsing_service.extract_email_order_lines",
+            return_value={"document_order_no": None, "line_items": []},
+        ):
+            with (
+                patch(
+                    "app.services.pdf_order_parsing_service.download_attachment",
+                    return_value=b"%PDF-fake",
+                ),
+                patch(
+                    "app.services.pdf_order_parsing_service.extract_text",
+                    return_value=PdfTextResult(text="本文", failure_reason=None),
+                ),
+                patch(
+                    "app.services.pdf_order_parsing_service.extract_order_lines",
+                    return_value=extraction,
+                ),
+            ):
+                result = parse_pending_order_pdfs(mock_db)
+
+        assert result["orders_created"] == 0
+        assert not [i for i in self._inserts(mock_db) if "order_type" in i]
+
+    def test_production_extraction_keeps_line_item_flow(self):
+        mock_db = self._mock_db()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "inserted"}]
+        )
+        extraction = {**self._REPAIR_EXTRACTION, "order_type": "production"}
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=None,
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_products",
+                return_value={"product_id": None, "candidates": []},
+            ),
+        ):
+            result, _ = self._run_text_pdf(mock_db, extraction)
+
+        assert result["orders_created"] == 2
+        assert not [i for i in self._inserts(mock_db) if "order_type" in i]
+
+    def test_image_pdf_repair_marks_success_image(self):
+        mock_db = self._mock_db()
+
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fax",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(text=None, failure_reason="failed_image"),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                return_value={**self._REPAIR_EXTRACTION, "issuer_company_name": None},
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        inserts = self._inserts(mock_db)
+        (repair_insert,) = [i for i in inserts if "order_type" in i]
+        assert repair_insert["customer_order_no"] == "R-0001"
+        (attachment_insert,) = [i for i in inserts if "order_id" in i]
+        assert attachment_insert["parse_status"] == "success_image"
+        assert [i["reason"] for i in inserts if "reason" in i] == ["image_extracted"]

@@ -86,9 +86,31 @@ _EXTRACT_SCHEMA: Any = {
             },
         },
     },
-    "required": ["document_order_no", "line_items"],
+    "required": ["document_order_no", "line_items", "order_type", "subject"],
     "additionalProperties": False,
 }
+# 注文書の種別と件名（Issue #493）。修理は製品マスタに当てはめず、件名と明細の内訳を
+# まとめて作業内容として1件の受注にする（pdf_order_parsing_service 側で分岐する）
+_EXTRACT_SCHEMA["properties"]["order_type"] = {
+    "type": "string",
+    "enum": ["production", "repair"],
+    "description": (
+        "注文書の種別。件名・品名に「修理」「補修」「手直し」などの作業依頼が書かれ、"
+        "製品の生産ではなく顧客から預かった物への作業を依頼する注文は repair、"
+        "それ以外（製品の生産・購入の注文）は production。"
+    ),
+}
+_EXTRACT_SCHEMA["properties"]["subject"] = {
+    "type": ["string", "null"],
+    "description": "注文書の件名（「件名」「品名」欄の見出し等）。無い場合は null。",
+}
+
+# 種別・件名の抽出指示。テキストPDF・画像PDFのプロンプトに共通で付ける（Issue #493）
+_ORDER_TYPE_INSTRUCTION = (
+    "あわせて、注文書の種別(order_type)と件名(subject)を返してください。"
+    "件名・品名に修理・補修などの作業依頼が書かれ、製品の生産ではない注文は"
+    " repair、それ以外は production とします。"
+)
 
 
 def _build_prompt(lead: str, customer_extraction_prompt: str | None) -> str:
@@ -126,6 +148,9 @@ def _normalize_result(data: dict[str, Any]) -> dict[str, Any]:
         # スキーマ上は list だが、LLM が null/不正型を返しても
         # 呼び出し側（list 前提）が壊れないよう空配列にフォールバックする
         "line_items": line_items if isinstance(line_items, list) else [],
+        # 想定外の値・未指定は従来どおり生産として扱う（Issue #493）
+        "order_type": "repair" if data.get("order_type") == "repair" else "production",
+        "subject": _optional_str(data.get("subject")),
     }
 
 
@@ -139,14 +164,15 @@ def extract_order_lines(
     customers.order_extraction_prompt）、汎用プロンプトの末尾に「顧客固有の抽出指示」
     として追記する。抽出スキーマは変更せず、あくまで自然言語の指示のみ。
 
-    戻り値: {"document_order_no": str | None, "line_items": list[dict]}
+    戻り値: {"document_order_no": str | None, "line_items": list[dict],
+             "order_type": "production" | "repair", "subject": str | None}
     """
     model = os.environ.get("PDF_EXTRACTION_MODEL", "claude-sonnet-5")
     prompt = _build_prompt(
         "以下は受注PDFから抽出したテキストです。"
         "文書レベルの注文番号(document_order_no)と、明細行ごとに"
         "品番・品名・数量・納期・確度、および明細レベルの注文No.(line_order_no)を"
-        "抽出してください。",
+        "抽出してください。" + _ORDER_TYPE_INSTRUCTION,
         customer_extraction_prompt,
     )
     prompt += f"\n\n{pdf_text}"
@@ -223,6 +249,7 @@ def extract_order_lines_from_pdf(
     - 拒否（stop_reason='refusal'）・出力打ち切りは空結果として返す
 
     戻り値: {"document_order_no": str | None, "line_items": list[dict],
+             "order_type": "production" | "repair", "subject": str | None,
              "issuer_company_name": str | None, "issuer_fax_number": str | None,
              "issuer_phone_number": str | None}
     """
@@ -236,7 +263,8 @@ def extract_order_lines_from_pdf(
         "電話番号(issuer_phone_number)と、"
         "明細行ごとに品番・品名・数量・納期・確度、"
         "および明細レベルの注文No.(line_order_no)を抽出してください。"
-        "かすれ・つぶれで判読できない値は推測で埋めず null にしてください。",
+        "かすれ・つぶれで判読できない値は推測で埋めず null にしてください。"
+        + _ORDER_TYPE_INSTRUCTION,
         customer_extraction_prompt,
     )
 
@@ -284,8 +312,7 @@ def extract_order_lines_from_pdf(
             f"(stop_reason={response.stop_reason})"
         )
         return {
-            "document_order_no": None,
-            "line_items": [],
+            **_normalize_result({}),
             "issuer_company_name": None,
             "issuer_fax_number": None,
             "issuer_phone_number": None,

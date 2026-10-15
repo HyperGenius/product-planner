@@ -4,6 +4,9 @@ from typing import Any, cast
 
 from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
 
+# 修理（Issue #493）は工程を持たない受注なので、「工程未入力・起票不可」として扱わない
+_REPAIR_ROUTING_STATUS = {"has_no_routings": False, "has_unconfirmed_routings": False}
+
 
 class OrderRepository(BaseRepository):
     def __init__(self, client):
@@ -44,6 +47,9 @@ class OrderRepository(BaseRepository):
 
         result = []
         for order in orders:
+            if order.get("order_type") == "repair":
+                result.append({**order, **_REPAIR_ROUTING_STATUS})
+                continue
             pid = order.get("product_id")
             has_no_routings = pid is None or pid not in products_with_routings
             has_unconfirmed = has_no_routings or pid in products_with_unconfirmed
@@ -61,6 +67,8 @@ class OrderRepository(BaseRepository):
         order = self.get_by_id(order_id)
         if not order:
             return None
+        if order.get("order_type") == "repair":
+            return {**order, **_REPAIR_ROUTING_STATUS}
         pid = order.get("product_id")
         if pid is None:
             return {**order, "has_no_routings": True, "has_unconfirmed_routings": True}

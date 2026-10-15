@@ -43,6 +43,7 @@ from app.services.order_status_service import (
     validate_order_status_transition,
 )
 from app.services.product_alias_service import record_auto_match_alias_if_applicable
+from app.services.repair_order_service import has_repair_dates, is_repair_order
 from app.services.scheduling_start_service import (
     default_scheduling_start_date,
     is_backdated,
@@ -120,17 +121,39 @@ def _confirm_single_order(
     """
     スケジュールを確定・保存し、注文ステータスをconfirmedにする。
     ロールチェックは呼び出し側（単体/一括の各エンドポイント）で行う。
+
+    修理（order_type='repair'）は設備を使わないため、スケジュール計算・作業開始日の
+    繰り上げをせず、受注担当者が入れた完了予定日（simulated_deadline）を
+    confirmed_deadline にコピーして確定する（production_schedules は作らない。Issue #493）。
     """
     order = order_repo.get_by_id(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.get("product_id") is None:
+    repair = is_repair_order(order)
+    if repair:
+        if not has_repair_dates(order):
+            raise HTTPException(
+                status_code=422, detail={"error": "repair_dates_missing"}
+            )
+    elif order.get("product_id") is None:
         raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
 
     try:
         validate_order_status_transition(order.get("status"), "confirmed")
     except InvalidOrderStatusTransitionError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
+
+    if repair:
+        order_repo.update(
+            order_id,
+            {
+                "status": "confirmed",
+                "is_scheduled": True,
+                "confirmed_at": datetime.now(UTC).isoformat(),
+                "confirmed_deadline": order["simulated_deadline"],
+            },
+        )
+        return {"status": "confirmed", "schedules": []}
 
     # 1. 実際に保存 (dry_run=False)
     #    受注に作業開始日が設定されていれば、その日の稼働開始時刻を起点にする（Issue #372）。
@@ -196,6 +219,9 @@ def request_order_approval(
     メール起票かつ自動マッチのまま（担当者が product_id を未修正）の注文は、
     この時点で「担当者の目を通った」とみなし、その対応を製品別名辞書へ
     source='auto_match_unreviewed' として記録する（Issue #350）。
+
+    修理（order_type='repair'）は製品を持たないため、製品の照合ではなく実施開始日・
+    完了予定日が入っていることを条件にする（Issue #493）。
     """
     logger.info(f"Requesting approval for order {order_id}")
     _require_role(tenant_id, user_id, client, "order_handler", "承認依頼の送信")
@@ -203,7 +229,12 @@ def request_order_approval(
     order = order_repo.get_by_id(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.get("product_id") is None:
+    if is_repair_order(order):
+        if not has_repair_dates(order):
+            raise HTTPException(
+                status_code=422, detail={"error": "repair_dates_missing"}
+            )
+    elif order.get("product_id") is None:
         raise HTTPException(status_code=422, detail={"error": "product_unmatched"})
 
     try:

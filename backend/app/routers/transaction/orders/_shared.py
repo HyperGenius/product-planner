@@ -96,9 +96,11 @@ def _duplicate_order_conflict_exception(
 ) -> HTTPException:
     """DuplicateRecordError を 409 Conflict の構造化 detail へ変換する（Issue #415 PR2）。
 
-    orders には UNIQUE が2本あり、どちらの列を変更しても衝突しうるため、制約名
+    orders には UNIQUE が複数あり、どの列を変更しても衝突しうるため、制約名
     （`e.constraint`）で振り分ける:
       - `orders_tenant_id_order_number_idx`: (tenant_id, order_number)
+      - `orders_repair_customer_order_no_key`: 修理の (tenant_id, customer_id,
+        customer_order_no)（Issue #493）
       - `orders_dedupe_key` / `orders_dedupe_key_unmatched_product`:
         (tenant_id, customer_id, product_id, deadline_date) または
         product_id IS NULL 時は extracted_product_name 込みのキー
@@ -112,6 +114,16 @@ def _duplicate_order_conflict_exception(
             detail={
                 "error": "duplicate_order_number",
                 "message": "この注文番号はすでに使用されています",
+            },
+        )
+    if "orders_repair_customer_order_no_key" in (e.constraint or ""):
+        # 修理の (顧客, 顧客側の注文番号) の重複（Issue #493）。修理は製品・納期の
+        # dedupe キーを持たないので、下の衝突先の検索は当てはまらない
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "duplicate_repair_order",
+                "message": "同じ顧客・注文番号の修理注文がすでに存在します",
             },
         )
 

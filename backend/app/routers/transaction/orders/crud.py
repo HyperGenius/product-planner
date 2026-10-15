@@ -19,6 +19,11 @@ from app.repositories.supa_infra.transaction.order_scheduling_start_backdate_log
     OrderSchedulingStartBackdateLogRepository,
 )
 from app.services.product_alias_service import record_correction_if_applicable
+from app.services.repair_order_service import (
+    is_repair_order,
+    parse_order_date,
+    repair_dates_in_order,
+)
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -75,6 +80,82 @@ _SIM_INVALIDATING_ORDER_FIELDS = (
 )
 
 
+def _assert_repair_has_no_product(product_id: Any, quantity: Any) -> None:
+    """修理は製品・数量を持たない（Issue #493。製品は DB の CHECK でも弾く）。"""
+    if product_id is not None or quantity is not None:
+        raise HTTPException(
+            status_code=422, detail={"error": "repair_order_product_not_allowed"}
+        )
+
+
+def _assert_repair_dates_valid(start: Any, end: Any) -> None:
+    """修理の完了予定日の形式と、実施開始日より前でないことを検証する（Issue #493）。
+
+    実施開始日の形式は `_assert_scheduling_start_date_allowed` で検証済みの前提。
+    """
+    try:
+        parse_order_date(end)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail={"error": "invalid_simulated_deadline"}
+        ) from None
+    if not repair_dates_in_order(start, end):
+        raise HTTPException(
+            status_code=422, detail={"error": "repair_dates_out_of_order"}
+        )
+
+
+def _assert_simulated_deadline_not_sent(sent: bool) -> None:
+    """生産のシミュ納期はシミュレーションでしか書き込まない（Issue #493）。"""
+    if sent:
+        raise HTTPException(
+            status_code=422, detail={"error": "simulated_deadline_not_editable"}
+        )
+
+
+def _apply_production_update_rules(
+    update_dict: dict[str, Any], order_before: dict[str, Any] | None
+) -> None:
+    """生産の PATCH: シミュ納期の直接書き換えを拒否し、陳腐化したシミュ結果を消す。
+
+    スケジュール条件（製品・数量・希望納期・作業開始日）が実質変化したら、
+    実行済みのシミュレーション結果を無効化する（Issue #394-A / #392 統合）。
+    既に無効な項目は書き込まず、余計な UPDATE を避ける。
+    """
+    _assert_simulated_deadline_not_sent("simulated_deadline" in update_dict)
+    if order_before is None or not any(
+        field in update_dict and update_dict[field] != order_before.get(field)
+        for field in _SIM_INVALIDATING_ORDER_FIELDS
+    ):
+        return
+    if order_before.get("simulated_deadline") is not None:
+        update_dict["simulated_deadline"] = None
+    if order_before.get("is_scheduled"):
+        update_dict["is_scheduled"] = False
+
+
+def _apply_repair_update_rules(
+    update_dict: dict[str, Any], order_before: dict[str, Any]
+) -> None:
+    """修理の PATCH（Issue #493）。
+
+    完了予定日は受注担当者の手入力なので、実施開始日を変えても消さない。
+    実施開始日・完了予定日が揃ったら承認依頼できる（シミュ済みと同じ扱い）よう
+    is_scheduled を日付の有無に合わせる。
+    """
+    _assert_repair_has_no_product(
+        update_dict.get("product_id"), update_dict.get("quantity")
+    )
+    start = update_dict.get(
+        "scheduling_start_date", order_before.get("scheduling_start_date")
+    )
+    end = update_dict.get("simulated_deadline", order_before.get("simulated_deadline"))
+    _assert_repair_dates_valid(start, end)
+    is_scheduled = bool(start and end)
+    if is_scheduled != bool(order_before.get("is_scheduled")):
+        update_dict["is_scheduled"] = is_scheduled
+
+
 @router.post("")
 def create_order(
     order_data: OrderCreate,
@@ -91,8 +172,23 @@ def create_order(
     backdated = _assert_scheduling_start_date_allowed(
         order_data.scheduling_start_date, tenant_id, user_id, client
     )
+    payload = order_data.with_tenant_id(tenant_id)
+    if order_data.order_type == "repair":
+        # FAX 等で届いた修理を手で登録する経路（Issue #493）。製品・数量を持たず、
+        # 実施開始日・完了予定日が揃っていれば「シミュ済み」と同じく承認依頼できる状態にする
+        _assert_repair_has_no_product(order_data.product_id, order_data.quantity)
+        _assert_repair_dates_valid(
+            order_data.scheduling_start_date, order_data.simulated_deadline
+        )
+        payload["extracted_product_name"] = None
+        payload["product_candidates"] = None
+        payload["is_scheduled"] = bool(
+            order_data.scheduling_start_date and order_data.simulated_deadline
+        )
+    else:
+        _assert_simulated_deadline_not_sent(order_data.simulated_deadline is not None)
     try:
-        result = repo.create(order_data.with_tenant_id(tenant_id))
+        result = repo.create(payload)
     except DuplicateRecordError as e:
         raise _duplicate_order_conflict_exception(
             e,
@@ -182,6 +278,10 @@ def update_order(
     order_before = repo.get_by_id(order_id)
 
     update_dict = order_data.model_dump(exclude_unset=True)
+    if order_before is not None and is_repair_order(order_before):
+        _apply_repair_update_rules(update_dict, order_before)
+    else:
+        _apply_production_update_rules(update_dict, order_before)
     if (
         "product_id" in update_dict
         and order_before is not None
@@ -195,18 +295,6 @@ def update_order(
     # 過去日繰り上げの対象外にする（Issue #477）。
     if "scheduling_start_date" in update_dict:
         update_dict["scheduling_start_date_auto"] = False
-
-    # スケジュール条件（製品・数量・希望納期・作業開始日）が実質変化したら、
-    # 実行済みのシミュレーション結果を無効化する（Issue #394-A / #392 統合）。
-    # 既に無効な項目は書き込まず、余計な UPDATE を避ける。
-    if order_before is not None and any(
-        field in update_dict and update_dict[field] != order_before.get(field)
-        for field in _SIM_INVALIDATING_ORDER_FIELDS
-    ):
-        if order_before.get("simulated_deadline") is not None:
-            update_dict["simulated_deadline"] = None
-        if order_before.get("is_scheduled"):
-            update_dict["is_scheduled"] = False
 
     try:
         result = repo.update(order_id, update_dict)

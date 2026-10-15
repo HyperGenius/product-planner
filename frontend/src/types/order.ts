@@ -3,6 +3,14 @@
  */
 export interface Order {
   id: number
+  /**
+   * 受注種別。`repair`（修理）は製品・工程・設備を持たず、実施開始日（scheduling_start_date）と
+   * 完了予定日（simulated_deadline）を受注担当者が入力する。作成後は変更できない（Issue #493）。
+   * API は常に返すが、既存のテストフィクスチャが持たないため optional にしている（画面対応は #494）
+   */
+  order_type?: 'production' | 'repair'
+  /** 件名・作業内容のフリーテキスト（修理で使う。Issue #493） */
+  work_description?: string | null
   order_no: string | null
   /** 顧客側の注文番号／注文No.（Issue #366。観察用・社内採番の order_no とは別物） */
   customer_order_no?: string | null

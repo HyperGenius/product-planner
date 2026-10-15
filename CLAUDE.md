@@ -211,6 +211,16 @@ cd backend && ruff check . && mypy .
   Issue #400）。フロントの取り得る値は `frontend/src/types/order.ts` の `Order["status"]` と
   `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。詳細は
   [docs/features/order-status-workflow.md](docs/features/order-status-workflow.md)
+- **修理注文（`orders.order_type='repair'`、Issue #493）**: 製品・工程・設備を持たない受注で、`product_id` /
+  `quantity` / `extracted_product_name` は NULL（CHECK `orders_repair_without_product`）。実施開始日＝`scheduling_start_date`、
+  承認前の完了予定日＝`simulated_deadline` を受注担当者が手入力し、承認で `confirmed_deadline` へコピーする
+  （`schedule_order()` を呼ばず `production_schedules` も作らない）。受注を扱う処理で「`product_id` が NULL ＝製品未照合」と
+  判定している箇所は、修理を先に `repair_order_service.is_repair_order()` で分岐させる（承認依頼・承認・シミュ・
+  `has_no_routings`・分割で対応済み）。修理の `is_scheduled` は「実施開始日と完了予定日が両方入っている」に合わせて
+  起票・PATCH のたびに書き直す（一覧の「シミュ済」タブ・承認依頼ボタンが draft の `is_scheduled` で判定するため）。
+  `order_type` は作成後に変えないので `OrderUpdate` に入れない。PDF 取り込みは `upsert_order_by_dedupe_key` を通さず
+  直接 INSERT し、部分 UNIQUE `orders_repair_customer_order_no_key` の 23505 で再受信をスキップする。
+  詳細は [docs/features/repair-orders.md](docs/features/repair-orders.md)
 - **顧客側の確度 (`orders.customer_certainty`)**: `confirmed` / `forecast` / `forecast_tentative` / NULL。
   確度を判定できない取り込み（PDFテキスト抽出失敗・抽出値が許容値外等）は `forecast_tentative`（内々示）へ
   フォールバックせず **NULL（確度不明）** で保存する（内々示と誤認させるため。Issue #474）。NULL は
