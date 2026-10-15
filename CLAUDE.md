@@ -279,6 +279,10 @@ cd backend && ruff check . && mypy .
   任意項目は「選択を解除」項目を `keywords` 無しで置くと検索中は自動で隠れる。分割ダイアログ等で1画面に複数並ぶ部品はラベルと
   トリガーの `id` を固定にせず `React.useId()` にする（前例は `components/customer-selector.tsx`）
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
+  - 生産スケジュールの週次表示は、同じ受注・工程（`process_routing_id`）のセグメントを `GanttTask.rowId` で1行に並べ、
+    バーはセグメントごとに描く。先頭〜最後の1本にまとめると、隙間に詰めて飛び飛びになった工程の空き時間まで作業中に見える（Issue #535）
+  - 稼働時間スロットの終了列は `binarySearchFirstGe`（終了時刻ちょうどのスロットは塗らない）。`FirstGt` にすると 10:00 終了のバーが
+    10:00 開始の後工程と1列重なる（#163 で一度 `FirstGt` にして #535 で戻した）。詳細は [docs/features/gantt-date-math.md](docs/features/gantt-date-math.md)
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）
   だけを取り出して別の要素（凡例のスウォッチ等）に使い回す場合、`.split(" ")[0]` のような**位置依存**の抽出は

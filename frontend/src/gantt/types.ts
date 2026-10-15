@@ -31,6 +31,14 @@ export interface GanttTask {
   progress?: number
   /** 遅れとして強調表示する場合 true（グループヘッダーでは無視する） */
   isDelayed?: boolean
+  /**
+   * 同じ行に並べるタスクの識別子。同じ rowId のタスクは1行にまとめて描画する
+   * （1つの作業が飛び飛びの区間に分かれる場合に、区間ごとのバーを1行に並べる）。
+   * 未指定ならタスクごとに1行
+   */
+  rowId?: string
+  /** バー横のラベルを出さない場合 true（同じ行の2本目以降のバー等） */
+  hideLabel?: boolean
 }
 
 /**

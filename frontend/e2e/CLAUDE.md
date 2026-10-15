@@ -42,6 +42,18 @@
 - 製品コード等の一意制約があるフィールドは、空文字のまま複数レコードを
   作ろうとすると `duplicate key` エラーになる。テストでは必ず一意な値を埋める
 
+## 画面の見た目をスクリーンショットで確認するとき（前例: `gantt-segment-bars.spec.ts`、Issue #535）
+
+- 描画だけを見るなら、表示するデータの API は `page.route()` で固定応答にする（UI でデータを作るより速く、毎回同じ画面になる）。
+  `apiClient` のクエリ付き URL は正規表現で受ける（例: `/\/production-schedules\?/`）
+- 「今日」で表示範囲が決まる画面は `page.clock.setFixedTime()` と `test.use({ timezoneId: "Asia/Tokyo" })` で固定する。
+  サーバー側（SSR）の時刻は固定されないのでハイドレーション不一致になり、開発用オーバーレイのバッジが写る。
+  撮影前に `nextjs-portal { display: none !important; }` を `addStyleTag` で当てる
+- 本番で見つかったデータの形を再現するときも、受注番号・品名・顧客名等はダミー値にする（ルートの `CLAUDE.md`「実データの取り扱い」）
+- `toHaveScreenshot()` のピクセル比較は使わない（OS・フォントで差が出る・CI で回らない）。`page.screenshot()` で
+  `test-results/`（gitignore 済み）に保存して PR に添付し、回帰は DOM（バーの `data-task-id` と `style.gridColumn` 等）で検証する。
+  修正前を撮るときは修正対象のソースだけ `git stash push -- <paths>` して同じ spec を流す（dev サーバーが差し替わる）
+
 ## 現状の制約
 
 - CI では自動実行されない。実装者が手元で Supabase / backend / frontend を

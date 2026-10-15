@@ -9,6 +9,7 @@ import {
   startOfWeek,
   endOfWeek,
   format,
+  isSameDay,
 } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { GanttChart as GanttChartLib } from '@/gantt'
@@ -138,47 +139,37 @@ export function convertScheduleToTask(
 }
 
 /**
- * 週次モード用: 同一 order_id + process_name のセグメントを1行に集約する
+ * 週次モード用: 同じ受注・工程（process_routing_id）のセグメントを1行に並べる。
+ *
+ * スケジューラは1工程を日・休憩・既存スケジュールの隙間ごとのセグメントに分けるので、
+ * 1本のバー（先頭の開始〜最後の終了）にまとめると間の空き時間まで作業中に見える（Issue #535）。
+ * バーはセグメントごとに描き、行だけをまとめる。ラベルは行の右端（最後のセグメント）にだけ出す。
+ * 工程名ではなく process_routing_id で束ねるのは、同じ工程名がルーティングに2回ある場合に
+ * 別の工程を1行に合体させないため
  */
-function aggregateSegments(
+function segmentRowTasks(
   schedules: Schedule[],
   colorMode: 'product' | 'process',
   groupBy: GroupByMode,
 ): GanttTask[] {
   const groups = new Map<string, Schedule[]>()
   schedules.forEach((s) => {
-    const key = `${s.order_id}__${s.process_name ?? ''}`
+    const key = `${s.order_id}__${s.process_routing_id}`
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(s)
   })
 
   const result: GanttTask[] = []
-  groups.forEach((items) => {
+  groups.forEach((items, key) => {
     const sorted = [...items].sort(
       (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime(),
     )
-    const first = sorted[0]
-    const last = sorted[sorted.length - 1]
-
-    const aggStart = new Date(first.start_datetime)
-    const aggEnd = new Date(last.end_datetime)
-
-    const processName = first.process_name || '工程'
-    let suffix: string
-    if (groupBy === 'equipment_group') {
-      suffix = orderKey(first)
-    } else {
-      suffix = first.equipment_group_name ?? ''
-    }
-    const name = suffix ? `${processName} - ${suffix}` : processName
-
-    result.push({
-      id: `schedule-${first.id}`,
-      name,
-      start: aggStart,
-      end: aggEnd,
-      color: getBarColor(first, colorMode),
-      isMilestone: aggStart.getTime() === aggEnd.getTime(),
+    sorted.forEach((s, i) => {
+      result.push({
+        ...convertScheduleToTask(s, colorMode, groupBy),
+        rowId: `segments-${key}`,
+        hideLabel: i < sorted.length - 1,
+      })
     })
   })
 
@@ -199,12 +190,13 @@ function transformSchedulesToGroupedTasks(
       (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime(),
     )
 
-  const shouldAggregate = viewMode === 'Week'
+  // 週次は行数を抑えるため、同じ工程のセグメントを1行に並べる（日次・月次は1セグメント1行）
+  const shouldShareRows = viewMode === 'Week'
 
   if (groupBy === 'none') {
     const sorted = sortByStartDate(schedules)
-    if (shouldAggregate) {
-      return aggregateSegments(sorted, colorMode, 'none')
+    if (shouldShareRows) {
+      return segmentRowTasks(sorted, colorMode, 'none')
     }
     return sorted.map((s) => convertScheduleToTask(s, colorMode, 'none'))
   }
@@ -241,8 +233,8 @@ function transformSchedulesToGroupedTasks(
           end: new Date(Math.max(...ends)),
           isGroupHeader: true,
         })
-        if (shouldAggregate) {
-          aggregateSegments(items, colorMode, 'order').forEach((t) => tasks.push(t))
+        if (shouldShareRows) {
+          segmentRowTasks(items, colorMode, 'order').forEach((t) => tasks.push(t))
         } else {
           items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode, 'order')))
         }
@@ -282,9 +274,8 @@ function transformSchedulesToGroupedTasks(
 }
 
 /**
- * バーに進捗率・遅れを載せる。週次の集約バーは先頭セグメントの (受注, 工程) で引く
- * （集約は同じ受注・工程名の単位なので、どのセグメントでも同じ進捗になる）。
- * 進捗は工程単位なので、日次・月次で工程が複数のセグメントに分かれる場合は各セグメントに同じ進捗を出す
+ * バーに進捗率・遅れを載せる。進捗は工程単位なので、工程が複数のセグメントに分かれる場合は
+ * 各セグメントのバーに同じ進捗を出す
  */
 function applyProgress(
   tasks: GanttTask[],
@@ -306,6 +297,54 @@ function applyProgress(
       isDelayed: isProgressDelayed(progress, now),
     }
   })
+}
+
+function formatDateTime(d: Date): string {
+  return format(d, 'M/d HH:mm', { locale: ja })
+}
+
+/** 期間を日付付きで出す（同じ日なら終了は時刻だけ）。週次で複数日にわたる範囲を1日分に見せないため */
+function formatRange(start: Date, end: Date): string {
+  const endLabel = isSameDay(start, end) ? format(end, 'HH:mm', { locale: ja }) : formatDateTime(end)
+  return `${formatDateTime(start)} - ${endLabel}`
+}
+
+/** 同じ行に並ぶセグメントの数と表示中の範囲（Issue #535） */
+interface RowSummary {
+  count: number
+  start: Date
+  end: Date
+}
+
+/** タスク ID → そのタスクが並ぶ行のセグメントの要約。セグメントが1つだけの行は含めない */
+function summarizeRows(tasks: GanttTask[]): Map<string, RowSummary> {
+  const byRow = new Map<string, GanttTask[]>()
+  tasks.forEach((t) => {
+    if (t.rowId === undefined) return
+    if (!byRow.has(t.rowId)) byRow.set(t.rowId, [])
+    byRow.get(t.rowId)!.push(t)
+  })
+  const result = new Map<string, RowSummary>()
+  byRow.forEach((items) => {
+    if (items.length < 2) return
+    const summary: RowSummary = {
+      count: items.length,
+      start: new Date(Math.min(...items.map((t) => t.start.getTime()))),
+      end: new Date(Math.max(...items.map((t) => t.end.getTime()))),
+    }
+    items.forEach((t) => result.set(t.id, summary))
+  })
+  return result
+}
+
+/** 工程が複数のセグメントに分かれているとき、ツールチップに工程全体（表示中の範囲）を出す */
+function RowSegmentsTooltipLine({ summary }: { summary: RowSummary | undefined }) {
+  if (!summary) return null
+  return (
+    <p>
+      この工程（表示中）: {formatRange(summary.start, summary.end)}（{summary.count}区間）
+    </p>
+  )
 }
 
 /** ツールチップの進捗の行（実績数量・初回／最終実績日・状態） */
@@ -391,6 +430,8 @@ export function GanttChart({
     [tasks, groupBy, colorMode, viewMode, scheduleMap, progressIndex],
   )
 
+  const rowSummaries = useMemo(() => summarizeRows(ganttTasks), [ganttTasks])
+
   const progressOf = (task: GanttTask): ProcessProgress | undefined => {
     const schedule = scheduleMap.get(task.id)
     return schedule
@@ -434,11 +475,8 @@ export function GanttChart({
             <TooltipTrigger asChild>{children}</TooltipTrigger>
             <TooltipContent>
               <p className="font-semibold">{task.name}</p>
-              <p>
-                {task.isMilestone
-                  ? format(task.start, 'MM/dd HH:mm', { locale: ja })
-                  : `${format(task.start, 'HH:mm', { locale: ja })} - ${format(task.end, 'HH:mm', { locale: ja })}`}
-              </p>
+              <p>{task.isMilestone ? formatDateTime(task.start) : formatRange(task.start, task.end)}</p>
+              {!task.isGroupHeader && <RowSegmentsTooltipLine summary={rowSummaries.get(task.id)} />}
               {taskProgress && (
                 <ProgressTooltipLines progress={taskProgress} delayed={task.isDelayed === true} />
               )}
