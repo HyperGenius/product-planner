@@ -70,7 +70,7 @@ class OrderSplitLineItem(BaseSchema):
     model_config = ConfigDict(populate_by_name=True)
 
     product_id: int
-    quantity: int
+    quantity: int = Field(gt=0)
     deadline_date: str = Field(alias="desired_deadline")
     customer_id: int | None = None
     customer_certainty: (
