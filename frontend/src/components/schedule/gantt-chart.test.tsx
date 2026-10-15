@@ -132,7 +132,7 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
     }
   })
 
-  it("週次の集約バーにも進捗を載せる", () => {
+  it("週次でセグメントを1行に並べたバーにも進捗を載せる", () => {
     render(
       <GanttChart
         tasks={SCHEDULES}
@@ -167,5 +167,103 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
 
     const tooltip = await screen.findByRole("tooltip")
     expect(tooltip).toHaveTextContent("状態: 完了（後工程の実績から推定）")
+  })
+})
+
+describe("GanttChart（スケジュール）の週次表示のセグメント（Issue #535）", () => {
+  // 2026-09-13(日)〜09-19(土) の週（ja ロケールは日曜始まり）。月曜と木曜に同じ工程のセグメントがある
+  const WEEK = new Date(2026, 8, 16)
+  const WEEKEND = [new Date(2026, 8, 13), new Date(2026, 8, 19)]
+  const SEGMENTED: Schedule[] = [
+    schedule({
+      id: 21,
+      process_routing_id: 31,
+      process_name: "内職",
+      equipment_group_name: undefined,
+      start_datetime: at(14, 9),
+      end_datetime: at(14, 17),
+    }),
+    schedule({
+      id: 22,
+      process_routing_id: 31,
+      process_name: "内職",
+      equipment_group_name: undefined,
+      start_datetime: new Date(2026, 8, 17, 13, 30).toISOString(),
+      end_datetime: at(17, 17),
+    }),
+    // 同じ工程名でも別の工程（ルーティング）は別の行
+    schedule({
+      id: 23,
+      process_routing_id: 33,
+      process_name: "内職",
+      equipment_group_name: undefined,
+      start_datetime: at(18, 9),
+      end_datetime: at(18, 12),
+    }),
+  ]
+
+  function renderWeek() {
+    return render(
+      <GanttChart
+        tasks={SEGMENTED}
+        viewMode="Week"
+        groupBy="none"
+        currentDate={WEEK}
+        nonWorkingDays={WEEKEND}
+      />,
+    )
+  }
+
+  function segmentBars(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-task-id^="schedule-"]'))
+  }
+
+  it("セグメントごとにバーを描き、間の空き時間を塗らない", () => {
+    renderWeek()
+    const bars = segmentBars()
+    expect(bars.map((b) => b.dataset.taskId)).toEqual(["schedule-21", "schedule-22", "schedule-23"])
+
+    // 1日7スロット（9〜17時、12時台は休憩）。月曜 09:00〜17:00 は 1〜7列、
+    // 木曜 13:30〜17:00 は 14:00〜16:00 のスロット（木曜は 22列目から）
+    expect(bars[0].style.gridColumn).toBe("1 / 8")
+    expect(bars[1].style.gridColumn).toBe("26 / 29")
+  })
+
+  it("同じ工程のセグメントは1行に並べ、別の工程は同じ工程名でも別の行にする", () => {
+    renderWeek()
+    const [first, second, other] = segmentBars()
+    expect(first.parentElement).toBe(second.parentElement)
+    expect(other.parentElement).not.toBe(first.parentElement)
+    // ラベルは行の最後のセグメントにだけ出す
+    expect(screen.getAllByText("内職")).toHaveLength(2)
+  })
+
+  it("ツールチップにセグメントの日付と工程全体の範囲を出す", async () => {
+    const user = userEvent.setup()
+    renderWeek()
+
+    await user.hover(segmentBars()[0])
+
+    const tooltip = await screen.findByRole("tooltip")
+    expect(tooltip).toHaveTextContent("9/14 09:00 - 17:00")
+    expect(tooltip).toHaveTextContent("この工程（表示中）: 9/14 09:00 - 9/17 17:00（2区間）")
+  })
+
+  it("クリックするとそのセグメントを渡す", async () => {
+    const user = userEvent.setup()
+    const onTaskClick = vi.fn()
+    render(
+      <GanttChart
+        tasks={SEGMENTED}
+        viewMode="Week"
+        groupBy="none"
+        currentDate={WEEK}
+        nonWorkingDays={WEEKEND}
+        onTaskClick={onTaskClick}
+      />,
+    )
+
+    await user.click(segmentBars()[1])
+    expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: 22 }))
   })
 })

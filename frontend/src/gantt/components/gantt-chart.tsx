@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, type ReactNode } from 'react'
+import { Fragment, useMemo, type ReactNode } from 'react'
 import type { GanttTask, GanttViewMode } from '../types'
 import {
   buildTimelineConfig,
@@ -68,6 +68,8 @@ export function GanttChart({
 
   const nowFrac = useMemo(() => getNowFractionalColumn(config), [config])
 
+  const rows = useMemo(() => groupTasksIntoRows(tasks), [tasks])
+
   const { totalUnits, columnWidthPx } = config
 
   const gridTemplateColumns = columnWidthPx
@@ -107,43 +109,72 @@ export function GanttChart({
             />
           )}
 
-          {/* タスク行 */}
-          {tasks.map((task, index) => {
-            const isMilestone = !task.isGroupHeader && task.isMilestone === true
-            const milestoneCol = isMilestone
-              ? getMilestoneGridColumn(task.start, config)
-              : null
-            const { colStart, colEnd } =
-              milestoneCol !== null
-                ? { colStart: milestoneCol, colEnd: milestoneCol + 1 }
-                : getTaskGridColumns(task.start, task.end, config)
-            const bar = (
-              <TaskBar
-                task={task}
-                colStart={colStart}
-                colEnd={colEnd}
-                onClick={onTaskClick && !task.isGroupHeader ? () => onTaskClick(task) : undefined}
-              />
-            )
-            return (
-              <div
-                key={task.id}
-                className="border-b border-gray-100 dark:border-gray-800"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns,
-                  height: `${rowHeight}px`,
-                  alignItems: 'center',
-                  backgroundColor:
-                    index % 2 === 1 ? 'rgba(0,0,0,0.03)' : 'transparent',
-                }}
-              >
-                {wrapTaskBar ? wrapTaskBar(task, bar) : bar}
-              </div>
-            )
-          })}
+          {/* タスク行（同じ rowId のタスクは1行に並べる） */}
+          {rows.map((rowTasks, index) => (
+            <div
+              key={rowTasks[0].rowId ?? rowTasks[0].id}
+              className="border-b border-gray-100 dark:border-gray-800"
+              style={{
+                display: 'grid',
+                gridTemplateColumns,
+                height: `${rowHeight}px`,
+                alignItems: 'center',
+                backgroundColor:
+                  index % 2 === 1 ? 'rgba(0,0,0,0.03)' : 'transparent',
+              }}
+            >
+              {rowTasks.map((task) => {
+                const isMilestone = !task.isGroupHeader && task.isMilestone === true
+                const milestoneCol = isMilestone
+                  ? getMilestoneGridColumn(task.start, config)
+                  : null
+                const { colStart, colEnd } =
+                  milestoneCol !== null
+                    ? { colStart: milestoneCol, colEnd: milestoneCol + 1 }
+                    : getTaskGridColumns(task.start, task.end, config)
+                const bar = (
+                  <TaskBar
+                    key={task.id}
+                    task={task}
+                    colStart={colStart}
+                    colEnd={colEnd}
+                    style={{ gridRow: 1 }}
+                    onClick={onTaskClick && !task.isGroupHeader ? () => onTaskClick(task) : undefined}
+                  />
+                )
+                return wrapTaskBar ? (
+                  <Fragment key={task.id}>{wrapTaskBar(task, bar)}</Fragment>
+                ) : (
+                  bar
+                )
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </div>
   )
+}
+
+/**
+ * タスクを描画する行に分ける。rowId が同じタスクは最初に現れた位置の行にまとめ、
+ * rowId の無いタスクは1タスク1行にする（行の順序はタスクの並び順を保つ）
+ */
+export function groupTasksIntoRows(tasks: GanttTask[]): GanttTask[][] {
+  const rows: GanttTask[][] = []
+  const rowIndexById = new Map<string, number>()
+  tasks.forEach((task) => {
+    if (task.rowId === undefined) {
+      rows.push([task])
+      return
+    }
+    const existing = rowIndexById.get(task.rowId)
+    if (existing !== undefined) {
+      rows[existing].push(task)
+      return
+    }
+    rowIndexById.set(task.rowId, rows.length)
+    rows.push([task])
+  })
+  return rows
 }

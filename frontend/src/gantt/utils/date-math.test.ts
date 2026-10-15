@@ -80,6 +80,34 @@ describe("getTaskGridColumns", () => {
   })
 })
 
+describe("getTaskGridColumns（稼働時間スロット）", () => {
+  // 2026-01-05(月)〜01-07(水)、9〜17時・12時台は休憩 → 1日7スロット
+  const WORK_HOURS = { start: 9, end: 17, breakStart: 12, breakEnd: 13 }
+  const config = buildTimelineConfig(
+    new Date(2026, 0, 5),
+    new Date(2026, 0, 8),
+    "Week",
+    WORK_HOURS,
+    [],
+  )
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 0, day, hour, minute)
+
+  it("スロットの開始ちょうどに終わるタスクはそのスロットを塗らない（Issue #535）", () => {
+    // 09:00〜10:00 は 09:00 の1列だけ
+    expect(getTaskGridColumns(at(5, 9), at(5, 10), config)).toEqual({ colStart: 1, colEnd: 2 })
+  })
+
+  it("終業時刻に終わるタスクはその日の最後のスロットまで塗る", () => {
+    // 09:00〜17:00 は 1日分の7列（翌日の 09:00 の列は塗らない）
+    expect(getTaskGridColumns(at(5, 9), at(5, 17), config)).toEqual({ colStart: 1, colEnd: 8 })
+  })
+
+  it("スロットの途中で終わるタスクはそのスロットまで塗る", () => {
+    // 翌日 09:00〜09:10 は翌日の 09:00 の1列
+    expect(getTaskGridColumns(at(6, 9), at(6, 9, 10), config)).toEqual({ colStart: 8, colEnd: 9 })
+  })
+})
+
 describe("getMilestoneGridColumn", () => {
   it("所要時間ゼロの工程でも開始列だけを返す（最小幅を作らない）", () => {
     const start = new Date("2026-01-01T00:00:00Z")

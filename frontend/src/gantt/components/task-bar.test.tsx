@@ -62,3 +62,15 @@ describe("TaskBar の進捗表示", () => {
     expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
   })
 })
+
+describe("TaskBar のラベル", () => {
+  it("hideLabel ならバー横のラベルを出さない", () => {
+    renderBar(task({ hideLabel: true }))
+    expect(screen.queryByText("プレス")).not.toBeInTheDocument()
+  })
+
+  it("マイルストーンでも hideLabel ならラベルを出さない", () => {
+    renderBar(task({ isMilestone: true, hideLabel: true }))
+    expect(screen.queryByText("プレス")).not.toBeInTheDocument()
+  })
+})

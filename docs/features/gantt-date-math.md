@@ -13,9 +13,13 @@
 | 値 | 計算方法 | 備考 |
 |---|---|---|
 | `colStart` | `binarySearchFirstGe(slots, taskStartMs) + 1` | タスク開始以降の最初のスロット |
-| `colEnd` | `binarySearchFirstGt(slots, taskEndMs) + 1` | タスク終了より**厳密に後**の最初のスロット |
+| `colEnd` | `binarySearchFirstGe(slots, taskEndMs) + 1` | タスク終了**以降**の最初のスロット（の手前までを塗る） |
 
-`colEndIdx` に `binarySearchFirstGt`（strictly greater than）を使うことで、前工程の終了時刻と後工程の開始時刻が同一スロット境界を指す場合でも colEnd と colStart が重複せず、バーが隙間なく接続する。
+`colEnd` は CSS Grid の終了線（排他）なので、終了時刻ちょうどに始まるスロットは塗らない。前工程の終了と後工程の開始が
+同じ時刻（例: 10:00）なら、前工程の `colEnd` と後工程の `colStart` が同じグリッド線になり、バーは重ならずに接する。
+
+> #163 で `binarySearchFirstGt` に変えたが、これだと 10:00 終了のタスクが 10:00 のスロットまで1列長くなり、
+> 10:00 開始の後工程と重なっていた。#535 で `binarySearchFirstGe` に戻した（クランプ順序の修正はそのまま）。
 
 ### クランプ順序
 
@@ -36,7 +40,26 @@ if (colEndIdx <= colStartIdx) colEndIdx = colStartIdx + 1  // 2. 最小幅保証
   - 均一グリッド: `ceil((taskStart - rangeStart) / unitDurationMs) + 1` を `[1, totalUnits]` にクランプ。
 - 描画側（`GanttChart` / `TaskBar`）は `GanttTask.isMilestone === true` のとき `getMilestoneGridColumn()` の結果で `colStart` / `colEnd = colStart + 1` を与え、`TaskBar` がアウトラインのひし形マーカー＋右側ラベルを表示する。
 
+## 1行に複数のバー（`GanttTask.rowId`、#535）
+
+`GanttTask.rowId` が同じタスクは `GanttChart` が1行にまとめて描く（`groupTasksIntoRows()`。行の順序は各 rowId が最初に現れた位置）。
+各タスクは自分の `start` / `end` の列にバーを描くので、行をまとめても間の時間は塗らない。`hideLabel` でバー横のラベルを消せる。
+各バーには `data-task-id` を付けている（テスト・E2E からバーを特定するため）。
+
+生産スケジュールの週次表示（`components/schedule/gantt-chart.tsx`）はこれを使い、同じ受注・工程（`process_routing_id`）の
+セグメントを1行に並べる。以前は「先頭セグメントの開始〜最後のセグメントの終了」の1本のバーにまとめていたため、
+既存スケジュールの隙間に詰めて飛び飛びになった工程（`scheduler_logic._greedy_fill_gaps()`）は間の空き時間まで作業中に見え、
+工程名で束ねていたので同じ工程名の別工程が合体していた。
+
+- ラベルは行の最後のセグメントにだけ出す（右端に1つ）
+- ツールチップはセグメントの期間を日付付きで出し、セグメントが複数ある行は「この工程（表示中）: 開始〜終了（N区間）」も出す
+  （表示中の週に取得したセグメントだけの範囲。週の外へ続く工程の全期間ではない）
+- クリックで開く編集ダイアログはクリックしたセグメントを編集する
+
+見た目は `frontend/e2e/gantt-segment-bars.spec.ts` で確認できる（スクリーンショットを `test-results/gantt-segment-bars/` に保存）。
+
 ## 変更履歴
 
 - **#163**: `colEndIdx` を `binarySearchFirstGe` → `binarySearchFirstGt` に変更し、クランプ順序を修正（工程バーの重複・空行バグ修正）
 - **#379**: `getMilestoneGridColumn()` を追加。所要時間 0 の工程をひし形マーカーで表示（`GanttTask.isMilestone`、`TaskBar` のマーカー描画分岐、シミュレーション結果一覧・手動調整ダイアログのゼロ長対応を含む）
+- **#535**: `colEndIdx` を `binarySearchFirstGe` に戻し、終了時刻ちょうどのスロットを塗らないようにした。`GanttTask.rowId` / `hideLabel` を追加し、生産スケジュールの週次表示を「1工程1本の集約バー」から「セグメントごとのバーを1行に並べる」に変更
