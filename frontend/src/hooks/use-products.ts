@@ -8,6 +8,7 @@ import type {
   ProductNameAliasHistoryEntry,
   ProductNameAliasUpdate,
   ProductUpdate,
+  SimilarProductsResponse,
 } from "@/types/product"
 
 // クエリキーを定数化
@@ -162,5 +163,26 @@ export function useToggleProductActive() {
       // 製品一覧を再取得
       queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY })
     },
+  })
+}
+
+/**
+ * 品名に似た既存製品（直径・長さ・材質が一致）を取得するフック（Issue #516）。
+ *
+ * 品名をクエリキーに含める。`name` が空のときは取得しない。`excludeId` は編集中の製品。
+ */
+export function useSimilarProducts(
+  name: string,
+  excludeId: number | null,
+  enabled = true,
+) {
+  return useQuery<SimilarProductsResponse>({
+    queryKey: [...PRODUCTS_QUERY_KEY, "similar", name, excludeId],
+    queryFn: () => {
+      const params = new URLSearchParams({ name })
+      if (excludeId !== null) params.set("exclude_id", String(excludeId))
+      return apiClient<SimilarProductsResponse>(`/products/similar?${params}`)
+    },
+    enabled: enabled && name !== "",
   })
 }

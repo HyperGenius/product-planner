@@ -186,3 +186,24 @@ export interface ProductMergePreview {
   deleted_orders: ProductMergeOrderRef[]
   blockers: ProductMergeBlocker[]
 }
+
+/**
+ * 新規作成・編集中の品名に似た既存製品（Issue #516）。
+ * Backend `models/master/product_similarity_schemas.py` の `SimilarProduct` と一致させる。
+ */
+export interface SimilarProduct {
+  id: number
+  name: string
+  code: string | null
+  is_active: boolean
+  /** 品名の先頭の接頭辞（無ければ空文字） */
+  prefix: string
+  /** 入力の品名と接頭辞が違うか（顧客ごとの別製品の可能性） */
+  prefix_differs: boolean
+  has_process: boolean
+  has_unconfirmed_process: boolean
+}
+
+export interface SimilarProductsResponse {
+  products: SimilarProduct[]
+}

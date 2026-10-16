@@ -13,10 +13,17 @@ from app.dependencies import (
 
 # テスト対象のAPIインスタンス
 from app.main import app
+from app.models.master.product_similarity_schemas import (
+    SimilarProduct,
+    SimilarProductsResponse,
+)
+from app.services import product_similarity_service
 from fastapi.testclient import TestClient
 
 # テストクライアントの作成
 client = TestClient(app)
+
+TENANT = str(uuid.uuid4())
 
 
 def _set_role(mock_client: MagicMock, role: str) -> None:
@@ -425,3 +432,62 @@ class TestProductRouter:
     # もし ProductCreateSchema で「名前は必須」などの定義がある場合、
     # payload = {} のような空データを POST して 422 Unprocessable Entity が
     # 返ってくるかどうかをテストすると、より堅牢になります。
+
+
+@pytest.mark.api
+class TestSimilarProductsRouter:
+    """GET /products/similar (Issue #516)。サービス層は差し替える。"""
+
+    @pytest.fixture(autouse=True)
+    def override_dependency(self):
+        app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
+        app.dependency_overrides[get_supabase_client] = lambda: MagicMock()
+        yield
+        app.dependency_overrides = {}
+
+    def test_returns_similar_products_and_passes_query(self, monkeypatch):
+        mock = MagicMock(
+            return_value=SimilarProductsResponse(
+                products=[
+                    SimilarProduct(
+                        id=1,
+                        name="φ10×20L SUS100",
+                        code="A-1",
+                        is_active=True,
+                        prefix="",
+                        prefix_differs=False,
+                        has_process=True,
+                        has_unconfirmed_process=False,
+                    )
+                ]
+            )
+        )
+        monkeypatch.setattr(product_similarity_service, "find_similar_products", mock)
+
+        res = client.get(
+            "/products/similar",
+            params={"name": "10φ×20L SUS100", "exclude_id": 5},
+            headers={"x-tenant-id": TENANT},
+        )
+
+        assert res.status_code == 200
+        assert res.json()["products"][0]["id"] == 1
+        assert mock.call_args.args[2:] == ("10φ×20L SUS100", 5)
+
+    def test_missing_name_is_422(self):
+        res = client.get("/products/similar", headers={"x-tenant-id": TENANT})
+        assert res.status_code == 422
+
+    def test_similar_is_not_parsed_as_product_id(self, monkeypatch):
+        monkeypatch.setattr(
+            product_similarity_service,
+            "find_similar_products",
+            MagicMock(return_value=SimilarProductsResponse(products=[])),
+        )
+        res = client.get(
+            "/products/similar",
+            params={"name": "製品A"},
+            headers={"x-tenant-id": TENANT},
+        )
+        assert res.status_code == 200
+        assert res.json() == {"products": []}
