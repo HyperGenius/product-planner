@@ -139,7 +139,7 @@ export function convertScheduleToTask(
 }
 
 /**
- * 週次モード用: 同じ受注・工程（process_routing_id）のセグメントを1行に並べる。
+ * 週次・月次モード用: 同じ受注・工程（process_routing_id）のセグメントを1行に並べる。
  *
  * スケジューラは1工程を日・休憩・既存スケジュールの隙間ごとのセグメントに分けるので、
  * 1本のバー（先頭の開始〜最後の終了）にまとめると間の空き時間まで作業中に見える（Issue #535）。
@@ -190,8 +190,8 @@ function transformSchedulesToGroupedTasks(
       (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime(),
     )
 
-  // 週次は行数を抑えるため、同じ工程のセグメントを1行に並べる（日次・月次は1セグメント1行）
-  const shouldShareRows = viewMode === 'Week'
+  // 週次・月次は行数を抑えるため、同じ工程のセグメントを1行に並べる（日次は1セグメント1行）
+  const shouldShareRows = viewMode === 'Week' || viewMode === 'Month'
 
   if (groupBy === 'none') {
     const sorted = sortByStartDate(schedules)

@@ -134,7 +134,9 @@ export function getTaskGridColumns(
   const { rangeStart, unitDurationMs, totalUnits } = config
   const rangeStartMs = rangeStart.getTime()
 
-  const rawColStart = Math.ceil((taskStart.getTime() - rangeStartMs) / unitDurationMs) + 1
+  // 開始は「開始時刻を含む列」（切り捨て）。切り上げると月次（1列＝1日）で 09:00 開始が翌日の列になる（Issue #537）。
+  // 終了は排他の線なので切り上げのまま
+  const rawColStart = Math.floor((taskStart.getTime() - rangeStartMs) / unitDurationMs) + 1
   const rawColEnd = Math.ceil((taskEnd.getTime() - rangeStartMs) / unitDurationMs) + 1
 
   const colStart = Math.max(1, Math.min(rawColStart, totalUnits))
@@ -151,7 +153,7 @@ export function getTaskGridColumns(
  * マイルストーンとして視認できない。この関数は開始列だけを算出し、呼び出し側で
  * 幅を持たない◇マーカーとして描画するために使う。
  *
- * 開始列の丸めは `getTaskGridColumns()` の colStart（切り上げ）および
+ * 開始列の丸めは `getTaskGridColumns()` の colStart（切り捨て＝開始時刻を含む列）に揃える。
  * 稼働時間スロット側（`binarySearchFirstGe` = 開始以降の最初のスロット）と揃える。
  */
 export function getMilestoneGridColumn(
@@ -170,7 +172,7 @@ export function getMilestoneGridColumn(
 
   const { rangeStart, unitDurationMs, totalUnits } = config
   const rawCol =
-    Math.ceil((taskStart.getTime() - rangeStart.getTime()) / unitDurationMs) + 1
+    Math.floor((taskStart.getTime() - rangeStart.getTime()) / unitDurationMs) + 1
   return Math.max(1, Math.min(rawCol, totalUnits))
 }
 

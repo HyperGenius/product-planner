@@ -267,3 +267,89 @@ describe("GanttChart（スケジュール）の週次表示のセグメント（
     expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: 22 }))
   })
 })
+
+describe("GanttChart（スケジュール）の月次表示のセグメント（Issue #537）", () => {
+  // 月次の表示範囲は基準日の前3日〜後31日。9/16(水) 基準なら 9/13(日) が1列目
+  const MONTH_BASE = new Date(2026, 8, 16)
+  const SEGMENTED: Schedule[] = [
+    schedule({
+      id: 31,
+      process_routing_id: 41,
+      process_name: "内職",
+      equipment_group_name: undefined,
+      start_datetime: at(15, 9),
+      end_datetime: at(15, 17),
+    }),
+    schedule({
+      id: 32,
+      process_routing_id: 41,
+      process_name: "内職",
+      equipment_group_name: undefined,
+      start_datetime: at(17, 9),
+      end_datetime: at(17, 17),
+    }),
+    // 同じ工程名でも別の工程（ルーティング）は別の行
+    schedule({
+      id: 33,
+      process_routing_id: 43,
+      process_name: "内職",
+      equipment_group_name: undefined,
+      start_datetime: at(18, 9),
+      end_datetime: at(18, 12),
+    }),
+  ]
+
+  function renderMonth(groupBy: "none" | "order" | "equipment_group" = "none", onTaskClick?: () => void) {
+    return render(
+      <GanttChart
+        tasks={SEGMENTED}
+        viewMode="Month"
+        groupBy={groupBy}
+        currentDate={MONTH_BASE}
+        onTaskClick={onTaskClick}
+      />,
+    )
+  }
+
+  function segmentBars(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-task-id^="schedule-"]'))
+  }
+
+  it("セグメントをその日の列に描き、間の日を塗らない", () => {
+    renderMonth()
+    const bars = segmentBars()
+    // 9/15(火) は3列目、9/17(木) は5列目（翌日の列にずれない）
+    expect(bars[0].style.gridColumn).toBe("3 / 4")
+    expect(bars[1].style.gridColumn).toBe("5 / 6")
+  })
+
+  it("同じ工程のセグメントは1行に並べ、別の工程は別の行にする（フラット表示）", () => {
+    renderMonth("none")
+    const [first, second, other] = segmentBars()
+    expect(first.parentElement).toBe(second.parentElement)
+    expect(other.parentElement).not.toBe(first.parentElement)
+    expect(screen.getAllByText("内職")).toHaveLength(2)
+  })
+
+  it("オーダー別でも同じ工程のセグメントを1行に並べる", () => {
+    renderMonth("order")
+    const [first, second, other] = segmentBars()
+    expect(first.parentElement).toBe(second.parentElement)
+    expect(other.parentElement).not.toBe(first.parentElement)
+  })
+
+  it("設備グループ別は1セグメント1行のまま", () => {
+    renderMonth("equipment_group")
+    const [first, second] = segmentBars()
+    expect(first.parentElement).not.toBe(second.parentElement)
+  })
+
+  it("クリックするとそのセグメントを渡す", async () => {
+    const user = userEvent.setup()
+    const onTaskClick = vi.fn()
+    renderMonth("none", onTaskClick)
+
+    await user.click(segmentBars()[1])
+    expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: 32 }))
+  })
+})

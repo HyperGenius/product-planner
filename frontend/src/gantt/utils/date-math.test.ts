@@ -80,6 +80,28 @@ describe("getTaskGridColumns", () => {
   })
 })
 
+describe("getTaskGridColumns（均一グリッドの開始列、Issue #537）", () => {
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 0, day, hour, minute)
+
+  it("月次: 日の途中に始まるタスクはその日の列に描く（翌日にずれない）", () => {
+    const config = buildTimelineConfig(at(1, 0), at(11, 0), "Month")
+    // 1/5 09:00〜17:00 は 5列目の1列だけ
+    expect(getTaskGridColumns(at(5, 9), at(5, 17), config)).toEqual({ colStart: 5, colEnd: 6 })
+    // 日をまたぐタスク: 1/5 09:00〜1/7 12:00 は 5〜7列目
+    expect(getTaskGridColumns(at(5, 9), at(7, 12), config)).toEqual({ colStart: 5, colEnd: 8 })
+  })
+
+  it("日次: ○時ちょうどに始まるタスクの列は変わらない", () => {
+    const config = buildTimelineConfig(at(5, 0), at(6, 0), "Day")
+    expect(getTaskGridColumns(at(5, 9), at(5, 12), config)).toEqual({ colStart: 10, colEnd: 13 })
+  })
+
+  it("月次: マイルストーンもその日の列に置く", () => {
+    const config = buildTimelineConfig(at(1, 0), at(11, 0), "Month")
+    expect(getMilestoneGridColumn(at(5, 9), config)).toBe(5)
+  })
+})
+
 describe("getTaskGridColumns（稼働時間スロット）", () => {
   // 2026-01-05(月)〜01-07(水)、9〜17時・12時台は休憩 → 1日7スロット
   const WORK_HOURS = { start: 9, end: 17, breakStart: 12, breakEnd: 13 }
