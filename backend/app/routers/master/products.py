@@ -27,12 +27,13 @@ from app.models.master.product_merge_schemas import (
     ProductMergePreview,
     ProductMergeRequest,
 )
+from app.models.master.product_similarity_schemas import SimilarProductsResponse
 from app.repositories.supa_infra.master.product_name_alias_repo import (
     ProductNameAliasHistoryRepository,
     ProductNameAliasRepository,
 )
 from app.repositories.supa_infra.master.product_repo import ProductRepository
-from app.services import product_merge_service
+from app.services import product_merge_service, product_similarity_service
 from app.services.product_alias_service import record_direct_alias_change
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
@@ -171,6 +172,24 @@ def merge_products(
                 "message": "他の操作と競合したため統合できませんでした。候補の検索からやり直してください",
             },
         ) from exc
+
+
+# /{product_id} より先に登録する（"similar" が product_id として解釈されないように）
+@product_router.get("/similar", response_model=SimilarProductsResponse)
+def get_similar_products(
+    name: str = Query(max_length=200),
+    exclude_id: int | None = Query(default=None),
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """品名の直径・長さ・材質が一致する既存製品を返す（Issue #516）。
+
+    新規作成・編集ダイアログの警告用。品名から3項目を読み取れなければ空。
+    `exclude_id` は編集中の製品（一覧から除く）。
+    """
+    return product_similarity_service.find_similar_products(
+        client, tenant_id, name, exclude_id
+    )
 
 
 @product_router.get("/{product_id}")

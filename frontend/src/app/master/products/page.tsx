@@ -50,6 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
+import { SimilarProductsWarning } from "@/components/similar-products-warning"
 import { ProductNameAliasHistoryDialog } from "@/components/product-name-alias-history-dialog"
 import { MasterPagination } from "@/components/master-pagination"
 
@@ -515,6 +516,7 @@ export default function ProductsPage() {
                 placeholder="例: 製品A"
               />
             </div>
+            <SimilarProductsWarning name={productName} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -555,6 +557,11 @@ export default function ProductsPage() {
                 placeholder="例: 製品A"
               />
             </div>
+            <SimilarProductsWarning
+              name={productName}
+              excludeId={selectedProduct?.id ?? null}
+              originalName={selectedProduct?.name}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>

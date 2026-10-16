@@ -264,6 +264,10 @@ cd backend && ruff check . && mypy .
     （`use-daily-report-names.ts` が `use-products.ts` を import しているので循環 import になる）。前例は `hooks/use-product-merge.ts`
   - 重い集計など「ボタンを押したときだけ」取得するクエリは `enabled: false` にして `refetch()` で取る（`useProductMergeGroups()`）。
     `invalidateQueries` は無効（disabled）なクエリを再取得しないので、配下のキーをまとめて無効化しても勝手に走らない
+- **類似製品の警告（Issue #516）**: 製品の作成・編集ダイアログの警告は `GET /products/similar`（`product_similarity_service`、
+  `parse_product_spec()` を #515 と共有）で、警告は登録・保存を妨げない。入力に応じて呼ぶクエリは、**問い合わせの可否・クエリキーを
+  デバウンス後の値で決める**（入力中の値で `enabled` を決めると、デバウンス待ちの間に前の値で問い合わせる。`SimilarProductsWarning`）。
+  `/{product_id}` と衝突する静的パスは先に登録する
 - **一覧のセルを折り返さず省略するとき**: shadcn の `Table` は自動レイアウトなので、`td` の `truncate` / `max-w-*` は効かない
   （列が文字列の長さまで広がる）。`<Table className="table-fixed">` にして見出しの幅で列幅を決める（Issue #503）
 - **一覧の行全体をクリック可能にするとき**: 行内の `DropdownMenu` / `Popover` の中身はポータルに描画されるが、React の合成イベントは

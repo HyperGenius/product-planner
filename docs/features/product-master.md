@@ -128,6 +128,8 @@ const displayName = product.name   // 品名として表示（NOT NULL のため
 | `supabase/migrations/20261016000000_add_merge_products.sql` | RPC `merge_products` と `product_name_alias_history` の UPDATE ポリシー（#515） |
 | `frontend/src/components/product-merge/` | 重複製品の統合画面（#515） |
 | `frontend/src/hooks/use-product-merge.ts` | 統合の候補・プレビュー・実行のフック（#515） |
+| `backend/app/services/product_similarity_service.py` | 入力の品名に似た既存製品の検索（`select_similar_products()` は純粋関数）（#516） |
+| `frontend/src/components/similar-products-warning.tsx` | 作成・編集ダイアログの類似製品の警告欄（#516） |
 | `frontend/src/lib/product-merge-utils.ts` | 統合画面の表示規則（統合できない理由・止める理由の文言等）（#515） |
 
 ## 工程ルーティング (process_routings)
@@ -368,6 +370,30 @@ cron `compute-daily-report-progress` の次回の再計算で反映される（�
 
 ---
 
+## 類似製品の警告（Issue #516）
+
+製品の新規作成・編集ダイアログで、入力中の品名と**直径・長さ・材質が同じ既存製品**があれば「似た製品があります」と警告する。
+表記ゆれ（φ の位置・`×` の字形・`L` の位置・全角半角・空白・材質の括弧）による重複登録を、統合（#515）の後に再発させないためのもの。
+**警告は登録・保存を妨げない**（ボタンの活性には関与しない）。
+
+- 読み取り・比較は #515 と共通の `parse_product_spec()` / `ProductSpec.same_size_and_material()` を使う。品名から3項目を読み取れなければ警告しない（空を返す）
+- 無効な製品も対象に含める。編集時は `exclude_id`（編集中の製品）を除く
+- 接頭辞が違う製品（顧客ごとの別製品の可能性）も含め、`prefix_differs=true` として接頭辞を目立たせて表示する。人が別製品かどうか判断する
+- 一覧の各行は品名・図番・工程の登録状況（未登録／あり／あり（未確定））を示し、`/master/products?highlight=<id>` へのリンク（別タブ。入力中のダイアログを閉じないため）を持つ
+
+### API
+
+`GET /products/similar?name=&exclude_id=` → `{ products: SimilarProduct[] }`（ID 順）。テナントのメンバーなら誰でも呼べる（製品の新規作成と同じ権限）。
+`/{product_id}` より先に登録している（`similar` が `product_id` として解釈されないように）。全製品の品名を読み取る計算なので、画面は入力が止まってから（400ms デバウンス）呼ぶ。
+
+### Frontend
+
+- `SimilarProductsWarning`（`components/similar-products-warning.tsx`）を作成・編集ダイアログに置く。取得は `useSimilarProducts(name, excludeId, enabled)`（クエリキーは `["products", "similar", name, excludeId]`）
+- 編集ダイアログは**品名を変更していない間は警告しない**（元の品名と一致するときは問い合わせない。自身は `exclude_id` でも除くが、同じ仕様の別製品が元々ある場合に開いた直後から警告が出ないようにするため）
+- 問い合わせの可否はデバウンス後の品名で決める。入力中の値で決めると、デバウンス待ちの間に元の品名で問い合わせてしまう
+
+---
+
 ## 変更履歴
 
 | PR | 内容 |
@@ -386,3 +412,4 @@ cron `compute-daily-report-progress` の次回の再計算で反映される（�
 | #488 | 日報の名寄せで、日報の商品名の別名を `source='daily_report'` で登録できるように（`register_daily_report_alias()`）。確認済みの由来として `auto_match_unreviewed` より優先（Issue #488） |
 | #515 | 表記ゆれで重複登録された製品の統合画面（`/master/products/merge`）を追加。品名から (接頭辞, 直径, 長さ, 材質) を読み取る `product_spec_parser`、候補検索・事前チェック（受注の重複キーの衝突・工程の対応）の `product_merge_service`、1トランザクションで付け替え・削除する RPC `merge_products`。`product_name_alias_history` の `product_id` 列だけ president / platform_admin に UPDATE を許可（Issue #515） |
 | #515 (追加) | 「候補を抽出」で直径・長さ・材質が同じ製品の組を一覧にする `GET /products/merge-groups` を追加。ボタンを押したときだけ取得し、組を選ぶと候補一覧を開く（Issue #515） |
+| #516 | 製品の新規作成・編集ダイアログに類似製品の警告を追加。`GET /products/similar`・`product_similarity_service`・`SimilarProductsWarning`。警告は登録を妨げない（Issue #516） |
