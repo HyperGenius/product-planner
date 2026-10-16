@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test"
 
 /**
- * ガントチャート週次表示の工程バー（Issue #535）
+ * ガントチャート週次・月次表示の工程バー（Issue #535 / #537）
  *
  * 前提:
  * - Supabase (supabase start), backend (uvicorn app.main:app --port 8000),
@@ -181,5 +181,56 @@ test.describe("ガントチャート週次表示の工程バー（Issue #535）"
     await screenshot(page, "day-order")
 
     expect(await rowOf(page, 102)).not.toBe(await rowOf(page, 103))
+  })
+})
+
+test.describe("ガントチャート月次表示の工程バー（Issue #537）", () => {
+  // 月次の表示範囲は基準日（9/16）の前3日〜後31日。9/13(日) が1列目なので、9/N の列は N-12
+  async function openMonth(page: Page) {
+    await openSchedule(page)
+    await selectOption(page, "表示モード選択", "月次")
+    await expect(bar(page, 101)).toBeVisible()
+  }
+
+  test("オーダー別: バーはその日の列に描かれ、同じ工程は1行に並ぶ", async ({ page }) => {
+    await openMonth(page)
+    await screenshot(page, "month-order")
+
+    // 月〜木の内職（09:00〜17:00）はそれぞれの日の列。翌日の列にずれない
+    expect(await gridColumn(page, 101)).toBe("2 / 3")
+    expect(await gridColumn(page, 102)).toBe("3 / 4")
+    expect(await gridColumn(page, 103)).toBe("4 / 5")
+    expect(await gridColumn(page, 104)).toBe("5 / 6")
+    // 金曜の検査は金曜の列（土曜の列ではない）
+    expect(await gridColumn(page, 107)).toBe("6 / 7")
+
+    // 内職の4セグメントは1行。同じ工程名でも別の工程（ルーティング）は別の行
+    const row = await rowOf(page, 101)
+    for (const id of [102, 103, 104]) expect(await rowOf(page, id)).toBe(row)
+    expect(await rowOf(page, 301)).not.toBe(await rowOf(page, 303))
+
+    // ケース1: 月曜と木曜の飛び飛びのセグメント。間（火・水）を塗らない
+    expect(await gridColumn(page, 201)).toBe("2 / 3")
+    expect(await gridColumn(page, 202)).toBe("5 / 6")
+    expect(await rowOf(page, 201)).toBe(await rowOf(page, 202))
+  })
+
+  test("フラット表示でも同じ工程のセグメントを1行に並べる", async ({ page }) => {
+    await openMonth(page)
+    await selectOption(page, "グルーピングモード選択", "フラット表示")
+    await screenshot(page, "month-flat")
+
+    expect(await rowOf(page, 201)).toBe(await rowOf(page, 202))
+    expect(await rowOf(page, 301)).not.toBe(await rowOf(page, 303))
+  })
+
+  test("ツールチップ: セグメントの日付と工程全体の範囲を出す", async ({ page }) => {
+    await openMonth(page)
+
+    await bar(page, 102).hover()
+    const tooltip = page.getByRole("tooltip")
+    await expect(tooltip).toContainText("9/15 09:00 - 17:00")
+    await expect(tooltip).toContainText("この工程（表示中）: 9/14 09:00 - 9/17 09:10（4区間）")
+    await screenshot(page, "month-tooltip")
   })
 })

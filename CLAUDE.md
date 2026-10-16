@@ -281,6 +281,8 @@ cd backend && ruff check . && mypy .
 - **ガントチャート**: `frontend/src/gantt/` のカスタム実装を使用。`gantt-task-react` は削除済みのため参照しない
   - 生産スケジュールの週次表示は、同じ受注・工程（`process_routing_id`）のセグメントを `GanttTask.rowId` で1行に並べ、
     バーはセグメントごとに描く。先頭〜最後の1本にまとめると、隙間に詰めて飛び飛びになった工程の空き時間まで作業中に見える（Issue #535）
+  - 月次表示（オーダー別・フラット）も週次と同じく行をまとめる（Issue #537）。日次・設備グループ別は1セグメント1行のまま。均一グリッド（月次・日次）の開始列は
+    **切り捨て**（開始時刻を含む列）、終了列は切り上げ。切り上げにすると月次で 09:00 開始のバーが翌日の列に描かれて1日ずれる
   - 稼働時間スロットの終了列は `binarySearchFirstGe`（終了時刻ちょうどのスロットは塗らない）。`FirstGt` にすると 10:00 終了のバーが
     10:00 開始の後工程と1列重なる（#163 で一度 `FirstGt` にして #535 で戻した）。詳細は [docs/features/gantt-date-math.md](docs/features/gantt-date-math.md)
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
