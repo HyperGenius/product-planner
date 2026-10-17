@@ -120,7 +120,13 @@ function mockApi({
   return calls
 }
 
+/** 手動検索は折りたたみなので、先に開く */
+async function openSpecSearch() {
+  await userEvent.click(await screen.findByRole("button", { name: /仕様を指定して探す/ }))
+}
+
 async function search() {
+  await openSpecSearch()
   await userEvent.type(await screen.findByLabelText("直径 *"), "１０．０")
   await userEvent.type(screen.getByLabelText("長さ *"), "20")
   await userEvent.type(screen.getByLabelText("材質"), "SUS100")
@@ -191,10 +197,15 @@ describe("ProductMerge", () => {
     render(<ProductMerge />)
     const extract = await screen.findByRole("button", { name: "候補を抽出" })
     expect(calls.groups).toBe(0)
+    // 未抽出は「重複なし」と区別して案内し、② は選択前の案内を出す
+    expect(screen.getByText(/「候補を抽出」を押すと、重複している組が一覧に出ます/)).toBeInTheDocument()
+    expect(screen.queryByText("重複の候補はありません")).not.toBeInTheDocument()
+    expect(screen.getByText(/①の一覧から組を選ぶと、ここに統合の候補が出ます/)).toBeInTheDocument()
 
     await userEvent.click(extract)
 
     expect(await screen.findByText("2組")).toBeInTheDocument()
+    expect(screen.getByText(/統合できる組 → 件数の多い順/)).toBeInTheDocument()
     expect(calls.groups).toBe(1)
     expect(screen.getByText("接頭辞違いのみ")).toBeInTheDocument()
     expect(calls.candidates).toEqual([])
@@ -208,6 +219,7 @@ describe("ProductMerge", () => {
       "20",
       "SUS100",
     ])
+    await openSpecSearch()
     expect(screen.getByLabelText("直径 *")).toHaveValue("10")
 
     // 統合しても組は自動で抽出し直さず、実行済みの印を付ける
@@ -224,6 +236,25 @@ describe("ProductMerge", () => {
     await userEvent.click(screen.getByRole("button", { name: "候補を抽出" }))
     await waitFor(() => expect(calls.groups).toBe(2))
     await waitFor(() => expect(screen.queryByText("統合を実行済み")).not.toBeInTheDocument())
+  })
+
+  it("抽出した組を品名・仕様で絞り込める", async () => {
+    mockApi()
+
+    render(<ProductMerge />)
+    await userEvent.click(await screen.findByRole("button", { name: "候補を抽出" }))
+    await screen.findByText("2組")
+
+    await userEvent.type(screen.getByLabelText("組を絞り込む"), "ａ社")
+    expect(screen.getAllByRole("button", { name: /φ\d+ × \d+/ })).toHaveLength(2)
+
+    await userEvent.clear(screen.getByLabelText("組を絞り込む"))
+    await userEvent.type(screen.getByLabelText("組を絞り込む"), "SUS 100")
+    expect(screen.getAllByRole("button", { name: /φ\d+ × \d+/ })).toHaveLength(1)
+
+    await userEvent.clear(screen.getByLabelText("組を絞り込む"))
+    await userEvent.type(screen.getByLabelText("組を絞り込む"), "存在しない")
+    expect(screen.getByText("条件に一致する組がありません")).toBeInTheDocument()
   })
 
   it("正しさが同順位なら残す製品を初期選択しない", async () => {
