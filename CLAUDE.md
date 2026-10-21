@@ -175,6 +175,11 @@ cd backend && ruff check . && mypy .
   自動で付けるので、表の制約に同じ形の名前（例: `CONSTRAINT order_process_progress_completed_by_check`）を付けると
   `already exists` で失敗する。ローカル DB へ手で適用するときは `psql --single-transaction -v ON_ERROR_STOP=1` で流す
   （付けないと途中まで作られたテーブルが残る）
+- **ローカル DB のマイグレーション履歴**: 通常は `supabase migration up --local` で当てる。`psql` で手で流したら
+  `supabase migration repair --local --status applied <版>` で履歴（`supabase_migrations.schema_migrations`）にも記録する。
+  記録しないと、以降の `migration up` が「最後の版より前に未記録のファイルがある」と止まる。そこで `--include-all` を付けると
+  適用済みのものまで流し直して `already exists` で失敗するので、未記録の版は中身（列・テーブル・関数）が DB にあるかを1本ずつ確かめ、
+  適用済みだけを repair してから `--include-all` で残りを当てる（PR #545 の作業時に、手動適用済み13本・未適用2本が混在していた）
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。
