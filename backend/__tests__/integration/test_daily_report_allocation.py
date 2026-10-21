@@ -260,6 +260,61 @@ class TestRecomputeAllocation:
             .execute()
         )
         assert run == [{"progress_count": 8, "unallocated_count": 1}]
+        # 照合状況（#542）: 加工月ごとの照合済み・未照合の数量
+        coverage = _rows(
+            admin_db.table("daily_report_allocation_runs")
+            .select("coverage")
+            .eq("tenant_id", own["id"])
+            .execute()
+        )[0]["coverage"]
+        assert coverage == [
+            {
+                "work_month": "2026-08-01",
+                "matched_rows": 1,
+                "matched_qty": 40,
+                "unmatched_rows": 0,
+                "unmatched_qty": 0,
+            },
+            {
+                "work_month": "2026-09-01",
+                "matched_rows": 2,
+                "matched_qty": 175,
+                "unmatched_rows": 1,
+                "unmatched_qty": 20,
+            },
+        ]
+
+    def test_process_missing_from_routing_is_no_routing_process(
+        self, admin_db, tenants
+    ):
+        own = tenants["own"]
+        # 別の製品の工程ルートにだけある工程名（マスタの工程名としては照合できる）
+        other_product_id = _rows(
+            admin_db.table("products")
+            .insert({"tenant_id": own["id"], "name": "ブラケット", "code": None})
+            .execute()
+        )[0]["id"]
+        admin_db.table("process_routings").insert(
+            {
+                "tenant_id": own["id"],
+                "product_id": other_product_id,
+                "sequence_order": 1,
+                "process_name": "溶接",
+                "unit_time_seconds": 1,
+            }
+        ).execute()
+        _replace_entries(
+            admin_db,
+            own,
+            [["2026.09.10", "サンプル工業", "ピン", "溶接", 10, 0]],
+            "2026-09-12T18:00:00+09:00",
+        )
+
+        recompute_tenant_allocation(admin_db, own["id"])
+
+        assert _unallocated(admin_db, own) == [
+            ("溶接", "2026-09-10", 10, "no_routing_process")
+        ]
 
     def test_recomputation_is_idempotent_and_reflects_changes(
         self, admin_db, auth_user_id, tenants
@@ -528,3 +583,40 @@ class TestProgressApi:
             (u["reason"], u["qty"], u["sheet_name"], u["process_raw"])
             for u in res.json()
         ] == [("before_order_date", 40, SHEET, "プレス")]
+
+        # 照合状況（#542）
+        res = client.get("/daily-reports/coverage", headers=headers)
+        assert res.status_code == 200
+        body = res.json()
+        assert body["summary"] == {
+            "total_qty": 235,
+            "allocated_qty": 175,
+            "unallocated_qty": 40,
+            "unmatched_rows": 1,
+            "unmatched_qty": 20,
+            "unallocated": [
+                {"category": "before_order_date", "row_count": 1, "qty": 40}
+            ],
+        }
+        assert [
+            (
+                g["product_name"],
+                g["process_name"],
+                g["category"],
+                g["qty"],
+                g["product_has_routings"],
+            )
+            for g in body["groups"]
+        ] == [("ピン", "プレス", "before_order_date", 40, True)]
+
+        res = client.get(
+            "/daily-reports/unallocated-actuals",
+            params={
+                "product_id": own["product_id"],
+                "process_name": "プレス",
+                "reason": "exceeds_order_qty",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 200
+        assert res.json() == []

@@ -1,5 +1,6 @@
-"""日報の実績による受注の進捗 API のテスト (Issue #490)。"""
+"""日報の実績による受注の進捗・照合状況 API のテスト (Issue #490 / #542)。"""
 
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -110,7 +111,120 @@ class TestDailyReportProgressRouter:
         assert response.json() == [
             {k: v for k, v in item.items() if k != "computed_at"}
         ]
-        fetch.assert_called_once_with(mock_client, TENANT)
+        fetch.assert_called_once_with(
+            mock_client,
+            TENANT,
+            product_id=None,
+            process_name=None,
+            reason=None,
+            since=None,
+            limit=None,
+        )
+
+    def test_unallocated_actuals_filters(self, mock_client):
+        with (
+            patch(
+                f"{DAILY_REPORTS_ROUTER}.fetch_unallocated_actuals", return_value=[]
+            ) as fetch,
+            patch(
+                f"{DAILY_REPORTS_ROUTER}.period_start", return_value=date(2026, 8, 1)
+            ) as start,
+        ):
+            response = client.get(
+                "/daily-reports/unallocated-actuals",
+                params={
+                    "product_id": 100,
+                    "process_name": "プレス",
+                    "reason": "no_routing_process",
+                    "months": 3,
+                    "limit": 100,
+                },
+            )
+
+        assert response.status_code == 200
+        assert start.call_args.args[1] == 3
+        fetch.assert_called_once_with(
+            mock_client,
+            TENANT,
+            product_id=100,
+            process_name="プレス",
+            reason="no_routing_process",
+            since=date(2026, 8, 1),
+            limit=100,
+        )
+
+    @pytest.mark.parametrize(
+        "query", ["reason=unknown", "months=0", "months=37", "limit=1001"]
+    )
+    def test_unallocated_actuals_rejects_invalid_filters(self, query):
+        response = client.get(f"/daily-reports/unallocated-actuals?{query}")
+        assert response.status_code == 422
+
+    # --- GET /daily-reports/coverage (Issue #542) --------------------------
+
+    def test_coverage(self, mock_client):
+        coverage = {
+            "computed_at": COMPUTED_AT,
+            "since": date(2026, 8, 1),
+            "summary": {
+                "total_qty": 100,
+                "allocated_qty": 60,
+                "unallocated_qty": 30,
+                "unmatched_rows": 1,
+                "unmatched_qty": 10,
+                "unallocated": [
+                    {"category": "no_routing_process", "row_count": 2, "qty": 30}
+                ],
+            },
+            "groups": [
+                {
+                    "product_id": 100,
+                    "product_name": "ピン",
+                    "product_code": None,
+                    "product_has_routings": False,
+                    "process_name": "溶接",
+                    "reason": "no_routing_process",
+                    "category": "no_routing_process",
+                    "row_count": 2,
+                    "qty": 30,
+                    "first_work_date": "2026-09-01",
+                    "last_work_date": "2026-09-03",
+                    "customer_names": ["顧客A"],
+                }
+            ],
+        }
+        with patch(
+            f"{DAILY_REPORTS_ROUTER}.get_coverage", return_value=coverage
+        ) as get:
+            response = client.get("/daily-reports/coverage?months=3")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["computed_at"] == "2026-10-01T03:00:00Z"
+        assert body["since"] == "2026-08-01"
+        assert body["summary"] == coverage["summary"]
+        assert body["groups"] == coverage["groups"]
+        get.assert_called_once_with(mock_client, TENANT, 3)
+
+    def test_coverage_without_months_returns_all_periods(self, mock_client):
+        with patch(f"{DAILY_REPORTS_ROUTER}.get_coverage") as get:
+            get.return_value = {
+                "computed_at": None,
+                "since": None,
+                "summary": {
+                    "total_qty": 0,
+                    "allocated_qty": 0,
+                    "unallocated_qty": 0,
+                    "unmatched_rows": 0,
+                    "unmatched_qty": 0,
+                    "unallocated": [],
+                },
+                "groups": [],
+            }
+            response = client.get("/daily-reports/coverage")
+
+        assert response.status_code == 200
+        get.assert_called_once_with(mock_client, TENANT, None)
 
     # --- GET /orders/{order_id}/progress -----------------------------------
 

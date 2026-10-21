@@ -197,18 +197,40 @@ class TestAllocation:
             (3, "no_candidate_order")
         ]
 
-    def test_no_candidate_when_product_has_no_order_or_no_such_process(self):
+    def test_no_candidate_when_product_has_no_order(self):
+        orders = [_order(1, 100, date(2026, 10, 10))]
+        routings = [
+            *ROUTINGS,
+            RoutingRef(
+                id=21, product_id=OTHER_PRODUCT, sequence_order=1, process_name="プレス"
+            ),
+        ]
+        entries = [_entry(1, 10, "プレス", product_id=OTHER_PRODUCT)]
+
+        result = allocate_actuals(entries, orders, routings)
+
+        assert [(u.entry_id, u.process_name, u.reason) for u in result.unallocated] == [
+            (1, "プレス", "no_candidate_order"),
+        ]
+
+    def test_no_routing_process_takes_precedence_over_no_candidate_order(self):
+        # 工程ルートに無い工程は、受注の有無にかかわらず no_routing_process（Issue #542）
         orders = [_order(1, 100, date(2026, 10, 10))]
         entries = [
-            _entry(1, 10, "プレス", product_id=OTHER_PRODUCT),
-            _entry(2, 10, "溶接"),
+            # 受注はあるが工程ルートに「溶接」が無い
+            _entry(1, 10, "溶接"),
+            # 工程ルートが1件も無い製品（受注も無い）
+            _entry(2, 10, "プレス", product_id=OTHER_PRODUCT),
+            # 加工日が無くても工程ルートの有無を先に見る
+            _entry(3, 10, "溶接", None),
         ]
 
         result = allocate_actuals(entries, orders, ROUTINGS)
 
         assert [(u.entry_id, u.process_name, u.reason) for u in result.unallocated] == [
-            (1, "プレス", "no_candidate_order"),
-            (2, "溶接", "no_candidate_order"),
+            (1, "溶接", "no_routing_process"),
+            (2, "プレス", "no_routing_process"),
+            (3, "溶接", "no_routing_process"),
         ]
 
     def test_actuals_before_order_date_are_not_allocated(self):

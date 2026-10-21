@@ -166,10 +166,20 @@ cd backend && ruff check . && mypy .
     セグメントしか取得しないので、フロントの手元のセグメントで求めると範囲外へ続く工程を誤って遅れにする。進捗の行が無い工程
     （割り付け対象外の受注・未計算のテナント）は遅れにしない。表示規則は `lib/daily-report-progress-utils.ts` に集約し、
     `src/gantt` には汎用の `GanttTask.progress` / `isDelayed` だけを足す（ドメイン知識を入れない）
+  - **照合状況の画面（Issue #542）**: 割り付け済み・未割当・未照合の内訳は、割り付けの再計算で加工月ごとに集計して
+    `daily_report_allocation_runs.coverage` に**未割当と同じ RPC で保存**し、参照時に明細を照合し直さない（辞書の変更が先に反映されて
+    未割当と数字が合わなくなる）。未割当の reason は工程ルートに無い工程（`no_routing_process`）を受注の有無より先に判定する。
+    `no_candidate_order` の「承認前の受注のみ／出荷済みの受注のみ／受注なし」は保存せず読み出し時に `orders` から分類する。
+    加工日の無い明細は期間の絞り込みにかかわらず含める
 - **マイグレーションの CHECK 制約名**: 列の CHECK（`status text CHECK (...)`）には Postgres が `<table>_<column>_check` という名前を
   自動で付けるので、表の制約に同じ形の名前（例: `CONSTRAINT order_process_progress_completed_by_check`）を付けると
   `already exists` で失敗する。ローカル DB へ手で適用するときは `psql --single-transaction -v ON_ERROR_STOP=1` で流す
   （付けないと途中まで作られたテーブルが残る）
+- **ローカル DB のマイグレーション履歴**: 通常は `supabase migration up --local` で当てる。`psql` で手で流したら
+  `supabase migration repair --local --status applied <版>` で履歴（`supabase_migrations.schema_migrations`）にも記録する。
+  記録しないと、以降の `migration up` が「最後の版より前に未記録のファイルがある」と止まる。そこで `--include-all` を付けると
+  適用済みのものまで流し直して `already exists` で失敗するので、未記録の版は中身（列・テーブル・関数）が DB にあるかを1本ずつ確かめ、
+  適用済みだけを repair してから `--include-all` で残りを当てる（PR #545 の作業時に、手動適用済み13本・未適用2本が混在していた）
 - **Edge Function でリクエストを中継するとき**（`supabase/functions/agent-gateway/`、Issue #468）: エージェントは
   `agent-gateway` 経由で Render の `/api/agent/*` を叩く。独自トークンを `Authorization` に載せる関数は
   `verify_jwt = false` が必要だが、Terraform provider に属性が無いので CLI（`--no-verify-jwt`）でデプロイする。

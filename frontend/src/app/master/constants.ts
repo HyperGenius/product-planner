@@ -1,4 +1,4 @@
-import { Calendar, Cpu, FileSpreadsheet, Package, Users } from "lucide-react"
+import { Calendar, ChartPie, Cpu, FileSpreadsheet, Package, Users } from "lucide-react"
 
 export const masterItems = [
   {
@@ -45,5 +45,14 @@ export const masterItems = [
     accent: "border-t-violet-500",
     iconBg: "bg-violet-50",
     iconColor: "text-violet-600",
+  },
+  {
+    title: "日報の照合状況",
+    href: "/master/daily-report-coverage",
+    icon: ChartPie,
+    description: "日報の実績と受注・工程のつながり",
+    accent: "border-t-amber-500",
+    iconBg: "bg-amber-50",
+    iconColor: "text-amber-600",
   },
 ]

@@ -21,6 +21,7 @@ from app.services.daily_report_allocator import (
     RoutingRef,
     allocate_actuals,
 )
+from app.services.daily_report_coverage import UnmatchedEntry, summarize_coverage
 from app.services.daily_report_name_matcher import DailyReportNameMatcher
 from app.services.daily_report_name_matching_service import (
     fetch_all_rows,
@@ -62,11 +63,11 @@ def _to_jst_date(value: Any) -> date | None:
 
 def load_actual_entries(
     db: Client, tenant_id: str, matcher: DailyReportNameMatcher
-) -> tuple[list[ActualEntry], int]:
+) -> tuple[list[ActualEntry], list[UnmatchedEntry]]:
     """良品数が1以上の明細を照合し、製品と工程が照合できたものを返す。
 
-    戻り値の2つ目は製品か工程が照合できず割り付けに使えなかった明細の数
-    （未照合キュー #489 で解消するもの。未割当には含めない）。
+    戻り値の2つ目は製品か工程が照合できず割り付けに使えなかった明細
+    （未照合キュー #489 で解消するもの。未割当には含めず、照合状況の集計 #542 にだけ使う）。
     """
     rows = fetch_all_rows(
         lambda: (
@@ -78,11 +79,16 @@ def load_actual_entries(
         )
     )
     entries: list[ActualEntry] = []
-    unmatched = 0
+    unmatched: list[UnmatchedEntry] = []
     for row in rows:
         match = matcher.match_entry(row)
         if match.product_id is None or not match.process_names:
-            unmatched += 1
+            unmatched.append(
+                UnmatchedEntry(
+                    work_date=_parse_date(row.get("work_date")),
+                    good_qty=int(row["good_qty"]),
+                )
+            )
             continue
         entries.append(
             ActualEntry(
@@ -193,6 +199,8 @@ def recompute_tenant_allocation(
 
     result = allocate_actuals(entries, orders, routings)
     progress, unallocated = _rpc_payload(result)
+    # 照合状況の画面（#542）用に、照合済み・未照合の数量を加工月ごとに残す
+    coverage = [m.to_json() for m in summarize_coverage(entries, unmatched)]
     rpc_result = db.rpc(
         "replace_daily_report_allocation",
         {
@@ -200,12 +208,13 @@ def recompute_tenant_allocation(
             "p_computed_at": computed_at.isoformat(),
             "p_progress": progress,
             "p_unallocated": unallocated,
+            "p_coverage": coverage,
         },
     ).execute()
     return {
         "status": rpc_result.data,
         "entries": len(entries),
-        "unmatched_entries": unmatched,
+        "unmatched_entries": len(unmatched),
         "progress": len(progress),
         "unallocated": len(unallocated),
     }
@@ -363,22 +372,44 @@ def fetch_last_computed_at(db: Client, tenant_id: str) -> str | None:
 _ENTRY_COLUMNS = ("sheet_name", "row_no", "customer_raw", "product_raw", "process_raw")
 
 
-def fetch_unallocated_actuals(db: Client, tenant_id: str) -> list[dict[str, Any]]:
-    """未割当の実績を加工日の新しい順に返す（明細の日報上の表記を添える）。"""
-    rows = fetch_all_rows(
-        lambda: (
+def fetch_unallocated_actuals(
+    db: Client,
+    tenant_id: str,
+    *,
+    product_id: int | None = None,
+    process_name: str | None = None,
+    reason: str | None = None,
+    since: date | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """未割当の実績を加工日の新しい順に返す（明細の日報上の表記を添える）。
+
+    照合状況の画面（#542）で、まとめた1行（製品・工程名・理由）の元の日報の行を出すときは
+    絞り込みを指定する。`since` より前の加工日は除く（加工日の無い行は常に含める）。
+    """
+
+    def build_query():
+        query = (
             db.table(SupabaseTableName.DAILY_REPORT_UNALLOCATED_ACTUALS.value)
             .select(
                 "id, entry_id, product_id, customer_id, process_name, work_date, qty, "
                 f"reason, computed_at, daily_report_entries({', '.join(_ENTRY_COLUMNS)})"
             )
             .eq("tenant_id", tenant_id)
-            .order("id")
         )
-    )
+        if product_id is not None:
+            query = query.eq("product_id", product_id)
+        if process_name is not None:
+            query = query.eq("process_name", process_name)
+        if reason is not None:
+            query = query.eq("reason", reason)
+        if since is not None:
+            query = query.or_(f"work_date.gte.{since.isoformat()},work_date.is.null")
+        return query.order("id")
+
     items: list[dict[str, Any]] = []
-    for row in rows:
+    for row in fetch_all_rows(build_query):
         entry = row.pop("daily_report_entries", None) or {}
         items.append({**row, **{k: entry.get(k) for k in _ENTRY_COLUMNS}})
     items.sort(key=lambda i: i["work_date"] or "", reverse=True)
-    return items
+    return items[:limit] if limit is not None else items

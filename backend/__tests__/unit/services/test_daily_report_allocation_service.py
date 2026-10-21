@@ -41,6 +41,16 @@ class _FakeQuery:
         self._rows = [r for r in self._rows if r.get(column) is not None]
         return self
 
+    def or_(self, filters):
+        # `work_date.gte.<日付>,work_date.is.null` のみ使う
+        gte, is_null = filters.split(",")
+        column, op, value = gte.split(".", 2)
+        assert (op, is_null) == ("gte", f"{column}.is.null")
+        self._rows = [
+            r for r in self._rows if r.get(column) is None or r[column] >= value
+        ]
+        return self
+
     def order(self, *_args, **_kwargs):
         return self
 
@@ -255,6 +265,16 @@ class TestRecomputeTenantAllocation:
         # 「カシメ、仕上げ加工」は辞書が無いので照合できず、割り付けに使わない
         assert progress[(1, 12)]["status"] == "not_started"
         assert params["p_unallocated"] == []
+        # 照合状況（#542）: 照合済み 120、照合できない「カシメ、仕上げ加工」30 と「謎の部品」10
+        assert params["p_coverage"] == [
+            {
+                "work_month": "2026-09-01",
+                "matched_rows": 1,
+                "matched_qty": 120,
+                "unmatched_rows": 2,
+                "unmatched_qty": 40,
+            }
+        ]
         assert summary == {
             "status": "replaced",
             "entries": 1,
@@ -539,6 +559,48 @@ class TestFetch:
         assert result[1]["row_no"] == 5
         assert result[0]["product_raw"] is None
         assert "daily_report_entries" not in result[0]
+
+    def test_fetch_unallocated_actuals_filters_group_and_period(self):
+        def row(row_id, work_date, **extra):
+            return {
+                "tenant_id": TENANT,
+                "id": row_id,
+                "product_id": 100,
+                "process_name": "プレス",
+                "reason": "no_candidate_order",
+                "work_date": work_date,
+                "daily_report_entries": None,
+                **extra,
+            }
+
+        rows = [
+            row(1, "2026-09-01"),
+            row(2, "2026-08-31"),
+            row(3, None),
+            row(4, "2026-09-05"),
+            row(5, "2026-09-02", product_id=200),
+            row(6, "2026-09-02", process_name="カシメ"),
+            row(7, "2026-09-02", reason="before_order_date"),
+        ]
+        db = _fake_db({"daily_report_unallocated_actuals": rows})
+
+        result = service.fetch_unallocated_actuals(
+            db,
+            TENANT,
+            product_id=100,
+            process_name="プレス",
+            reason="no_candidate_order",
+            since=date(2026, 9, 1),
+        )
+
+        # 加工日の新しい順、加工日の無い行は期間にかかわらず含めて最後
+        assert [r["id"] for r in result] == [4, 1, 3]
+        assert [
+            r["id"]
+            for r in service.fetch_unallocated_actuals(
+                db, TENANT, product_id=100, limit=2
+            )
+        ] == [4, 6]
 
     def test_fetch_last_computed_at(self):
         db = _fake_db(

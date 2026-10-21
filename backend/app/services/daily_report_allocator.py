@@ -13,7 +13,8 @@ DB の読み書きは `daily_report_allocation_service`。
 * 加工日が受注日（`order_date` の JST 暦日）より前の実績はその受注に充当しない。在庫の先行生産や、
   出荷済みで候補から外れた過去の受注の実績が、後から入った受注を完了に見せるのを避けるため
   （充当できなかった分は未割当 `before_order_date` として残り、見込み生産の発見に使える）
-* どの受注にも充当できなかった数量は未割当として返す
+* どの受注にも充当できなかった数量は未割当として返す。製品の工程ルートにその工程名が無い実績は、
+  受注の有無より先に `no_routing_process` にする（工程の棚卸しで聞くことが受注の有無と違うため。Issue #542）
 
 進捗の状態（受注×工程）:
 * completed: 割り付けた良品数が受注数量以上、または後の工程（`sequence_order` が大きい工程）に
@@ -30,7 +31,11 @@ from typing import Literal
 ProgressStatus = Literal["not_started", "in_progress", "completed"]
 CompletedBy = Literal["quantity", "later_process"]
 UnallocatedReason = Literal[
-    "no_candidate_order", "before_order_date", "exceeds_order_qty", "no_work_date"
+    "no_routing_process",
+    "no_candidate_order",
+    "before_order_date",
+    "exceeds_order_qty",
+    "no_work_date",
 ]
 
 
@@ -180,12 +185,14 @@ def _allocate_one(
 ) -> tuple[UnallocatedReason | None, int]:
     """明細1行の1工程分を充当する。充当しきれなければ (理由, 残数) を返す。"""
     routing = routing_index.get((entry.product_id, process_name))
+    if routing is None:
+        return "no_routing_process", entry.good_qty
     candidates = [
         order
         for order in orders_by_product.get(entry.product_id, [])
         if entry.customer_id is None or order.customer_id == entry.customer_id
     ]
-    if routing is None or not candidates:
+    if not candidates:
         return "no_candidate_order", entry.good_qty
 
     work_date = entry.work_date
