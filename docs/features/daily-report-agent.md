@@ -9,7 +9,8 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 「[日報の名寄せと別名辞書](#日報の名寄せと別名辞書issue-488)」に、未照合キューの画面（#489）は
 「[未照合キューの画面](#未照合キューの画面issue-489)」に、受注への割り付けと進捗（#490）は
 「[受注への割り付けと進捗の算出](#受注への割り付けと進捗の算出issue-490)」に、ガントチャート・受注詳細への進捗表示（#491）は
-「[ガントチャート・受注詳細への進捗表示](#ガントチャート受注詳細への進捗表示issue-491)」に記載する。
+「[ガントチャート・受注詳細への進捗表示](#ガントチャート受注詳細への進捗表示issue-491)」に、照合状況の画面（#542）は
+「[日報の照合状況の画面](#日報の照合状況の画面issue-542)」に記載する。
 
 ## 実装の進め方（サブIssue）
 
@@ -25,6 +26,7 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 | #489 | 未照合キューの画面（Epic #485 の 4/6） | 本ドキュメントに記載 |
 | #490 | 受注への割り付けと進捗の算出（Epic #485 の 5/6） | 本ドキュメントに記載 |
 | #491 | ガントチャート・受注詳細への進捗表示（Epic #485 の 6/6） | 本ドキュメントに記載 |
+| #542 | 日報の照合状況の画面（照合状況 1/2。2/2 の訪問時のヒアリング入力は #543） | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -530,7 +532,8 @@ DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings
 
 | reason | 意味 |
 |---|---|
-| `no_candidate_order` | 同じ製品（顧客が照合できていれば同じ顧客）の確定済み・生産中の受注が無い、またはその製品の工程ルートにその工程名が無い |
+| `no_routing_process` | その製品の工程ルートにその工程名が無い（工程ルートが1件も無い製品を含む）。受注の有無より先に判定する（#542 で `no_candidate_order` から分離） |
+| `no_candidate_order` | 同じ製品（顧客が照合できていれば同じ顧客）の確定済み・生産中の受注が無い |
 | `before_order_date` | 候補の受注はあるが、加工日がどの候補の受注日よりも前 |
 | `exceeds_order_qty` | 候補の受注の数量をすべて満たしてもあふれた（あふれた数量だけを記録） |
 | `no_work_date` | 加工日が読めない明細（受注日と比べられないので充当しない） |
@@ -540,7 +543,7 @@ DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings
 - 差分更新せず、**テナント単位で毎回全量を再計算して丸ごと置き換える**（Epic の方針）。`recompute_tenant_allocation()` が
   明細（`good_qty > 0`）・候補の受注・工程ルートを `fetch_all_rows()` で読み、明細を `load_matcher().match_entry()` で照合してから
   `allocate_actuals()` に渡す。辞書の修正・受注の追加／ステータス変更・明細の置き換え・マスタの変更が、次の再計算でそのまま反映される
-- 置き換えは RPC `replace_daily_report_allocation(p_tenant_id, p_computed_at, p_progress, p_unallocated)` で1トランザクション
+- 置き換えは RPC `replace_daily_report_allocation(p_tenant_id, p_computed_at, p_progress, p_unallocated, p_coverage)` で1トランザクション
   （途中で失敗しても進捗が空にならない）。テナントで advisory lock を取り、`p_computed_at`（読み込み開始時刻）が載っている結果より
   古ければ `'stale'` を返して置き換えない（cron の実行が重なったとき、後から終わった古い計算で上書きしない）
 - 計算に使ったデータを読んだ後で受注・工程・明細が削除されることがあるので、RPC は**このテナントに現存する行に結合して INSERT** する
@@ -564,7 +567,7 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 |---|---|
 | `order_process_progress` | PK (`order_id`, `process_routing_id`)。`good_qty` / `first_actual_date` / `last_actual_date` / `status`（`not_started` / `in_progress` / `completed`）/ `completed_by`（`quantity` / `later_process`、`completed` のときだけ）/ `computed_at`。受注・工程の削除で消える（CASCADE） |
 | `daily_report_unallocated_actuals` | 明細1行×マスタの工程名ごと。`entry_id`（明細の置き換えで消える）/ `product_id` / `customer_id` / `process_name` / `work_date` / `qty` / `reason` / `computed_at` |
-| `daily_report_allocation_runs` | PK `tenant_id`。最終計算の `computed_at` と件数（`progress_count` / `unallocated_count`）。古い計算での上書き防止と、API の「いつ時点の進捗か」の表示に使う |
+| `daily_report_allocation_runs` | PK `tenant_id`。最終計算の `computed_at` と件数（`progress_count` / `unallocated_count`）。古い計算での上書き防止と、API の「いつ時点の進捗か」の表示に使う。`coverage`（#542）は加工月ごとの照合済み・未照合の数量 |
 
 ### API
 
@@ -574,7 +577,8 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 |---|---|
 | `GET /orders/{order_id}/progress`（`routers/transaction/orders/progress.py`） | `{order_id, computed_at, processes: [...]}`。`processes` は工程順で、各行は `process_routing_id` / `sequence_order` / `process_name` / `good_qty` / `order_quantity` / `first_actual_date` / `last_actual_date` / `status` / `completed_by` / `planned_end_datetime`（#491 で `order_quantity`・`planned_end_datetime` を追加）。割り付けの対象外（確定済み・生産中以外）の受注は空配列、他テナント・存在しない受注は 404。`computed_at` は一度も計算していなければ `null` |
 | `GET /daily-reports/order-progress?order_id=1&order_id=2`（`routers/daily_reports/progress.py`） | ガントチャート向けに複数受注をまとめて返す `{computed_at, items: [...]}`（`items` の各行は上と同じ＋`order_id`）。`order_id` 省略時は全件、指定は500件まで |
-| `GET /daily-reports/unallocated-actuals` | 未割当の実績を加工日の新しい順に。日報上の位置と表記（`sheet_name` / `row_no` / `customer_raw` / `product_raw` / `process_raw`）を添える |
+| `GET /daily-reports/unallocated-actuals` | 未割当の実績を加工日の新しい順に。日報上の位置と表記（`sheet_name` / `row_no` / `customer_raw` / `product_raw` / `process_raw`）を添える。#542 で絞り込み（`product_id` / `process_name` / `reason` / `months` / `limit`）を追加 |
+| `GET /daily-reports/coverage?months=3` | 照合状況のサマリと未割当のまとめ（#542。[日報の照合状況の画面](#日報の照合状況の画面issue-542)） |
 
 ## ガントチャート・受注詳細への進捗表示（Issue #491）
 
@@ -613,6 +617,56 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 
 - 確定済み・生産中の受注（割り付けの対象）でだけ「工程の進捗」カードを出す。`GET /orders/{order_id}/progress` で取得し、
   工程・実績数量・状態（遅れのときは「遅れ」バッジ）・実績日を工程順に表示する
+
+## 日報の照合状況の画面（Issue #542）
+
+日報の実績が受注の工程にどこまでつながっているか（割り付け済み・未割当・未照合）と、つながっていない実績を
+(製品, 工程名, 理由) ごとに数量の多い順で出す。現場ヒアリングで聞く項目の一覧として使う（回答の記録・印刷は #543）。
+画面は `/master/daily-report-coverage`（`components/daily-report-coverage/`）。
+
+### 照合状況の数え方（`services/daily_report_coverage.py`）
+
+- 数量の単位は「明細×マスタの工程名」（未割当と同じ）。1行が2工程に対応する明細は2回数える。照合できなかった明細は工程が
+  決まらないので1行1回
+- 割り付けの再計算（`recompute_tenant_allocation()`）のときに、照合済み・未照合の数量を**加工日の月ごと**に集計して
+  `daily_report_allocation_runs.coverage` に保存する（`summarize_coverage()`）。未割当と同じ RPC・同じトランザクションで置き換えるので、
+  サマリの数字は未割当と同じ時点になる。リクエストのたびに明細を照合し直さない（辞書の変更が先に反映されて内訳が合わなくなるため）
+- 割り付け済みの数量は保存せず「照合済み − 未割当」で求める
+- 期間は直近 N か月（今月を含む、JST）で、`period_start()` が月初を返す。**加工日の無い明細・未割当は期間にかかわらず含める**
+  （`in_period()`。期間で絞り込めず、「加工日が空欄」はヒアリング項目として常に出したいため）
+
+### 未割当の分類（画面）
+
+`no_candidate_order` は、その製品の割り付けの候補にならない受注の有無で3つに分ける（読み出し時に `orders` から判定。保存はしない）。
+
+| 分類 | 条件 | 要確認 |
+|---|---|---|
+| `no_routing_process` | reason のまま | ○ |
+| `unapproved_order` | 下書き・承認待ちの受注がある（出荷済みより優先） | ○ |
+| `closed_order_only` | 出荷済み・完了の受注だけがある（過去の受注の実績の可能性が高い） | × |
+| `no_order` | 上記の受注も無い（見込み生産・登録漏れ） | ○ |
+| `before_order_date` / `exceeds_order_qty` / `no_work_date` | reason のまま | ○ |
+
+- 受注の判定は製品単位（顧客で絞らない）。取消は数えない
+- 一覧の既定の絞り込みは「要確認」（`closed_order_only` を除く）。ラベルと現場への問いかけは `lib/daily-report-coverage-utils.ts` の `CATEGORY_META`
+
+### API（`routers/daily_reports/progress.py`、参照のみ・ユーザー JWT）
+
+- `GET /daily-reports/coverage?months=3`（`months` は 1〜36、省略ですべての期間）:
+  `{computed_at, since, summary: {total_qty, allocated_qty, unallocated_qty, unmatched_rows, unmatched_qty, unallocated: [{category, row_count, qty}]}, groups: [...]}`。
+  `groups` は (製品, 工程名, 理由) ごとに `category` / `row_count` / `qty` / 加工日の範囲 / 顧客名 / 製品名・図番 / `product_has_routings`
+- まとめた1行の元の日報の行は `GET /daily-reports/unallocated-actuals?product_id=&process_name=&reason=&months=&limit=100`
+
+### 画面
+
+- サマリ: 割り付けできた割合（数量）と、割り付け済み・未割当・未照合の帯グラフ。未照合は名寄せ画面（#489）へのリンク。
+  未割当の内訳を押すと一覧がその分類に絞り込まれる
+- 工程ルートが無い製品: `no_routing_process` のうち `product_has_routings=false` を製品ごとに集める（`productsWithoutRoutings()`）。
+  「工程を登録」で製品マスタの工程管理ダイアログ（`product-routings-dialog.tsx`）を開く。ダイアログは閉じている間に設備グループ等を
+  取得しないよう、開くときだけ描画する
+- 割り付けできなかった実績: 数量の多い順に50件ずつ。行を開くと元の日報の行（新しい順に最大100行）を出す
+- 名寄せ・工程の変更は次の cron（10〜15分ごと）で反映される（#490 の方針どおり、画面から再計算しない。
+  訪問時にその場で反映させる「今すぐ再計算」は画面の確認後に検討する）
 
 ## テスト
 
@@ -666,6 +720,12 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
   Frontend（Vitest + MSW）: `lib/daily-report-progress-utils.test.ts`（進捗率・遅れ・ラベル・日付の整形）、
   `hooks/use-daily-report-progress.test.ts`（1リクエストへのまとめ・500件超の分割）、`gantt/components/task-bar.test.tsx`（塗り・遅れの強調）、
   `components/schedule/gantt-chart.test.tsx`（進捗の結合・週次の集約バー・ツールチップ）、`components/orders/order-process-progress.test.tsx`
+- #542: `backend/__tests__/unit/services/test_daily_report_coverage.py`（月ごとの集計・期間・分類・まとめ・サマリ）、
+  `.../test_daily_report_coverage_service.py`（期間の絞り込み・加工日なしを含める・他テナントを読まない）、
+  `test_daily_report_allocator.py` / `test_daily_report_allocation_service.py`（`no_routing_process`・`p_coverage`・未割当の絞り込み）、
+  API テスト（`/coverage`・未割当の絞り込みと 422）、integration（`coverage` の保存・`no_routing_process`・ユーザー JWT での `/coverage`）。
+  Frontend: `lib/daily-report-coverage-utils.test.ts`、`components/daily-report-coverage/daily-report-coverage.test.tsx`
+  （サマリ・要確認の絞り込み・内訳からの絞り込み・元の行のクエリ・期間・工程管理を開く・未計算）
 
 ## スコープ外（PoC ではやらない）
 

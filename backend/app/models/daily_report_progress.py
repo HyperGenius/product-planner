@@ -8,7 +8,11 @@ from pydantic import BaseModel
 ProgressStatus = Literal["not_started", "in_progress", "completed"]
 CompletedBy = Literal["quantity", "later_process"]
 UnallocatedReason = Literal[
-    "no_candidate_order", "before_order_date", "exceeds_order_qty", "no_work_date"
+    "no_routing_process",
+    "no_candidate_order",
+    "before_order_date",
+    "exceeds_order_qty",
+    "no_work_date",
 ]
 
 
@@ -59,3 +63,64 @@ class UnallocatedActualResponse(BaseModel):
     customer_raw: str | None
     product_raw: str | None
     process_raw: str | None
+
+
+# ---------------------------------------------------------------------------
+# 日報の照合状況（Issue #542）
+# ---------------------------------------------------------------------------
+
+# 画面での未割当の分類。no_candidate_order は、その製品の候補にならない受注の有無で
+# unapproved_order（下書き・承認待ちあり）/ closed_order_only（出荷済み・完了だけ）/ no_order に分ける
+UnallocatedCategory = Literal[
+    "no_routing_process",
+    "unapproved_order",
+    "closed_order_only",
+    "no_order",
+    "before_order_date",
+    "exceeds_order_qty",
+    "no_work_date",
+]
+
+
+class UnallocatedCategoryTotal(BaseModel):
+    category: UnallocatedCategory
+    row_count: int
+    qty: int
+
+
+class CoverageSummaryResponse(BaseModel):
+    # 数量の単位は「明細×マスタの工程名」（1行が2工程に対応する明細は2回数える）。未照合は1行1回
+    total_qty: int
+    allocated_qty: int
+    unallocated_qty: int
+    unmatched_rows: int
+    unmatched_qty: int
+    # 分類ごとの未割当（数量の多い順）
+    unallocated: list[UnallocatedCategoryTotal]
+
+
+class UnallocatedGroupResponse(BaseModel):
+    product_id: int
+    product_name: str | None
+    product_code: str | None
+    # 製品に工程ルートが1件でもあるか（無ければ「工程ルートが無い製品」）
+    product_has_routings: bool
+    # マスタの工程名（別名辞書で解決した後の名前）
+    process_name: str
+    reason: UnallocatedReason
+    category: UnallocatedCategory
+    row_count: int
+    qty: int
+    first_work_date: date | None
+    last_work_date: date | None
+    customer_names: list[str]
+
+
+class DailyReportCoverageResponse(BaseModel):
+    # 割り付けの最終計算日時。一度も計算していなければ None
+    computed_at: datetime | None
+    # 加工日の絞り込みの開始日（直近 N か月の初日）。すべての期間なら None
+    since: date | None
+    summary: CoverageSummaryResponse
+    # (製品, 工程名, 理由) ごとの未割当（数量の多い順）
+    groups: list[UnallocatedGroupResponse]
