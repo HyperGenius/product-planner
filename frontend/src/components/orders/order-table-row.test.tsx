@@ -4,7 +4,7 @@ import { render, screen, userEvent } from "@/test-utils/render"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Table, TableBody } from "@/components/ui/table"
 import type { Order } from "@/types/order"
-import { OrderTableRow } from "./order-table-row"
+import { OrderTableRow, type OrderTableRowProps } from "./order-table-row"
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -60,7 +60,10 @@ const rowProps = {
   onView: vi.fn(),
 }
 
-function renderRow(order: Order, props: Partial<typeof rowProps> = {}) {
+function renderRow(
+  order: Order,
+  props: Partial<typeof rowProps> & Pick<OrderTableRowProps, "visibleActions"> = {},
+) {
   return render(
     <TooltipProvider>
       <Table>
@@ -310,5 +313,45 @@ describe("OrderTableRow", () => {
         expect(container.querySelector("tr")).not.toHaveAttribute("tabindex")
       },
     )
+  })
+
+  describe("出す操作を呼び出し側から絞る（Issue #554）", () => {
+    it("visibleActions を省略するとステータス・ロールに応じた操作をすべて出す", async () => {
+      renderRow(makeOrder({ status: "pending_approval" }), { currentUserRole: "president" })
+
+      expect(screen.getByRole("button", { name: "承認" })).toBeInTheDocument()
+      await userEvent.click(screen.getByRole("button", { name: "メニューを開く" }))
+      expect(await screen.findByText("差し戻し")).toBeInTheDocument()
+      expect(screen.getByText("削除")).toBeInTheDocument()
+    })
+
+    it("含めない操作は出さない", async () => {
+      renderRow(makeOrder({ status: "pending_approval" }), {
+        currentUserRole: "president",
+        visibleActions: ["reject"],
+      })
+
+      expect(screen.queryByRole("button", { name: "承認" })).not.toBeInTheDocument()
+      await userEvent.click(screen.getByRole("button", { name: "メニューを開く" }))
+      expect(await screen.findByText("差し戻し")).toBeInTheDocument()
+      expect(screen.queryByText("削除")).not.toBeInTheDocument()
+    })
+
+    it("メニューに出す操作が1つも無ければメニュー自体を出さない", () => {
+      renderRow(makeOrder({ status: "draft", source_type: "manual" }), {
+        visibleActions: ["simulate"],
+      })
+
+      expect(screen.getByRole("button", { name: "シミュレーション実行" })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "メニューを開く" })).not.toBeInTheDocument()
+    })
+
+    it("view を含めない確定済みの行はクリックできない", () => {
+      const { container } = renderRow(makeOrder({ status: "confirmed" }), {
+        visibleActions: ["ship"],
+      })
+
+      expect(container.querySelector("tr")).not.toHaveAttribute("tabindex")
+    })
   })
 })

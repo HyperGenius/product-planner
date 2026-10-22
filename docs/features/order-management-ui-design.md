@@ -478,20 +478,57 @@ frontend/src/
     simulation-side-sheet.tsx             # シミュレーション結果サイドシート
     bulk-simulate-summary-dialog.tsx      # 一括シミュレーション結果サマリーモーダル
   hooks/
-    use-orders-page.ts                    # URL state・データ取得・ハンドラー一式
+    use-orders-page.ts                    # URL state・データ取得・ハンドラー一式（#554 で行操作・一括操作を分離）
   lib/
     order-utils.ts                        # filterOrder / compareOrders / 定数・型
 ```
 
-**`use-orders-page.ts` が提供する値**
+### 行・操作の共通部品化 (#554)
 
-| カテゴリ | 主な内容 |
-|---|---|
-| URL state | `statusFilter`, `sortKey`, `page`, `setParam()` |
-| データ | `orders`, `products`, `customers`, `isLoading` |
-| 派生値 | `draftCount`, `incompleteCount`, `filteredOrders`, `pagedOrders` |
-| ダイアログ state | `selectedOrder`, `viewingOrder`, `deleteTargetOrder`, `expandedOrderId`, `expandedSimResult` |
-| ハンドラー | `handleSimulate`, `handleConfirmFromRow`, `handleOpenEditDialog`, `handleOpenViewDialog`, `handleConfirmDelete`, `closeSimResult` |
+Epic #553 で注文一覧を「起票の確認」「承認」「送品の消し込み」「すべての注文」に分けるため、
+行の操作と確認ダイアログを、どの画面からも呼べる部品にした（挙動は変えていない）。
+
+```
+frontend/src/
+  app/orders/page.tsx                     # 下記を組み合わせるだけ
+  hooks/
+    use-orders-page.ts                    # URL の状態・絞り込み・ページング・通知カードの件数
+    use-order-actions.ts                  # 行操作の mutation・確認ダイアログの対象・トースト
+    use-order-bulk-actions.ts             # 一括選択・一括シミュ／承認依頼／承認・納期超過の下書きの一括送品
+  components/orders/
+    order-action-dialogs.tsx              # 行操作の確認ダイアログ群（useOrderActions の戻り値を受け取る）
+    order-bulk-action-dialogs.tsx         # 一括操作バーと確認ダイアログ群（useOrderBulkActions の戻り値を受け取る）
+    orders-table.tsx                      # 表の外枠（読み込み中・空状態・ページング）と既定の列見出し
+    order-table-row.tsx                   # visibleActions で出す操作を絞れる（省略時は従来どおり全部）
+```
+
+新しい画面での組み立て方:
+
+```tsx
+const actions = useOrderActions(orders)
+const bulk = useOrderBulkActions({ orders, pageOrders, selectionResetKey })
+
+<OrdersTable header={<OrderTableHeaderRow statusFilter={...} selectAll={...} />} ...>
+  {pageOrders.map((order) => (
+    <OrderTableRow
+      key={order.id}
+      order={order}
+      visibleActions={["approve", "reject", "view"]}   // 画面で出す操作だけ
+      {...actions.getRowProps(order)}
+      {...bulk.getRowProps(order)}
+      ...
+    />
+  ))}
+</OrdersTable>
+<OrderActionDialogs actions={actions} ... />
+<OrderBulkActionDialogs bulk={bulk} ... />
+```
+
+- `visibleActions` は表示の絞り込みだけで、ステータス・ロールの条件は従来どおり行の中でかかる。
+  `"simulate"` は下書きのシミュレーション実行・メール起票の「確認」・再シミュレーションをまとめて指す。
+  メニューに出す操作が1つも無ければケバブメニュー自体を出さない。`"view"` を含めないと確定済みの行はクリックできない
+- 一括選択は `selectionResetKey` が変わると解除される（一覧ページはページ・タブ・顧客・製品の絞り込みを連結した値を渡す）
+- 行操作と一括操作は別々の mutation インスタンスを持つ。一括処理中の行のボタンは `isBulkOperationInProgress` で無効化する
 
 ---
 
@@ -548,6 +585,7 @@ frontend/src/
 | 新規注文: 入力促進ヒント | 中 | ✅ 実装済 (#117) |
 | 新規注文: 確定前サマリー表示 | 中 | ✅ 実装済 (#117) |
 | 一覧ページ: コード分割リファクタリング | - | ✅ 実装済 (#130) |
+| 一覧ページ: 行・操作・確認ダイアログの共通部品化（Epic #553 の画面分割の準備） | - | ✅ 実装済 (#554) |
 | 一覧ページ: シミュレーション行ごとローディング・エラーフィードバック | 中 | ✅ 実装済 (#133) |
 | 一覧ページ: 一括操作（チェックボックス・一括シミュレーション・一括確定） | 中 | ✅ 実装済 (#135) |
 | 一括シミュレーション: サマリーモーダル + NG行ハイライト | 中 | ✅ 実装済 (#140) |
