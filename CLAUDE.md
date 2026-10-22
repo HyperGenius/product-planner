@@ -76,6 +76,9 @@ cd backend && ruff check . && mypy .
   （どちらもルートから `ruff check --config=backend/pyproject.toml backend/` で実行）と食い違う。
   自分の変更が I001 を増やしていないかは
   `ruff check --config=backend/pyproject.toml backend/path/to/file.py` で確認する
+- CI（`.github/workflows/ci-*.yml`）のキャッシュ: PR の run で保存したキャッシュはその PR からしか復元できないので、
+  他の PR でも効かせたいキャッシュは `main` への push の run で作る（両ワークフローを `push: main` でも走らせているのはこのため）。
+  Next.js 16 の `next build`（Turbopack）は `.next/cache` にコンパイル結果を残さないので、キャッシュしてもビルドは速くならない
 - コミット時に pre-commit（`ruff` / `ruff-format` / `mypy`）が走り、`ruff-format` は自動整形して
   コミットを一旦中断する。整形後に `git add` して再コミットする
 
