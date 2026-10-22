@@ -241,7 +241,7 @@ export interface OrderApprovalLog {
   id: string
   order_id: number
   order_number: string | null
-  action: 'request_approval' | 'approve' | 'reject' | 'withdraw'
+  action: 'request_approval' | 'approve' | 'reject' | 'withdraw' | 'ship_without_routing'
   actor_user_id: string
   actor_full_name: string | null
   actor_email: string | null

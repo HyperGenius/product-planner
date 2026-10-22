@@ -219,7 +219,12 @@ cd backend && ruff check . && mypy .
   （`scheduling_start_date` → 無ければ最早工程の `production_schedules.start_datetime`）の到来で
   cron が `confirmed ⇄ in_progress` を自動遷移させる（`GET /api/cron/advance-order-status`、
   Issue #400）。フロントの取り得る値は `frontend/src/types/order.ts` の `Order["status"]` と
-  `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。詳細は
+  `order-utils.ts`（ラベル／バッジ／タブ）を同時に更新する。`draft → shipped` は遷移表に無く、
+  専用エンドポイントだけが例外的に行う（納期超過の一括 `ship-overdue-drafts`、Issue #367 ／ 社長が個別に行う
+  工程未入力の下書き `POST /orders/{id}/ship-without-routing`＝暫定の例外処理で承認ログ
+  `ship_without_routing` を残す、Issue #547）。`order_approval_log.action` を足すときは CHECK 制約の張り直しに加え、
+  Backend の `OrderApprovalLogResponse.action`・CSV ラベル（`approval_logs.py`）と Frontend の
+  `OrderApprovalLog["action"]`・承認ログ画面のラベルも更新する。詳細は
   [docs/features/order-status-workflow.md](docs/features/order-status-workflow.md)
 - **修理注文（`orders.order_type='repair'`、Issue #493）**: 製品・工程・設備を持たない受注で、`product_id` /
   `quantity` / `extracted_product_name` は NULL（CHECK `orders_repair_without_product`）。実施開始日＝`scheduling_start_date`、

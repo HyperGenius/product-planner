@@ -504,6 +504,56 @@ def ship_order(
     return _map_order_response(result)
 
 
+SHIP_WITHOUT_ROUTING_REASON = "工程未入力のため例外処理で送品済みにした"
+
+
+@router.post("/{order_id}/ship-without-routing")
+def ship_order_without_routing(
+    order_id: int,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
+    order_repo: OrderRepository = Depends(get_order_repo),
+    approval_log_repo: OrderApprovalLogRepository = Depends(
+        get_order_approval_log_repo
+    ),
+):
+    """
+    工程未入力の下書き (draft) 受注を送品済み (shipped) にする（president 限定、Issue #547）。
+
+    工程を入力できるようになるまでの暫定の例外処理。工程未入力の受注はシミュレーションも
+    承認依頼も進められず、片付ける手段が削除しかないため、記録を残したまま送品済みにする。
+    `ORDER_STATUS_TRANSITIONS` に draft -> shipped は足さず（PATCH 等まで緩むため）、
+    `ship-overdue-drafts` と同様に遷移表の外で判定する。対象は「status == 'draft' かつ
+    `has_no_routings`」に限り、サーバー側で再判定する。操作は承認ログへ記録する。
+    """
+    logger.info(f"Marking routing-less draft order {order_id} as shipped")
+    _require_role(
+        tenant_id, user_id, client, "president", "工程未入力の受注の送品済み化"
+    )
+
+    order = order_repo.get_by_id_with_routing_status(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.get("status") != "draft" or not order.get("has_no_routings"):
+        raise HTTPException(
+            status_code=400,
+            detail="工程未入力の下書き受注のみ、この操作で送品済みにできます",
+        )
+
+    result = order_repo.update(order_id, {"status": "shipped"})
+    _log_approval_action_safely(
+        approval_log_repo,
+        tenant_id,
+        order_id,
+        "ship_without_routing",
+        user_id,
+        SHIP_WITHOUT_ROUTING_REASON,
+    )
+    return _map_order_response(result)
+
+
 @router.post("/ship-overdue-drafts", response_model=ShipOverdueDraftsResponse)
 def ship_overdue_drafts(
     tenant_id: str = Depends(get_current_tenant_id),

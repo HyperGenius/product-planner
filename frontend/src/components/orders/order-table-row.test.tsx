@@ -53,18 +53,19 @@ const rowProps = {
   onReject: vi.fn(),
   onWithdraw: vi.fn(),
   onShip: vi.fn(),
+  onShipWithoutRouting: vi.fn(),
   onEdit: vi.fn(),
   onDelete: vi.fn(),
   onToggleSelect: vi.fn(),
   onView: vi.fn(),
 }
 
-function renderRow(order: Order) {
+function renderRow(order: Order, props: Partial<typeof rowProps> = {}) {
   return render(
     <TooltipProvider>
       <Table>
         <TableBody>
-          <OrderTableRow order={order} {...rowProps} />
+          <OrderTableRow order={order} {...rowProps} {...props} />
         </TableBody>
       </Table>
     </TooltipProvider>,
@@ -72,6 +73,54 @@ function renderRow(order: Order) {
 }
 
 describe("OrderTableRow", () => {
+  describe("工程未入力の下書きの送品済み化（Issue #547）", () => {
+    const LABEL = "送品済みにする（工程未入力の例外処理）"
+
+    async function openMenu() {
+      await userEvent.click(screen.getByRole("button", { name: "メニューを開く" }))
+    }
+
+    it("president × 工程未入力の下書きならメニューに表示し、クリックで onShipWithoutRouting を呼ぶ", async () => {
+      const onShipWithoutRouting = vi.fn()
+      const order = makeOrder({ has_no_routings: true })
+      renderRow(order, { currentUserRole: "president", onShipWithoutRouting })
+
+      await openMenu()
+      await userEvent.click(await screen.findByText(LABEL))
+
+      expect(onShipWithoutRouting).toHaveBeenCalledWith(order)
+    })
+
+    it.each(["order_handler", "iso_officer", "platform_admin"])(
+      "%s には表示しない",
+      async (role) => {
+        renderRow(makeOrder({ has_no_routings: true }), { currentUserRole: role })
+
+        await openMenu()
+
+        expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+      },
+    )
+
+    it("工程が入力済みの下書きには表示しない", async () => {
+      renderRow(makeOrder({ has_no_routings: false }), { currentUserRole: "president" })
+
+      await openMenu()
+
+      expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+    })
+
+    it("下書き以外には表示しない", async () => {
+      renderRow(makeOrder({ has_no_routings: true, status: "pending_approval" }), {
+        currentUserRole: "president",
+      })
+
+      await openMenu()
+
+      expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+    })
+  })
+
   it("quantity が数値なら 3 桁区切りで表示する", () => {
     renderRow(makeOrder({ quantity: 1234 }))
 

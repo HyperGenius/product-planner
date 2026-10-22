@@ -1911,6 +1911,122 @@ class TestOrderRouter:
 
         assert response.status_code == 404
 
+    def _routingless_draft(self, order_id=1, **overrides):
+        return {
+            "id": order_id,
+            "product_id": 100,
+            "status": "draft",
+            "has_no_routings": True,
+            **overrides,
+        }
+
+    def test_ship_without_routing_success(
+        self, headers, mock_repo, mock_supabase_client, mock_approval_log_repo
+    ):
+        """POST /{order_id}/ship-without-routing: president は工程未入力の draft を送品済みにでき、承認ログが残る"""
+        order_id = 1
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id_with_routing_status.return_value = self._routingless_draft()
+        mock_repo.update.return_value = {"id": order_id, "status": "shipped"}
+
+        response = client.post(
+            f"/orders/{order_id}/ship-without-routing", headers=headers
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "shipped"
+        mock_repo.update.assert_called_once_with(order_id, {"status": "shipped"})
+        mock_approval_log_repo.log_action.assert_called_once_with(
+            headers["x-tenant-id"],
+            order_id,
+            "ship_without_routing",
+            "test-user-id",
+            "工程未入力のため例外処理で送品済みにした",
+        )
+
+    def test_ship_without_routing_allows_unmatched_product(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship-without-routing: 製品未照合 (product_id NULL) の draft も対象"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id_with_routing_status.return_value = self._routingless_draft(
+            product_id=None
+        )
+        mock_repo.update.return_value = {"id": 1, "status": "shipped"}
+
+        response = client.post("/orders/1/ship-without-routing", headers=headers)
+
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("role", ["order_handler", "iso_officer", "platform_admin"])
+    def test_ship_without_routing_forbidden_for_non_president(
+        self, role, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship-without-routing: president 以外は403"""
+        self._set_role(mock_supabase_client, role)
+
+        response = client.post("/orders/1/ship-without-routing", headers=headers)
+
+        assert response.status_code == 403
+        mock_repo.get_by_id_with_routing_status.assert_not_called()
+        mock_repo.update.assert_not_called()
+
+    def test_ship_without_routing_rejects_order_with_routings(
+        self, headers, mock_repo, mock_supabase_client, mock_approval_log_repo
+    ):
+        """POST /{order_id}/ship-without-routing: 工程入力済みの draft は400"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id_with_routing_status.return_value = self._routingless_draft(
+            has_no_routings=False
+        )
+
+        response = client.post("/orders/1/ship-without-routing", headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
+        mock_approval_log_repo.log_action.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "status", ["pending_approval", "confirmed", "in_progress", "shipped"]
+    )
+    def test_ship_without_routing_rejects_non_draft(
+        self, status, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship-without-routing: draft 以外は400"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id_with_routing_status.return_value = self._routingless_draft(
+            status=status
+        )
+
+        response = client.post("/orders/1/ship-without-routing", headers=headers)
+
+        assert response.status_code == 400
+        mock_repo.update.assert_not_called()
+
+    def test_ship_without_routing_not_found(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        """POST /{order_id}/ship-without-routing: 存在しない注文は404"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id_with_routing_status.return_value = None
+
+        response = client.post("/orders/999/ship-without-routing", headers=headers)
+
+        assert response.status_code == 404
+
+    def test_ship_without_routing_succeeds_even_if_log_fails(
+        self, headers, mock_repo, mock_supabase_client, mock_approval_log_repo
+    ):
+        """POST /{order_id}/ship-without-routing: 承認ログの記録に失敗しても200"""
+        self._set_role(mock_supabase_client, "president")
+        mock_repo.get_by_id_with_routing_status.return_value = self._routingless_draft()
+        mock_repo.update.return_value = {"id": 1, "status": "shipped"}
+        mock_approval_log_repo.log_action.side_effect = RuntimeError("boom")
+
+        response = client.post("/orders/1/ship-without-routing", headers=headers)
+
+        assert response.status_code == 200
+
     def test_ship_overdue_drafts_success(
         self, headers, mock_repo, mock_supabase_client
     ):

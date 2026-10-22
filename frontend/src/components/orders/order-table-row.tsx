@@ -35,9 +35,11 @@ import {
   getOrderUrgency,
   isDeadlineOverdue,
   isNoRoutingOrder,
+  canShipWithoutRouting,
   type StatusFilter,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
+import type { MemberRole } from "@/types/member"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
@@ -64,6 +66,8 @@ interface OrderTableRowProps {
   onReject: (order: Order) => void
   onWithdraw: (orderId: number, orderNo: string) => void
   onShip: (orderId: number, orderNo: string) => void
+  /** 工程未入力の下書きを送品済みにする暫定の例外処理（president のみ、Issue #547） */
+  onShipWithoutRouting: (order: Order) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
   onToggleSelect: (orderId: number) => void
@@ -96,6 +100,7 @@ export function OrderTableRow({
   onReject,
   onWithdraw,
   onShip,
+  onShipWithoutRouting,
   onEdit,
   onDelete,
   onToggleSelect,
@@ -116,10 +121,11 @@ export function OrderTableRow({
   const canShip =
     (order.status === "confirmed" || order.status === "in_progress") &&
     (currentUserRole === "president" || currentUserRole === "order_handler")
+  const canShipNoRouting = canShipWithoutRouting(order, currentUserRole as MemberRole | null)
   const canResimulate = order.status === "draft" && order.is_scheduled
   const canEditOrder = order.status === "draft"
   const hasMenuActionGroup =
-    canWithdraw || canReject || canShip || canResimulate || canEditOrder
+    canWithdraw || canReject || canShip || canShipNoRouting || canResimulate || canEditOrder
 
   // 緊急度による段階的な背景色（Issue #461）。優先順位（高い順）:
   // バルクシミュレーション失敗行 > 緊急度 > メール起票行。
@@ -453,6 +459,15 @@ export function OrderTableRow({
                     >
                       <Truck className="mr-2 h-3.5 w-3.5" />
                       送品済みにする
+                    </DropdownMenuItem>
+                  )}
+                  {canShipNoRouting && (
+                    <DropdownMenuItem
+                      onClick={() => onShipWithoutRouting(order)}
+                      disabled={shipIsPending || isBulkOperationInProgress}
+                    >
+                      <Truck className="mr-2 h-3.5 w-3.5" />
+                      送品済みにする（工程未入力の例外処理）
                     </DropdownMenuItem>
                   )}
                   {canResimulate && (

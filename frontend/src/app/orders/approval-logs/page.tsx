@@ -24,6 +24,7 @@ const ACTION_LABELS: Record<OrderApprovalLog["action"], string> = {
   approve: "承認",
   reject: "差し戻し",
   withdraw: "取り下げ",
+  ship_without_routing: "送品済み（工程未入力の例外処理）",
 }
 
 const ACTION_BADGE_VARIANTS: Record<
@@ -34,6 +35,7 @@ const ACTION_BADGE_VARIANTS: Record<
   approve: "default",
   reject: "outline",
   withdraw: "outline",
+  ship_without_routing: "outline",
 }
 
 function formatDateTime(value: string): string {

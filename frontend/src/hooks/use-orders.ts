@@ -258,6 +258,24 @@ export function useShipOrder() {
 }
 
 /**
+ * 工程未入力の下書き注文を送品済みにする暫定の例外処理（president 限定、Issue #547）
+ */
+export function useShipOrderWithoutRouting() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      apiClient<Order>(`/orders/${orderId}/ship-without-routing`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, orderId) => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
+    },
+  })
+}
+
+/**
  * 納期を過ぎたまま残っている下書き注文をまとめて送品済みにするフック
  * （president / platform_admin 限定、Issue #367）
  */
