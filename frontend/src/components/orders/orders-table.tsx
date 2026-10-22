@@ -64,15 +64,23 @@ interface OrderTableHeaderRowProps {
   statusFilter: StatusFilter
   /** 選択列の見出し（全選択のチェックボックス等） */
   selectAll?: ReactNode
+  /** 選択・操作の列を出すか。行の `OrderTableRow` と同じ値を渡す（Issue #558） */
+  showActionColumns?: boolean
 }
 
 /** `OrderTableRow` の列に対応する見出しの行 */
-export function OrderTableHeaderRow({ statusFilter, selectAll }: OrderTableHeaderRowProps) {
+export function OrderTableHeaderRow({
+  statusFilter,
+  selectAll,
+  showActionColumns = true,
+}: OrderTableHeaderRowProps) {
   return (
     <TableRow>
-      <TableHead className="w-10">
-        <div className="flex items-center justify-center">{selectAll}</div>
-      </TableHead>
+      {showActionColumns && (
+        <TableHead className="w-10">
+          <div className="flex items-center justify-center">{selectAll}</div>
+        </TableHead>
+      )}
       <TableHead>
         <div className="flex flex-col leading-tight">
           <span>注文番号</span>
@@ -91,7 +99,7 @@ export function OrderTableHeaderRow({ statusFilter, selectAll }: OrderTableHeade
         </div>
       </TableHead>
       <TableHead className="text-foreground">ステータス</TableHead>
-      <TableHead className="text-right text-foreground">操作</TableHead>
+      {showActionColumns && <TableHead className="text-right text-foreground">操作</TableHead>}
     </TableRow>
   )
 }

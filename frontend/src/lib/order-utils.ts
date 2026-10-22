@@ -5,27 +5,13 @@ import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 import type { MemberRole } from "@/types/member"
 
-export type StatusFilter =
-  | ""
-  | "action_required"
-  | "draft"
-  | "simulated"
-  | "pending_approval"
-  | "confirmed"
-  | "in_progress"
-  | "shipped"
-  | "completed"
-  | "canceled"
-  // status タブとしては出さないが、通知カード「情報不足の注文を確認する →」の
-  // 導線が URL の ?status= に入れる派生フィルタ（顧客・希望納期の未設定）
-  | "incomplete"
+/** 「すべての注文」のタブ。`orders.status` だけに限定する（#215 / Issue #558） */
+export type StatusFilter = "" | Order["status"]
 export type SortKey = "created_at_desc" | "created_at_asc" | "desired_deadline_asc"
 
 export const STATUS_TABS: { label: string; value: StatusFilter }[] = [
-  { label: "対応が必要", value: "action_required" },
   { label: "すべて", value: "" },
   { label: "下書き", value: "draft" },
-  { label: "シミュ済", value: "simulated" },
   { label: "承認待ち", value: "pending_approval" },
   { label: "確定済", value: "confirmed" },
   { label: "生産中", value: "in_progress" },
@@ -53,7 +39,7 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
  *    （＝未シミュレーションの draft のみを対象にする）
  *
  * フィルタータブは追加しない（`orders.status` のみに限定する設計方針 #215）。
- * この状態は一覧行のバッジ・通知カードで認知させる。
+ * この状態は一覧行のバッジと「起票の確認」画面（Issue #555）で認知させる。
  */
 export function isNoRoutingOrder(order: Order): boolean {
   return (
@@ -261,50 +247,10 @@ export function countRecentFailedEmailIntakes(
 }
 
 /**
- * 「対応が必要」（Issue #460）＝ロールごとに自分がアクションすべき注文か。
- * - order_handler / iso_officer: 下書き全般（未シミュレーション・差し戻し済み・シミュ済みを含む）
- * - president: 承認待ち
- * - platform_admin: 確定済み
- * ロール未取得中（null）は判定できないため対象外（false）とする。
+ * 「すべての注文」のタブで注文を絞り込む。「下書き」タブはシミュ済みの下書きも含む（Issue #558）。
  */
-function isActionRequiredForRole(order: Order, role: MemberRole | null): boolean {
-  if (role === "order_handler" || role === "iso_officer") {
-    return order.status === "draft"
-  }
-  if (role === "president") {
-    return order.status === "pending_approval"
-  }
-  if (role === "platform_admin") {
-    return order.status === "confirmed"
-  }
-  return false
-}
-
-export function filterOrder(
-  order: Order,
-  statusFilter: StatusFilter,
-  role: MemberRole | null = null
-): boolean {
-  if (statusFilter === "action_required") {
-    return isActionRequiredForRole(order, role)
-  }
+export function filterOrder(order: Order, statusFilter: StatusFilter): boolean {
   if (!statusFilter) return true
-  // 「情報不足」= 顧客または希望納期が未設定（ステータス問わず）。フィルタタブには出さず、
-  // 通知カードの導線からのみ ?status=incomplete で絞り込む（use-orders-page の incompleteCount と同条件）。
-  if (statusFilter === "incomplete") {
-    return !order.customer_id || !order.desired_deadline
-  }
-  // 「シミュ済」= status='draft' かつ is_scheduled（シミュレーション完了・未確定）。
-  // 「下書き」タブは未シミュレーションの下書きのみに絞り、両タブを排他にする。
-  // Issue #394-A 以降、is_scheduled はスケジュール条件の編集で simulated_deadline とともに
-  // クリアされるため、`is_scheduled` と `simulated_deadline != null` は draft では実質同値
-  // （表示値は simulated_deadline を使う。getDeadlineForTab / usesSimulatedDeadline 参照）。
-  if (statusFilter === "simulated") {
-    return order.status === "draft" && !!order.is_scheduled
-  }
-  if (statusFilter === "draft") {
-    return order.status === "draft" && !order.is_scheduled
-  }
   return order.status === statusFilter
 }
 
@@ -450,13 +396,6 @@ const CONFIRMED_DEADLINE_STATUSES: readonly Order["status"][] = [
   "completed",
 ]
 
-/** 一覧タブ（StatusFilter）が「シミュ納期」を表示すべきか。false なら「確定納期」。 */
-export function usesSimulatedDeadline(statusFilter: StatusFilter): boolean {
-  // 「すべて」(="") は確定納期。下書き / シミュ済 / 承認待ち / キャンセルはシミュ納期。
-  if (!statusFilter) return false
-  return !(CONFIRMED_DEADLINE_STATUSES as string[]).includes(statusFilter)
-}
-
 /** 受注単体（タブ文脈なし。受注詳細・承認モーダル）で「シミュ納期」を表示すべきか。 */
 export function usesSimulatedDeadlineForOrder(order: Order): boolean {
   return !CONFIRMED_DEADLINE_STATUSES.includes(order.status)
@@ -464,22 +403,20 @@ export function usesSimulatedDeadlineForOrder(order: Order): boolean {
 
 /**
  * 一覧カラムのヘッダ文言。
- * 「対応が必要」タブ（Issue #460）はロールにより中身の status（下書き／承認待ち／確定済み）が
- * 変わり単一タイトルに決められないため、汎用の「納期」を返す（値自体は行ごとに
- * `usesSimulatedDeadlineForOrder` で正しい方を出す）。
+ * 「すべて」タブはステータスの混ざった行が並ぶので汎用の「納期」にし、値は行ごとに
+ * `usesSimulatedDeadlineForOrder` で正しい方を出す（既定のタブなので、下書きの行を空欄にしない。Issue #558）。
  */
 export function getDeadlineColumnLabel(statusFilter: StatusFilter): string {
-  if (statusFilter === "action_required") return "納期"
-  return usesSimulatedDeadline(statusFilter) ? "シミュ納期" : "確定納期"
+  if (!statusFilter) return "納期"
+  return CONFIRMED_DEADLINE_STATUSES.includes(statusFilter) ? "確定納期" : "シミュ納期"
 }
 
 /** そのタブで表示すべき納期値（未設定なら null）。 */
 export function getDeadlineForTab(order: Order, statusFilter: StatusFilter): string | null {
-  const useSimulated =
-    statusFilter === "action_required"
-      ? usesSimulatedDeadlineForOrder(order)
-      : usesSimulatedDeadline(statusFilter)
-  const raw = useSimulated ? order.simulated_deadline : order.confirmed_deadline
+  const status = statusFilter || order.status
+  const raw = CONFIRMED_DEADLINE_STATUSES.includes(status)
+    ? order.confirmed_deadline
+    : order.simulated_deadline
   return raw ?? null
 }
 

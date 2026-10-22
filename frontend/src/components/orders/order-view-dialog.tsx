@@ -12,10 +12,12 @@ import { cn } from "@/lib/utils"
 import {
   formatDeadlineDate,
   getCustomerName,
+  getEffectiveOrderStatus,
   getProductName,
   getStatusBadgeClass,
   getStatusLabel,
   isDeadlineOverdue,
+  usesSimulatedDeadlineForOrder,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -30,7 +32,7 @@ interface OrderViewDialogProps {
 }
 
 /**
- * 確定済み・生産中の注文を読み取り専用で表示するモーダル（Issue #527）。
+ * 注文を読み取り専用で表示するモーダル（Issue #527）。「すべての注文」から全ステータスの注文で開く（Issue #558）。
  * 編集モーダル（EditOrderDialog）と同じ外枠・項目順・入力欄の見た目で、値を変更できない。
  */
 export function OrderViewDialog({
@@ -49,6 +51,10 @@ export function OrderViewDialog({
     order.customer_id == null ? null : getCustomerName(order.customer_id, customers)
   // メール取り込みで注文書から顧客を特定できなかった受注（Issue #521）
   const customerPlaceholder = order.source_type === "email" ? "顧客不明" : "未設定"
+  // 承認前は確定納期が空なので、一覧の納期カラムと同じくシミュ納期を出す
+  const usesSimulated = usesSimulatedDeadlineForOrder(order)
+  const deadline = usesSimulated ? order.simulated_deadline : order.confirmed_deadline
+  const effectiveStatus = getEffectiveOrderStatus(order)
 
   return (
     <OrderDialogLayout
@@ -95,11 +101,11 @@ export function OrderViewDialog({
         value={formatDeadlineDate(order.scheduling_start_date)}
       />
       <ReadOnlyField
-        id={fieldId("confirmed-deadline")}
-        label="確定納期"
-        value={formatDeadlineDate(order.confirmed_deadline)}
+        id={fieldId("deadline")}
+        label={usesSimulated ? "シミュ納期" : "確定納期"}
+        value={formatDeadlineDate(deadline)}
         inputClassName={
-          isDeadlineOverdue(order, order.confirmed_deadline)
+          isDeadlineOverdue(order, deadline)
             ? "font-semibold text-destructive"
             : undefined
         }
@@ -107,8 +113,8 @@ export function OrderViewDialog({
 
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium">ステータス</span>
-        <Badge className={getStatusBadgeClass(order.status)}>
-          {getStatusLabel(order.status)}
+        <Badge className={getStatusBadgeClass(effectiveStatus)}>
+          {getStatusLabel(effectiveStatus)}
         </Badge>
       </div>
       <div className="flex items-center justify-between text-sm">

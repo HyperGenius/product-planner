@@ -87,9 +87,10 @@ export interface OrderTableRowProps {
   withdrawIsPending: boolean
   shipIsPending: boolean
   currentUserRole: string | null
-  isSelected: boolean
+  /** 一括選択の props（`useOrderBulkActions().getRowProps()`）。選択列を出さない画面では省略する */
+  isSelected?: boolean
   selectionIndex?: number
-  isBulkOperationInProgress: boolean
+  isBulkOperationInProgress?: boolean
   hasBulkSimFailed?: boolean
   onSimulate: (order: Order) => void
   onRequestApproval: (order: Order) => void
@@ -101,8 +102,8 @@ export interface OrderTableRowProps {
   onShipWithoutRouting: (order: Order) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
-  onToggleSelect: (orderId: number) => void
-  /** 確定済み・生産中の行のクリックで読み取り専用の確認モーダルを開く（Issue #527） */
+  onToggleSelect?: (orderId: number) => void
+  /** 行のクリックで読み取り専用の確認モーダルを開く（Issue #527。全ステータスで開く、Issue #558） */
   onView: (order: Order) => void
   /**
    * 出す操作。省略時はすべて（ステータス・ロールの条件は従来どおり別途かかる）。
@@ -115,6 +116,11 @@ export interface OrderTableRowProps {
   selectable?: boolean
   /** 差し戻された下書きに「差し戻し」バッジと理由を出す（省略時はアイコンのツールチップだけ。Issue #555） */
   showRejectionReason?: boolean
+  /**
+   * 選択・操作の列を出すか。false にすると列ごと出さない（「すべての注文」、Issue #558）。
+   * 見出しの `OrderTableHeaderRow` にも同じ値を渡す
+   */
+  showActionColumns?: boolean
 }
 
 // 行内でクリックしても確認モーダルを開かない操作要素
@@ -132,9 +138,9 @@ export function OrderTableRow({
   withdrawIsPending,
   shipIsPending,
   currentUserRole,
-  isSelected,
+  isSelected = false,
   selectionIndex,
-  isBulkOperationInProgress,
+  isBulkOperationInProgress = false,
   hasBulkSimFailed,
   onSimulate,
   onRequestApproval,
@@ -151,6 +157,7 @@ export function OrderTableRow({
   leadingActions,
   selectable,
   showRejectionReason = false,
+  showActionColumns = true,
 }: OrderTableRowProps) {
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
@@ -197,14 +204,14 @@ export function OrderTableRow({
     rowClassName = "bg-blue-50/60"
   }
 
-  // 確定済み・生産中は編集できないので、行のクリックで内容を確認できるようにする（Issue #527）
   const isSelectable =
-    selectable ??
-    (order.status === "draft" || canApproveOrder(order, role))
+    onToggleSelect !== undefined &&
+    (selectable ?? (order.status === "draft" || canApproveOrder(order, role)))
   const rejectionReason = order.status === "draft" ? order.rejection_reason : null
 
-  const isViewable =
-    shows("view") && (order.status === "confirmed" || order.status === "in_progress")
+  // 行のクリックで内容を確認できるようにする（Issue #527）。「すべての注文」は作業ボタンを
+  // 出さないので、全ステータスで開けるようにしている（Issue #558）
+  const isViewable = shows("view")
 
   const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
     const target = e.target as Element
@@ -240,23 +247,25 @@ export function OrderTableRow({
             }
           : {})}
       >
-        <TableCell className="w-10">
-          {isSelectable ? (
-            <div className="relative flex items-center justify-center">
-              <Checkbox
-                checked={isSelected}
-                onCheckedChange={() => onToggleSelect(order.id)}
-                disabled={isBulkOperationInProgress}
-                aria-label={`注文 ${order.order_no} を選択`}
-              />
-              {selectionIndex != null && (
-                <Badge className="absolute -top-2 -right-2 h-4 w-4 p-0 text-[10px] flex items-center justify-center rounded-full">
-                  {selectionIndex}
-                </Badge>
-              )}
-            </div>
-          ) : null}
-        </TableCell>
+        {showActionColumns && (
+          <TableCell className="w-10">
+            {isSelectable ? (
+              <div className="relative flex items-center justify-center">
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={() => onToggleSelect?.(order.id)}
+                  disabled={isBulkOperationInProgress}
+                  aria-label={`注文 ${order.order_no} を選択`}
+                />
+                {selectionIndex != null && (
+                  <Badge className="absolute -top-2 -right-2 h-4 w-4 p-0 text-[10px] flex items-center justify-center rounded-full">
+                    {selectionIndex}
+                  </Badge>
+                )}
+              </div>
+            ) : null}
+          </TableCell>
+        )}
         <TableCell className="text-muted-foreground">
           <div className="flex flex-col gap-0.5 leading-tight">
             <span className="inline-flex items-center gap-1">
@@ -418,152 +427,154 @@ export function OrderTableRow({
             )}
           </div>
         </TableCell>
-        <TableCell className="text-right">
-          <div className="flex items-center justify-end gap-2">
-            {hasSimulationError && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <AlertCircle className="h-4 w-4 text-destructive" />
-                </TooltipTrigger>
-                <TooltipContent>シミュレーションに失敗しました</TooltipContent>
-              </Tooltip>
-            )}
-            {leadingActions}
-            {canSimulate && (
-              isEmailOrder ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => router.push(`/orders/${order.id}`)}
-                >
-                  確認
-                </Button>
-              ) : noRouting ? (
+        {showActionColumns && (
+          <TableCell className="text-right">
+            <div className="flex items-center justify-end gap-2">
+              {hasSimulationError && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    {/* disabled な Button は pointer/フォーカスイベントを出さないので span で受ける。
-                        スクリーンリーダーにも「無効・理由付き」が伝わるよう role/aria を付ける */}
-                    <span
-                      tabIndex={0}
-                      role="button"
-                      aria-disabled="true"
-                      aria-label="シミュレーション実行（製品に工程が登録されていないため実行できません）"
-                    >
-                      <Button size="sm" variant="outline" disabled tabIndex={-1}>
-                        シミュレーション実行
-                      </Button>
-                    </span>
+                    <AlertCircle className="h-4 w-4 text-destructive" />
                   </TooltipTrigger>
-                  <TooltipContent>
-                    製品に工程が登録されていません。製品マスタから工程を設定してください。
-                  </TooltipContent>
+                  <TooltipContent>シミュレーションに失敗しました</TooltipContent>
                 </Tooltip>
-              ) : (
+              )}
+              {leadingActions}
+              {canSimulate && (
+                isEmailOrder ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push(`/orders/${order.id}`)}
+                  >
+                    確認
+                  </Button>
+                ) : noRouting ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      {/* disabled な Button は pointer/フォーカスイベントを出さないので span で受ける。
+                          スクリーンリーダーにも「無効・理由付き」が伝わるよう role/aria を付ける */}
+                      <span
+                        tabIndex={0}
+                        role="button"
+                        aria-disabled="true"
+                        aria-label="シミュレーション実行（製品に工程が登録されていないため実行できません）"
+                      >
+                        <Button size="sm" variant="outline" disabled tabIndex={-1}>
+                          シミュレーション実行
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      製品に工程が登録されていません。製品マスタから工程を設定してください。
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onSimulate(order)}
+                    disabled={isSimulating || isBulkOperationInProgress}
+                  >
+                    {isSimulating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        実行中...
+                      </>
+                    ) : (
+                      "シミュレーション実行"
+                    )}
+                  </Button>
+                )
+              )}
+              {canRequestApproval && (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => onSimulate(order)}
-                  disabled={isSimulating || isBulkOperationInProgress}
+                  onClick={() => onRequestApproval(order)}
+                  disabled={requestApprovalIsPending || isBulkOperationInProgress}
                 >
-                  {isSimulating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      実行中...
-                    </>
-                  ) : (
-                    "シミュレーション実行"
-                  )}
+                  承認依頼を送信
                 </Button>
-              )
-            )}
-            {canRequestApproval && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onRequestApproval(order)}
-                disabled={requestApprovalIsPending || isBulkOperationInProgress}
-              >
-                承認依頼を送信
-              </Button>
-            )}
-            {canApprove && (
-              <Button
-                size="sm"
-                onClick={() => onApprove(order)}
-                disabled={approveIsPending || isBulkOperationInProgress}
-              >
-                承認
-              </Button>
-            )}
-            {hasMenu && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
-                    <MoreHorizontal className="h-4 w-4" />
-                    <span className="sr-only">メニューを開く</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {canWithdraw && (
-                    <DropdownMenuItem
-                      onClick={() => onWithdraw(order.id, order.order_no ?? "")}
-                      disabled={withdrawIsPending || isBulkOperationInProgress}
-                    >
-                      <Undo2 className="mr-2 h-3.5 w-3.5" />
-                      取り下げ
-                    </DropdownMenuItem>
-                  )}
-                  {canReject && (
-                    <DropdownMenuItem
-                      onClick={() => onReject(order)}
-                      disabled={isBulkOperationInProgress}
-                    >
-                      <MessageSquareWarning className="mr-2 h-3.5 w-3.5" />
-                      差し戻し
-                    </DropdownMenuItem>
-                  )}
-                  {canShip && (
-                    <DropdownMenuItem
-                      onClick={() => onShip(order.id, order.order_no ?? "")}
-                      disabled={shipIsPending || isBulkOperationInProgress}
-                    >
-                      <Truck className="mr-2 h-3.5 w-3.5" />
-                      送品済みにする
-                    </DropdownMenuItem>
-                  )}
-                  {canShipNoRouting && (
-                    <DropdownMenuItem
-                      onClick={() => onShipWithoutRouting(order)}
-                      disabled={shipIsPending || isBulkOperationInProgress}
-                    >
-                      <Truck className="mr-2 h-3.5 w-3.5" />
-                      送品済みにする（工程未入力の例外処理）
-                    </DropdownMenuItem>
-                  )}
-                  {canResimulate && (
-                    <DropdownMenuItem onClick={() => onSimulate(order)}>
-                      再シミュレーション
-                    </DropdownMenuItem>
-                  )}
-                  {canEditOrder && (
-                    <DropdownMenuItem onClick={() => onEdit(order)}>
-                      編集
-                    </DropdownMenuItem>
-                  )}
-                  {hasMenuActionGroup && canDelete && <DropdownMenuSeparator />}
-                  {canDelete && (
-                    <DropdownMenuItem
-                      className="text-destructive"
-                      onClick={() => onDelete(order)}
-                    >
-                      削除
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </TableCell>
+              )}
+              {canApprove && (
+                <Button
+                  size="sm"
+                  onClick={() => onApprove(order)}
+                  disabled={approveIsPending || isBulkOperationInProgress}
+                >
+                  承認
+                </Button>
+              )}
+              {hasMenu && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                      <MoreHorizontal className="h-4 w-4" />
+                      <span className="sr-only">メニューを開く</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {canWithdraw && (
+                      <DropdownMenuItem
+                        onClick={() => onWithdraw(order.id, order.order_no ?? "")}
+                        disabled={withdrawIsPending || isBulkOperationInProgress}
+                      >
+                        <Undo2 className="mr-2 h-3.5 w-3.5" />
+                        取り下げ
+                      </DropdownMenuItem>
+                    )}
+                    {canReject && (
+                      <DropdownMenuItem
+                        onClick={() => onReject(order)}
+                        disabled={isBulkOperationInProgress}
+                      >
+                        <MessageSquareWarning className="mr-2 h-3.5 w-3.5" />
+                        差し戻し
+                      </DropdownMenuItem>
+                    )}
+                    {canShip && (
+                      <DropdownMenuItem
+                        onClick={() => onShip(order.id, order.order_no ?? "")}
+                        disabled={shipIsPending || isBulkOperationInProgress}
+                      >
+                        <Truck className="mr-2 h-3.5 w-3.5" />
+                        送品済みにする
+                      </DropdownMenuItem>
+                    )}
+                    {canShipNoRouting && (
+                      <DropdownMenuItem
+                        onClick={() => onShipWithoutRouting(order)}
+                        disabled={shipIsPending || isBulkOperationInProgress}
+                      >
+                        <Truck className="mr-2 h-3.5 w-3.5" />
+                        送品済みにする（工程未入力の例外処理）
+                      </DropdownMenuItem>
+                    )}
+                    {canResimulate && (
+                      <DropdownMenuItem onClick={() => onSimulate(order)}>
+                        再シミュレーション
+                      </DropdownMenuItem>
+                    )}
+                    {canEditOrder && (
+                      <DropdownMenuItem onClick={() => onEdit(order)}>
+                        編集
+                      </DropdownMenuItem>
+                    )}
+                    {hasMenuActionGroup && canDelete && <DropdownMenuSeparator />}
+                    {canDelete && (
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={() => onDelete(order)}
+                      >
+                        削除
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </TableCell>
+        )}
       </TableRow>
   )
 }

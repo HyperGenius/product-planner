@@ -9,6 +9,8 @@ import {
   countRecentFailedEmailIntakes,
   formatDateTimeShort,
   filterOrder,
+  getDeadlineColumnLabel,
+  getDeadlineForTab,
   getIntakeCategory,
   getOrderUrgency,
   isNoRoutingOrder,
@@ -125,54 +127,37 @@ describe("filterOrder", () => {
     expect(filterOrder(noRouting, "draft")).toBe(true)
   })
 
-  it("incomplete は顧客または希望納期が未設定の注文を通す（通知カード導線）", () => {
-    expect(filterOrder(makeOrder({ customer_id: undefined }), "incomplete")).toBe(true)
-    expect(filterOrder(makeOrder({ desired_deadline: undefined }), "incomplete")).toBe(true)
-    expect(
-      filterOrder(
-        makeOrder({ customer_id: 1, desired_deadline: "2026-09-30" }),
-        "incomplete",
-      ),
-    ).toBe(false)
+  it("「下書き」タブはシミュ済みの下書きも含める（Issue #558）", () => {
+    expect(filterOrder(makeOrder({ is_scheduled: false }), "draft")).toBe(true)
+    expect(filterOrder(makeOrder({ is_scheduled: true }), "draft")).toBe(true)
+    expect(filterOrder(makeOrder({ status: "pending_approval" }), "draft")).toBe(false)
   })
 
-  describe("action_required（Issue #460）", () => {
-    it("order_handler / iso_officer は下書き全般（未シミュレーション・シミュ済み）が対象", () => {
-      const draft = makeOrder({ status: "draft", is_scheduled: false })
-      const simulated = makeOrder({ status: "draft", is_scheduled: true })
-      const pendingApproval = makeOrder({ status: "pending_approval" })
-      for (const role of ["order_handler", "iso_officer"] as const) {
-        expect(filterOrder(draft, "action_required", role)).toBe(true)
-        expect(filterOrder(simulated, "action_required", role)).toBe(true)
-        expect(filterOrder(pendingApproval, "action_required", role)).toBe(false)
-      }
-    })
+  it("「すべて」は全ステータスを通す", () => {
+    for (const status of ["draft", "pending_approval", "confirmed", "canceled"] as const) {
+      expect(filterOrder(makeOrder({ status }), "")).toBe(true)
+    }
+  })
+})
 
-    it("president は承認待ちのみ対象", () => {
-      expect(
-        filterOrder(makeOrder({ status: "pending_approval" }), "action_required", "president"),
-      ).toBe(true)
-      expect(
-        filterOrder(makeOrder({ status: "draft" }), "action_required", "president"),
-      ).toBe(false)
+describe("納期カラム（Issue #558）", () => {
+  it("「すべて」タブは見出しを「納期」にし、行ごとにシミュ納期／確定納期を出す", () => {
+    expect(getDeadlineColumnLabel("")).toBe("納期")
+    const draft = makeOrder({ status: "draft", simulated_deadline: "2026-09-20" })
+    const confirmed = makeOrder({
+      status: "confirmed",
+      simulated_deadline: "2026-09-20",
+      confirmed_deadline: "2026-09-25",
     })
+    expect(getDeadlineForTab(draft, "")).toBe("2026-09-20")
+    expect(getDeadlineForTab(confirmed, "")).toBe("2026-09-25")
+  })
 
-    it("platform_admin は確定済みのみ対象", () => {
-      expect(
-        filterOrder(makeOrder({ status: "confirmed" }), "action_required", "platform_admin"),
-      ).toBe(true)
-      expect(
-        filterOrder(
-          makeOrder({ status: "pending_approval" }),
-          "action_required",
-          "platform_admin",
-        ),
-      ).toBe(false)
-    })
-
-    it("ロール未取得（null）は対象外", () => {
-      expect(filterOrder(makeOrder({ status: "draft" }), "action_required", null)).toBe(false)
-    })
+  it("ステータスのタブはタブに合わせて出し分ける", () => {
+    expect(getDeadlineColumnLabel("draft")).toBe("シミュ納期")
+    expect(getDeadlineColumnLabel("confirmed")).toBe("確定納期")
+    const confirmed = makeOrder({ status: "confirmed", confirmed_deadline: "2026-09-25" })
+    expect(getDeadlineForTab(confirmed, "confirmed")).toBe("2026-09-25")
   })
 })
 

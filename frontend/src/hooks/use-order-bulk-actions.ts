@@ -14,10 +14,10 @@ import { isOverdueDraft } from "@/lib/order-utils"
 import type { Order, BulkSimulateResult } from "@/types/order"
 
 /** `OrderTableRow` に渡す一括選択の props（`useOrderBulkActions().getRowProps()` の戻り値） */
-export type OrderRowBulkProps = Pick<
-  OrderTableRowProps,
-  "isSelected" | "selectionIndex" | "isBulkOperationInProgress" | "hasBulkSimFailed" | "onToggleSelect"
->
+export type OrderRowBulkProps = Required<
+  Pick<OrderTableRowProps, "isSelected" | "isBulkOperationInProgress" | "onToggleSelect">
+> &
+  Pick<OrderTableRowProps, "selectionIndex" | "hasBulkSimFailed">
 
 interface UseOrderBulkActionsOptions {
   /** 一覧の全注文（選択中の ID から注文を引く・納期超過の下書きを数えるのに使う） */
