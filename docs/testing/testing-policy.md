@@ -48,7 +48,8 @@ PRごとのゲートCIを構築する。
 - `.github/workflows/ci-frontend.yml`: `frontend/**` の変更時に eslint / `tsc --noEmit` / `next build` を実行
   - この時点ではフロントエンドのUnitテスト基盤 (Vitest等) は導入しない。壊れやすいロジックが実際に出てきた時点で改めて検討する
 - CI の時間短縮（依存インストールのキャッシュ）
-  - Backend は `uv pip install --system`（`astral-sh/setup-uv` のキャッシュ）、Frontend は `node_modules` そのものを `actions/cache` に載せ、ヒットしたら `npm ci` を飛ばす。`next build` 用に `.next/cache` もキャッシュする
+  - Backend は `uv pip install --system`（`astral-sh/setup-uv` のキャッシュ）、Frontend は `node_modules` そのものを `actions/cache` に載せ、ヒットしたら `npm ci` を飛ばす
+  - `.next/cache` はキャッシュしない。Next.js 16 の `next build`（Turbopack）はコンパイル結果を `.next/cache` に残さず（約100KB）、ヒットしてもビルド時間が変わらなかった
   - PR の run で保存したキャッシュは同じ PR からしか復元できないため、両ワークフローは `main` への push でも走らせ、各 PR の初回から復元できるキャッシュを `main` に作る
   - テスト用のコンテナイメージを GHCR に置く案は、イメージの pull が依存インストールと同程度かかり効果が小さいため見送った（`supabase start` を使う integration / E2E を CI で回す段階で再検討する）
 

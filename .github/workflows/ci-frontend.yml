@@ -58,14 +58,7 @@ jobs:
       - name: Unit tests (Vitest)
         run: npm run test
 
-      # Next.js のビルドキャッシュ。ソースが変わってもキーが前方一致する直近のキャッシュを復元して差分だけビルドさせる
-      - name: Cache Next.js build
-        uses: actions/cache@v4
-        with:
-          path: frontend/.next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/src/**', 'frontend/public/**', 'frontend/next.config.ts') }}
-          restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
-
+      # .next/cache はキャッシュしない。Next.js 16 の next build（Turbopack）はコンパイル結果を .next/cache に
+      # 残さず（約100KB）、キャッシュがヒットしてもビルド時間は変わらなかった
       - name: Build
         run: npm run build
