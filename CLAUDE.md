@@ -290,6 +290,11 @@ cd backend && ruff check . && mypy .
   `e.currentTarget.contains(e.target)` で DOM 上の行外（ポータル）のクリックを除外し、行内のボタン・リンク等も `closest()` で除外する
   （前例は受注一覧の `order-table-row.tsx`、Issue #527）。確定済み注文の確認モーダルは編集モーダルと外枠
   （`components/orders/order-dialog-layout.tsx`）を共有しているので、どちらかの見た目を変えるときはここを直す
+- **注文の行操作・一括操作（Issue #554）**: 注文を並べる画面は、行操作を `useOrderActions()` ＋ `OrderActionDialogs`、
+  一括操作を `useOrderBulkActions()` ＋ `OrderBulkActionDialogs`、表の外枠を `OrdersTable` で組み、行には
+  `getRowProps(order)` を展開して渡す。画面ごとに出す操作は `OrderTableRow` の `visibleActions` で絞り、ページ側のフックに
+  mutation・確認ダイアログの state を書き足さない（`use-orders-page.ts` は URL の状態・絞り込み・ページングだけ）。
+  操作を足すときは `OrderRowAction` に値を足し、行の表示条件・`getRowProps()`・`OrderActionDialogs` を揃えて更新する
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
   閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
 - **マスタを選ぶ検索付きコンボボックス（`Popover` + `Command`）**: 件数が増えうるマスタの選択は `Select` を使わずこちらにする

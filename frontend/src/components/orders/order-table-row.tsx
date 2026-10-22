@@ -43,7 +43,33 @@ import type { MemberRole } from "@/types/member"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 
-interface OrderTableRowProps {
+/** 行に出せる操作。画面ごとに `visibleActions` で絞る（Issue #554） */
+export type OrderRowAction =
+  | "simulate"
+  | "request_approval"
+  | "approve"
+  | "reject"
+  | "withdraw"
+  | "ship"
+  | "ship_without_routing"
+  | "edit"
+  | "delete"
+  | "view"
+
+export const ALL_ORDER_ROW_ACTIONS: readonly OrderRowAction[] = [
+  "simulate",
+  "request_approval",
+  "approve",
+  "reject",
+  "withdraw",
+  "ship",
+  "ship_without_routing",
+  "edit",
+  "delete",
+  "view",
+]
+
+export interface OrderTableRowProps {
   order: Order
   /** 現在の一覧タブ。納期カラムを「シミュ納期」/「確定納期」で出し分けるのに使う（Issue #394-B） */
   statusFilter: StatusFilter
@@ -73,6 +99,11 @@ interface OrderTableRowProps {
   onToggleSelect: (orderId: number) => void
   /** 確定済み・生産中の行のクリックで読み取り専用の確認モーダルを開く（Issue #527） */
   onView: (order: Order) => void
+  /**
+   * 出す操作。省略時はすべて（ステータス・ロールの条件は従来どおり別途かかる）。
+   * "simulate" は下書きのシミュレーション実行・メール起票の「確認」・再シミュレーションを含む
+   */
+  visibleActions?: readonly OrderRowAction[]
 }
 
 // 行内でクリックしても確認モーダルを開かない操作要素
@@ -105,6 +136,7 @@ export function OrderTableRow({
   onDelete,
   onToggleSelect,
   onView,
+  visibleActions = ALL_ORDER_ROW_ACTIONS,
 }: OrderTableRowProps) {
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
@@ -115,17 +147,32 @@ export function OrderTableRow({
   const tabDeadlineLabel = formatDeadlineDate(tabDeadline)
   const product = getProductDisplayParts(order.product_id, products, order.extracted_product_name)
 
+  const shows = (action: OrderRowAction) => visibleActions.includes(action)
+  const canSimulate = shows("simulate") && order.status === "draft" && !order.is_scheduled
+  const canRequestApproval =
+    shows("request_approval") &&
+    order.status === "draft" &&
+    order.is_scheduled &&
+    currentUserRole === "order_handler"
+  const canApprove =
+    shows("approve") && order.status === "pending_approval" && currentUserRole === "president"
   // 操作カラムを圧縮するため、主要アクション以外はケバブメニューへ寄せる（Issue #397）
-  const canWithdraw = order.status === "pending_approval" && currentUserRole === "order_handler"
-  const canReject = order.status === "pending_approval" && currentUserRole === "president"
+  const canWithdraw =
+    shows("withdraw") && order.status === "pending_approval" && currentUserRole === "order_handler"
+  const canReject =
+    shows("reject") && order.status === "pending_approval" && currentUserRole === "president"
   const canShip =
+    shows("ship") &&
     (order.status === "confirmed" || order.status === "in_progress") &&
     (currentUserRole === "president" || currentUserRole === "order_handler")
-  const canShipNoRouting = canShipWithoutRouting(order, currentUserRole as MemberRole | null)
-  const canResimulate = order.status === "draft" && order.is_scheduled
-  const canEditOrder = order.status === "draft"
+  const canShipNoRouting =
+    shows("ship_without_routing") && canShipWithoutRouting(order, currentUserRole as MemberRole | null)
+  const canResimulate = shows("simulate") && order.status === "draft" && order.is_scheduled
+  const canEditOrder = shows("edit") && order.status === "draft"
+  const canDelete = shows("delete")
   const hasMenuActionGroup =
     canWithdraw || canReject || canShip || canShipNoRouting || canResimulate || canEditOrder
+  const hasMenu = order.status !== "completed" && (hasMenuActionGroup || canDelete)
 
   // 緊急度による段階的な背景色（Issue #461）。優先順位（高い順）:
   // バルクシミュレーション失敗行 > 緊急度 > メール起票行。
@@ -142,7 +189,8 @@ export function OrderTableRow({
   }
 
   // 確定済み・生産中は編集できないので、行のクリックで内容を確認できるようにする（Issue #527）
-  const isViewable = order.status === "confirmed" || order.status === "in_progress"
+  const isViewable =
+    shows("view") && (order.status === "confirmed" || order.status === "in_progress")
 
   const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
     const target = e.target as Element
@@ -359,7 +407,7 @@ export function OrderTableRow({
                 <TooltipContent>シミュレーションに失敗しました</TooltipContent>
               </Tooltip>
             )}
-            {order.status === "draft" && !order.is_scheduled && (
+            {canSimulate && (
               isEmailOrder ? (
                 <Button
                   size="sm"
@@ -406,7 +454,7 @@ export function OrderTableRow({
                 </Button>
               )
             )}
-            {order.status === "draft" && order.is_scheduled && currentUserRole === "order_handler" && (
+            {canRequestApproval && (
               <Button
                 size="sm"
                 variant="outline"
@@ -416,7 +464,7 @@ export function OrderTableRow({
                 承認依頼を送信
               </Button>
             )}
-            {order.status === "pending_approval" && currentUserRole === "president" && (
+            {canApprove && (
               <Button
                 size="sm"
                 onClick={() => onApprove(order)}
@@ -425,7 +473,7 @@ export function OrderTableRow({
                 承認
               </Button>
             )}
-            {order.status !== "completed" && (
+            {hasMenu && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
@@ -480,13 +528,15 @@ export function OrderTableRow({
                       編集
                     </DropdownMenuItem>
                   )}
-                  {hasMenuActionGroup && <DropdownMenuSeparator />}
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onClick={() => onDelete(order)}
-                  >
-                    削除
-                  </DropdownMenuItem>
+                  {hasMenuActionGroup && canDelete && <DropdownMenuSeparator />}
+                  {canDelete && (
+                    <DropdownMenuItem
+                      className="text-destructive"
+                      onClick={() => onDelete(order)}
+                    >
+                      削除
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}

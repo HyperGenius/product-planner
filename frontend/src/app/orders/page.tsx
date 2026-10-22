@@ -10,35 +10,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { MasterPagination } from "@/components/master-pagination"
-import { BulkActionBar } from "@/components/orders/bulk-action-bar"
-import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-confirm-dialog"
-import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
-import { BulkRequestApprovalConfirmDialog } from "@/components/orders/bulk-request-approval-confirm-dialog"
-import { BulkApproveConfirmDialog } from "@/components/orders/bulk-approve-confirm-dialog"
-import { ShipWithoutRoutingConfirmDialog } from "@/components/orders/ship-without-routing-confirm-dialog"
-import { ShipOverdueDraftsConfirmDialog } from "@/components/orders/ship-overdue-drafts-confirm-dialog"
-import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
-import { OrderViewDialog } from "@/components/orders/order-view-dialog"
-import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
-import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
-import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
-import { RequestApprovalResultDialog } from "@/components/orders/request-approval-result-dialog"
-import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
+import { OrderActionDialogs } from "@/components/orders/order-action-dialogs"
+import { OrderBulkActionDialogs } from "@/components/orders/order-bulk-action-dialogs"
 import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
+import { OrderTableHeaderRow, OrdersTable } from "@/components/orders/orders-table"
 import { OrderTableRow } from "@/components/orders/order-table-row"
-import { SimulationSideSheet } from "@/components/orders/simulation-side-sheet"
-import { getDeadlineColumnLabel } from "@/lib/order-utils"
 import { useOrdersPage, PAGE_SIZE } from "@/hooks/use-orders-page"
+import { useOrderActions } from "@/hooks/use-order-actions"
+import { useOrderBulkActions } from "@/hooks/use-order-bulk-actions"
 
 export default function OrdersPage() {
   const {
@@ -47,6 +28,7 @@ export default function OrdersPage() {
     productFilterId,
     sortKey,
     router,
+    selectionResetKey,
     isLoading,
     orders,
     products,
@@ -58,103 +40,83 @@ export default function OrdersPage() {
     noRoutingCount,
     filteredOrders,
     pagedOrders,
-    isEditDialogOpen,
-    setIsEditDialogOpen,
-    selectedOrder,
-    editDialogGeneration,
-    viewingOrder,
-    isViewDialogOpen,
-    setIsViewDialogOpen,
-    deleteTargetOrder,
-    setDeleteTargetOrder,
-    expandedOrderId,
-    expandedSimResult,
     currentUserRole,
     isPresident,
     canShipOverdueDrafts,
-    confirmOrder,
-    requestApproval,
-    rejectOrder,
-    withdrawApproval,
-    shipOrder,
-    shipWithoutRouting,
-    shipWithoutRoutingTarget,
-    handleShipWithoutRoutingRequest,
-    handleShipWithoutRoutingConfirm,
-    handleShipWithoutRoutingCancel,
-    deleteOrder,
-    simulatingOrderId,
-    simulationErrorOrderId,
     setParam,
     clearMasterFilters,
-    handleApproveFromRow,
-    handleRequestApprovalFromRow,
-    handleWithdrawFromRow,
-    handleShipFromRow,
-    handleRejectRequest,
-    handleConfirmReject,
-    handleSimulate,
-    handleOpenEditDialog,
-    handleOpenViewDialog,
-    handleConfirmDelete,
-    closeSimResult,
-    rejectTargetOrder,
-    setRejectTargetOrder,
-    requestApprovalTargetOrder,
-    setRequestApprovalTargetOrder,
-    handleConfirmRequestApproval,
-    requestApprovalResultOrder,
-    setRequestApprovalResultOrder,
-    approveTargetOrder,
-    setApproveTargetOrder,
-    handleConfirmApprove,
-    selectedOrderIds,
-    selectedScheduledCount,
-    selectedPendingApprovalCount,
-    selectedScheduledOrders,
-    selectedPendingApprovalOrders,
-    draftPageOrders,
-    pendingApprovalPageOrders,
-    allDraftOnPageSelected,
-    someDraftOnPageSelected,
-    allPendingApprovalOnPageSelected,
-    somePendingApprovalOnPageSelected,
-    isBulkSimulating,
-    isBulkRequestingApproval,
-    isBulkApproving,
-    isBulkSimulateConfirmOpen,
-    isBulkRequestApprovalConfirmOpen,
-    isBulkApproveConfirmOpen,
-    handleToggleSelect,
-    handleToggleSelectAll,
-    handleToggleSelectAllPendingApproval,
-    handleClearSelection,
-    handleBulkSimulateRequest,
-    handleBulkSimulateConfirm,
-    handleBulkSimulateCancel,
-    handleBulkRequestApprovalRequest,
-    handleBulkRequestApprovalConfirm,
-    handleBulkRequestApprovalCancel,
-    handleBulkApproveRequest,
-    handleBulkApproveConfirm,
-    handleBulkApproveCancel,
-    bulkSimSummary,
-    bulkSimFailedIds,
-    handleCloseBulkSimSummary,
-    handleBulkRequestApprovalFromSummary,
-    overdueDraftOrders,
-    isShipOverdueDraftsConfirmOpen,
-    handleShipOverdueDraftsRequest,
-    handleShipOverdueDraftsConfirm,
-    handleShipOverdueDraftsCancel,
-    shipOverdueDrafts,
   } = useOrdersPage()
+  const actions = useOrderActions(orders)
+  const bulk = useOrderBulkActions({ orders, pageOrders: pagedOrders, selectionResetKey })
 
-  const expandedOrder = orders?.find((o) => o.id === expandedOrderId) ?? null
+  const selectAll =
+    statusFilter === "pending_approval" ? (
+      <Checkbox
+        checked={
+          bulk.allPendingApprovalOnPageSelected
+            ? true
+            : bulk.somePendingApprovalOnPageSelected
+            ? "indeterminate"
+            : false
+        }
+        onCheckedChange={bulk.handleToggleSelectAllPendingApproval}
+        disabled={
+          !isPresident ||
+          bulk.pendingApprovalPageOrders.length === 0 ||
+          bulk.isBulkApproving
+        }
+        aria-label="全選択"
+      />
+    ) : (
+      <Checkbox
+        checked={
+          bulk.allDraftOnPageSelected
+            ? true
+            : bulk.someDraftOnPageSelected
+            ? "indeterminate"
+            : false
+        }
+        onCheckedChange={bulk.handleToggleSelectAll}
+        disabled={
+          bulk.draftPageOrders.length === 0 || bulk.isBulkSimulating || bulk.isBulkRequestingApproval
+        }
+        aria-label="全選択"
+      />
+    )
+
+  const emptyState =
+    statusFilter === "action_required" ? (
+      <p>対応が必要な注文はありません</p>
+    ) : statusFilter || customerFilterId !== null || productFilterId !== null ? (
+      <>
+        <p>条件に一致する注文がありません</p>
+        {(customerFilterId !== null || productFilterId !== null) && (
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={clearMasterFilters}
+          >
+            顧客・製品の絞り込みを解除
+          </Button>
+        )}
+      </>
+    ) : (
+      <>
+        <p>まだ注文がありません</p>
+        <Button
+          variant="outline"
+          className="mt-4"
+          onClick={() => router.push("/orders/new")}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          新規注文を作成
+        </Button>
+      </>
+    )
 
   return (
     <TooltipProvider>
-      <div className={cn("container mx-auto py-6 px-4", selectedOrderIds.length > 0 && "pb-24")}>
+      <div className={cn("container mx-auto py-6 px-4", bulk.selectedOrderIds.length > 0 && "pb-24")}>
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">注文一覧</h1>
@@ -175,11 +137,11 @@ export default function OrdersPage() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    disabled={overdueDraftOrders.length === 0}
-                    onClick={handleShipOverdueDraftsRequest}
+                    disabled={bulk.overdueDraftOrders.length === 0}
+                    onClick={bulk.handleShipOverdueDraftsRequest}
                   >
                     納期超過の下書きを送品済みにする
-                    {overdueDraftOrders.length > 0 && `（${overdueDraftOrders.length}件）`}
+                    {bulk.overdueDraftOrders.length > 0 && `（${bulk.overdueDraftOrders.length}件）`}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -212,271 +174,36 @@ export default function OrdersPage() {
           onSortChange={(v) => setParam("sort", v)}
         />
 
-        <div className="rounded-lg border bg-card shadow-sm max-h-[calc(100vh-20rem)] overflow-y-auto">
-          {isLoading ? (
-            <div className="p-8 text-center text-muted-foreground">読み込み中...</div>
-          ) : pagedOrders.length > 0 ? (
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="w-10">
-                    <div className="flex items-center justify-center">
-                      {statusFilter === "pending_approval" ? (
-                        <Checkbox
-                          checked={
-                            allPendingApprovalOnPageSelected
-                              ? true
-                              : somePendingApprovalOnPageSelected
-                              ? "indeterminate"
-                              : false
-                          }
-                          onCheckedChange={handleToggleSelectAllPendingApproval}
-                          disabled={
-                            !isPresident ||
-                            pendingApprovalPageOrders.length === 0 ||
-                            isBulkApproving
-                          }
-                          aria-label="全選択"
-                        />
-                      ) : (
-                        <Checkbox
-                          checked={
-                            allDraftOnPageSelected
-                              ? true
-                              : someDraftOnPageSelected
-                              ? "indeterminate"
-                              : false
-                          }
-                          onCheckedChange={handleToggleSelectAll}
-                          disabled={draftPageOrders.length === 0 || isBulkSimulating || isBulkRequestingApproval}
-                          aria-label="全選択"
-                        />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead>
-                    <div className="flex flex-col leading-tight">
-                      <span>注文番号</span>
-                      <span className="text-xs font-normal text-muted-foreground">顧客注番</span>
-                    </div>
-                  </TableHead>
-                  <TableHead>製品</TableHead>
-                  <TableHead>通称</TableHead>
-                  <TableHead className="text-right">数量</TableHead>
-                  <TableHead>
-                    <div className="flex flex-col leading-tight">
-                      <span>希望納期</span>
-                      <span className="text-xs font-normal text-muted-foreground">
-                        {getDeadlineColumnLabel(statusFilter)}
-                      </span>
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-foreground">ステータス</TableHead>
-                  <TableHead className="text-right text-foreground">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pagedOrders.map((order) => (
-                  <OrderTableRow
-                    key={order.id}
-                    order={order}
-                    statusFilter={statusFilter}
-                    products={products}
-                    customers={customers}
-                    isSimulating={simulatingOrderId === order.id}
-                    hasSimulationError={simulationErrorOrderId === order.id}
-                    requestApprovalIsPending={requestApproval.isPending}
-                    approveIsPending={confirmOrder.isPending}
-                    withdrawIsPending={withdrawApproval.isPending}
-                    shipIsPending={shipOrder.isPending || shipWithoutRouting.isPending}
-                    currentUserRole={currentUserRole}
-                    isSelected={selectedOrderIds.includes(order.id)}
-                    selectionIndex={selectedOrderIds.includes(order.id) ? selectedOrderIds.indexOf(order.id) + 1 : undefined}
-                    isBulkOperationInProgress={isBulkSimulating || isBulkRequestingApproval || isBulkApproving}
-                    hasBulkSimFailed={bulkSimFailedIds.has(order.id)}
-                    onSimulate={handleSimulate}
-                    onRequestApproval={handleRequestApprovalFromRow}
-                    onApprove={handleApproveFromRow}
-                    onReject={handleRejectRequest}
-                    onWithdraw={handleWithdrawFromRow}
-                    onShip={handleShipFromRow}
-                    onShipWithoutRouting={handleShipWithoutRoutingRequest}
-                    onEdit={handleOpenEditDialog}
-                    onDelete={setDeleteTargetOrder}
-                    onToggleSelect={handleToggleSelect}
-                    onView={handleOpenViewDialog}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="p-8 text-center text-muted-foreground">
-              {statusFilter === "action_required" ? (
-                <p>対応が必要な注文はありません</p>
-              ) : statusFilter || customerFilterId !== null || productFilterId !== null ? (
-                <>
-                  <p>条件に一致する注文がありません</p>
-                  {(customerFilterId !== null || productFilterId !== null) && (
-                    <Button
-                      variant="outline"
-                      className="mt-4"
-                      onClick={clearMasterFilters}
-                    >
-                      顧客・製品の絞り込みを解除
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p>まだ注文がありません</p>
-                  <Button
-                    variant="outline"
-                    className="mt-4"
-                    onClick={() => router.push("/orders/new")}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    新規注文を作成
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+        <OrdersTable
+          isLoading={isLoading}
+          header={<OrderTableHeaderRow statusFilter={statusFilter} selectAll={selectAll} />}
+          rowCount={pagedOrders.length}
+          emptyState={emptyState}
+          totalCount={filteredOrders.length}
+          pageSize={PAGE_SIZE}
+        >
+          {pagedOrders.map((order) => (
+            <OrderTableRow
+              key={order.id}
+              order={order}
+              statusFilter={statusFilter}
+              products={products}
+              customers={customers}
+              currentUserRole={currentUserRole}
+              {...actions.getRowProps(order)}
+              {...bulk.getRowProps(order)}
+            />
+          ))}
+        </OrdersTable>
 
-        <MasterPagination totalCount={filteredOrders.length} pageSize={PAGE_SIZE} />
-
-        {selectedOrder && (
-          <EditOrderDialog
-            key={`${selectedOrder.id}-${editDialogGeneration}`}
-            order={selectedOrder}
-            open={isEditDialogOpen}
-            onOpenChange={setIsEditDialogOpen}
-          />
-        )}
-
-        <OrderViewDialog
-          order={viewingOrder}
+        <OrderActionDialogs
+          actions={actions}
           products={products}
           customers={customers}
-          open={isViewDialogOpen}
-          onOpenChange={setIsViewDialogOpen}
-        />
-
-        <DeleteOrderDialog
-          order={deleteTargetOrder}
-          products={products}
-          customers={customers}
-          isPending={deleteOrder.isPending}
-          onConfirm={handleConfirmDelete}
-          onOpenChange={(open) => { if (!open) setDeleteTargetOrder(null) }}
-        />
-
-        <RejectOrderDialog
-          order={rejectTargetOrder}
-          products={products}
-          customers={customers}
-          isPending={rejectOrder.isPending}
-          onConfirm={handleConfirmReject}
-          onOpenChange={(open) => { if (!open) setRejectTargetOrder(null) }}
-        />
-
-        <RequestApprovalConfirmDialog
-          order={requestApprovalTargetOrder}
-          products={products}
-          isPending={requestApproval.isPending}
-          onConfirm={handleConfirmRequestApproval}
-          onOpenChange={(open) => { if (!open) setRequestApprovalTargetOrder(null) }}
-        />
-
-        <RequestApprovalResultDialog
-          order={requestApprovalResultOrder}
-          products={products}
-          customers={customers}
-          onOpenChange={(open) => { if (!open) setRequestApprovalResultOrder(null) }}
-        />
-
-        <ApproveConfirmDialog
-          order={approveTargetOrder}
-          products={products}
-          isPending={confirmOrder.isPending}
-          onConfirm={handleConfirmApprove}
-          onOpenChange={(open) => { if (!open) setApproveTargetOrder(null) }}
-        />
-
-        <SimulationSideSheet
-          open={expandedSimResult !== null}
-          order={expandedOrder}
-          result={expandedSimResult}
-          requestApprovalIsPending={requestApproval.isPending}
           currentUserRole={currentUserRole}
-          onClose={closeSimResult}
-          onRequestApproval={handleRequestApprovalFromRow}
         />
 
-        <BulkActionBar
-          selectedCount={selectedOrderIds.length}
-          selectedScheduledCount={selectedScheduledCount}
-          selectedPendingApprovalCount={selectedPendingApprovalCount}
-          currentUserRole={currentUserRole}
-          isBulkSimulating={isBulkSimulating}
-          isBulkRequestingApproval={isBulkRequestingApproval}
-          isBulkApproving={isBulkApproving}
-          onBulkSimulate={handleBulkSimulateRequest}
-          onBulkRequestApproval={handleBulkRequestApprovalRequest}
-          onBulkApprove={handleBulkApproveRequest}
-          onClearSelection={handleClearSelection}
-        />
-
-        <BulkSimulateConfirmDialog
-          open={isBulkSimulateConfirmOpen}
-          orders={selectedOrderIds
-            .map((id) => orders?.find((o) => o.id === id))
-            .filter((o): o is NonNullable<typeof o> => o != null)}
-          products={products}
-          onConfirm={handleBulkSimulateConfirm}
-          onCancel={handleBulkSimulateCancel}
-        />
-
-        <BulkRequestApprovalConfirmDialog
-          open={isBulkRequestApprovalConfirmOpen}
-          orders={selectedScheduledOrders}
-          products={products}
-          isPending={isBulkRequestingApproval}
-          onConfirm={handleBulkRequestApprovalConfirm}
-          onCancel={handleBulkRequestApprovalCancel}
-        />
-
-        <BulkApproveConfirmDialog
-          open={isBulkApproveConfirmOpen}
-          orders={selectedPendingApprovalOrders}
-          products={products}
-          isPending={isBulkApproving}
-          onConfirm={handleBulkApproveConfirm}
-          onCancel={handleBulkApproveCancel}
-        />
-
-        <BulkSimulateSummaryDialog
-          results={bulkSimSummary}
-          onClose={handleCloseBulkSimSummary}
-          onBulkRequestApproval={handleBulkRequestApprovalFromSummary}
-        />
-
-        <ShipWithoutRoutingConfirmDialog
-          open={shipWithoutRoutingTarget !== null}
-          orderNo={shipWithoutRoutingTarget?.order_no ?? ""}
-          isPending={shipWithoutRouting.isPending}
-          onConfirm={handleShipWithoutRoutingConfirm}
-          onCancel={handleShipWithoutRoutingCancel}
-        />
-
-        <ShipOverdueDraftsConfirmDialog
-          open={isShipOverdueDraftsConfirmOpen}
-          orders={overdueDraftOrders}
-          products={products}
-          isPending={shipOverdueDrafts.isPending}
-          onConfirm={handleShipOverdueDraftsConfirm}
-          onCancel={handleShipOverdueDraftsCancel}
-        />
+        <OrderBulkActionDialogs bulk={bulk} products={products} currentUserRole={currentUserRole} />
       </div>
     </TooltipProvider>
   )
