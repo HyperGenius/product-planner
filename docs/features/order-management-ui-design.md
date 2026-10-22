@@ -434,6 +434,55 @@ frontend/src/
 - ダッシュボードの承認待ちキュー（`ApprovalQueueCard`）の見出しの遷移先を `/orders?status=pending_approval` からこの画面に変えた
 - 注文一覧（`/orders`）の「承認待ち」タブ・「対応が必要」タブ（社長）は #558 で整理するまで残る
 
+## 送品の消し込み（`/orders/shipping`、Issue #557）
+
+Epic #553 の3画面目。確定済・生産中の注文のうち、送品済みになっていそうなものを候補として上に出す。**送品の記録は弥生が正**で、この画面は候補を示すだけで自動では送品済みにしない（担当者が弥生で確認してから1件ずつ押す）。Backend の変更は無く、`GET /orders` と `GET /daily-reports/order-progress`（Issue #490）で判定する。
+
+### 候補の判定
+
+判定は純粋関数 `lib/shipping-candidate-utils.ts`（`buildShippingRows()`）。対象は `status` が `confirmed` / `in_progress` の注文で、次のいずれかに当たれば候補にする。
+
+| 理由 | 条件 | バッジの色 |
+|---|---|---|
+| A 最終工程完了（`final_process_completed`） | 日報の進捗で `sequence_order` が最大の工程の `status` が `completed` | 緑 |
+| B 納期超過（`overdue`） | 納期が今日（JST）より前 | 赤（納期の状態の超過と同じ） |
+| C 納期まで1週間（`due_soon`） | 納期まで残り7日未満（当日を含む） | amber（納期の状態の間近と同じ） |
+
+- **納期の基準は希望納期（`desired_deadline`）**。送品は顧客の納期に合わせるため。希望納期が無い注文は完成見込み（`getEffectiveDeadline()`＝確定納期 → シミュ納期）に落とし、納期の列に「（完成見込み）」と添える。現場ダッシュボードは完成見込みを基準にしているので、両画面で超過・間近の注文が一致しないことがある
+- B・C の閾値は現場ダッシュボードと同じ `getDeadlineStatus()` / `DEADLINE_DUE_SOON_THRESHOLD_DAYS`（`lib/floor-dashboard-utils.ts`）。「今日」は `jstTodayIso()`
+- 進捗の行が無い注文（割り付けが未計算・対象外）は工程の進捗を「日報なし」と出し、A では候補にしない（B・C だけで判定する。Issue #491 の「進捗の行が無い工程は遅れにしない」と同じ考え方）。`sequence_order` が null の行は最終工程の判定に使わない
+- 最終工程は後の工程が無いので、完了の根拠（`completed_by`）は実質 `quantity`（良品数が受注数量以上）になる
+- 進捗の取得に失敗したときも B・C だけで判定し、その旨を出す
+
+### 一覧
+
+- 既定は「候補のみ」。タブで候補でない注文も含めた「すべて」に切り替える（画面内の状態で、URL には持たない）
+- 並びは A かつ B を先頭に、次に納期の古い順（納期の無い注文は末尾、同順位は注文 ID 順。`compareShippingRows()`）
+- 列: 注文番号（ステータス）・顧客・製品・数量・納期（「N日超過」/「今日」/「残りN日」）・工程の進捗（完了した工程数 / 工程数）・候補の理由・操作。専用の行 `ShippingOrderRow` に `useOrderActions().getRowProps()` を展開する
+- 画面上部に「送品の記録は弥生が正です。弥生で送品を確認してから『送品済みにする』を押してください」を常に出す。進捗の最終計算日時（`computed_at`）は JST の「M/D HH:mm」で出す
+
+### 操作
+
+- 「送品済みにする」（`POST /orders/{id}/ship`）は1件ずつで、社長・受注担当だけ。他のロールは閲覧のみ。権限の判定は `canShipOrder()`（`lib/order-utils.ts`）に切り出し、注文一覧の `OrderTableRow` と共有する
+- 一括で送品済みにする操作は作らない（弥生で1件ずつ確認する運用のため）
+- 送品済みにした注文は対象から外れるので、注文の再取得でこの画面から外れる
+
+### 画面の構成
+
+```
+frontend/src/
+  app/orders/shipping/page.tsx                  # 下記を組み合わせる
+  hooks/use-orders-shipping.ts                  # useShippingRows（画面とサイドバーで共有）/ useOrdersShipping
+  lib/shipping-candidate-utils.ts               # 候補の判定・並び（純粋関数）
+  components/orders/shipping/
+    shipping-order-row.tsx                      # ShippingOrderHeaderRow / ShippingOrderRow
+```
+
+### 導線
+
+- サイドバーの「受注管理」配下に「送品の消し込み」を「承認」の次に置く。件数バッジ（`SidebarBadgeKey` の `shipping_candidates`＝候補の件数）は**社長・受注担当にだけ**出す
+- バッジは画面と同じ `useShippingRows()` で数え、進捗を同じクエリキー（対象の注文 ID の昇順）で取るので二重に取得しない。バッジを出さないロールでは進捗を取得せず、進捗が届くまではバッジを出さない（最終工程の完了が抜けた件数を一瞬出さないため）
+
 ## バックエンド追加事項
 
 ### `confirmed_deadline` カラム追加

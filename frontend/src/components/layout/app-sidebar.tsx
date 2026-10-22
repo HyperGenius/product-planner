@@ -21,6 +21,7 @@ import {
   MailCheck,
   FileCheck,
   Stamp,
+  Truck,
 } from "lucide-react"
 
 import {
@@ -101,6 +102,13 @@ const menuItems: MenuItem[] = [
         url: "/orders/approval",
         icon: Stamp,
         badge: { key: "pending_approval", roles: ["president"] },
+      },
+      {
+        // 送品済みにできるのは社長・受注担当なので、候補の件数もこの2ロールにだけ出す（Issue #557）
+        title: "送品の消し込み",
+        url: "/orders/shipping",
+        icon: Truck,
+        badge: { key: "shipping_candidates", roles: ["president", "order_handler"] },
       },
       {
         title: "受信メール処理結果",
