@@ -30,12 +30,26 @@ export interface DeadlineRiskOrder {
 /**
  * "YYYY-MM-DD" 同士の日数差（`toIso - fromIso`）を端末タイムゾーン非依存で返す。
  * 両端を UTC 深夜として解釈するため、`new Date("YYYY-MM-DD")` のような日付ズレは起きない。
- * `ApprovalQueueCard`（Issue #456）の超過日数表示でも同じ計算を使うため export する。
+ * 承認待ちの超過日数（`getSimulatedDeadlineDiffDays`）でも同じ計算を使う。
  */
 export function diffDaysIso(fromIso: string, toIso: string): number {
   const from = Date.parse(`${fromIso}T00:00:00Z`)
   const to = Date.parse(`${toIso}T00:00:00Z`)
   return Math.round((to - from) / 86_400_000)
+}
+
+/**
+ * シミュ納期の希望納期との差（`simulated_deadline - desired_deadline` の日数。正なら超過）。
+ * 承認前の注文は確定納期が無いのでシミュ納期で比べる。どちらかが未設定・不正な日付なら null。
+ * ダッシュボードの承認待ちキュー（Issue #456）と「承認」画面（Issue #556）で共有する
+ */
+export function getSimulatedDeadlineDiffDays(order: Order): number | null {
+  const desired = order.desired_deadline?.slice(0, 10)
+  const simulated = order.simulated_deadline?.slice(0, 10)
+  if (!desired || !simulated || !isValidIsoDate(desired) || !isValidIsoDate(simulated)) {
+    return null
+  }
+  return diffDaysIso(desired, simulated)
 }
 
 /**

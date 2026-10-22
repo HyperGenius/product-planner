@@ -20,6 +20,8 @@ interface BulkActionBarProps {
   onBulkRequestApproval: () => void
   onBulkApprove: () => void
   onClearSelection: () => void
+  /** 一括シミュレーションのボタンを出すか（省略時は出す。承認待ちだけを並べる「承認」画面では出さない。Issue #556） */
+  showBulkSimulate?: boolean
 }
 
 export function BulkActionBar({
@@ -34,6 +36,7 @@ export function BulkActionBar({
   onBulkRequestApproval,
   onBulkApprove,
   onClearSelection,
+  showBulkSimulate = true,
 }: BulkActionBarProps) {
   if (selectedCount === 0) return null
 
@@ -53,16 +56,18 @@ export function BulkActionBar({
         </span>
       )}
       <div className="h-4 w-px bg-border" />
-      <Button size="sm" variant="outline" onClick={onBulkSimulate} disabled={isBusy}>
-        {isBulkSimulating ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            シミュレーション中...
-          </>
-        ) : (
-          `一括シミュレーション（${selectedCount}件）`
-        )}
-      </Button>
+      {showBulkSimulate && (
+        <Button size="sm" variant="outline" onClick={onBulkSimulate} disabled={isBusy}>
+          {isBulkSimulating ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              シミュレーション中...
+            </>
+          ) : (
+            `一括シミュレーション（${selectedCount}件）`
+          )}
+        </Button>
+      )}
       {/* disabled な Button は pointer-events: none のため Tooltip が発火しない。span でラップする */}
       {currentUserRole === "order_handler" && (
         <Tooltip>

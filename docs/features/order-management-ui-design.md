@@ -391,7 +391,48 @@ frontend/src/
 - 「受注管理」をサブメニュー付きにした（`app-sidebar.tsx`）。親を押すとロールにかかわらず `/orders` を開き、開閉は右端のシェブロン（`SidebarMenuAction`）で行う。サブメニューは初めから展開する（`defaultOpen`）
 - サブメニュー: 「起票の確認」・「受信メール処理結果」（トップレベルから移動）
 - `SubMenuItem` に `allowedRoles` と `badge: { key, roles }` を足した。件数は `useSidebarBadgeCounts()`（`hooks/use-sidebar-badge-counts.ts`）が `SidebarBadgeKey` ごとに返す。バッジを出す項目が無いロールでは `useOrders({ enabled: false })` で注文を取得しない
-- 「起票の確認」の件数バッジ（下書きの件数）は受注担当・ISO担当にだけ出す。#556（承認）・#557（送品の消し込み）は `SidebarBadgeKey` に値を足して項目を追加する
+- 「起票の確認」の件数バッジ（下書きの件数）は受注担当・ISO担当にだけ出す。#557（送品の消し込み）は `SidebarBadgeKey` に値を足して項目を追加する
+
+## 承認（`/orders/approval`、Issue #556）
+
+Epic #553 の2画面目。社長が承認待ちの注文を、希望納期とシミュ納期を見比べながら承認・一括承認・差し戻しする。Backend の変更は無く、`GET /orders` の全件から `status === "pending_approval"` を絞る（依頼者 `approval_requested_by_name`・依頼日時 `approval_requested_at` は Issue #402 で返している）。
+
+### 一覧
+
+- 並びは承認依頼の古い順（`compareApprovalRequests()`、`lib/order-utils.ts`）。`approval_requested_at` が未設定・解釈できない注文（Issue #402 以前の既存データ）は末尾に置き、同順位は注文 ID 順
+- 列: 選択・注文番号（顧客注番）・顧客・製品・数量・希望納期・シミュ納期（希望納期との差）・依頼者（依頼日時）・操作。列が注文一覧と違うので `OrderTableRow` ではなく専用の `ApprovalOrderRow` を使う（行操作・一括選択の props は `useOrderActions().getRowProps()` / `useOrderBulkActions().getRowProps()` をそのまま展開する）
+- シミュ納期の差は `getSimulatedDeadlineDiffDays()`（`lib/deadline-risk.ts`、ダッシュボードの承認待ちキューと共有）。超過は「N日超過」を赤字で出し、行の背景も赤くする。それ以外は「希望納期どおり」/「N日前」
+- 依頼日時は JST の「M/D HH:mm」（当年以外は「YY/M/D HH:mm」、`formatDateTimeShort()`）
+- 注文番号は受注詳細（`/orders/{id}`）へのリンク
+
+### 操作
+
+| ロール | 操作 |
+|---|---|
+| 社長（`president`） | 承認（確認モーダル、Issue #338）・差し戻し（理由入力）・一括承認（選択して確認モーダル） |
+| 受注担当（`order_handler`） | 取り下げ |
+| それ以外（`iso_officer` / `platform_admin`） | 閲覧のみ（選択欄も出さない） |
+
+- 権限の判定は `canApproveOrder()` / `canRejectOrder()` / `canWithdrawApproval()`（`lib/order-utils.ts`）に切り出し、注文一覧の `OrderTableRow` と共有する。承認は `president` 限定で `platform_admin` を含めない（Issue #323）
+- 取り下げは注文一覧・バックエンド（`withdraw-approval`）と同じく受注担当なら依頼者本人かを問わない
+- 承認待ちだけを並べる画面なので、一括操作バーの「一括シミュレーション」は出さない（`OrderBulkActionDialogs` / `BulkActionBar` の `showBulkSimulate={false}`。省略時は従来どおり出す）
+- 承認・差し戻し・取り下げた注文は承認待ちでなくなるので、注文の再取得でこの画面から外れる
+
+### 画面の構成
+
+```
+frontend/src/
+  app/orders/approval/page.tsx                  # 下記を組み合わせる
+  hooks/use-orders-approval.ts                  # 承認待ちの絞り込みと並び
+  components/orders/approval/
+    approval-order-row.tsx                      # ApprovalOrderHeaderRow / ApprovalOrderRow
+```
+
+### 導線
+
+- サイドバーの「受注管理」配下に「承認」を「起票の確認」の次に置く。件数バッジ（`SidebarBadgeKey` の `pending_approval`＝承認待ちの件数）は**社長にだけ**出す
+- ダッシュボードの承認待ちキュー（`ApprovalQueueCard`）の見出しの遷移先を `/orders?status=pending_approval` からこの画面に変えた
+- 注文一覧（`/orders`）の「承認待ち」タブ・「対応が必要」タブ（社長）は #558 で整理するまで残る
 
 ## バックエンド追加事項
 
@@ -635,6 +676,7 @@ const bulk = useOrderBulkActions({ orders, pageOrders, selectionResetKey })
 | 一覧ページ: コード分割リファクタリング | - | ✅ 実装済 (#130) |
 | 一覧ページ: 行・操作・確認ダイアログの共通部品化（Epic #553 の画面分割の準備） | - | ✅ 実装済 (#554) |
 | 起票の確認画面（下書きの5区分・起票失敗メールへの導線・サイドバーのサブメニューと件数バッジ） | 高 | ✅ 実装済 (#555) |
+| 承認画面（承認依頼の古い順・シミュ納期の超過日数・ロール別の承認／差し戻し／取り下げ・社長だけの件数バッジ） | 高 | ✅ 実装済 (#556) |
 | 一覧ページ: シミュレーション行ごとローディング・エラーフィードバック | 中 | ✅ 実装済 (#133) |
 | 一覧ページ: 一括操作（チェックボックス・一括シミュレーション・一括確定） | 中 | ✅ 実装済 (#135) |
 | 一括シミュレーション: サマリーモーダル + NG行ハイライト | 中 | ✅ 実装済 (#140) |
