@@ -42,6 +42,8 @@ import { useOrdersPage, PAGE_SIZE } from "@/hooks/use-orders-page"
 export default function OrdersPage() {
   const {
     statusFilter,
+    customerFilterId,
+    productFilterId,
     sortKey,
     router,
     isLoading,
@@ -78,6 +80,7 @@ export default function OrdersPage() {
     simulatingOrderId,
     simulationErrorOrderId,
     setParam,
+    clearMasterFilters,
     handleApproveFromRow,
     handleRequestApprovalFromRow,
     handleWithdrawFromRow,
@@ -193,6 +196,12 @@ export default function OrdersPage() {
         <OrdersFilterBar
           statusFilter={statusFilter}
           sortKey={sortKey}
+          customerFilterId={customerFilterId}
+          productFilterId={productFilterId}
+          customers={customers}
+          products={products}
+          onCustomerChange={(v) => setParam("customer", v)}
+          onProductChange={(v) => setParam("product", v)}
           onStatusChange={(v) => setParam("status", v)}
           onSortChange={(v) => setParam("sort", v)}
         />
@@ -297,8 +306,19 @@ export default function OrdersPage() {
             <div className="p-8 text-center text-muted-foreground">
               {statusFilter === "action_required" ? (
                 <p>対応が必要な注文はありません</p>
-              ) : statusFilter ? (
-                <p>条件に一致する注文がありません</p>
+              ) : statusFilter || customerFilterId !== null || productFilterId !== null ? (
+                <>
+                  <p>条件に一致する注文がありません</p>
+                  {(customerFilterId !== null || productFilterId !== null) && (
+                    <Button
+                      variant="outline"
+                      className="mt-4"
+                      onClick={clearMasterFilters}
+                    >
+                      顧客・製品の絞り込みを解除
+                    </Button>
+                  )}
+                </>
               ) : (
                 <>
                   <p>まだ注文がありません</p>

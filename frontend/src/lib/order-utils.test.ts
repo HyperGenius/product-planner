@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Order } from "@/types/order"
-import { filterOrder, getOrderUrgency, isNoRoutingOrder, jstTomorrowIso } from "./order-utils"
+import {
+  filterOrder,
+  getOrderUrgency,
+  isNoRoutingOrder,
+  jstTomorrowIso,
+  matchesCustomerProductFilter,
+  toValidMasterId,
+} from "./order-utils"
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
@@ -178,5 +185,37 @@ describe("jstTomorrowIso（Issue #477）", () => {
     // JST 2026-12-31 12:00
     vi.setSystemTime(new Date("2026-12-31T03:00:00Z"))
     expect(jstTomorrowIso()).toBe("2027-01-01")
+  })
+})
+
+describe("matchesCustomerProductFilter / toValidMasterId（Issue #546）", () => {
+  const order = (customer_id?: number, product_id?: number) =>
+    ({ id: 1, customer_id, product_id }) as Order
+
+  it("未指定（null）なら顧客・製品が無い注文も通す", () => {
+    expect(matchesCustomerProductFilter(order(), null, null)).toBe(true)
+  })
+
+  it("顧客・製品は ID 一致で AND 判定する", () => {
+    expect(matchesCustomerProductFilter(order(1, 10), 1, 10)).toBe(true)
+    expect(matchesCustomerProductFilter(order(1, 10), 1, 11)).toBe(false)
+    expect(matchesCustomerProductFilter(order(2, 10), 1, null)).toBe(false)
+  })
+
+  it("顧客不明・製品未照合の注文は指定中は通さない", () => {
+    expect(matchesCustomerProductFilter(order(undefined, 10), 1, null)).toBe(false)
+    expect(matchesCustomerProductFilter(order(1, undefined), null, 10)).toBe(false)
+  })
+
+  it("toValidMasterId は不正値・存在しない ID を null にする", () => {
+    const ids = new Set([1, 2])
+    expect(toValidMasterId("2", ids)).toBe(2)
+    expect(toValidMasterId("3", ids)).toBeNull()
+    expect(toValidMasterId("abc", ids)).toBeNull()
+    expect(toValidMasterId("1.5")).toBeNull()
+    expect(toValidMasterId("0")).toBeNull()
+    expect(toValidMasterId("-1")).toBeNull()
+    expect(toValidMasterId(null)).toBeNull()
+    expect(toValidMasterId("7")).toBe(7)
   })
 })
