@@ -24,6 +24,7 @@ import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
 import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
+import { ShipWithoutRoutingConfirmDialog } from "@/components/orders/ship-without-routing-confirm-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
 import { OrderProcessProgress } from "@/components/orders/order-process-progress"
@@ -36,6 +37,7 @@ import {
   useRejectOrder,
   useWithdrawApproval,
   useShipOrder,
+  useShipOrderWithoutRouting,
   useDeleteOrder,
 } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
@@ -49,6 +51,7 @@ import {
   formatDeadlineDate,
   usesSimulatedDeadlineForOrder,
   isDeadlineOverdue,
+  canShipWithoutRouting,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import { ApiError } from "@/lib/api-client"
@@ -71,11 +74,13 @@ export default function OrderDetailPage() {
   const rejectMutation = useRejectOrder()
   const withdrawMutation = useWithdrawApproval()
   const shipMutation = useShipOrder()
+  const shipWithoutRoutingMutation = useShipOrderWithoutRouting()
   const deleteMutation = useDeleteOrder()
 
   const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editDialogGeneration, setEditDialogGeneration] = useState(0)
+  const [isShipWithoutRoutingDialogOpen, setIsShipWithoutRoutingDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false)
@@ -183,6 +188,16 @@ export default function OrderDetailPage() {
     }
   }
 
+  const handleShipWithoutRouting = async () => {
+    try {
+      await shipWithoutRoutingMutation.mutateAsync(orderId)
+      toast.success("送品済みにしました")
+      setIsShipWithoutRoutingDialogOpen(false)
+    } catch {
+      toast.error("送品済みへの変更に失敗しました")
+    }
+  }
+
   const handleDelete = async () => {
     try {
       await deleteMutation.mutateAsync(orderId)
@@ -220,6 +235,7 @@ export default function OrderDetailPage() {
   const canShip =
     (order.status === "confirmed" || order.status === "in_progress") &&
     (currentUserRole === "president" || currentUserRole === "order_handler")
+  const canShipNoRouting = canShipWithoutRouting(order, currentUserRole)
   const canDelete = order.status === "draft" || order.status === "canceled"
   // 自動起票で製品を識別できなかった明細（product_id === null）は、
   // has_no_routings も併せて true になるため、工程未登録の警告と二重表示
@@ -533,6 +549,16 @@ export default function OrderDetailPage() {
                 {shipMutation.isPending ? "処理中..." : "送品済みにする"}
               </Button>
             )}
+            {canShipNoRouting && (
+              <Button
+                onClick={() => setIsShipWithoutRoutingDialogOpen(true)}
+                disabled={shipWithoutRoutingMutation.isPending}
+                variant="outline"
+              >
+                <Truck className="mr-2 h-4 w-4" />
+                送品済みにする（工程未入力の例外処理）
+              </Button>
+            )}
             {isDraft && (
               <Button
                 variant="outline"
@@ -578,6 +604,14 @@ export default function OrderDetailPage() {
         order={isEditDialogOpen ? order : null}
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
+      />
+
+      <ShipWithoutRoutingConfirmDialog
+        open={isShipWithoutRoutingDialogOpen}
+        orderNo={order.order_no ?? ""}
+        isPending={shipWithoutRoutingMutation.isPending}
+        onConfirm={handleShipWithoutRouting}
+        onCancel={() => setIsShipWithoutRoutingDialogOpen(false)}
       />
 
       <DeleteOrderDialog

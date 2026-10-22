@@ -36,8 +36,9 @@ draft ──────────▶ pending_approval ───────�
 | `completed` | 完了 |
 | `canceled` | キャンセル |
 
-> 注: 上記に加えて、管理者による後片付け操作のみ `draft → shipped` を例外的に許可する
-> （納期超過の下書き限定。詳細は下記「納期超過の下書きの一括送品済み化」）。
+> 注: 上記に加えて、後片付け操作のみ `draft → shipped` を例外的に許可する
+> （納期超過の下書き限定の管理者操作は下記「納期超過の下書きの一括送品済み化」、
+> 社長が個別に行う工程未入力の下書きは「工程未入力の下書きの送品済み化」）。
 
 順方向遷移のみを許可し、差し戻し `pending_approval → draft` のみ例外的に許可する。
 バリデーションは
@@ -117,6 +118,32 @@ draft ──────────▶ pending_approval ───────�
   （`ShipOverdueDraftsConfirmDialog`）で対象一覧を確認してから実行。フックは
   `useShipOverdueDrafts`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)）。
   行チェックボックスによる個別選択は用いない。
+
+### 工程未入力の下書きの送品済み化 (`draft → shipped`、暫定の例外処理、Issue #547)
+
+工程未入力の下書き（製品に工程ルーティングが無い）はシミュレーションも承認依頼も進められず、
+片付ける手段が削除しかなかった。記録を残したまま `shipped` にするための**暫定の例外処理**で、
+工程を入力できるようになったら廃止を検討する。`POST /orders/{id}/ship-without-routing`
+（[approval_workflow.py](../../backend/app/routers/transaction/orders/approval_workflow.py)）が担う。
+
+- **ロール**: `president` のみ。`order_handler` / `iso_officer` / `platform_admin` は 403。
+  既存の `confirmed` / `in_progress` の送品済み化（`POST /orders/{id}/ship`）は変えていない。
+- **対象**: `status == "draft"` かつ `get_by_id_with_routing_status()` の `has_no_routings == true`。
+  サーバー側で再判定し、満たさない場合は 400（工程入力済み・draft 以外）、存在しなければ 404。
+  製品未照合（`product_id` が NULL）の受注も `has_no_routings` が true なので対象に含める。
+  修理注文は `has_no_routings` が常に false のため対象外。
+- **遷移バリデーション**: `ORDER_STATUS_TRANSITIONS` には `draft → shipped` を足さない
+  （PATCH 等の遷移検証まで緩むため）。`ship-overdue-drafts` と同様、遷移表の外で専用に判定する。
+- **承認ログ**: `order_approval_log.action = 'ship_without_routing'` を `reason` 付きで記録する
+  （`_log_approval_action_safely()`。失敗しても送品済み化は成功）。CHECK 制約
+  `order_approval_log_action_check` はマイグレーション
+  `20261022000000_add_ship_without_routing_action_to_order_approval_log.sql` で張り直した。
+  承認ログ画面・CSV には「送品済み（工程未入力の例外処理）」と表示する。
+- **フロントエンド**: 表示条件は `canShipWithoutRouting(order, role)`（`lib/order-utils.ts`）で、
+  一覧行のケバブメニューと詳細画面の両方が共有する。バックエンドの判定に揃えるため、
+  `isNoRoutingOrder()`（製品照合済み・未シミュに限定）とは違い製品未照合も含む。
+  確認ダイアログ（`ShipWithoutRoutingConfirmDialog`）で例外処理であることを示してから実行し、
+  フックは `useShipOrderWithoutRouting`（`use-orders.ts`）。
 
 ## フロントエンド表示: 「シミュ済」派生ステータス (Issue #392)
 

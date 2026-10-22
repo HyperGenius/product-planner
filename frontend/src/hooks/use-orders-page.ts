@@ -12,6 +12,7 @@ import {
   useRejectOrder,
   useRequestApproval,
   useShipOrder,
+  useShipOrderWithoutRouting,
   useShipOverdueDrafts,
   useSimulateOrderById,
   useWithdrawApproval,
@@ -116,6 +117,8 @@ export function useOrdersPage() {
   const rejectOrder = useRejectOrder()
   const withdrawApproval = useWithdrawApproval()
   const shipOrder = useShipOrder()
+  const shipWithoutRouting = useShipOrderWithoutRouting()
+  const [shipWithoutRoutingTarget, setShipWithoutRoutingTarget] = useState<Order | null>(null)
   const shipOverdueDrafts = useShipOverdueDrafts()
   const approveOrdersBulk = useApproveOrdersBulk()
   const deleteOrder = useDeleteOrder()
@@ -294,6 +297,24 @@ export function useOrdersPage() {
     shipOrder.mutate(orderId, {
       onSuccess: () => {
         toast.success(`注文「${orderNo}」を送品済みにしました`)
+      },
+      onError: (error: Error) => {
+        toast.error(`送品済みへの変更に失敗しました: ${error.message}`)
+      },
+    })
+  }
+
+  const handleShipWithoutRoutingRequest = (order: Order) => setShipWithoutRoutingTarget(order)
+
+  const handleShipWithoutRoutingCancel = () => setShipWithoutRoutingTarget(null)
+
+  const handleShipWithoutRoutingConfirm = () => {
+    if (!shipWithoutRoutingTarget) return
+    const orderNo = shipWithoutRoutingTarget.order_no ?? ""
+    shipWithoutRouting.mutate(shipWithoutRoutingTarget.id, {
+      onSuccess: () => {
+        toast.success(`注文「${orderNo}」を送品済みにしました`)
+        setShipWithoutRoutingTarget(null)
       },
       onError: (error: Error) => {
         toast.error(`送品済みへの変更に失敗しました: ${error.message}`)
@@ -608,6 +629,11 @@ export function useOrdersPage() {
     withdrawApproval,
     shipOrder,
     shipOverdueDrafts,
+    shipWithoutRouting,
+    shipWithoutRoutingTarget,
+    handleShipWithoutRoutingRequest,
+    handleShipWithoutRoutingConfirm,
+    handleShipWithoutRoutingCancel,
     deleteOrder,
     simulateOrderById,
     simulatingOrderId,

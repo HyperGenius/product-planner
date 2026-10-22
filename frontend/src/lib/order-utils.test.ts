@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Order } from "@/types/order"
 import {
+  canShipWithoutRouting,
   filterOrder,
   getOrderUrgency,
   isNoRoutingOrder,

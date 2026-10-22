@@ -65,6 +65,24 @@ export function isNoRoutingOrder(order: Order): boolean {
 }
 
 /**
+ * 社長が「工程未入力の下書き」を送品済みにできるか（Issue #547）。
+ *
+ * 工程を入力できるようになるまでの暫定の例外処理。バックエンドの判定
+ * （`draft` かつ `has_no_routings`）に揃えるため、`isNoRoutingOrder()` と違って
+ * 製品未照合（`product_id` が null）の受注・シミュ済みの受注も対象に含める。
+ */
+export function canShipWithoutRouting(
+  order: Order,
+  role: MemberRole | null,
+): boolean {
+  return (
+    role === "president" &&
+    order.status === "draft" &&
+    order.has_no_routings === true
+  )
+}
+
+/**
  * 「対応が必要」（Issue #460）＝ロールごとに自分がアクションすべき注文か。
  * - order_handler / iso_officer: 下書き全般（未シミュレーション・差し戻し済み・シミュ済みを含む）
  * - president: 承認待ち

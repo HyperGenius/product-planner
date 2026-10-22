@@ -131,6 +131,7 @@ def export_approval_logs_csv(
         "approve": "承認",
         "reject": "差し戻し",
         "withdraw": "取り下げ",
+        "ship_without_routing": "送品済み（工程未入力の例外処理）",
     }
     for log in logs:
         writer.writerow(

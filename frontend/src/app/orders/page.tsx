@@ -24,6 +24,7 @@ import { BulkSimulateConfirmDialog } from "@/components/orders/bulk-simulate-con
 import { BulkSimulateSummaryDialog } from "@/components/orders/bulk-simulate-summary-dialog"
 import { BulkRequestApprovalConfirmDialog } from "@/components/orders/bulk-request-approval-confirm-dialog"
 import { BulkApproveConfirmDialog } from "@/components/orders/bulk-approve-confirm-dialog"
+import { ShipWithoutRoutingConfirmDialog } from "@/components/orders/ship-without-routing-confirm-dialog"
 import { ShipOverdueDraftsConfirmDialog } from "@/components/orders/ship-overdue-drafts-confirm-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { OrderViewDialog } from "@/components/orders/order-view-dialog"
@@ -76,6 +77,11 @@ export default function OrdersPage() {
     rejectOrder,
     withdrawApproval,
     shipOrder,
+    shipWithoutRouting,
+    shipWithoutRoutingTarget,
+    handleShipWithoutRoutingRequest,
+    handleShipWithoutRoutingConfirm,
+    handleShipWithoutRoutingCancel,
     deleteOrder,
     simulatingOrderId,
     simulationErrorOrderId,
@@ -282,7 +288,7 @@ export default function OrdersPage() {
                     requestApprovalIsPending={requestApproval.isPending}
                     approveIsPending={confirmOrder.isPending}
                     withdrawIsPending={withdrawApproval.isPending}
-                    shipIsPending={shipOrder.isPending}
+                    shipIsPending={shipOrder.isPending || shipWithoutRouting.isPending}
                     currentUserRole={currentUserRole}
                     isSelected={selectedOrderIds.includes(order.id)}
                     selectionIndex={selectedOrderIds.includes(order.id) ? selectedOrderIds.indexOf(order.id) + 1 : undefined}
@@ -294,6 +300,7 @@ export default function OrdersPage() {
                     onReject={handleRejectRequest}
                     onWithdraw={handleWithdrawFromRow}
                     onShip={handleShipFromRow}
+                    onShipWithoutRouting={handleShipWithoutRoutingRequest}
                     onEdit={handleOpenEditDialog}
                     onDelete={setDeleteTargetOrder}
                     onToggleSelect={handleToggleSelect}
@@ -452,6 +459,14 @@ export default function OrdersPage() {
           results={bulkSimSummary}
           onClose={handleCloseBulkSimSummary}
           onBulkRequestApproval={handleBulkRequestApprovalFromSummary}
+        />
+
+        <ShipWithoutRoutingConfirmDialog
+          open={shipWithoutRoutingTarget !== null}
+          orderNo={shipWithoutRoutingTarget?.order_no ?? ""}
+          isPending={shipWithoutRouting.isPending}
+          onConfirm={handleShipWithoutRoutingConfirm}
+          onCancel={handleShipWithoutRoutingCancel}
         />
 
         <ShipOverdueDraftsConfirmDialog
