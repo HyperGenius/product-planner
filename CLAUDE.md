@@ -295,6 +295,11 @@ cd backend && ruff check . && mypy .
   `getRowProps(order)` を展開して渡す。画面ごとに出す操作は `OrderTableRow` の `visibleActions` で絞り、ページ側のフックに
   mutation・確認ダイアログの state を書き足さない（`use-orders-page.ts` は URL の状態・絞り込み・ページングだけ）。
   操作を足すときは `OrderRowAction` に値を足し、行の表示条件・`getRowProps()`・`OrderActionDialogs` を揃えて更新する
+  - 画面固有の操作（リンク等）は `OrderRowAction` に足さず `OrderTableRow` の `leadingActions` に渡す。1画面に表を複数並べるときは
+    `OrdersTable` の `totalCount` / `pageSize` を省略する（ページは URL の `?page=` 1つなので、表ごとにページングすると連動する）。
+    全選択は表ごとに `useOrderBulkActions()` の `getSelectAllState()` / `handleToggleSelectAllOf()` を使う（起票の確認、Issue #555）
+  - サイドバーの件数バッジは `SubMenuItem.badge`（`{ key: SidebarBadgeKey, roles }`）で、件数は `useSidebarBadgeCounts()` に集約する。
+    バッジを出さないロールで注文を取得しないよう、取得は `useOrders({ enabled })` で必要なときだけにする（Epic #553）
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
   閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
 - **マスタを選ぶ検索付きコンボボックス（`Popover` + `Command`）**: 件数が増えうるマスタの選択は `Select` を使わずこちらにする

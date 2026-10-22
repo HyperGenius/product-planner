@@ -126,6 +126,24 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     })
   }
 
+  /** 指定した注文の全選択の状態（画面内に表が複数あり、表ごとに全選択するとき。Issue #555） */
+  const getSelectAllState = (targets: Order[]): boolean | "indeterminate" => {
+    const selectedCount = targets.filter((o) => selectedOrderIds.includes(o.id)).length
+    if (targets.length > 0 && selectedCount === targets.length) return true
+    return selectedCount > 0 ? "indeterminate" : false
+  }
+
+  /** 指定した注文がすべて選択済みなら選択を外し、そうでなければすべて選択する */
+  const handleToggleSelectAllOf = (targets: Order[]) => {
+    setSelectedOrderIds((prev) => {
+      const targetIds = targets.map((o) => o.id)
+      if (targetIds.length > 0 && targetIds.every((id) => prev.includes(id))) {
+        return prev.filter((id) => !targetIds.includes(id))
+      }
+      return [...prev, ...targetIds.filter((id) => !prev.includes(id))]
+    })
+  }
+
   const handleClearSelection = () => setSelectedOrderIds([])
 
   const handleBulkSimulateRequest = () => setIsBulkSimulateConfirmOpen(true)
@@ -304,6 +322,8 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     handleToggleSelect,
     handleToggleSelectAll,
     handleToggleSelectAllPendingApproval,
+    getSelectAllState,
+    handleToggleSelectAllOf,
     handleClearSelection,
     // 実行状態
     isBulkSimulating,

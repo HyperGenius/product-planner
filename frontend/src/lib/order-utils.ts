@@ -1,6 +1,6 @@
 import { addDays, startOfWeek, parseISO } from "date-fns"
 import { ja } from "date-fns/locale"
-import type { Order } from "@/types/order"
+import type { EmailIntakeResult, Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 import type { MemberRole } from "@/types/member"
@@ -80,6 +80,113 @@ export function canShipWithoutRouting(
     order.status === "draft" &&
     order.has_no_routings === true
   )
+}
+
+/**
+ * 修理注文か（Issue #493）。製品・工程を持たないので、`product_id` が NULL でも製品未照合ではない。
+ * バックエンドの `repair_order_service.is_repair_order()` と同じ判定
+ */
+export function isRepairOrder(order: Order): boolean {
+  return order.order_type === "repair"
+}
+
+/**
+ * 「起票の確認」画面（Issue #555）での下書きの区分。次に何をすれば先へ進めるかで分ける。
+ * 並び順（`INTAKE_CATEGORIES`）が判定の優先順
+ */
+export type IntakeCategory =
+  | "no_product"
+  | "no_routing"
+  | "incomplete"
+  | "unsimulated"
+  | "simulated"
+
+export const INTAKE_CATEGORIES: readonly IntakeCategory[] = [
+  "no_product",
+  "no_routing",
+  "incomplete",
+  "unsimulated",
+  "simulated",
+]
+
+export interface IntakeCategoryMeta {
+  label: string
+  /** 次の操作の案内 */
+  description: string
+  /** 件数カード・見出しの色（既存のバッジに合わせる） */
+  cardClass: string
+  countClass: string
+}
+
+export const INTAKE_CATEGORY_META: Record<IntakeCategory, IntakeCategoryMeta> = {
+  no_product: {
+    label: "製品未確定",
+    description: "製品マスタと照合できていません。編集で製品を選ぶか、製品マスタに登録してください。",
+    cardClass: "border-red-300 bg-red-50",
+    countClass: "text-red-800",
+  },
+  no_routing: {
+    label: "工程未登録",
+    description: "製品に工程が登録されていないためシミュレーションできません。製品マスタで工程を登録してください。",
+    cardClass: "border-amber-300 bg-amber-50",
+    countClass: "text-amber-800",
+  },
+  incomplete: {
+    label: "情報不足",
+    description: "顧客または希望納期が設定されていません。編集で入力してください。",
+    cardClass: "border-orange-300 bg-orange-50",
+    countClass: "text-orange-800",
+  },
+  unsimulated: {
+    label: "シミュ未実行",
+    description: "シミュレーションを実行して、完成見込み日（シミュ納期）を出してください。",
+    cardClass: "border-yellow-300 bg-yellow-50",
+    countClass: "text-yellow-800",
+  },
+  simulated: {
+    label: "シミュ納期の確認",
+    description: "希望納期とシミュ納期を見比べて、問題なければ承認依頼を送ってください。",
+    cardClass: "border-indigo-300 bg-indigo-50",
+    countClass: "text-indigo-800",
+  },
+}
+
+/**
+ * 下書きの区分（Issue #555）。下書き以外は null。優先順に最初に当たった区分を返す。
+ * - `has_no_routings` は `product_id` が NULL のときも true なので、製品未確定を先に判定する
+ * - 工程未登録は `isNoRoutingOrder()` ではなく `has_no_routings` を直接見る（シミュ済も含める）
+ * - 修理注文は製品・工程を持たないので製品未確定・工程未登録に入れない。
+ *   修理の `is_scheduled` は実施開始日と完了予定日がそろっているかで立つので、シミュの区分はそのまま使える
+ * - 差し戻し（`rejection_reason`）は区分に影響させない
+ */
+export function getIntakeCategory(order: Order): IntakeCategory | null {
+  if (order.status !== "draft") return null
+  if (!isRepairOrder(order)) {
+    if (order.product_id === null) return "no_product"
+    if (order.has_no_routings === true) return "no_routing"
+  }
+  if (!order.customer_id || !order.desired_deadline) return "incomplete"
+  return order.is_scheduled ? "simulated" : "unsimulated"
+}
+
+/** 「起票の確認」画面で数える起票失敗メールの期間（日数、Issue #555） */
+export const RECENT_FAILED_EMAIL_INTAKE_DAYS = 7
+
+/**
+ * 直近 `days` 日に受信して起票に失敗したメール（`outcome === "failed"`）の件数（Issue #555）。
+ * 失敗したメールには「対応済み」の状態が無く、手動起票しても件数が減らないため、期間で区切って数える
+ */
+export function countRecentFailedEmailIntakes(
+  results: EmailIntakeResult[],
+  now: Date = new Date(),
+  days: number = RECENT_FAILED_EMAIL_INTAKE_DAYS
+): number {
+  const since = now.getTime() - days * 24 * 60 * 60 * 1000
+  return results.filter((r) => {
+    if (r.outcome !== "failed") return false
+    const receivedAt = new Date(r.received_at).getTime()
+    return !Number.isNaN(receivedAt) && receivedAt >= since
+  }).length
 }
 
 /**

@@ -19,9 +19,10 @@ interface OrdersTableProps {
   rowCount: number
   /** 該当する注文が無いときの表示 */
   emptyState: ReactNode
-  /** ページングの対象件数（絞り込み後の全件数） */
-  totalCount: number
-  pageSize: number
+  /** ページングの対象件数（絞り込み後の全件数）。pageSize と合わせて省略するとページングを出さない */
+  totalCount?: number
+  /** 1ページの件数。ページは URL の `?page=` で持つので、1画面に表を複数並べるときは省略する */
+  pageSize?: number
   /** 行（`OrderTableRow` 等） */
   children: ReactNode
 }
@@ -51,7 +52,9 @@ export function OrdersTable({
         )}
       </div>
 
-      <MasterPagination totalCount={totalCount} pageSize={pageSize} />
+      {totalCount !== undefined && pageSize !== undefined && (
+        <MasterPagination totalCount={totalCount} pageSize={pageSize} />
+      )}
     </>
   )
 }

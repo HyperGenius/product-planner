@@ -19,6 +19,7 @@ import {
   KeyRound,
   Inbox,
   MailCheck,
+  FileCheck,
 } from "lucide-react"
 
 import {
@@ -30,6 +31,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -44,17 +46,30 @@ import {
 } from "@/components/ui/collapsible"
 import { logout } from "@/lib/auth-server-actions"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
+import { useSidebarBadgeCounts, type SidebarBadgeKey } from "@/hooks/use-sidebar-badge-counts"
 import {
   ORDER_APPROVAL_LOG_VIEWER_ROLES,
   type MemberRole,
 } from "@/types/member"
 
-type SubMenuItem = { title: string; url: string; icon: React.ElementType }
+type SubMenuItem = {
+  title: string
+  url: string
+  icon: React.ElementType
+  /** 指定した場合、このロールを持つメンバーにのみ表示する */
+  allowedRoles?: MemberRole[]
+  /** 件数バッジ。`roles` のメンバーにだけ出す（自分が操作する画面にだけ出す方針。Epic #553） */
+  badge?: { key: SidebarBadgeKey; roles: MemberRole[] }
+}
 type MenuItem = {
   title: string
   icon: React.ElementType
+  /** サブメニューを持つ項目では、親の項目を押したときの行き先（開閉はシェブロンで行う） */
   url?: string
+  /** 一致判定の接頭辞。サブメニューを持つ項目では、このパス配下を開いたときに初めから展開する */
   activePrefix?: string
+  /** サブメニューを初めから展開する */
+  defaultOpen?: boolean
   items?: SubMenuItem[]
   /** 指定した場合、このロールを持つメンバーにのみメニュー項目を表示する */
   allowedRoles?: MemberRole[]
@@ -67,14 +82,24 @@ const menuItems: MenuItem[] = [
     icon: LayoutDashboard,
   },
   {
+    // 親はロールにかかわらず「すべての注文」を開き、作業の画面へはサブメニューから入る（Epic #553）
     title: "受注管理",
     url: "/orders",
     icon: ShoppingCart,
-  },
-  {
-    title: "受信メール処理結果",
-    url: "/orders/email-intake",
-    icon: Inbox,
+    defaultOpen: true,
+    items: [
+      {
+        title: "起票の確認",
+        url: "/orders/intake",
+        icon: FileCheck,
+        badge: { key: "intake_drafts", roles: ["order_handler", "iso_officer"] },
+      },
+      {
+        title: "受信メール処理結果",
+        url: "/orders/email-intake",
+        icon: Inbox,
+      },
+    ],
   },
   {
     title: "生産スケジュール",
@@ -96,6 +121,7 @@ const menuItems: MenuItem[] = [
   {
     title: "設定",
     icon: Settings,
+    activePrefix: "/settings",
     items: [
       {
         title: "メンバー管理",
@@ -134,12 +160,26 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
   const { data: currentMember, isLoading: isMemberLoading } = useCurrentMember()
   const currentUserRole = currentMember?.role ?? null
 
-  const visibleMenuItems = menuItems.filter((item) => {
-    if (!item.allowedRoles) return true
+  const isAllowed = (allowedRoles?: MemberRole[]) => {
+    if (!allowedRoles) return true
     // ロール未確定の間はロール制御付き項目を表示しない
     if (isMemberLoading || !currentUserRole) return false
-    return item.allowedRoles.includes(currentUserRole)
-  })
+    return allowedRoles.includes(currentUserRole)
+  }
+
+  const visibleMenuItems = menuItems
+    .filter((item) => isAllowed(item.allowedRoles))
+    .map((item) =>
+      item.items ? { ...item, items: item.items.filter((sub) => isAllowed(sub.allowedRoles)) } : item
+    )
+
+  // そのロールに出すバッジの種類だけ件数を取得する（出すバッジが無いロールは注文を取得しない）
+  const badgeKeys = visibleMenuItems.flatMap((item) =>
+    (item.items ?? []).flatMap((sub) =>
+      sub.badge && currentUserRole && sub.badge.roles.includes(currentUserRole) ? [sub.badge.key] : []
+    )
+  )
+  const badgeCounts = useSidebarBadgeCounts(badgeKeys)
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
@@ -165,44 +205,70 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                 item.items ? (
                   <Collapsible
                     key={item.title}
-                    defaultOpen={item.title === "設定" && pathname.startsWith("/settings")}
+                    defaultOpen={
+                      item.defaultOpen ||
+                      (!!item.activePrefix && pathname.startsWith(item.activePrefix))
+                    }
                   >
                     <SidebarMenuItem>
-                      <CollapsibleTrigger asChild>
-                        <SidebarMenuButton
-                          asChild={!!item.url}
-                          isActive={!!item.url && pathname === item.url}
-                        >
-                          {item.url ? (
+                      {item.url ? (
+                        // 親の項目はリンク、開閉は右端のシェブロンで行う（押すたびに閉じないように）
+                        <>
+                          <SidebarMenuButton asChild isActive={pathname === item.url}>
                             <Link href={item.url}>
                               <item.icon className="h-4 w-4" />
                               <span>{item.title}</span>
-                              <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
                             </Link>
-                          ) : (
-                            <>
-                              <item.icon className="h-4 w-4" />
-                              <span>{item.title}</span>
-                              <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                            </>
-                          )}
-                        </SidebarMenuButton>
-                      </CollapsibleTrigger>
+                          </SidebarMenuButton>
+                          <CollapsibleTrigger asChild>
+                            <SidebarMenuAction
+                              className="data-[state=open]:rotate-180"
+                              aria-label={`${item.title}のサブメニューを開閉`}
+                            >
+                              <ChevronDown />
+                            </SidebarMenuAction>
+                          </CollapsibleTrigger>
+                        </>
+                      ) : (
+                        <CollapsibleTrigger asChild>
+                          <SidebarMenuButton>
+                            <item.icon className="h-4 w-4" />
+                            <span>{item.title}</span>
+                            <ChevronDown className="ml-auto h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                          </SidebarMenuButton>
+                        </CollapsibleTrigger>
+                      )}
                       <CollapsibleContent>
                         <SidebarMenuSub>
-                          {item.items.map((subItem) => (
-                            <SidebarMenuSubItem key={subItem.title}>
-                              <SidebarMenuSubButton
-                                asChild
-                                isActive={pathname === subItem.url}
-                              >
-                                <Link href={subItem.url}>
-                                  <subItem.icon className="h-4 w-4" />
-                                  <span>{subItem.title}</span>
-                                </Link>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                          ))}
+                          {item.items.map((subItem) => {
+                            const badgeCount =
+                              subItem.badge &&
+                              currentUserRole &&
+                              subItem.badge.roles.includes(currentUserRole)
+                                ? badgeCounts[subItem.badge.key]
+                                : undefined
+                            return (
+                              <SidebarMenuSubItem key={subItem.title}>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={pathname === subItem.url}
+                                >
+                                  <Link href={subItem.url}>
+                                    <subItem.icon className="h-4 w-4" />
+                                    <span className="truncate">{subItem.title}</span>
+                                    {badgeCount !== undefined && badgeCount > 0 && (
+                                      <span
+                                        className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
+                                        aria-label={`${badgeCount}件`}
+                                      >
+                                        {badgeCount}
+                                      </span>
+                                    )}
+                                  </Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            )
+                          })}
                         </SidebarMenuSub>
                       </CollapsibleContent>
                     </SidebarMenuItem>
