@@ -40,6 +40,7 @@ import {
   canApproveOrder,
   canRejectOrder,
   canWithdrawApproval,
+  canShipOrder,
   type StatusFilter,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
@@ -172,10 +173,7 @@ export function OrderTableRow({
   // 操作カラムを圧縮するため、主要アクション以外はケバブメニューへ寄せる（Issue #397）
   const canWithdraw = shows("withdraw") && canWithdrawApproval(order, role)
   const canReject = shows("reject") && canRejectOrder(order, role)
-  const canShip =
-    shows("ship") &&
-    (order.status === "confirmed" || order.status === "in_progress") &&
-    (currentUserRole === "president" || currentUserRole === "order_handler")
+  const canShip = shows("ship") && canShipOrder(order, role)
   const canShipNoRouting =
     shows("ship_without_routing") && canShipWithoutRouting(order, role)
   const canResimulate = shows("simulate") && order.status === "draft" && order.is_scheduled

@@ -104,6 +104,17 @@ export function canWithdrawApproval(order: Order, role: MemberRole | null): bool
 }
 
 /**
+ * 確定済・生産中の注文を送品済みにできるか（社長・受注担当。`POST /orders/{id}/ship`）。
+ * 注文一覧（`OrderTableRow`）と「送品の消し込み」画面（Issue #557）で共有する
+ */
+export function canShipOrder(order: Order, role: MemberRole | null): boolean {
+  return (
+    (order.status === "confirmed" || order.status === "in_progress") &&
+    (role === "president" || role === "order_handler")
+  )
+}
+
+/**
  * 承認依頼の古い順（Issue #556）。`approval_requested_at` が未設定（Issue #402 以前の既存データ）の
  * 注文は末尾に置き、同じ日時・どちらも未設定なら注文 ID の昇順にする
  */

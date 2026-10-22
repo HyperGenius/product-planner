@@ -302,7 +302,12 @@ cd backend && ruff check . && mypy .
     `getRowProps()` をそのまま展開する（前例は「承認」画面の `ApprovalOrderRow`、Issue #556）。承認・差し戻し・取り下げの可否は
     行で条件を書かず `canApproveOrder()` / `canRejectOrder()` / `canWithdrawApproval()`（`order-utils.ts`）を使い、注文一覧と揃える
   - サイドバーの件数バッジは `SubMenuItem.badge`（`{ key: SidebarBadgeKey, roles }`）で、件数は `useSidebarBadgeCounts()` に集約する。
-    バッジを出さないロールで注文を取得しないよう、取得は `useOrders({ enabled })` で必要なときだけにする（Epic #553）
+    バッジを出さないロールで注文を取得しないよう、取得は `useOrders({ enabled })` で必要なときだけにする（Epic #553）。
+    注文以外のデータ（日報の進捗等）が要るバッジは、画面と同じフックで取ってクエリキーを揃え（「送品の消し込み」は
+    `useShippingRows()`）、取得が終わるまでは件数を返さない（途中の件数が一瞬出る。Issue #557）
+  - 「送品の消し込み」（Issue #557）の納期の基準は**希望納期 → 無ければ完成見込み**（`getShippingDeadline()`）で、
+    完成見込みを基準にする現場ダッシュボードとは意図的に違う。送品は弥生が正なので、候補を示すだけで自動では送品済みにせず、
+    一括の送品も作らない。送品の権限は `canShipOrder()`（`order-utils.ts`）で注文一覧と共有する
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
   閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
 - **マスタを選ぶ検索付きコンボボックス（`Popover` + `Command`）**: 件数が増えうるマスタの選択は `Select` を使わずこちらにする
