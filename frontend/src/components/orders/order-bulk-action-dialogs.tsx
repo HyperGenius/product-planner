@@ -13,13 +13,20 @@ interface OrderBulkActionDialogsProps {
   bulk: OrderBulkActions
   products?: Product[]
   currentUserRole: string | null
+  /** 操作バーに一括シミュレーションを出すか（省略時は出す。Issue #556） */
+  showBulkSimulate?: boolean
 }
 
 /**
  * 一括操作の操作バーと確認ダイアログ群（`useOrderBulkActions()` の戻り値を受け取って描画する。Issue #554）。
  * 操作バーは選択中だけ画面下部に固定表示されるので、ページ側は選択中に下余白を空けること
  */
-export function OrderBulkActionDialogs({ bulk, products, currentUserRole }: OrderBulkActionDialogsProps) {
+export function OrderBulkActionDialogs({
+  bulk,
+  products,
+  currentUserRole,
+  showBulkSimulate,
+}: OrderBulkActionDialogsProps) {
   return (
     <>
       <BulkActionBar
@@ -34,6 +41,7 @@ export function OrderBulkActionDialogs({ bulk, products, currentUserRole }: Orde
         onBulkRequestApproval={bulk.handleBulkRequestApprovalRequest}
         onBulkApprove={bulk.handleBulkApproveRequest}
         onClearSelection={bulk.handleClearSelection}
+        showBulkSimulate={showBulkSimulate}
       />
 
       <BulkSimulateConfirmDialog

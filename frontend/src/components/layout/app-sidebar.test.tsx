@@ -46,6 +46,8 @@ function setup(role: MemberRole) {
         makeOrder({ id: 1 }),
         makeOrder({ id: 2, is_scheduled: true }),
         makeOrder({ id: 3, status: "pending_approval" }),
+        makeOrder({ id: 4, status: "pending_approval" }),
+        makeOrder({ id: 5, status: "pending_approval" }),
       ])
     }),
   )
@@ -57,12 +59,13 @@ function setup(role: MemberRole) {
   return { fetchedOrders }
 }
 
-describe("AppSidebar（Issue #555）", () => {
-  it("「受注管理」はすべての注文を開き、サブメニューに起票の確認・受信メール処理結果がある", async () => {
-    setup("president")
+describe("AppSidebar（Issue #555 / #556）", () => {
+  it("「受注管理」はすべての注文を開き、サブメニューに起票の確認・承認・受信メール処理結果がある", async () => {
+    setup("iso_officer")
 
     expect(await screen.findByRole("link", { name: "受注管理" })).toHaveAttribute("href", "/orders")
-    expect(screen.getByRole("link", { name: "起票の確認" })).toHaveAttribute("href", "/orders/intake")
+    expect(screen.getByRole("link", { name: /起票の確認/ })).toHaveAttribute("href", "/orders/intake")
+    expect(screen.getByRole("link", { name: "承認" })).toHaveAttribute("href", "/orders/approval")
     expect(screen.getByRole("link", { name: "受信メール処理結果" })).toHaveAttribute(
       "href",
       "/orders/email-intake",
@@ -76,19 +79,29 @@ describe("AppSidebar（Issue #555）", () => {
 
       expect(await screen.findByLabelText("2件")).toBeInTheDocument()
       expect(screen.getByRole("link", { name: /起票の確認/ })).toHaveTextContent("起票の確認2")
+      // 承認待ちの件数は社長にだけ出す
+      expect(screen.getByRole("link", { name: "承認" })).toHaveTextContent(/^承認$/)
+      expect(screen.queryByLabelText("3件")).toBeNull()
     },
   )
 
-  it.each<MemberRole>(["president", "platform_admin"])(
-    "%s には件数バッジを出さず、注文も取得しない",
-    async (role) => {
-      const { fetchedOrders } = setup(role)
+  it("president には承認に承認待ちの件数バッジを出し、起票の確認には出さない", async () => {
+    setup("president")
 
-      await screen.findByRole("link", { name: "起票の確認" })
-      // ロールの取得を待ってから、バッジ用の注文取得が走っていないことを確かめる
-      await waitFor(() => expect(screen.getByRole("link", { name: "承認監査ログ" })).toBeInTheDocument())
-      expect(screen.queryByLabelText("2件")).toBeNull()
-      expect(fetchedOrders).not.toHaveBeenCalled()
-    },
-  )
+    expect(await screen.findByLabelText("3件")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /^承認\s*3件$/ })).toHaveTextContent("承認3")
+    expect(screen.getByRole("link", { name: "起票の確認" })).toHaveTextContent(/^起票の確認$/)
+    expect(screen.queryByLabelText("2件")).toBeNull()
+  })
+
+  it("platform_admin には件数バッジを出さず、注文も取得しない", async () => {
+    const { fetchedOrders } = setup("platform_admin")
+
+    await screen.findByRole("link", { name: "起票の確認" })
+    // ロールの取得を待ってから、バッジ用の注文取得が走っていないことを確かめる
+    await waitFor(() => expect(screen.getByRole("link", { name: "承認監査ログ" })).toBeInTheDocument())
+    expect(screen.queryByLabelText("2件")).toBeNull()
+    expect(screen.queryByLabelText("3件")).toBeNull()
+    expect(fetchedOrders).not.toHaveBeenCalled()
+  })
 })

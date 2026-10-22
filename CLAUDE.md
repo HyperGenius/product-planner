@@ -298,6 +298,9 @@ cd backend && ruff check . && mypy .
   - 画面固有の操作（リンク等）は `OrderRowAction` に足さず `OrderTableRow` の `leadingActions` に渡す。1画面に表を複数並べるときは
     `OrdersTable` の `totalCount` / `pageSize` を省略する（ページは URL の `?page=` 1つなので、表ごとにページングすると連動する）。
     全選択は表ごとに `useOrderBulkActions()` の `getSelectAllState()` / `handleToggleSelectAllOf()` を使う（起票の確認、Issue #555）
+  - 列が注文一覧と違う画面は専用の行コンポーネントを作り、props の型に `OrderRowActionProps` / `OrderRowBulkProps` を使って
+    `getRowProps()` をそのまま展開する（前例は「承認」画面の `ApprovalOrderRow`、Issue #556）。承認・差し戻し・取り下げの可否は
+    行で条件を書かず `canApproveOrder()` / `canRejectOrder()` / `canWithdrawApproval()`（`order-utils.ts`）を使い、注文一覧と揃える
   - サイドバーの件数バッジは `SubMenuItem.badge`（`{ key: SidebarBadgeKey, roles }`）で、件数は `useSidebarBadgeCounts()` に集約する。
     バッジを出さないロールで注文を取得しないよう、取得は `useOrders({ enabled })` で必要なときだけにする（Epic #553）
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って

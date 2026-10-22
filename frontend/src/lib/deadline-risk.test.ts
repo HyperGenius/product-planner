@@ -3,6 +3,7 @@ import {
   RISK_DEADLINE_BUFFER_DAYS,
   describeDeadlineRisk,
   getDeadlineRiskOrders,
+  getSimulatedDeadlineDiffDays,
 } from "./deadline-risk"
 import type { Order } from "@/types/order"
 
@@ -172,5 +173,29 @@ describe("describeDeadlineRisk", () => {
       text: "希望納期が4日前",
       severity: "overrun",
     })
+  })
+})
+
+describe("getSimulatedDeadlineDiffDays（Issue #556）", () => {
+  it("シミュ納期 - 希望納期 の日数（正なら超過）", () => {
+    expect(
+      getSimulatedDeadlineDiffDays(
+        makeOrder({ desired_deadline: "2026-09-10", simulated_deadline: "2026-09-13" })
+      )
+    ).toBe(3)
+    expect(
+      getSimulatedDeadlineDiffDays(
+        makeOrder({ desired_deadline: "2026-09-10", simulated_deadline: "2026-09-08T00:00:00" })
+      )
+    ).toBe(-2)
+  })
+
+  it("どちらかが未設定・不正な日付なら null", () => {
+    expect(getSimulatedDeadlineDiffDays(makeOrder({ desired_deadline: "2026-09-10" }))).toBeNull()
+    expect(
+      getSimulatedDeadlineDiffDays(
+        makeOrder({ desired_deadline: "2026-13-40", simulated_deadline: "2026-09-10" })
+      )
+    ).toBeNull()
   })
 })

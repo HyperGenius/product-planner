@@ -83,6 +83,66 @@ export function canShipWithoutRouting(
 }
 
 /**
+ * 承認待ちの注文を承認・一括承認できるか。承認は社長だけで platform_admin を含めない
+ * （Issue #323）。注文一覧（`OrderTableRow`）と「承認」画面（Issue #556）で共有する
+ */
+export function canApproveOrder(order: Order, role: MemberRole | null): boolean {
+  return order.status === "pending_approval" && role === "president"
+}
+
+/** 承認待ちの注文を差し戻せるか（承認と同じく社長だけ） */
+export function canRejectOrder(order: Order, role: MemberRole | null): boolean {
+  return order.status === "pending_approval" && role === "president"
+}
+
+/**
+ * 承認依頼を取り下げられるか（受注担当だけ）。バックエンドの `withdraw-approval` と同じく
+ * 依頼者本人かは見ない
+ */
+export function canWithdrawApproval(order: Order, role: MemberRole | null): boolean {
+  return order.status === "pending_approval" && role === "order_handler"
+}
+
+/**
+ * 承認依頼の古い順（Issue #556）。`approval_requested_at` が未設定（Issue #402 以前の既存データ）の
+ * 注文は末尾に置き、同じ日時・どちらも未設定なら注文 ID の昇順にする
+ */
+export function compareApprovalRequests(a: Order, b: Order): number {
+  const at = a.approval_requested_at ? Date.parse(a.approval_requested_at) : NaN
+  const bt = b.approval_requested_at ? Date.parse(b.approval_requested_at) : NaN
+  const aMissing = Number.isNaN(at)
+  const bMissing = Number.isNaN(bt)
+  if (aMissing !== bMissing) return aMissing ? 1 : -1
+  if (!aMissing && at !== bt) return at - bt
+  return a.id - b.id
+}
+
+/**
+ * タイムスタンプ（承認依頼日時等）を JST の "M/D HH:mm"（当年以外は "YY/M/D HH:mm"）で表示する。
+ * 解釈できない値は null
+ */
+export function formatDateTimeShort(datetimeIso: string | null | undefined): string | null {
+  if (!datetimeIso) return null
+  const date = new Date(datetimeIso)
+  if (Number.isNaN(date.getTime())) return null
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(date)
+      .map((p) => [p.type, p.value])
+  )
+  const day = formatDeadlineShort(`${parts.year}-${parts.month}-${parts.day}`)
+  return `${day} ${parts.hour}:${parts.minute}`
+}
+
+/**
  * 修理注文か（Issue #493）。製品・工程を持たないので、`product_id` が NULL でも製品未照合ではない。
  * バックエンドの `repair_order_service.is_repair_order()` と同じ判定
  */

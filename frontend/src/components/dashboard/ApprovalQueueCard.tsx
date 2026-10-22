@@ -3,12 +3,11 @@
 import { useRouter } from "next/navigation"
 import { AlertTriangle, ArrowRight, BellRing } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { diffDaysIso } from "@/lib/deadline-risk"
+import { getSimulatedDeadlineDiffDays } from "@/lib/deadline-risk"
 import {
   formatDeadlineShort,
   getCustomerDisplayName,
   getProductName,
-  isValidIsoDate,
 } from "@/lib/order-utils"
 import type { Customer } from "@/types/customer"
 import type { Order } from "@/types/order"
@@ -33,10 +32,10 @@ interface ApprovalQueueCardProps {
  *   顧客名 / 製品名（左）／ 数量バッジ／ 希望・シミュ納期／ 超過日数ラベル（右の3列は固定幅で右揃え）
  * - 「納期超過」は `simulated_deadline > desired_deadline` の単純な条件（承認待ちはまだ
  *   確定していないため、確定納期ではなくシミュ納期で判定する）。超過日数は
- *   `diffDaysIso`（`lib/deadline-risk.ts`）で算出し、「N日超過」で表示する
- * - 導線: 行クリック → `/orders/{id}`、ヘッダー行クリック → `/orders?status=pending_approval`
- *   （一括承認画面。旧実装にあった下部の「一括承認画面へ」ボタンはヘッダーと導線が
- *   重複するため削除した）
+ *   `getSimulatedDeadlineDiffDays`（`lib/deadline-risk.ts`）で算出し、「N日超過」で表示する
+ * - 導線: 行クリック → `/orders/{id}`、ヘッダー行クリック → 「承認」画面 `/orders/approval`
+ *   （承認・一括承認・差し戻しを行う画面。Issue #556。旧実装にあった下部の「一括承認画面へ」
+ *   ボタンはヘッダーと導線が重複するため削除した）
  * - 承認待ち0件・ロード中は何も描画しない（旧バナーの挙動を踏襲）
  */
 export function ApprovalQueueCard({
@@ -56,7 +55,7 @@ export function ApprovalQueueCard({
     <div className="mb-8 rounded-lg border border-orange-300 bg-orange-50/60 shadow-sm">
       <button
         type="button"
-        onClick={() => router.push("/orders?status=pending_approval")}
+        onClick={() => router.push("/orders/approval")}
         className="flex w-full items-center justify-between gap-4 border-b border-orange-200 px-6 py-4 text-left transition-colors hover:bg-orange-100/60"
       >
         <div className="flex items-center gap-3">
@@ -72,15 +71,7 @@ export function ApprovalQueueCard({
 
       <div className="divide-y divide-orange-200">
         {pending.map((order) => {
-          const desired = order.desired_deadline?.slice(0, 10)
-          const simulated = order.simulated_deadline?.slice(0, 10)
-          const overrunDays =
-            desired &&
-            simulated &&
-            isValidIsoDate(desired) &&
-            isValidIsoDate(simulated)
-              ? diffDaysIso(desired, simulated)
-              : 0
+          const overrunDays = getSimulatedDeadlineDiffDays(order) ?? 0
           const overdue = overrunDays > 0
 
           return (

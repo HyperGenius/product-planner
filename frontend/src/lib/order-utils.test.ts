@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { EmailIntakeResult, Order } from "@/types/order"
 import {
+  canApproveOrder,
+  canRejectOrder,
   canShipWithoutRouting,
+  canWithdrawApproval,
+  compareApprovalRequests,
   countRecentFailedEmailIntakes,
+  formatDateTimeShort,
   filterOrder,
   getIntakeCategory,
   getOrderUrgency,
@@ -322,5 +327,64 @@ describe("countRecentFailedEmailIntakes（Issue #555）", () => {
 
   it("受信日時が解釈できない行は数えない", () => {
     expect(countRecentFailedEmailIntakes([makeResult({ received_at: "invalid" })], now)).toBe(0)
+  })
+})
+
+describe("承認待ちの操作の権限（Issue #556）", () => {
+  const pending = makeOrder({ status: "pending_approval" })
+
+  it("承認・差し戻しは社長だけ（platform_admin を含めない）", () => {
+    expect(canApproveOrder(pending, "president")).toBe(true)
+    expect(canRejectOrder(pending, "president")).toBe(true)
+    for (const role of ["platform_admin", "order_handler", "iso_officer", null] as const) {
+      expect(canApproveOrder(pending, role)).toBe(false)
+      expect(canRejectOrder(pending, role)).toBe(false)
+    }
+  })
+
+  it("取り下げは受注担当だけ", () => {
+    expect(canWithdrawApproval(pending, "order_handler")).toBe(true)
+    for (const role of ["president", "platform_admin", "iso_officer", null] as const) {
+      expect(canWithdrawApproval(pending, role)).toBe(false)
+    }
+  })
+
+  it("承認待ち以外はどのロールも操作できない", () => {
+    const draft = makeOrder({ status: "draft" })
+    expect(canApproveOrder(draft, "president")).toBe(false)
+    expect(canRejectOrder(draft, "president")).toBe(false)
+    expect(canWithdrawApproval(draft, "order_handler")).toBe(false)
+  })
+})
+
+describe("compareApprovalRequests（Issue #556）", () => {
+  it("承認依頼の古い順。依頼日時が未設定・解釈できない注文は末尾で、同順位は ID 順", () => {
+    const orders = [
+      makeOrder({ id: 1, approval_requested_at: null }),
+      makeOrder({ id: 2, approval_requested_at: "2026-09-02T00:00:00Z" }),
+      makeOrder({ id: 3, approval_requested_at: "invalid" }),
+      makeOrder({ id: 4, approval_requested_at: "2026-09-01T00:00:00Z" }),
+      makeOrder({ id: 5, approval_requested_at: "2026-09-02T09:00:00+09:00" }),
+    ]
+    expect([...orders].sort(compareApprovalRequests).map((o) => o.id)).toEqual([4, 2, 5, 1, 3])
+  })
+})
+
+describe("formatDateTimeShort（Issue #556）", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("JST の日時で、当年は年を省き、それ以外は2桁の年を付ける", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-10-22T03:00:00Z"))
+    // UTC では前日でも JST の暦日で表示する
+    expect(formatDateTimeShort("2026-10-21T15:30:00Z")).toBe("10/22 00:30")
+    expect(formatDateTimeShort("2025-12-31T14:59:00Z")).toBe("25/12/31 23:59")
+  })
+
+  it("未設定・解釈できない値は null", () => {
+    expect(formatDateTimeShort(null)).toBeNull()
+    expect(formatDateTimeShort("invalid")).toBeNull()
   })
 })

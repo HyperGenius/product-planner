@@ -37,6 +37,9 @@ import {
   isDeadlineOverdue,
   isNoRoutingOrder,
   canShipWithoutRouting,
+  canApproveOrder,
+  canRejectOrder,
+  canWithdrawApproval,
   type StatusFilter,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
@@ -164,19 +167,17 @@ export function OrderTableRow({
     order.status === "draft" &&
     order.is_scheduled &&
     currentUserRole === "order_handler"
-  const canApprove =
-    shows("approve") && order.status === "pending_approval" && currentUserRole === "president"
+  const role = currentUserRole as MemberRole | null
+  const canApprove = shows("approve") && canApproveOrder(order, role)
   // 操作カラムを圧縮するため、主要アクション以外はケバブメニューへ寄せる（Issue #397）
-  const canWithdraw =
-    shows("withdraw") && order.status === "pending_approval" && currentUserRole === "order_handler"
-  const canReject =
-    shows("reject") && order.status === "pending_approval" && currentUserRole === "president"
+  const canWithdraw = shows("withdraw") && canWithdrawApproval(order, role)
+  const canReject = shows("reject") && canRejectOrder(order, role)
   const canShip =
     shows("ship") &&
     (order.status === "confirmed" || order.status === "in_progress") &&
     (currentUserRole === "president" || currentUserRole === "order_handler")
   const canShipNoRouting =
-    shows("ship_without_routing") && canShipWithoutRouting(order, currentUserRole as MemberRole | null)
+    shows("ship_without_routing") && canShipWithoutRouting(order, role)
   const canResimulate = shows("simulate") && order.status === "draft" && order.is_scheduled
   const canEditOrder = shows("edit") && order.status === "draft"
   const canDelete = shows("delete")
@@ -201,8 +202,7 @@ export function OrderTableRow({
   // 確定済み・生産中は編集できないので、行のクリックで内容を確認できるようにする（Issue #527）
   const isSelectable =
     selectable ??
-    (order.status === "draft" ||
-      (order.status === "pending_approval" && currentUserRole === "president"))
+    (order.status === "draft" || canApproveOrder(order, role))
   const rejectionReason = order.status === "draft" ? order.rejection_reason : null
 
   const isViewable =

@@ -241,6 +241,7 @@ Epic #399 の一環として、巨大化した `app/page.tsx` を `components/da
 導線: 行クリック → `/orders/{id}`、見出し／フッターボタン →
 `/orders?status=pending_approval`（既存の一括承認画面）。フッターボタンは
 Issue #456 でヘッダー行クリックと導線が重複するため削除済み（下記「レイアウト改善」参照）。
+見出しの遷移先は Issue #556 で「承認」画面（`/orders/approval`）に変えた（下記「承認画面への導線」参照）。
 
 ### レイアウト改善（Issue #456）
 
@@ -269,6 +270,13 @@ Issue #456 でヘッダー行クリックと導線が重複するため削除済
 | `components/dashboard/PresidentDashboard.tsx` | `ApprovalQueueCard` にも `customers`（Issue #454 で追加済み）を渡す |
 | `lib/deadline-risk.ts` | `diffDaysIso` を export し、`ApprovalQueueCard` の超過日数計算でも再利用 |
 
+### 承認画面への導線（Issue #556）
+
+- 見出し行の遷移先を `/orders?status=pending_approval` から「承認」画面 `/orders/approval` に変えた。
+  承認・一括承認・差し戻しはこの画面で行う（詳細は [order-management-ui-design.md](order-management-ui-design.md#承認ordersapprovalissue-556)）
+- 超過日数の計算を `getSimulatedDeadlineDiffDays(order)`（`lib/deadline-risk.ts`）に切り出し、
+  承認画面の「シミュ納期（希望納期との差）」列と共有する。未設定・不正な日付は `null`（カードでは超過なし扱い）
+
 ### Backend
 
 | ファイル | 変更内容 |
@@ -288,7 +296,7 @@ Issue #456 でヘッダー行クリックと導線が重複するため削除済
 2. `president` のダッシュボードに承認待ちキューカードが表示され、各行に顧客名・
    製品名・数量バッジ・希望/シミュ納期が出ること。`simulated_deadline > desired_deadline`
    の行には「N日超過」ラベル（赤文字）が出ること
-3. 行クリックで注文詳細、ヘッダー行クリックで一括承認画面へ遷移できること
+3. 行クリックで注文詳細、ヘッダー行クリックで「承認」画面（`/orders/approval`、Issue #556）へ遷移できること
    （サブタイトル・下部ボタンは表示されない）
 4. 承認待ち 0 件のときカードが非表示になること
 5. `president` が差し戻し（reject）／`order_handler` が取り下げ（withdraw）すると

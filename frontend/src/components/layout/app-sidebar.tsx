@@ -20,6 +20,7 @@ import {
   Inbox,
   MailCheck,
   FileCheck,
+  Stamp,
 } from "lucide-react"
 
 import {
@@ -93,6 +94,13 @@ const menuItems: MenuItem[] = [
         url: "/orders/intake",
         icon: FileCheck,
         badge: { key: "intake_drafts", roles: ["order_handler", "iso_officer"] },
+      },
+      {
+        // 承認は社長だけの操作なので、件数バッジも社長にだけ出す（Issue #556）
+        title: "承認",
+        url: "/orders/approval",
+        icon: Stamp,
+        badge: { key: "pending_approval", roles: ["president"] },
       },
       {
         title: "受信メール処理結果",
