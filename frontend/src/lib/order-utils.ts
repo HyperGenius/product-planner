@@ -113,6 +113,37 @@ export function filterOrder(
 }
 
 /**
+ * 一覧の顧客・製品フィルタ（Issue #546）。`null` は未指定（絞り込まない）。
+ * ID が一致する注文だけを通すので、顧客不明（customer_id NULL）・製品未照合／修理注文
+ * （product_id NULL）は指定中は表示されない。
+ */
+export function matchesCustomerProductFilter(
+  order: Order,
+  customerId: number | null,
+  productId: number | null
+): boolean {
+  if (customerId !== null && order.customer_id !== customerId) return false
+  if (productId !== null && order.product_id !== productId) return false
+  return true
+}
+
+/**
+ * `?customer=` / `?product=` の値を ID に変換する。URL は直接編集できる入力なので、
+ * 正の整数以外、およびマスタ（取得済みのとき）に無い ID は未指定（null）にクランプする。
+ * `validIds` が undefined（マスタ取得前）のときは形式の検証だけ行う。
+ */
+export function toValidMasterId(
+  raw: string | null,
+  validIds?: ReadonlySet<number>
+): number | null {
+  if (raw === null || !/^[1-9]\d*$/.test(raw)) return null
+  const id = Number(raw)
+  if (!Number.isSafeInteger(id)) return null
+  if (validIds && !validIds.has(id)) return null
+  return id
+}
+
+/**
  * 日付のみを表す文字列 (例: "2026-10-01" や "2026-10-01T00:00:00")
  * をタイムゾーンの影響を受けずに "yyyy/MM/dd" 表示へ整形する。
  * `new Date()` でパースすると環境のタイムゾーンによって日付がずれるため使用しない。

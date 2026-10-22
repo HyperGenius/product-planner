@@ -335,6 +335,16 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 ---
 
+## 一覧の顧客・製品フィルタ（Issue #546）
+
+受注一覧（`/orders`）のフィルタバーに、顧客・製品の検索付きコンボボックス（`components/orders/filter-combobox.tsx`、`Popover` + `Command`）を追加した。Backend の変更は無く、`GET /orders` の全件をフロントで絞り込む。
+
+- 状態は URL クエリ `?customer=<id>` / `?product=<id>`。ステータスタブ・並び替えと AND で組み合わせる。変更時は `setParam` が `page` を消して 1 ページ目に戻り、一括選択は `useEffect`（`[page, statusFilter, customerFilterId, productFilterId]`）でクリアされる
+- `toValidMasterId()`（`lib/order-utils.ts`）が正の整数以外・マスタに存在しない ID を未指定にクランプする。判定は `matchesCustomerProductFilter()`（ID 一致）で、`filterOrder()` のシグネチャは変えず `useOrdersPage` の `filteredOrders` で後段に適用する
+- 顧客不明（`customer_id` NULL）・製品未照合（`product_id` NULL）・修理注文は、該当フィルタを指定中は表示されない（「顧客未設定」「未照合の部分一致」は対象外）
+- 通知カードの件数（`draftCount` 等）は全件基準のまま
+- 該当なしのときは「顧客・製品の絞り込みを解除」ボタンを出す。2 つを同時に消すため `clearMasterFilters()`（`setParam` を続けて呼ぶと 2 回目が古い `searchParams` で 1 回目を巻き戻すので 1 回の `router.push` にまとめる）
+
 ## バックエンド追加事項
 
 ### `confirmed_deadline` カラム追加
@@ -533,6 +543,7 @@ frontend/src/
 | 一覧ページ: AlertDialogによる削除確認 | 高 | ✅ 実装済 (#115) |
 | 注文編集ダイアログ | 中 | ✅ 実装済 (#116) |
 | 一覧ページ: 確定済み・生産中の行クリックで読み取り専用の確認ダイアログ | 中 | ✅ 実装済 (#527) |
+| 一覧ページ: 顧客・製品での絞り込みフィルタ（`?customer=` / `?product=`） | 中 | ✅ 実装済 (#546) |
 | 新規注文: 3ステップインジケーター | 中 | ✅ 実装済 (#117) |
 | 新規注文: 入力促進ヒント | 中 | ✅ 実装済 (#117) |
 | 新規注文: 確定前サマリー表示 | 中 | ✅ 実装済 (#117) |

@@ -24,6 +24,8 @@ import {
   compareOrders,
   isNoRoutingOrder,
   isOverdueDraft,
+  matchesCustomerProductFilter,
+  toValidMasterId,
   DEFAULT_SORT,
   STATUS_TABS,
   type StatusFilter,
@@ -94,6 +96,17 @@ export function useOrdersPage() {
   const { data: products, isLoading: productsLoading } = useProducts()
   const { data: customers, isLoading: customersLoading } = useCustomers()
   const { data: currentMember } = useCurrentMember()
+  // `?customer=` / `?product=`（Issue #546）。無効な値・存在しない ID は未指定にクランプする
+  const customerIdSet = useMemo(
+    () => (customers ? new Set(customers.map((c) => c.id)) : undefined),
+    [customers]
+  )
+  const productIdSet = useMemo(
+    () => (products ? new Set(products.map((p) => p.id)) : undefined),
+    [products]
+  )
+  const customerFilterId = toValidMasterId(searchParams.get("customer"), customerIdSet)
+  const productFilterId = toValidMasterId(searchParams.get("product"), productIdSet)
   const currentUserRole = currentMember?.role ?? null
   const isPresident = currentUserRole === "president"
   const canShipOverdueDrafts =
@@ -119,6 +132,16 @@ export function useOrdersPage() {
       params.delete(key)
     }
     if (key !== "page") params.delete("page")
+    router.push(`?${params.toString()}`)
+  }
+
+  // 顧客・製品の絞り込みを一度に解除する。setParam を続けて呼ぶと2回目が古い searchParams を
+  // 元にして1回目の変更を巻き戻すので、1回の router.push にまとめる（Issue #546）
+  const clearMasterFilters = () => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("customer")
+    params.delete("product")
+    params.delete("page")
     router.push(`?${params.toString()}`)
   }
 
@@ -152,8 +175,9 @@ export function useOrdersPage() {
     if (!orders) return []
     return orders
       .filter((order) => filterOrder(order, statusFilter, currentUserRole))
+      .filter((order) => matchesCustomerProductFilter(order, customerFilterId, productFilterId))
       .sort((a, b) => compareOrders(a, b, sortKey))
-  }, [orders, statusFilter, sortKey, currentUserRole])
+  }, [orders, statusFilter, sortKey, currentUserRole, customerFilterId, productFilterId])
 
   const pagedOrders = useMemo(() => {
     const offset = (page - 1) * PAGE_SIZE
@@ -208,7 +232,7 @@ export function useOrdersPage() {
   useEffect(() => {
     setSelectedOrderIds([])
     setBulkSimFailedIds(new Set())
-  }, [page, statusFilter])
+  }, [page, statusFilter, customerFilterId, productFilterId])
 
   // 承認・承認依頼は受注ステータスを不可逆に進める重要な操作のため、
   // 実行前に必ず確認モーダル（ApproveConfirmDialog / RequestApprovalConfirmDialog）を挟む（Issue #338）
@@ -541,9 +565,12 @@ export function useOrdersPage() {
   return {
     // URL state
     statusFilter,
+    customerFilterId,
+    productFilterId,
     sortKey,
     page,
     setParam,
+    clearMasterFilters,
     router,
     // Data
     orders,
