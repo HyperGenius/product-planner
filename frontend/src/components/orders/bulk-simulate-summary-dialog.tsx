@@ -29,11 +29,28 @@ function formatDate(iso: string) {
   return format(new Date(iso), "yyyy/MM/dd HH:mm", { locale: ja })
 }
 
+// results が null の間は内容コンポーネントをアンマウントするので、
+// 結果がセットされるたびにページ番号・「NGのみ表示」が初期状態で始まる（Issue #551）
 export function BulkSimulateSummaryDialog({ results, onClose, onBulkRequestApproval }: BulkSimulateSummaryDialogProps) {
-  const [currentPage, setCurrentPage] = useState(1)
-  const [showNgOnly, setShowNgOnly] = useState(false)
-
   if (!results) return null
+  return (
+    <BulkSimulateSummaryContent
+      results={results}
+      onClose={onClose}
+      onBulkRequestApproval={onBulkRequestApproval}
+    />
+  )
+}
+
+interface BulkSimulateSummaryContentProps {
+  results: BulkSimulateResult[]
+  onClose: () => void
+  onBulkRequestApproval?: (orderIds: number[]) => void
+}
+
+function BulkSimulateSummaryContent({ results, onClose, onBulkRequestApproval }: BulkSimulateSummaryContentProps) {
+  const [requestedPage, setCurrentPage] = useState(1)
+  const [showNgOnly, setShowNgOnly] = useState(false)
 
   const okCount = results.filter((r) => r.result !== null && r.result.is_feasible).length
   const infeasibleCount = results.filter((r) => r.result !== null && !r.result.is_feasible).length
@@ -43,6 +60,7 @@ export function BulkSimulateSummaryDialog({ results, onClose, onBulkRequestAppro
     ? results.filter((r) => !r.result?.is_feasible)
     : results
   const totalPages = Math.max(1, Math.ceil(filteredResults.length / PAGE_SIZE))
+  const currentPage = Math.min(requestedPage, totalPages)
   const pagedResults = filteredResults.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const currentPageOkIds = pagedResults
@@ -55,7 +73,7 @@ export function BulkSimulateSummaryDialog({ results, onClose, onBulkRequestAppro
   }
 
   return (
-    <Dialog open={results !== null} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>
