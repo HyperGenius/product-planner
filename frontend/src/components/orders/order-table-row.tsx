@@ -4,6 +4,7 @@ import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Truck
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import type React from "react"
+import type { ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -104,6 +105,12 @@ export interface OrderTableRowProps {
    * "simulate" は下書きのシミュレーション実行・メール起票の「確認」・再シミュレーションを含む
    */
   visibleActions?: readonly OrderRowAction[]
+  /** 操作カラムの先頭に出す画面固有の操作（「起票の確認」の「製品マスタに登録」等。Issue #555） */
+  leadingActions?: ReactNode
+  /** 一括選択のチェックボックスを出すか。省略時は下書き・（社長には）承認待ちに出す */
+  selectable?: boolean
+  /** 差し戻された下書きに「差し戻し」バッジと理由を出す（省略時はアイコンのツールチップだけ。Issue #555） */
+  showRejectionReason?: boolean
 }
 
 // 行内でクリックしても確認モーダルを開かない操作要素
@@ -137,6 +144,9 @@ export function OrderTableRow({
   onToggleSelect,
   onView,
   visibleActions = ALL_ORDER_ROW_ACTIONS,
+  leadingActions,
+  selectable,
+  showRejectionReason = false,
 }: OrderTableRowProps) {
   const router = useRouter()
   const isEmailOrder = order.source_type === "email"
@@ -189,6 +199,12 @@ export function OrderTableRow({
   }
 
   // 確定済み・生産中は編集できないので、行のクリックで内容を確認できるようにする（Issue #527）
+  const isSelectable =
+    selectable ??
+    (order.status === "draft" ||
+      (order.status === "pending_approval" && currentUserRole === "president"))
+  const rejectionReason = order.status === "draft" ? order.rejection_reason : null
+
   const isViewable =
     shows("view") && (order.status === "confirmed" || order.status === "in_progress")
 
@@ -227,8 +243,7 @@ export function OrderTableRow({
           : {})}
       >
         <TableCell className="w-10">
-          {order.status === "draft" ||
-          (order.status === "pending_approval" && currentUserRole === "president") ? (
+          {isSelectable ? (
             <div className="relative flex items-center justify-center">
               <Checkbox
                 checked={isSelected}
@@ -365,7 +380,10 @@ export function OrderTableRow({
                   {getStatusLabel(effectiveStatus)}
                 </Badge>
               )}
-              {order.status === "draft" && order.rejection_reason && (
+              {rejectionReason && showRejectionReason && (
+                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">差し戻し</Badge>
+              )}
+              {rejectionReason && !showRejectionReason && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <MessageSquareWarning className="h-4 w-4 text-amber-600 shrink-0" />
@@ -376,6 +394,11 @@ export function OrderTableRow({
                 </Tooltip>
               )}
             </div>
+            {rejectionReason && showRejectionReason && (
+              <p className="max-w-56 whitespace-pre-wrap text-xs text-amber-700">
+                {rejectionReason}
+              </p>
+            )}
             {order.customer_certainty && order.customer_certainty !== "confirmed" && (
               <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
                 {getCertaintyLabel(order.customer_certainty)}
@@ -407,6 +430,7 @@ export function OrderTableRow({
                 <TooltipContent>シミュレーションに失敗しました</TooltipContent>
               </Tooltip>
             )}
+            {leadingActions}
             {canSimulate && (
               isEmailOrder ? (
                 <Button

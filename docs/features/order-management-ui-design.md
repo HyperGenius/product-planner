@@ -345,6 +345,54 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 - 通知カードの件数（`draftCount` 等）は全件基準のまま
 - 該当なしのときは「顧客・製品の絞り込みを解除」ボタンを出す。2 つを同時に消すため `clearMasterFilters()`（`setParam` を続けて呼ぶと 2 回目が古い `searchParams` で 1 回目を巻き戻すので 1 回の `router.push` にまとめる）
 
+## 起票の確認（`/orders/intake`、Issue #555）
+
+Epic #553 の1画面目。受注担当・ISO担当が、起票された下書きを確認して承認依頼まで進める。Backend の変更は無く、`GET /orders` と `GET /orders/email-intake-results` の全件をフロントで区分する。
+
+### 下書きの区分
+
+`getIntakeCategory(order)`（`lib/order-utils.ts`）が `status === "draft"` の注文を次の優先順で最初に当たった区分にだけ振る（下書き以外は `null`）。ラベル・説明・色は `INTAKE_CATEGORY_META`（`Record<IntakeCategory, ...>`）で引く。
+
+| 優先 | 区分（`IntakeCategory`） | 条件 | 行に出す操作 |
+|---|---|---|---|
+| 1 | 製品未確定（`no_product`） | `product_id` が NULL（修理注文を除く） | 「製品を選ぶ」（編集ダイアログ）・「製品マスタに登録」・例外送品（社長）・削除 |
+| 2 | 工程未登録（`no_routing`） | `has_no_routings`（修理注文を除く） | 「工程を登録」（`/master/products?highlight=<product_id>`）・編集・例外送品（社長）・削除 |
+| 3 | 情報不足（`incomplete`） | 顧客か希望納期が未設定 | 「編集」・削除 |
+| 4 | シミュ未実行（`unsimulated`） | `is_scheduled` が false | シミュ（メール起票は「確認」）・編集・削除・一括シミュ |
+| 5 | シミュ納期の確認（`simulated`） | `is_scheduled` が true | 承認依頼（受注担当）・再シミュ・編集・削除・一括承認依頼 |
+
+- `has_no_routings` は `product_id` が NULL のときも true なので、製品未確定を先に判定する。工程未登録は `isNoRoutingOrder()`（`is_scheduled` を除外する）ではなく `has_no_routings` を直接見る
+- 修理注文（`isRepairOrder()`＝`order_type === "repair"`）は製品・工程を持たないので 1・2 に入れない。修理の `is_scheduled` は実施開始日と完了予定日がそろっているかで立つので 4・5 はそのまま使える
+- 差し戻された下書き（`rejection_reason`）は区分を変えず、行に「差し戻し」バッジと理由を出す（`OrderTableRow` の `showRejectionReason`）
+- シミュ納期の「確認済み」は持たない。承認依頼を出すと下書きでなくなり、この画面から外れる（Epic の決定事項）
+
+### 画面の構成
+
+```
+frontend/src/
+  app/orders/intake/page.tsx                    # 下記を組み合わせる
+  hooks/use-orders-intake.ts                    # 下書きの区分け（区分内は希望納期の近い順）
+  components/orders/intake/
+    intake-category-summary.tsx                 # 区分ごとの件数。押すとその区分の表へページ内リンクで移動（0件はリンクにしない）
+    intake-category-section.tsx                 # 区分ごとの表。区分ごとの操作は INTAKE_CATEGORY_CONFIG
+    failed-email-intake-notice.tsx              # 起票失敗メールへの導線
+```
+
+- 行操作・一括操作・確認ダイアログは #554 の `useOrderActions()` / `useOrderBulkActions()` / `OrderActionDialogs` / `OrderBulkActionDialogs` をそのまま使う。#554 の部品には次を足した（どれも省略時は従来どおり）
+  - `OrderTableRow`: `leadingActions`（操作カラムの先頭に出す画面固有の操作）・`selectable`（一括選択のチェックボックスを出すか）・`showRejectionReason`
+  - `OrdersTable`: `totalCount` / `pageSize` を省略するとページングを出さない。ページは URL の `?page=` 1つで持つので、1画面に表を複数並べるときは省略する
+  - `useOrderBulkActions()`: `getSelectAllState(orders)` / `handleToggleSelectAllOf(orders)`（表ごとの全選択）
+- 列は5区分で共通（`OrderTableHeaderRow` に `statusFilter="draft"` を渡し、納期の2段目はシミュ納期）。一括選択はシミュ未実行・シミュ納期の確認の表だけ（製品・工程・情報が欠けた下書きを一括シミュに混ぜない）
+- 「…」メニューの「納期超過の下書きを送品済みにする」（社長・プラットフォーム管理者、Issue #367）と「＋ 新規注文」を置く。#558 で注文一覧から外すまでは注文一覧にも残る
+- 起票失敗メール（`outcome === "failed"`）は**直近7日（`RECENT_FAILED_EMAIL_INTAKE_DAYS`）に受信したものだけを数える**（`countRecentFailedEmailIntakes()`）。失敗には「対応済み」の状態が無く、手動起票しても件数が減らないため。1件以上なら件数付きで強調し、0件でも「受信メール処理結果を見る」のリンクは常に置く
+
+### サイドバー
+
+- 「受注管理」をサブメニュー付きにした（`app-sidebar.tsx`）。親を押すとロールにかかわらず `/orders` を開き、開閉は右端のシェブロン（`SidebarMenuAction`）で行う。サブメニューは初めから展開する（`defaultOpen`）
+- サブメニュー: 「起票の確認」・「受信メール処理結果」（トップレベルから移動）
+- `SubMenuItem` に `allowedRoles` と `badge: { key, roles }` を足した。件数は `useSidebarBadgeCounts()`（`hooks/use-sidebar-badge-counts.ts`）が `SidebarBadgeKey` ごとに返す。バッジを出す項目が無いロールでは `useOrders({ enabled: false })` で注文を取得しない
+- 「起票の確認」の件数バッジ（下書きの件数）は受注担当・ISO担当にだけ出す。#556（承認）・#557（送品の消し込み）は `SidebarBadgeKey` に値を足して項目を追加する
+
 ## バックエンド追加事項
 
 ### `confirmed_deadline` カラム追加
@@ -586,6 +634,7 @@ const bulk = useOrderBulkActions({ orders, pageOrders, selectionResetKey })
 | 新規注文: 確定前サマリー表示 | 中 | ✅ 実装済 (#117) |
 | 一覧ページ: コード分割リファクタリング | - | ✅ 実装済 (#130) |
 | 一覧ページ: 行・操作・確認ダイアログの共通部品化（Epic #553 の画面分割の準備） | - | ✅ 実装済 (#554) |
+| 起票の確認画面（下書きの5区分・起票失敗メールへの導線・サイドバーのサブメニューと件数バッジ） | 高 | ✅ 実装済 (#555) |
 | 一覧ページ: シミュレーション行ごとローディング・エラーフィードバック | 中 | ✅ 実装済 (#133) |
 | 一覧ページ: 一括操作（チェックボックス・一括シミュレーション・一括確定） | 中 | ✅ 実装済 (#135) |
 | 一括シミュレーション: サマリーモーダル + NG行ハイライト | 中 | ✅ 実装済 (#140) |

@@ -28,12 +28,14 @@ const ORDERS_QUERY_KEY = ["orders"]
  *
  * @param options.refetchInterval 自動再取得の間隔(ms)。現場ダッシュボード（Issue #440）等、
  *   常時表示前提の画面から指定する想定。未指定時は自動再取得しない
+ * @param options.enabled false なら取得しない（サイドバーの件数バッジを出さないロール等）
  */
-export function useOrders(options?: { refetchInterval?: number }) {
+export function useOrders(options?: { refetchInterval?: number; enabled?: boolean }) {
   return useQuery<Order[]>({
     queryKey: ORDERS_QUERY_KEY,
     queryFn: () => apiClient<Order[]>("/orders"),
     refetchInterval: options?.refetchInterval,
+    enabled: options?.enabled,
   })
 }
 

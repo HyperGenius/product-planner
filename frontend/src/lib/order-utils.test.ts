@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Order } from "@/types/order"
+import type { EmailIntakeResult, Order } from "@/types/order"
 import {
   canShipWithoutRouting,
+  countRecentFailedEmailIntakes,
   filterOrder,
+  getIntakeCategory,
   getOrderUrgency,
   isNoRoutingOrder,
   jstTomorrowIso,
@@ -218,5 +220,107 @@ describe("matchesCustomerProductFilter / toValidMasterId（Issue #546）", () =>
     expect(toValidMasterId("-1")).toBeNull()
     expect(toValidMasterId(null)).toBeNull()
     expect(toValidMasterId("7")).toBe(7)
+  })
+})
+
+describe("getIntakeCategory（Issue #555）", () => {
+  it("下書き以外は区分を持たない", () => {
+    expect(getIntakeCategory(makeOrder({ status: "pending_approval", is_scheduled: true }))).toBeNull()
+    expect(getIntakeCategory(makeOrder({ status: "confirmed" }))).toBeNull()
+  })
+
+  it("製品未確定を最優先にする（has_no_routings・情報不足より先）", () => {
+    const order = makeOrder({
+      product_id: null,
+      has_no_routings: true,
+      customer_id: undefined,
+      desired_deadline: undefined,
+    })
+    expect(getIntakeCategory(order)).toBe("no_product")
+  })
+
+  it("工程未登録は情報不足より先。シミュ済でも has_no_routings なら工程未登録", () => {
+    expect(getIntakeCategory(makeOrder({ has_no_routings: true, customer_id: undefined }))).toBe(
+      "no_routing",
+    )
+    expect(getIntakeCategory(makeOrder({ has_no_routings: true, is_scheduled: true }))).toBe(
+      "no_routing",
+    )
+  })
+
+  it("顧客か希望納期が未設定なら情報不足（シミュ済でも）", () => {
+    expect(getIntakeCategory(makeOrder({ customer_id: undefined }))).toBe("incomplete")
+    expect(getIntakeCategory(makeOrder({ desired_deadline: undefined, is_scheduled: true }))).toBe(
+      "incomplete",
+    )
+  })
+
+  it("情報がそろっていれば is_scheduled でシミュ未実行／シミュ納期の確認に分ける", () => {
+    expect(getIntakeCategory(makeOrder({ has_no_routings: false }))).toBe("unsimulated")
+    expect(getIntakeCategory(makeOrder({ has_no_routings: false, is_scheduled: true }))).toBe(
+      "simulated",
+    )
+  })
+
+  it("修理注文は製品未確定・工程未登録に入れない", () => {
+    const repair = makeOrder({
+      order_type: "repair",
+      product_id: null,
+      quantity: null,
+      has_no_routings: true,
+    })
+    expect(getIntakeCategory(repair)).toBe("unsimulated")
+    expect(getIntakeCategory({ ...repair, is_scheduled: true })).toBe("simulated")
+    expect(getIntakeCategory({ ...repair, customer_id: undefined })).toBe("incomplete")
+  })
+
+  it("差し戻された下書きは区分を変えない", () => {
+    expect(
+      getIntakeCategory(makeOrder({ is_scheduled: true, rejection_reason: "納期を確認してください" })),
+    ).toBe("simulated")
+    expect(getIntakeCategory(makeOrder({ product_id: null, rejection_reason: "製品違い" }))).toBe(
+      "no_product",
+    )
+  })
+})
+
+describe("countRecentFailedEmailIntakes（Issue #555）", () => {
+  function makeResult(overrides: Partial<EmailIntakeResult>): EmailIntakeResult {
+    return {
+      id: "att-1",
+      received_at: "2026-10-20T00:00:00+00:00",
+      customer_id: null,
+      customer_name: null,
+      original_filename: null,
+      has_attachment: true,
+      content_type: "application/pdf",
+      parse_status: "failed_image",
+      gmail_message_id: null,
+      gmail_url: null,
+      signed_url: null,
+      created_order_count: 0,
+      created_order_ids: [],
+      parse_log_reasons: [],
+      outcome: "failed",
+      needs_attention: false,
+      empty_draft: false,
+      ...overrides,
+    }
+  }
+  const now = new Date("2026-10-22T03:00:00+00:00")
+
+  it("直近7日に受信した失敗だけを数える（起票・スキップ・7日より前は数えない）", () => {
+    const results = [
+      makeResult({ id: "a", received_at: "2026-10-22T01:00:00+00:00" }),
+      makeResult({ id: "b", received_at: "2026-10-15T03:00:00+00:00" }), // ちょうど7日前
+      makeResult({ id: "c", received_at: "2026-10-15T02:59:59+00:00" }),
+      makeResult({ id: "d", outcome: "created" }),
+      makeResult({ id: "e", outcome: "skipped" }),
+    ]
+    expect(countRecentFailedEmailIntakes(results, now)).toBe(2)
+  })
+
+  it("受信日時が解釈できない行は数えない", () => {
+    expect(countRecentFailedEmailIntakes([makeResult({ received_at: "invalid" })], now)).toBe(0)
   })
 })
