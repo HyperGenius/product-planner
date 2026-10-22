@@ -29,6 +29,11 @@
 
 ## 注文一覧ページ改善設計 (`/orders`)
 
+> [!NOTE]
+> Epic #553 で作業の入口を「起票の確認」「承認」「送品の消し込み」の各画面に分け、`/orders` は検索と履歴のための
+> 「すべての注文」に整理した（Issue #558）。この節のアテンションカード・「対応が必要」タブ・行の作業ボタンは
+> 当時の設計の記録として残している。現在の構成は「[すべての注文](#すべての注文orders、issue-558)」を参照。
+
 ### ページ構成
 
 ```
@@ -52,6 +57,8 @@
 
 ### アテンションカード
 
+> Issue #558 で削除した（`order-notification-cards.tsx`）。下書きの区分・情報不足・工程未入力は「起票の確認」（Issue #555）で扱う。
+
 画面上部に 2 枚のサマリーカードを並べる。
 
 **カード1: 下書き件数 (STEP 2)**
@@ -71,36 +78,31 @@
 
 URL クエリパラメータ `?status=` で管理（マスタ画面と同じパターン）。
 
-フィルタータブは `orders.status` の値のみに限定する。「情報不足」「工程未確認」は `orders.status` に存在しない派生的な概念であり、同列に扱うと軸が混在してユーザーを混乱させる（詳細は「設計上の決定事項」参照）。唯一の例外が次項の「対応が必要」（ロール依存の派生フィルタ）。
+フィルタータブは `orders.status` の値のみに限定する。「情報不足」「工程未確認」は `orders.status` に存在しない派生的な概念であり、同列に扱うと軸が混在してユーザーを混乱させる（詳細は「設計上の決定事項」参照）。
 
 | フィルター値 | 表示ラベル | 対象 |
 |---|---|---|
-| `action_required` | 対応が必要 | ロールに応じた要対応の注文（下記参照） |
-| (なし) | すべて | 全注文 |
-| `draft` | 下書き | status='draft' |
+| (なし) | すべて | 全注文（既定） |
+| `draft` | 下書き | status='draft'（シミュ済みの下書きを含む） |
 | `pending_approval` | 承認待ち | status='pending_approval' |
 | `confirmed` | 確定済 | status='confirmed' |
+| `in_progress` | 生産中 | status='in_progress' |
 | `shipped` | 送品済み | status='shipped' |
 | `completed` | 完了 | status='completed' |
 | `canceled` | キャンセル | status='canceled' |
 
-#### デフォルトフィルタ「対応が必要」(Issue #460)
+`?status=` が無いときは「すべて」。Issue #460 で既定にしていた「対応が必要」（`action_required`、ロールごとに自分が操作すべき注文）と、
+Issue #392 の「シミュ済」（`simulated`）タブは Issue #558 で廃止した。古い URL は `toValidStatusFilter()`（`use-orders-page.ts`）で
+次のように扱う。
 
-一覧を開いた瞬間に未整理の全件が並ぶと「今日やるべきこと」が埋もれるため、`?status=` を**指定せずに** `/orders` を開いた場合のみ `action_required` をデフォルト適用する（`use-orders-page.ts`）。`?status=` を明示指定した遷移・ブックマークはその値を優先する。「すべて」タブ自体は削除しない。
-
-ロールごとの対象（`order-utils.ts` の `filterOrder` / `isActionRequiredForRole`）:
-
-| ロール | 対象 |
+| 古い `?status=` | 扱い |
 |---|---|
-| `order_handler` | `status === 'draft'`（未シミュレーション・差し戻し済み・シミュ済みを含む） |
-| `iso_officer` | 同上（下書き全般） |
-| `president` | `status === 'pending_approval'` |
-| `platform_admin` | `status === 'confirmed'` |
-| ロール未取得（`null`） | 対象なし（0件） |
+| `simulated` | 「下書き」（シミュ済みの下書きは「下書き」タブに含めた） |
+| `action_required` / `incomplete` | 「すべて」（既知の値以外はクランプする方針どおり） |
 
-「対応が必要」はログイン中のロールにより中身の `status` が単一に定まる（下書き／承認待ち／確定済みのいずれか）ため、納期列は行ごとに `usesSimulatedDeadlineForOrder()` でシミュ納期／確定納期を出し分け、列見出しは汎用の「納期」にする（`getDeadlineColumnLabel` / `getDeadlineForTab`）。
-
-「すべて」タブ選択時は `?status=`（空文字）を URL に明示的に残す（`setParam` で `status` キーのみ削除せず維持）。削除すると「`?status=` 無し」と区別が付かず、リロードで「対応が必要」に戻ってしまうため。
+納期列は「すべて」タブではステータスの混ざった行が並ぶので、見出しを汎用の「納期」にし、値は行ごとに
+`usesSimulatedDeadlineForOrder()` の判定でシミュ納期／確定納期を出し分ける（既定のタブで下書きの行を空欄にしないため）。
+ステータスのタブでは、確定以降なら「確定納期」、それ以外は「シミュ納期」（`getDeadlineColumnLabel` / `getDeadlineForTab`）。
 
 ### テーブル設計
 
@@ -165,6 +167,9 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 ### アクション体系
 
+> 「すべての注文」（Issue #558）では作業ボタンを出さない。下表は「起票の確認」「承認」「送品の消し込み」で `visibleActions` により
+> 絞って出す操作の元になっている。
+
 注文の状態・ロールによってプライマリアクションを切り替える。操作カラムを圧縮するため、
 主要アクション以外（取り下げ・差し戻し・送品済みにする・再シミュレーション・編集）は
 ケバブメニューへ寄せ、常時表示するボタンは最大1個に抑える（Issue #397）。
@@ -187,7 +192,8 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 - ケバブメニューの項目はポータルに描画されるが、React の合成イベントはポータルからも行まで伝播する。行の DOM に含まれない
   クリック（`!e.currentTarget.contains(e.target)`）は無視して、「送品済みにする」「削除」で確認モーダルが開かないようにしている
 - キー操作は `e.target === e.currentTarget`（行そのものにフォーカスがあるとき）だけ扱う
-- それ以外のステータスの行はクリックしても何も起きない（`tabIndex` も付けない）
+- Issue #558 から、`visibleActions` に `view` を含む行（「すべての注文」）は全ステータスでクリックできる。`view` を含めない画面
+  （「起票の確認」等）の行はクリックしても何も起きない（`tabIndex` も付けない）
 
 **シミュレーション実行**（`POST /orders/{order_id}/simulate`）の結果は、画面右からスライドインするサイドシート（shadcn/ui `Sheet`）で表示する。Sheet フッターに「閉じる」「この内容で確定」ボタンを固定表示し、シミュレーション結果を確認後に confirm へ移行する。同時に開けるシートは 1 件のみで、別の注文のシミュレーション実行で自動的に切り替わる。
 
@@ -322,15 +328,17 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 ## 注文の確認ダイアログ（読み取り専用、Issue #527）
 
-一覧で確定済み・生産中の行をクリックすると開くダイアログ（`components/orders/order-view-dialog.tsx`）。
+「すべての注文」で行をクリックすると開くダイアログ（`components/orders/order-view-dialog.tsx`）。当初は確定済み・生産中だけが対象で、
+Issue #558 から全ステータスで開く。
 
 - 外枠（幅・メール起票時の参照元メール2カラム・ヘッダー・フッター）は編集ダイアログと共通の `OrderDialogLayout`
   （`components/orders/order-dialog-layout.tsx`）を使い、見た目を揃える。外枠を変えるときはこのファイルだけを直す
-- 項目は編集ダイアログと同じ順（注文番号 / 製品 / 顧客 / 数量 / 希望納期 / 作業開始日）に、確定納期・ステータス・顧客側の確度を足す。
+- 項目は編集ダイアログと同じ順（注文番号 / 製品 / 顧客 / 数量 / 希望納期 / 作業開始日）に、納期・ステータス・顧客側の確度を足す。
+  納期は確定以降なら「確定納期」、承認前は「シミュ納期」（`usesSimulatedDeadlineForOrder()`）。ステータスはシミュ済みの下書きを「シミュ済」で出す（`getEffectiveOrderStatus()`）。
   入力欄は `Input` の `readOnly` で、製品・顧客はコンボボックスではなく表示名を入れる。入力用の注記（「（任意）」「*」・作業開始日の説明・警告）は出さない
 - 未設定の項目は空欄＋プレースホルダ「未設定」（メール起票で顧客不明なら「顧客不明」、Issue #521）。確度 NULL は「－」（Issue #474）
 - フッターは「閉じる」と「詳細ページを開く」（`/orders/{id}`）。保存ボタンは無い
-- 一覧の `use-orders-page.ts` は表示中の注文を **ID**（`viewingOrderId`）で持ち、`orders` から引き直す。送品済み等で一覧が再取得されたときに古い内容を出さないため
+- `use-order-actions.ts` は表示中の注文を **ID**（`viewingOrderId`）で持ち、`orders` から引き直す。送品済み等で一覧が再取得されたときに古い内容を出さないため
 - 編集ダイアログに `readOnly` フラグを足す案は採らなかった（保存・409 の重複ハンドリング・作業開始日の権限チェック等、編集専用の処理が多いため）
 
 ---
@@ -339,10 +347,9 @@ URL クエリパラメータ `?status=` で管理（マスタ画面と同じパ�
 
 受注一覧（`/orders`）のフィルタバーに、顧客・製品の検索付きコンボボックス（`components/orders/filter-combobox.tsx`、`Popover` + `Command`）を追加した。Backend の変更は無く、`GET /orders` の全件をフロントで絞り込む。
 
-- 状態は URL クエリ `?customer=<id>` / `?product=<id>`。ステータスタブ・並び替えと AND で組み合わせる。変更時は `setParam` が `page` を消して 1 ページ目に戻り、一括選択は `useEffect`（`[page, statusFilter, customerFilterId, productFilterId]`）でクリアされる
+- 状態は URL クエリ `?customer=<id>` / `?product=<id>`。ステータスタブ・並び替えと AND で組み合わせる。変更時は `setParam` が `page` を消して 1 ページ目に戻る
 - `toValidMasterId()`（`lib/order-utils.ts`）が正の整数以外・マスタに存在しない ID を未指定にクランプする。判定は `matchesCustomerProductFilter()`（ID 一致）で、`filterOrder()` のシグネチャは変えず `useOrdersPage` の `filteredOrders` で後段に適用する
 - 顧客不明（`customer_id` NULL）・製品未照合（`product_id` NULL）・修理注文は、該当フィルタを指定中は表示されない（「顧客未設定」「未照合の部分一致」は対象外）
-- 通知カードの件数（`draftCount` 等）は全件基準のまま
 - 該当なしのときは「顧客・製品の絞り込みを解除」ボタンを出す。2 つを同時に消すため `clearMasterFilters()`（`setParam` を続けて呼ぶと 2 回目が古い `searchParams` で 1 回目を巻き戻すので 1 回の `router.push` にまとめる）
 
 ## 起票の確認（`/orders/intake`、Issue #555）
@@ -432,7 +439,7 @@ frontend/src/
 
 - サイドバーの「受注管理」配下に「承認」を「起票の確認」の次に置く。件数バッジ（`SidebarBadgeKey` の `pending_approval`＝承認待ちの件数）は**社長にだけ**出す
 - ダッシュボードの承認待ちキュー（`ApprovalQueueCard`）の見出しの遷移先を `/orders?status=pending_approval` からこの画面に変えた
-- 注文一覧（`/orders`）の「承認待ち」タブ・「対応が必要」タブ（社長）は #558 で整理するまで残る
+- 注文一覧（`/orders`）の「対応が必要」タブ（社長）は #558 で廃止した。「承認待ち」タブは状態の絞り込みとして残る（承認の操作は出さない）
 
 ## 送品の消し込み（`/orders/shipping`、Issue #557）
 
@@ -482,6 +489,36 @@ frontend/src/
 
 - サイドバーの「受注管理」配下に「送品の消し込み」を「承認」の次に置く。件数バッジ（`SidebarBadgeKey` の `shipping_candidates`＝候補の件数）は**社長・受注担当にだけ**出す
 - バッジは画面と同じ `useShippingRows()` で数え、進捗を同じクエリキー（対象の注文 ID の昇順）で取るので二重に取得しない。バッジを出さないロールでは進捗を取得せず、進捗が届くまではバッジを出さない（最終工程の完了が抜けた件数を一瞬出さないため）
+
+## すべての注文（`/orders`、Issue #558）
+
+Epic #553 の4画面目。作業の入口は「起票の確認」「承認」「送品の消し込み」に移したので、`/orders` は全件の検索と履歴だけを担う。
+Backend の変更は無い。サイドバーの「受注管理」の親項目は、ロールにかかわらずこの画面を開く。
+
+### 残したもの・外したもの
+
+| 残したもの | 外したもの |
+|---|---|
+| ステータスのタブ（すべて・下書き・承認待ち・確定済・生産中・送品済み・完了・キャンセル） | 「対応が必要」「シミュ済」タブ |
+| 顧客・製品の絞り込み（Issue #546）・並び替え・ページング | 通知カード（`order-notification-cards.tsx`、削除） |
+| 「＋ 新規注文」 | 行の作業ボタン（シミュ・承認依頼・承認・差し戻し・取り下げ・送品・例外送品・編集・削除）とケバブメニュー |
+| 行のバッジ（製品未確定・工程未入力・確度・差し戻し理由のアイコン等）と、工程未入力バッジから製品マスタへのリンク | 一括操作の選択チェックボックス・一括操作バー |
+| 行のクリックで確認モーダル（全ステータス） | 右上の「…」メニュー（納期超過の下書きの一括送品は「起票の確認」へ移動済み） |
+
+### 組み立て
+
+- 行は `OrderTableRow` に `visibleActions={["view"]}` と `showActionColumns={false}` を渡す。`showActionColumns={false}` で
+  選択・操作の列ごと出さない（見出しの `OrderTableHeaderRow` にも同じ値を渡す）。行操作は `useOrderActions()` の
+  `getRowProps()` を展開し、確認モーダルは `OrderActionDialogs` が描画する
+- 一括選択の props（`isSelected` / `isBulkOperationInProgress` / `onToggleSelect`）は `OrderTableRow` では任意にし、
+  `useOrderBulkActions()` を使わない画面では渡さない（`onToggleSelect` が無ければチェックボックスを出さない）。
+  `OrderRowBulkProps` は「承認」画面の行のため、これらを必須のまま保つ
+- `use-orders-page.ts` は URL の状態・絞り込み・ページングだけを持ち、通知カードの件数・一括選択の解除キーは持たない
+
+### 導線
+
+- `/orders?status=...` へ遷移する箇所は Issue #556 でダッシュボードの承認待ちキューを「承認」画面へ付け替えた時点で無くなっている。
+  残るのはサイドバーの「受注管理」とダッシュボードの「最新の注文」の「すべて表示」（いずれも `/orders`）
 
 ## バックエンド追加事項
 
@@ -544,7 +581,7 @@ router.push(`?${params.toString()}`)
 
 | パラメータ | 用途 | 例 |
 |---|---|---|
-| `?status=` | ステータスフィルター | `?status=draft` |
+| `?status=` | ステータスフィルター（無ければ「すべて」） | `?status=draft` |
 | `?page=` | ページ番号 | `?page=2` |
 | `?sort=` | ソートキー | `?sort=created_at` |
 
@@ -610,7 +647,6 @@ frontend/src/
     order-view-dialog.tsx                 # 注文の確認ダイアログ（読み取り専用、#527）
     order-dialog-layout.tsx               # 編集・確認ダイアログ共通の外枠（#527）
     delete-order-dialog.tsx               # 削除確認 AlertDialog（注文番号/製品/顧客/数量/希望納期/確定納期のサマリー表示、#284）
-    order-notification-cards.tsx          # 下書き/情報不足サマリーカード
     orders-filter-bar.tsx                 # ステータスタブ + ソートセレクト
     order-table-row.tsx                   # テーブル行
     simulation-side-sheet.tsx             # シミュレーション結果サイドシート
@@ -630,7 +666,7 @@ Epic #553 で注文一覧を「起票の確認」「承認」「送品の消し�
 frontend/src/
   app/orders/page.tsx                     # 下記を組み合わせるだけ
   hooks/
-    use-orders-page.ts                    # URL の状態・絞り込み・ページング・通知カードの件数
+    use-orders-page.ts                    # URL の状態・絞り込み・ページング
     use-order-actions.ts                  # 行操作の mutation・確認ダイアログの対象・トースト
     use-order-bulk-actions.ts             # 一括選択・一括シミュ／承認依頼／承認・納期超過の下書きの一括送品
   components/orders/
@@ -726,6 +762,7 @@ const bulk = useOrderBulkActions({ orders, pageOrders, selectionResetKey })
 | 一覧ページ: 行・操作・確認ダイアログの共通部品化（Epic #553 の画面分割の準備） | - | ✅ 実装済 (#554) |
 | 起票の確認画面（下書きの5区分・起票失敗メールへの導線・サイドバーのサブメニューと件数バッジ） | 高 | ✅ 実装済 (#555) |
 | 承認画面（承認依頼の古い順・シミュ納期の超過日数・ロール別の承認／差し戻し／取り下げ・社長だけの件数バッジ） | 高 | ✅ 実装済 (#556) |
+| 注文一覧を「すべての注文」に整理（「対応が必要」「シミュ済」タブ・通知カード・作業ボタン・一括操作を外し、全ステータスで確認モーダル） | 高 | ✅ 実装済 (#558) |
 | 一覧ページ: シミュレーション行ごとローディング・エラーフィードバック | 中 | ✅ 実装済 (#133) |
 | 一覧ページ: 一括操作（チェックボックス・一括シミュレーション・一括確定） | 中 | ✅ 実装済 (#135) |
 | 一括シミュレーション: サマリーモーダル + NG行ハイライト | 中 | ✅ 実装済 (#140) |

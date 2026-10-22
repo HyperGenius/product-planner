@@ -9,7 +9,7 @@ import type { Customer } from "@/types/customer"
 import { OrderViewDialog } from "./order-view-dialog"
 
 /**
- * 確定済み・生産中の注文を読み取り専用で表示する確認モーダル（Issue #527）。
+ * 注文を読み取り専用で表示する確認モーダル（Issue #527。全ステータスで開く、Issue #558）。
  */
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
@@ -70,6 +70,21 @@ describe("OrderViewDialog", () => {
     }
     expect(screen.getByText("確定")).toBeInTheDocument()
     expect(screen.getByText("内示")).toBeInTheDocument()
+  })
+
+  it("承認前の注文はシミュ納期と実効ステータス（シミュ済）を出す（Issue #558）", () => {
+    renderDialog(
+      makeOrder({
+        status: "draft",
+        is_scheduled: true,
+        confirmed_deadline: undefined,
+        simulated_deadline: "2026-09-20",
+      }),
+    )
+
+    expect(screen.getByLabelText("シミュ納期")).toHaveValue("2026/09/20")
+    expect(screen.queryByLabelText("確定納期")).not.toBeInTheDocument()
+    expect(screen.getByText("シミュ済")).toBeInTheDocument()
   })
 
   it("保存ボタンを出さず、詳細ページへのリンクを出す", () => {

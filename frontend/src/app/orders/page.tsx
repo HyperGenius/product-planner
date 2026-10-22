@@ -1,26 +1,20 @@
 "use client"
 
-import { MoreHorizontal, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { OrderActionDialogs } from "@/components/orders/order-action-dialogs"
-import { OrderBulkActionDialogs } from "@/components/orders/order-bulk-action-dialogs"
-import { OrderNotificationCards } from "@/components/orders/order-notification-cards"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
 import { OrderTableHeaderRow, OrdersTable } from "@/components/orders/orders-table"
-import { OrderTableRow } from "@/components/orders/order-table-row"
+import { OrderTableRow, type OrderRowAction } from "@/components/orders/order-table-row"
 import { useOrdersPage, PAGE_SIZE } from "@/hooks/use-orders-page"
 import { useOrderActions } from "@/hooks/use-order-actions"
-import { useOrderBulkActions } from "@/hooks/use-order-bulk-actions"
 
+// 作業（シミュ・承認・送品等）は「起票の確認」「承認」「送品の消し込み」の各画面で行うので、
+// ここでは行のクリックで内容を確認するだけにする（Issue #558）
+const VISIBLE_ACTIONS: readonly OrderRowAction[] = ["view"]
+
+/** すべての注文（全件の検索・履歴。Epic #553） */
 export default function OrdersPage() {
   const {
     statusFilter,
@@ -28,66 +22,20 @@ export default function OrdersPage() {
     productFilterId,
     sortKey,
     router,
-    selectionResetKey,
     isLoading,
     orders,
     products,
     customers,
-    draftCount,
-    incompleteCount,
-    noCustomerCount,
-    noDeadlineCount,
-    noRoutingCount,
     filteredOrders,
     pagedOrders,
     currentUserRole,
-    isPresident,
-    canShipOverdueDrafts,
     setParam,
     clearMasterFilters,
   } = useOrdersPage()
   const actions = useOrderActions(orders)
-  const bulk = useOrderBulkActions({ orders, pageOrders: pagedOrders, selectionResetKey })
-
-  const selectAll =
-    statusFilter === "pending_approval" ? (
-      <Checkbox
-        checked={
-          bulk.allPendingApprovalOnPageSelected
-            ? true
-            : bulk.somePendingApprovalOnPageSelected
-            ? "indeterminate"
-            : false
-        }
-        onCheckedChange={bulk.handleToggleSelectAllPendingApproval}
-        disabled={
-          !isPresident ||
-          bulk.pendingApprovalPageOrders.length === 0 ||
-          bulk.isBulkApproving
-        }
-        aria-label="全選択"
-      />
-    ) : (
-      <Checkbox
-        checked={
-          bulk.allDraftOnPageSelected
-            ? true
-            : bulk.someDraftOnPageSelected
-            ? "indeterminate"
-            : false
-        }
-        onCheckedChange={bulk.handleToggleSelectAll}
-        disabled={
-          bulk.draftPageOrders.length === 0 || bulk.isBulkSimulating || bulk.isBulkRequestingApproval
-        }
-        aria-label="全選択"
-      />
-    )
 
   const emptyState =
-    statusFilter === "action_required" ? (
-      <p>対応が必要な注文はありません</p>
-    ) : statusFilter || customerFilterId !== null || productFilterId !== null ? (
+    statusFilter || customerFilterId !== null || productFilterId !== null ? (
       <>
         <p>条件に一致する注文がありません</p>
         {(customerFilterId !== null || productFilterId !== null) && (
@@ -116,50 +64,17 @@ export default function OrdersPage() {
 
   return (
     <TooltipProvider>
-      <div className={cn("container mx-auto py-6 px-4", bulk.selectedOrderIds.length > 0 && "pb-24")}>
+      <div className="container mx-auto py-6 px-4">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">注文一覧</h1>
-            <p className="text-muted-foreground mt-2">登録された注文の一覧を表示します</p>
+            <h1 className="text-3xl font-bold">すべての注文</h1>
+            <p className="text-muted-foreground mt-2">登録された注文を検索・確認します</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => router.push("/orders/new")}>
-              <Plus className="mr-2 h-4 w-4" />
-              新規注文
-            </Button>
-            {canShipOverdueDrafts && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <MoreHorizontal className="h-4 w-4" />
-                    <span className="sr-only">その他の操作</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    disabled={bulk.overdueDraftOrders.length === 0}
-                    onClick={bulk.handleShipOverdueDraftsRequest}
-                  >
-                    納期超過の下書きを送品済みにする
-                    {bulk.overdueDraftOrders.length > 0 && `（${bulk.overdueDraftOrders.length}件）`}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+          <Button onClick={() => router.push("/orders/new")}>
+            <Plus className="mr-2 h-4 w-4" />
+            新規注文
+          </Button>
         </div>
-
-        {!isLoading && (
-          <OrderNotificationCards
-            draftCount={draftCount}
-            incompleteCount={incompleteCount}
-            noCustomerCount={noCustomerCount}
-            noDeadlineCount={noDeadlineCount}
-            noRoutingCount={noRoutingCount}
-            onDraftClick={() => setParam("status", "draft")}
-            onIncompleteClick={() => setParam("status", "incomplete")}
-          />
-        )}
 
         <OrdersFilterBar
           statusFilter={statusFilter}
@@ -176,7 +91,7 @@ export default function OrdersPage() {
 
         <OrdersTable
           isLoading={isLoading}
-          header={<OrderTableHeaderRow statusFilter={statusFilter} selectAll={selectAll} />}
+          header={<OrderTableHeaderRow statusFilter={statusFilter} showActionColumns={false} />}
           rowCount={pagedOrders.length}
           emptyState={emptyState}
           totalCount={filteredOrders.length}
@@ -191,7 +106,8 @@ export default function OrdersPage() {
               customers={customers}
               currentUserRole={currentUserRole}
               {...actions.getRowProps(order)}
-              {...bulk.getRowProps(order)}
+              visibleActions={VISIBLE_ACTIONS}
+              showActionColumns={false}
             />
           ))}
         </OrdersTable>
@@ -202,8 +118,6 @@ export default function OrdersPage() {
           customers={customers}
           currentUserRole={currentUserRole}
         />
-
-        <OrderBulkActionDialogs bulk={bulk} products={products} currentUserRole={currentUserRole} />
       </div>
     </TooltipProvider>
   )

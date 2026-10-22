@@ -62,7 +62,8 @@ const rowProps = {
 
 function renderRow(
   order: Order,
-  props: Partial<typeof rowProps> & Pick<OrderTableRowProps, "visibleActions"> = {},
+  props: Partial<typeof rowProps> &
+    Pick<OrderTableRowProps, "visibleActions" | "showActionColumns"> = {},
 ) {
   return render(
     <TooltipProvider>
@@ -243,7 +244,7 @@ describe("OrderTableRow", () => {
     })
   })
 
-  describe("確定済みの行のクリックで確認モーダルを開く（Issue #527）", () => {
+  describe("行のクリックで確認モーダルを開く（Issue #527 / #558）", () => {
     function renderViewableRow(order: Order) {
       const onView = vi.fn()
       const onDelete = vi.fn()
@@ -265,7 +266,7 @@ describe("OrderTableRow", () => {
       return { ...utils, onView, onDelete }
     }
 
-    it.each(["confirmed", "in_progress"] as const)(
+    it.each(["draft", "pending_approval", "confirmed", "in_progress", "shipped", "canceled"] as const)(
       "%s の行をクリックすると onView が呼ばれる",
       async (status) => {
         const order = makeOrder({ status, source_type: "manual" })
@@ -299,20 +300,6 @@ describe("OrderTableRow", () => {
       expect(onDelete).toHaveBeenCalledTimes(1)
       expect(onView).not.toHaveBeenCalled()
     })
-
-    it.each(["draft", "pending_approval", "shipped"] as const)(
-      "%s の行はクリックしても onView を呼ばず、フォーカスもできない",
-      async (status) => {
-        const { onView, container } = renderViewableRow(
-          makeOrder({ status, source_type: "manual" }),
-        )
-
-        await userEvent.setup().click(screen.getByText("O-1"))
-
-        expect(onView).not.toHaveBeenCalled()
-        expect(container.querySelector("tr")).not.toHaveAttribute("tabindex")
-      },
-    )
   })
 
   describe("出す操作を呼び出し側から絞る（Issue #554）", () => {
@@ -346,12 +333,38 @@ describe("OrderTableRow", () => {
       expect(screen.queryByRole("button", { name: "メニューを開く" })).not.toBeInTheDocument()
     })
 
-    it("view を含めない確定済みの行はクリックできない", () => {
+    it("view を含めない行はクリックできない", () => {
       const { container } = renderRow(makeOrder({ status: "confirmed" }), {
         visibleActions: ["ship"],
       })
 
       expect(container.querySelector("tr")).not.toHaveAttribute("tabindex")
+    })
+  })
+
+  describe("選択・操作の列を出さない（「すべての注文」、Issue #558）", () => {
+    it("showActionColumns=false なら選択・操作のセルを出さず、作業ボタンも出さない", () => {
+      const { container } = renderRow(makeOrder({ status: "pending_approval" }), {
+        currentUserRole: "president",
+        visibleActions: ["view"],
+        showActionColumns: false,
+      })
+
+      expect(container.querySelectorAll("td")).toHaveLength(6)
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "承認" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "メニューを開く" })).not.toBeInTheDocument()
+      expect(container.querySelector("tr")).toHaveAttribute("tabindex", "0")
+    })
+
+    it("一括選択の props を渡さなければ選択のチェックボックスを出さない", () => {
+      renderRow(makeOrder({ status: "draft", source_type: "manual" }), {
+        isSelected: undefined,
+        isBulkOperationInProgress: undefined,
+        onToggleSelect: undefined,
+      })
+
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     })
   })
 })

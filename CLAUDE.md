@@ -334,23 +334,21 @@ cd backend && ruff check . && mypy .
   各ダッシュボード・配下のパーツ（`KpiCards` 等）は表示専用。集計は `hooks/use-dashboard-metrics.ts`。
   Epic #399（Issue #401 が基盤、KPI 差し替え #ISSUE_D／承認待ちキュー #ISSUE_B／リスクカード #ISSUE_C）。
   詳細は [docs/features/dashboard-ui-improvement.md](docs/features/dashboard-ui-improvement.md)
-- **受注一覧のフィルタ／バッジ**: `frontend/src/lib/order-utils.ts` の `STATUS_TABS` に**表示するタブは
-  `orders.status`（＋ draft を分割した `simulated`）に限定する方針（#215）**。「情報不足」「工程未入力」など
-  `orders.status` と直交する概念は**タブを増やさず**、通知カード（`order-notification-cards.tsx`）＋一覧行の
-  バッジ（`order-table-row.tsx`）で認知させる。`filterOrder()` はタブ非表示の派生フィルタ（`incomplete` ＝
-  顧客/希望納期未設定、Issue #406 で導線復旧）も URL `?status=` から受けるので、`STATUS_TABS` に無い値でも
-  分岐を必ず用意する。「工程未入力・起票不可」（`has_no_routings`）判定は `isNoRoutingOrder()` に集約し、
-  受注詳細（`orders/[id]/page.tsx` の `hasNoRouting`）と条件を揃える。一覧のデフォルトフィルタは
-  「対応が必要」（`action_required`、Issue #460）＝ロール別に自分がアクションすべき注文
-  （`order_handler`/`iso_officer`: 下書き全般、`president`: 承認待ち、`platform_admin`: 確定済み）で、
-  `?status=` 未指定時のみ適用する（明示指定は尊重）。詳細は
-  [docs/features/order-management-ui-design.md](docs/features/order-management-ui-design.md) /
+- **すべての注文（`/orders`）のフィルタ／バッジ（Issue #558）**: `/orders` は全件の検索・履歴だけを担い、作業の入口は
+  「起票の確認」「承認」「送品の消し込み」に置く。**作業ボタン・一括操作・通知カード・ロール依存のタブをここへ戻さない**
+  （行は `visibleActions={["view"]}` ＋ `showActionColumns={false}` で、行クリックの確認モーダルだけを全ステータスで開く）。
+  `frontend/src/lib/order-utils.ts` の `STATUS_TABS` は **`orders.status` の値だけ**（`StatusFilter = "" | Order["status"]`、#215）で、
+  既定は「すべて」。シミュ済みの下書きは「下書き」タブに含める。「情報不足」「工程未入力」など `orders.status` と直交する概念は
+  タブを増やさず、一覧行のバッジ（`order-table-row.tsx`）と「起票の確認」の区分（`getIntakeCategory()`）で認知させる。
+  廃止した `?status=` の値（`simulated` → 下書き、`action_required` / `incomplete` → すべて）は `toValidStatusFilter()` で寄せる。
+  「工程未入力・起票不可」（`has_no_routings`）判定は `isNoRoutingOrder()` に集約し、受注詳細（`orders/[id]/page.tsx` の
+  `hasNoRouting`）と条件を揃える。詳細は [docs/features/order-management-ui-design.md](docs/features/order-management-ui-design.md) /
   [docs/features/process-routing-confirmation.md](docs/features/process-routing-confirmation.md)
 - **URL クエリを Union 型にキャストするとき（`?status=` 等）**: `searchParams.get(...) as StatusFilter`
   のように無検証で `as` キャストすると、URL 直接編集・ブックマーク由来の未知の値で「該当なし」の誤表示や
   タブの選択状態不整合を起こす（Issue #460 PR #465 Copilotレビュー指摘）。既知の値の集合
   （`STATUS_TABS` の値＋タブ非表示の派生フィルタ等）と照合し、外れていたらデフォルト値へクランプする
-  ヘルパー関数を挟むこと（`use-orders-page.ts` の `toValidStatusFilter()` が実装例）。同様に、ロール等の
+  ヘルパー関数を挟むこと（`use-orders-page.ts` の `toValidStatusFilter()` が実装例。廃止した値を別の値へ寄せるのもここで行う）。同様に、ロール等の
   Union 型を受け取る関数は引数を `Role | string` のように広げず `Role | null` のまま保つ（`string` を混ぜると
   呼び出し側のタイプミスをコンパイル時に検知できなくなる）
 - **データ取得**: TanStack Query (`useQuery` / `useMutation`) で統一。`useEffect` でのフェッチ禁止

@@ -160,11 +160,10 @@ draft ──────────▶ pending_approval ───────�
   バッジには出さず、ツールチップで表示）。配色は indigo（`confirmed` の緑・確度バッジ `forecast_tentative`
   の purple と区別）。描画は [order-table-row.tsx](../../frontend/src/components/orders/order-table-row.tsx)。
   受注一覧のみが対象で、受注詳細画面は従来どおり「下書き」表示。
-- **フィルタタブ**: `STATUS_TABS` に「シミュ済」(`value: "simulated"`) を追加。`filterOrder()` で
-  `simulated` = `draft && is_scheduled`、`draft` タブは `draft && !is_scheduled` として両者を排他にする。
-  フィルタ・ページングはクライアント側（[use-orders-page.ts](../../frontend/src/hooks/use-orders-page.ts)）
-  のため API 追加は不要。
-- **「未確定」通知カード**: `draftCount` もシミュ済を除外し、「下書き」タブと件数を揃える。
+- **フィルタタブ**: 当初は `STATUS_TABS` に「シミュ済」(`value: "simulated"`) を置き、「下書き」タブと排他にしていた。
+  Issue #558 で「すべての注文」に整理した際にこのタブと「未確定」通知カードは廃止し、シミュ済みの下書きは
+  「下書き」タブに含める（古い `?status=simulated` は「下書き」として扱う）。シミュ済みかどうかは引き続き行のバッジで見分ける。
+  下書きをシミュ済み／未シミュで分けて扱うのは「起票の確認」画面（Issue #555）の区分。
 - **「シミュ納期」カラム (Issue #394-B)**: 一覧の納期カラムはタブ依存で「シミュ納期」
   (`simulated_deadline`) と「確定納期」(`confirmed_deadline`) を出し分ける。`is_scheduled` と
   `simulated_deadline` は #394-A 以降スケジュール条件の編集で一緒にクリアされるため、

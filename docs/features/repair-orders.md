@@ -109,7 +109,7 @@
 
 ### `is_scheduled` の扱い
 
-一覧の「シミュ済」タブ・承認依頼ボタンは `status='draft' かつ is_scheduled` で判定している
+一覧の「シミュ済」バッジ・「起票の確認」の区分・承認依頼ボタンは `status='draft' かつ is_scheduled` で判定している
 （`order-utils.ts`。draft では `is_scheduled` と `simulated_deadline != null` が実質同値という前提）。
 修理では、**実施開始日と完了予定日が両方入ったら `is_scheduled = true`**、どちらかが空になったら false にする
 （起票・更新のたびに日付の有無に合わせる）。これで修理も「日付が入った = 承認依頼できる」状態が
