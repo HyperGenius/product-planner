@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
-import { getCustomerDisplayName, getProductDisplayParts, jstTodayIso } from "@/lib/order-utils"
+import { getCustomerDisplayName, getOrderProductDisplayParts, jstTodayIso } from "@/lib/order-utils"
 import {
   IN_PRODUCTION_STATUSES,
   getEffectiveDeadline,
@@ -43,7 +43,7 @@ export function groupOrdersByCustomer(
     .filter((order) => {
       const customerName =
         order.customer_id != null ? getCustomerDisplayName(order.customer_id, customers) : null
-      const product = getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+      const product = getOrderProductDisplayParts(order, products)
       return matchesSearchText(filters.searchText, {
         customerName,
         productPrimary: product.primary,
@@ -131,11 +131,7 @@ export function CustomerOrderList({
               </h3>
               <ul className="divide-y divide-border">
                 {group.orders.map((order) => {
-                  const product = getProductDisplayParts(
-                    order.product_id,
-                    products,
-                    order.extracted_product_name,
-                  )
+                  const product = getOrderProductDisplayParts(order, products)
                   const deadline = getEffectiveDeadline(order)
                   const status = getDeadlineStatus(deadline, todayIso)
                   const daysRemaining = deadline ? getDaysRemaining(deadline, todayIso) : undefined

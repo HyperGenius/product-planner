@@ -13,10 +13,12 @@ import {
   formatDeadlineDate,
   getCustomerName,
   getEffectiveOrderStatus,
-  getProductName,
+  getOrderProductName,
   getStatusBadgeClass,
   getStatusLabel,
   isDeadlineOverdue,
+  isRepairOrder,
+  ORDER_TYPE_LABELS,
   usesSimulatedDeadlineForOrder,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
@@ -55,6 +57,7 @@ export function OrderViewDialog({
   const usesSimulated = usesSimulatedDeadlineForOrder(order)
   const deadline = usesSimulated ? order.simulated_deadline : order.confirmed_deadline
   const effectiveStatus = getEffectiveOrderStatus(order)
+  const isRepair = isRepairOrder(order)
 
   return (
     <OrderDialogLayout
@@ -74,22 +77,42 @@ export function OrderViewDialog({
       }
     >
       <ReadOnlyField id={fieldId("order-no")} label="注文番号" value={order.order_no} />
-      <ReadOnlyField
-        id={fieldId("product")}
-        label="製品"
-        value={getProductName(order.product_id, products, order.extracted_product_name)}
-      />
+      {isRepair ? (
+        <div className="space-y-2">
+          <Label htmlFor={fieldId("work-description")} className="flex items-center gap-2">
+            件名・作業内容
+            <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">
+              {ORDER_TYPE_LABELS.repair}
+            </Badge>
+          </Label>
+          <textarea
+            id={fieldId("work-description")}
+            readOnly
+            rows={4}
+            value={order.work_description ?? ""}
+            className="border-input w-full cursor-default resize-none rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+          />
+        </div>
+      ) : (
+        <ReadOnlyField
+          id={fieldId("product")}
+          label="製品"
+          value={getOrderProductName(order, products)}
+        />
+      )}
       <ReadOnlyField
         id={fieldId("customer")}
         label="顧客"
         value={customerName}
         placeholder={customerPlaceholder}
       />
-      <ReadOnlyField
-        id={fieldId("quantity")}
-        label="数量"
-        value={order.quantity?.toLocaleString("ja-JP")}
-      />
+      {!isRepair && (
+        <ReadOnlyField
+          id={fieldId("quantity")}
+          label="数量"
+          value={order.quantity?.toLocaleString("ja-JP")}
+        />
+      )}
       <ReadOnlyField
         id={fieldId("desired-deadline")}
         label="希望納期"
@@ -97,12 +120,12 @@ export function OrderViewDialog({
       />
       <ReadOnlyField
         id={fieldId("scheduling-start-date")}
-        label="作業開始日"
+        label={isRepair ? "実施開始日" : "作業開始日"}
         value={formatDeadlineDate(order.scheduling_start_date)}
       />
       <ReadOnlyField
         id={fieldId("deadline")}
-        label={usesSimulated ? "シミュ納期" : "確定納期"}
+        label={isRepair ? (usesSimulated ? "完了予定日" : "確定した完了予定日") : usesSimulated ? "シミュ納期" : "確定納期"}
         value={formatDeadlineDate(deadline)}
         inputClassName={
           isDeadlineOverdue(order, deadline)

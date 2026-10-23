@@ -6,9 +6,11 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { OrderActionDialogs } from "@/components/orders/order-action-dialogs"
 import { OrdersFilterBar } from "@/components/orders/orders-filter-bar"
 import { OrderTableHeaderRow, OrdersTable } from "@/components/orders/orders-table"
+import { RepairOrderTableHeaderRow, RepairOrderTableRow } from "@/components/orders/repair-order-table"
 import { OrderTableRow, type OrderRowAction } from "@/components/orders/order-table-row"
 import { useOrdersPage, PAGE_SIZE } from "@/hooks/use-orders-page"
 import { useOrderActions } from "@/hooks/use-order-actions"
+import { DEFAULT_ORDER_TYPE_FILTER } from "@/lib/order-utils"
 
 // 作業（シミュ・承認・送品等）は「起票の確認」「承認」「送品の消し込み」の各画面で行うので、
 // ここでは行のクリックで内容を確認するだけにする（Issue #558）
@@ -17,6 +19,7 @@ const VISIBLE_ACTIONS: readonly OrderRowAction[] = ["view"]
 /** すべての注文（全件の検索・履歴。Epic #553） */
 export default function OrdersPage() {
   const {
+    typeFilter,
     statusFilter,
     customerFilterId,
     productFilterId,
@@ -33,6 +36,7 @@ export default function OrdersPage() {
     clearMasterFilters,
   } = useOrdersPage()
   const actions = useOrderActions(orders)
+  const isRepairList = typeFilter === "repair"
 
   const emptyState =
     statusFilter || customerFilterId !== null || productFilterId !== null ? (
@@ -77,6 +81,7 @@ export default function OrdersPage() {
         </div>
 
         <OrdersFilterBar
+          typeFilter={typeFilter}
           statusFilter={statusFilter}
           sortKey={sortKey}
           customerFilterId={customerFilterId}
@@ -85,19 +90,34 @@ export default function OrdersPage() {
           products={products}
           onCustomerChange={(v) => setParam("customer", v)}
           onProductChange={(v) => setParam("product", v)}
+          onTypeChange={(v) => setParam("type", v === DEFAULT_ORDER_TYPE_FILTER ? "" : v)}
           onStatusChange={(v) => setParam("status", v)}
           onSortChange={(v) => setParam("sort", v)}
         />
 
         <OrdersTable
           isLoading={isLoading}
-          header={<OrderTableHeaderRow statusFilter={statusFilter} showActionColumns={false} />}
+          header={
+            isRepairList ? (
+              <RepairOrderTableHeaderRow />
+            ) : (
+              <OrderTableHeaderRow statusFilter={statusFilter} showActionColumns={false} />
+            )
+          }
           rowCount={pagedOrders.length}
           emptyState={emptyState}
           totalCount={filteredOrders.length}
           pageSize={PAGE_SIZE}
         >
-          {pagedOrders.map((order) => (
+          {pagedOrders.map((order) =>
+            isRepairList ? (
+              <RepairOrderTableRow
+                key={order.id}
+                order={order}
+                customers={customers}
+                onView={actions.handleOpenViewDialog}
+              />
+            ) : (
             <OrderTableRow
               key={order.id}
               order={order}
@@ -109,7 +129,8 @@ export default function OrdersPage() {
               visibleActions={VISIBLE_ACTIONS}
               showActionColumns={false}
             />
-          ))}
+            )
+          )}
         </OrdersTable>
 
         <OrderActionDialogs

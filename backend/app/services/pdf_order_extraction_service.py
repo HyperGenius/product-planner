@@ -95,7 +95,7 @@ _EXTRACT_SCHEMA["properties"]["order_type"] = {
     "type": "string",
     "enum": ["production", "repair"],
     "description": (
-        "注文書の種別。件名・品名に「修理」「補修」「手直し」などの作業依頼が書かれ、"
+        "注文書の種別。件名・品名に「修理」「補修」「手直し」「メンテナンス」「洗浄」などの作業依頼が書かれ、"
         "製品の生産ではなく顧客から預かった物への作業を依頼する注文は repair、"
         "それ以外（製品の生産・購入の注文）は production。"
     ),
@@ -108,7 +108,7 @@ _EXTRACT_SCHEMA["properties"]["subject"] = {
 # 種別・件名の抽出指示。テキストPDF・画像PDFのプロンプトに共通で付ける（Issue #493）
 _ORDER_TYPE_INSTRUCTION = (
     "あわせて、注文書の種別(order_type)と件名(subject)を返してください。"
-    "件名・品名に修理・補修などの作業依頼が書かれ、製品の生産ではない注文は"
+    "件名・品名に修理・補修・メンテナンス・洗浄などの作業依頼が書かれ、製品の生産ではない注文は"
     " repair、それ以外は production とします。"
 )
 

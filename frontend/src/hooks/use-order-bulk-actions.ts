@@ -10,7 +10,7 @@ import {
   useSimulateOrderById,
 } from "@/hooks/use-orders"
 import type { OrderTableRowProps } from "@/components/orders/order-table-row"
-import { isOverdueDraft } from "@/lib/order-utils"
+import { isOverdueDraft, isRepairOrder } from "@/lib/order-utils"
 import type { Order, BulkSimulateResult } from "@/types/order"
 
 /** `OrderTableRow` に渡す一括選択の props（`useOrderBulkActions().getRowProps()` の戻り値） */
@@ -152,7 +152,19 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
 
   const handleBulkSimulateConfirm = async () => {
     setIsBulkSimulateConfirmOpen(false)
-    const ids = selectedOrderIds
+    // 修理等はシミュレーションしない（サーバーが 422 を返す）。日付は詳細で入力する（Issue #494）
+    const ids = selectedOrderIds.filter((id) => {
+      const target = orders?.find((o) => o.id === id)
+      return !(target && isRepairOrder(target))
+    })
+    const skippedRepairCount = selectedOrderIds.length - ids.length
+    if (skippedRepairCount > 0) {
+      toast.info(`修理等 ${skippedRepairCount}件はシミュレーション不要のためスキップしました`)
+    }
+    if (ids.length === 0) {
+      setSelectedOrderIds([])
+      return
+    }
     setIsBulkSimulating(true)
     setBulkSimFailedIds(new Set())
     const results: BulkSimulateResult[] = []
