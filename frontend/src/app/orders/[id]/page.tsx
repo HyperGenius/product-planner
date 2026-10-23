@@ -27,6 +27,7 @@ import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog
 import { ShipWithoutRoutingConfirmDialog } from "@/components/orders/ship-without-routing-confirm-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
+import { RepairOrderDetail } from "@/components/orders/repair-order-detail"
 import { OrderProcessProgress } from "@/components/orders/order-process-progress"
 import {
   useOrder,
@@ -44,7 +45,7 @@ import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import {
-  getProductName,
+  getOrderProductName,
   getCustomerName,
   getStatusLabel,
   getStatusBadgeClass,
@@ -52,6 +53,7 @@ import {
   usesSimulatedDeadlineForOrder,
   isDeadlineOverdue,
   canShipWithoutRouting,
+  isRepairOrder,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
 import { ApiError } from "@/lib/api-client"
@@ -230,6 +232,11 @@ export default function OrderDetailPage() {
     )
   }
 
+  // 修理・メンテナンス・洗浄など製品を持たない注文は、生産用の表示とは別の画面にする（Issue #494）
+  if (isRepairOrder(order)) {
+    return <RepairOrderDetail order={order} />
+  }
+
   const isDraft = order.status === "draft"
   const isPendingApproval = order.status === "pending_approval"
   const canShip =
@@ -279,7 +286,7 @@ export default function OrderDetailPage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">製品</dt>
-                <dd>{getProductName(order.product_id, products, order.extracted_product_name)}</dd>
+                <dd>{getOrderProductName(order, products)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">顧客</dt>

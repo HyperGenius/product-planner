@@ -1,6 +1,6 @@
 import { addDays, startOfWeek, parseISO } from "date-fns"
 import { ja } from "date-fns/locale"
-import type { EmailIntakeResult, Order } from "@/types/order"
+import type { EmailIntakeResult, Order, OrderType } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
 import type { MemberRole } from "@/types/member"
@@ -29,6 +29,81 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
 ]
 
 /**
+ * 修理注文か（Issue #493）。製品・工程を持たないので、`product_id` が NULL でも製品未照合ではない。
+ * バックエンドの `repair_order_service.is_repair_order()` と同じ判定。
+ * `repair` は修理のほかメンテナンス・洗浄など、製品を持たない作業依頼も含む（Issue #494）
+ */
+export function isRepairOrder(order: Order): boolean {
+  return order.order_type === "repair"
+}
+
+/** 画面に出す種別の呼び名。DB の値は `repair` のまま、メンテナンス・洗浄なども含めて「修理等」と呼ぶ */
+export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
+  production: "生産",
+  repair: "修理等",
+}
+
+/** 件名が空の修理注文に出す表示 */
+const REPAIR_SUBJECT_FALLBACK = "（件名なし）"
+
+/** 修理注文の件名。`work_description` の先頭の空でない行（複数行の内訳は詳細で見る） */
+export function getRepairSubject(order: Order): string {
+  const firstLine = (order.work_description ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line !== "")
+  return firstLine ?? REPAIR_SUBJECT_FALLBACK
+}
+
+/** 一覧の種別の絞り込み（`?type=`）。未指定は生産 */
+export type OrderTypeFilter = OrderType
+
+export const DEFAULT_ORDER_TYPE_FILTER: OrderTypeFilter = "production"
+
+export const ORDER_TYPE_FILTER_VALUES: readonly OrderTypeFilter[] = ["production", "repair"]
+
+/**
+ * `?type=` の値を検証する。URL は直接編集できる入力なので、未知の値は生産にクランプする
+ * （`toValidStatusFilter()` と同じ方式。Issue #494）
+ */
+export function toValidOrderTypeFilter(raw: string | null): OrderTypeFilter {
+  return ORDER_TYPE_FILTER_VALUES.find((value) => value === raw) ?? DEFAULT_ORDER_TYPE_FILTER
+}
+
+/** 注文が選んだ種別に当たるか（`order_type` 未指定は生産） */
+export function matchesOrderType(order: Order, type: OrderTypeFilter): boolean {
+  return isRepairOrder(order) === (type === "repair")
+}
+
+/**
+ * 修理注文が承認依頼できない理由（できるなら null）。実施開始日と完了予定日が両方入るまで押せない
+ * （サーバーの 422 `repair_dates_missing` と同じ条件）。入力するのは受注担当者
+ */
+export function getRepairApprovalBlockReason(order: Order): string | null {
+  const missing: string[] = []
+  if (!order.scheduling_start_date) missing.push("実施開始日")
+  if (!order.simulated_deadline) missing.push("完了予定日")
+  return missing.length > 0 ? `${missing.join("と")}を入力すると承認依頼できます` : null
+}
+
+/** 製品名の代わりに出す注文の品名。修理は件名、生産は製品名（Issue #494） */
+export function getOrderProductName(order: Order, products?: Product[]): string {
+  if (isRepairOrder(order)) return getRepairSubject(order)
+  return getProductName(order.product_id, products, order.extracted_product_name)
+}
+
+/** 一覧の製品セルの分解済みデータ。修理は件名を1行目に出し、製品未確定の警告扱いにしない */
+export function getOrderProductDisplayParts(
+  order: Order,
+  products?: Product[]
+): ProductDisplayParts {
+  if (isRepairOrder(order)) {
+    return { primary: getRepairSubject(order), secondary: null, unresolved: false }
+  }
+  return getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+}
+
+/**
  * 「製品はマッチ済みだが工程（process_routings）が1件も無いため起票（シミュレーション／承認）
  * できない」下書き受注か（Issue #406）。バックエンドの `has_no_routings` 集約をそのまま使う。
  *
@@ -43,6 +118,7 @@ export const SORT_OPTIONS: { label: string; value: SortKey }[] = [
  */
 export function isNoRoutingOrder(order: Order): boolean {
   return (
+    !isRepairOrder(order) &&
     order.has_no_routings === true &&
     order.product_id !== null &&
     order.status === "draft" &&
@@ -64,6 +140,7 @@ export function canShipWithoutRouting(
   return (
     role === "president" &&
     order.status === "draft" &&
+    !isRepairOrder(order) &&
     order.has_no_routings === true
   )
 }
@@ -137,14 +214,6 @@ export function formatDateTimeShort(datetimeIso: string | null | undefined): str
   )
   const day = formatDeadlineShort(`${parts.year}-${parts.month}-${parts.day}`)
   return `${day} ${parts.hour}:${parts.minute}`
-}
-
-/**
- * 修理注文か（Issue #493）。製品・工程を持たないので、`product_id` が NULL でも製品未照合ではない。
- * バックエンドの `repair_order_service.is_repair_order()` と同じ判定
- */
-export function isRepairOrder(order: Order): boolean {
-  return order.order_type === "repair"
 }
 
 /**

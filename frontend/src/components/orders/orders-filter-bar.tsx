@@ -9,11 +9,21 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FilterCombobox } from "@/components/orders/filter-combobox"
-import { STATUS_TABS, SORT_OPTIONS, type StatusFilter, type SortKey } from "@/lib/order-utils"
+import {
+  ORDER_TYPE_FILTER_VALUES,
+  ORDER_TYPE_LABELS,
+  STATUS_TABS,
+  SORT_OPTIONS,
+  type OrderTypeFilter,
+  type StatusFilter,
+  type SortKey,
+} from "@/lib/order-utils"
 import type { Customer } from "@/types/customer"
 import type { Product } from "@/types/product"
 
 interface OrdersFilterBarProps {
+  /** 生産／修理等の切り替え（`?type=`、Issue #494） */
+  typeFilter: OrderTypeFilter
   statusFilter: StatusFilter
   sortKey: SortKey
   /** 顧客フィルタの ID（Issue #546）。null は未指定 */
@@ -23,11 +33,13 @@ interface OrdersFilterBarProps {
   products?: Product[]
   onCustomerChange: (value: string) => void
   onProductChange: (value: string) => void
+  onTypeChange: (value: string) => void
   onStatusChange: (value: string) => void
   onSortChange: (value: string) => void
 }
 
 export function OrdersFilterBar({
+  typeFilter,
   statusFilter,
   sortKey,
   customerFilterId,
@@ -36,11 +48,22 @@ export function OrdersFilterBar({
   products,
   onCustomerChange,
   onProductChange,
+  onTypeChange,
   onStatusChange,
   onSortChange,
 }: OrdersFilterBarProps) {
   return (
     <div className="mb-4 flex items-center justify-between gap-4 flex-wrap">
+      <Tabs value={typeFilter} onValueChange={onTypeChange}>
+        <TabsList aria-label="注文の種別">
+          {ORDER_TYPE_FILTER_VALUES.map((value) => (
+            <TabsTrigger key={value} value={value}>
+              {ORDER_TYPE_LABELS[value]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
       <Tabs value={statusFilter} onValueChange={onStatusChange}>
         <TabsList>
           {STATUS_TABS.map((tab) => (
@@ -65,6 +88,7 @@ export function OrdersFilterBar({
           searchPlaceholder="顧客名または略称で検索..."
           emptyText="顧客が見つかりません"
         />
+        {typeFilter === "production" && (
         <FilterCombobox
           ariaLabel="製品で絞り込み"
           value={productFilterId === null ? "" : String(productFilterId)}
@@ -78,6 +102,7 @@ export function OrdersFilterBar({
           searchPlaceholder="製品名または製品コードで検索..."
           emptyText="製品が見つかりません"
         />
+        )}
       <Select value={sortKey} onValueChange={onSortChange}>
         <SelectTrigger className="w-[200px]">
           <SelectValue />

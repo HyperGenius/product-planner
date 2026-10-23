@@ -35,6 +35,7 @@ import { CustomerSelector } from "@/components/customer-selector"
 import { SimulationResult } from "@/components/simulation-result"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
+import { RepairOrderCreateForm } from "@/components/orders/repair-order-create-form"
 import {
   useSimulateOrder,
   useCreateOrder,
@@ -50,9 +51,10 @@ import {
   formatDeadlineDate,
   jstTodayIso,
   jstTomorrowIso,
+  ORDER_TYPE_LABELS,
 } from "@/lib/order-utils"
 import { ApiError } from "@/lib/api-client"
-import type { ConflictingOrder, OrderSimulateResponse } from "@/types/order"
+import type { ConflictingOrder, OrderSimulateResponse, OrderType } from "@/types/order"
 import type { Product } from "@/types/product"
 
 /**
@@ -61,6 +63,8 @@ import type { Product } from "@/types/product"
  */
 export default function NewOrderPage() {
   const router = useRouter()
+  // 注文の種別。修理・メンテナンス・洗浄などは製品・数量・シミュレーションを使わない別フォーム（Issue #494）
+  const [orderType, setOrderType] = useState<OrderType>("production")
   const [orderNo, setOrderNo] = useState("")
   const [productId, setProductId] = useState("")
   const [customerId, setCustomerId] = useState("")
@@ -331,6 +335,46 @@ export default function NewOrderPage() {
     }
   }
 
+  const orderTypeSwitch = (
+    <div
+      role="group"
+      aria-label="注文の種別"
+      className="mb-4 inline-flex rounded-lg border bg-muted/40 p-1"
+    >
+      {(["production", "repair"] as const).map((type) => (
+        <button
+          key={type}
+          type="button"
+          aria-pressed={orderType === type}
+          onClick={() => setOrderType(type)}
+          className={cn(
+            "rounded-md px-4 py-2 text-sm font-medium transition-colors",
+            orderType === type
+              ? "bg-background shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {ORDER_TYPE_LABELS[type]}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (orderType === "repair") {
+    return (
+      <div className="container mx-auto py-6 px-4">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold">注文登録</h1>
+          <p className="text-muted-foreground mt-2">
+            修理・メンテナンス・洗浄など、製品を生産しない作業の注文を登録します
+          </p>
+        </div>
+        {orderTypeSwitch}
+        <RepairOrderCreateForm />
+      </div>
+    )
+  }
+
   return (
     <div className="container mx-auto py-6 px-4">
       <div className="mb-6">
@@ -339,6 +383,8 @@ export default function NewOrderPage() {
           注文情報を入力し、生産スケジュールをシミュレーションして納期を確認してください
         </p>
       </div>
+
+      {orderTypeSwitch}
 
       {/* 起票元モードの選択（手動フォーム / メール起票） */}
       <div className="mb-6 inline-flex rounded-lg border bg-muted/40 p-1">

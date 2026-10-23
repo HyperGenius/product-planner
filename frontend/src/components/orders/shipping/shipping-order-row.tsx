@@ -12,7 +12,9 @@ import {
   formatDeadlineDate,
   formatDeadlineShort,
   getCustomerDisplayName,
-  getProductDisplayParts,
+  getOrderProductDisplayParts,
+  isRepairOrder,
+  ORDER_TYPE_LABELS,
   getStatusBadgeClass,
   getStatusLabel,
 } from "@/lib/order-utils"
@@ -93,7 +95,7 @@ export function ShippingOrderRow({
   onShip,
 }: ShippingOrderRowProps) {
   const { order, deadline, deadlineSource, daysRemaining, progress, reasons } = row
-  const product = getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+  const product = getOrderProductDisplayParts(order, products)
   const canShip = canShipOrder(order, currentUserRole)
 
   return (
@@ -113,7 +115,14 @@ export function ShippingOrderRow({
       </TableCell>
       <TableCell>
         <div className="flex flex-col leading-tight">
-          <span className="text-sm">{product.primary}</span>
+          <span className="inline-flex items-center gap-1.5 text-sm">
+            {isRepairOrder(order) && (
+              <Badge className="shrink-0 bg-slate-100 text-slate-700 hover:bg-slate-100">
+                {ORDER_TYPE_LABELS.repair}
+              </Badge>
+            )}
+            {product.primary}
+          </span>
           {product.secondary && (
             <span className="text-xs text-muted-foreground">{product.secondary}</span>
           )}

@@ -1,4 +1,4 @@
-# 修理注文（受注種別 `order_type`）（Issue #493）
+# 修理注文（受注種別 `order_type`）（Issue #493 / #494）
 
 生産ではなく**修理**（例: 顧客から預かった部品のはんだ補修）の注文書が届くことがある（月1回未満）。
 修理は図番・品名が規格化されておらず、製品マスタ・工程ルートに当てはめられない。
@@ -7,9 +7,17 @@
 顧客・ステータス遷移・承認・通知・着手日の自動遷移 cron は生産と共通の仕組みを使い、別テーブルで
 二重に作らない。修理専用のステータスや、内訳を表で持つ構造は作らず、運用しながら直す前提で最小限にしている。
 
-この文書はバックエンド（DB・取り込み・承認フロー）を扱う。画面は #494。
+この文書はバックエンド（DB・取り込み・承認フロー）と、画面（一覧・詳細・起票・ダッシュボード、Issue #494）を扱う。
 
 ---
+
+## 「修理」に含める注文の範囲
+
+運用では修理のほかに**メンテナンス・洗浄**などの注文も届く。どれも製品の生産ではなく、製品・工程・設備を持たない
+作業依頼なので、新しい種別は足さず `order_type = 'repair'` にまとめる（DB の値・API は変えない）。
+画面では「修理」ではなく**「修理等」**と呼ぶ（`ORDER_TYPE_LABELS`）。PDF 取り込みの種別判定も、件名・品名に
+「メンテナンス」「洗浄」などが書かれた注文を `repair` とするようプロンプトに加えた。種別ごとに扱いを変える必要が
+出たら `order_type` の値を増やす（CHECK を張り直す）。
 
 ## 前提
 
@@ -132,3 +140,27 @@
 - `__tests__/unit/services/test_pdf_order_extraction_service.py::TestOrderTypeExtraction`: 種別の抽出と既定値
 - `__tests__/api/routers/transaction/test_repair_orders.py`: 起票・更新・承認依頼・承認・シミュ・分割
 - `__tests__/unit/services/test_order_auto_transition_service.py`: 修理（スケジュール無し）の着手日での `in_progress` 遷移
+
+## 画面（Issue #494）
+
+DB・API は変えず、フロントエンドだけで生産と分けて表示・操作する。修理等かどうかの判定は `isRepairOrder()`（`lib/order-utils.ts`）。
+
+| 画面 | 修理等の扱い |
+|---|---|
+| すべての注文 `/orders` | 「生産／修理等」の切り替え（`?type=production\|repair`、未指定は生産）。未知の値は `toValidOrderTypeFilter()` で生産にクランプする。ステータスタブ・顧客の絞り込みは選んだ種別の中で効く（製品の絞り込みは生産だけ）。修理等の列は顧客・件名・納期・実施開始日・完了予定日・ステータス（`repair-order-table.tsx`）。`STATUS_TABS` に修理用のタブは足さない |
+| 注文詳細 `/orders/{id}` | 修理等は別コンポーネント `RepairOrderDetail`（製品・数量・工程・シミュレーション・スケジュールを出さない）。件名・作業内容、注文番号、顧客、納期、実施開始日、完了予定日、元の PDF を表示する。実施開始日と完了予定日が揃うまで「承認依頼を送信」を押せず、理由を表示する（`getRepairApprovalBlockReason()`）。社長の承認・差し戻しは生産と同じ操作で、承認後は確定した完了予定日を表示する |
+| 編集 | `RepairOrderEditDialog`（件名・作業内容、注文番号、顧客、納期、実施開始日、完了予定日）。空欄にした項目は `null` で送る。一覧・承認画面などの編集ボタンも修理等ならこのダイアログを開く |
+| 新規注文 `/orders/new` | 上部の「生産／修理等」で切り替え。修理等は製品・数量・シミュレーションの代わりに `RepairOrderCreateForm`（件名・作業内容を必須）で下書きを作り、詳細へ移動する |
+| 起票の確認・承認・送品の消し込み | 製品名の代わりに件名を出し、「修理等」バッジを付ける。起票の確認ではシミュレーションの代わりに「日付を入力」（詳細へ）を出す。一括シミュレーションは修理等をスキップする |
+| ダッシュボード | 承認待ちキュー・納期リスク・最新の注文は件名と「修理等」バッジを表示する。納期の集計には修理等も含まれる。ガントは変更なし（`production_schedules` が無いので出ない） |
+
+製品名を出す箇所は `getOrderProductName(order, products)` / `getOrderProductDisplayParts(order, products)` を使う
+（修理等は件名、生産は従来の製品名）。`getProductName()` に `order.product_id` を直接渡すと、修理等が「不明」と表示される。
+
+エラーは `lib/repair-order.ts` の `getRepairOrderErrorMessage()` で `errorCode` を既知の値と照合して固定文言にする
+（`detail` は外部入力なので、サーバーの文言をそのまま出さない）。
+
+現場向けの操作手順は Wiki に分離する: 「修理等の注文の登録と承認」（Wiki 側に追加後、ここにリンクを記載する）。
+
+テスト: `lib/order-utils.test.ts`（クランプ・件名・承認依頼の可否）、`components/orders/repair-order-detail.test.tsx`、
+`components/orders/orders-filter-bar.test.tsx`、`app/orders/new/page.test.tsx`。

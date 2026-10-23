@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getProductName, formatDeadlineDate } from "@/lib/order-utils"
+import { getOrderProductName, formatDeadlineDate } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -60,7 +60,7 @@ export function BulkSimulateConfirmDialog({
                 <TableRow key={order.id}>
                   <TableCell className="text-muted-foreground font-medium">{index + 1}</TableCell>
                   <TableCell className="font-medium">{order.order_no}</TableCell>
-                  <TableCell className="text-sm">{getProductName(order.product_id, products, order.extracted_product_name)}</TableCell>
+                  <TableCell className="text-sm">{getOrderProductName(order, products)}</TableCell>
                   <TableCell className="text-sm">
                     {formatDeadlineDate(order.desired_deadline) ?? "未設定"}
                   </TableCell>

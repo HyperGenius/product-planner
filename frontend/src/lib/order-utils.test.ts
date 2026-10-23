@@ -12,11 +12,17 @@ import {
   getDeadlineColumnLabel,
   getDeadlineForTab,
   getIntakeCategory,
+  getOrderProductDisplayParts,
+  getOrderProductName,
   getOrderUrgency,
+  getRepairApprovalBlockReason,
+  getRepairSubject,
   isNoRoutingOrder,
+  matchesOrderType,
   jstTomorrowIso,
   matchesCustomerProductFilter,
   toValidMasterId,
+  toValidOrderTypeFilter,
 } from "./order-utils"
 
 function makeOrder(overrides: Partial<Order> = {}): Order {
@@ -371,5 +377,92 @@ describe("formatDateTimeShort（Issue #556）", () => {
   it("未設定・解釈できない値は null", () => {
     expect(formatDateTimeShort(null)).toBeNull()
     expect(formatDateTimeShort("invalid")).toBeNull()
+  })
+})
+
+describe("修理等の注文（Issue #494）", () => {
+  const repair = makeOrder({
+    order_type: "repair",
+    product_id: null,
+    quantity: null,
+    work_description: "\n  部品の補修  \n・補修部1〜3ヶ所 ×11枚",
+  })
+
+  describe("toValidOrderTypeFilter", () => {
+    it("既知の値はそのまま返す", () => {
+      expect(toValidOrderTypeFilter("production")).toBe("production")
+      expect(toValidOrderTypeFilter("repair")).toBe("repair")
+    })
+
+    it("未指定・未知の値は生産にクランプする", () => {
+      expect(toValidOrderTypeFilter(null)).toBe("production")
+      expect(toValidOrderTypeFilter("")).toBe("production")
+      expect(toValidOrderTypeFilter("maintenance")).toBe("production")
+      expect(toValidOrderTypeFilter("REPAIR")).toBe("production")
+    })
+  })
+
+  describe("matchesOrderType", () => {
+    it("order_type 未指定は生産として扱う", () => {
+      expect(matchesOrderType(makeOrder(), "production")).toBe(true)
+      expect(matchesOrderType(makeOrder(), "repair")).toBe(false)
+    })
+
+    it("修理等は修理の一覧にだけ当たる", () => {
+      expect(matchesOrderType(repair, "repair")).toBe(true)
+      expect(matchesOrderType(repair, "production")).toBe(false)
+    })
+  })
+
+  describe("getRepairSubject / 品名の表示", () => {
+    it("work_description の先頭の空でない行を件名にする", () => {
+      expect(getRepairSubject(repair)).toBe("部品の補修")
+      expect(getOrderProductName(repair)).toBe("部品の補修")
+      expect(getOrderProductDisplayParts(repair)).toEqual({
+        primary: "部品の補修",
+        secondary: null,
+        unresolved: false,
+      })
+    })
+
+    it("件名が空なら代替の表示にする", () => {
+      expect(getRepairSubject(makeOrder({ order_type: "repair", work_description: null }))).toBe(
+        "（件名なし）",
+      )
+    })
+
+    it("生産は従来どおり製品名を返す", () => {
+      expect(getOrderProductName(makeOrder({ product_id: null }))).toBe("不明")
+    })
+  })
+
+  describe("getRepairApprovalBlockReason", () => {
+    it("実施開始日と完了予定日の両方が揃うまで理由を返す", () => {
+      expect(getRepairApprovalBlockReason(repair)).toBe(
+        "実施開始日と完了予定日を入力すると承認依頼できます",
+      )
+      expect(
+        getRepairApprovalBlockReason({ ...repair, scheduling_start_date: "2026-10-01" }),
+      ).toBe("完了予定日を入力すると承認依頼できます")
+      expect(
+        getRepairApprovalBlockReason({ ...repair, simulated_deadline: "2026-10-05" }),
+      ).toBe("実施開始日を入力すると承認依頼できます")
+    })
+
+    it("両方入っていれば null（承認依頼できる）", () => {
+      expect(
+        getRepairApprovalBlockReason({
+          ...repair,
+          scheduling_start_date: "2026-10-01",
+          simulated_deadline: "2026-10-05",
+        }),
+      ).toBeNull()
+    })
+  })
+
+  it("修理等は工程未入力・工程未入力の例外送品の対象にならない", () => {
+    const noRouting = { ...repair, has_no_routings: true }
+    expect(isNoRoutingOrder(noRouting)).toBe(false)
+    expect(canShipWithoutRouting(noRouting, "president")).toBe(false)
   })
 })

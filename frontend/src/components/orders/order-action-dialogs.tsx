@@ -4,11 +4,13 @@ import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { OrderViewDialog } from "@/components/orders/order-view-dialog"
+import { RepairOrderEditDialog } from "@/components/orders/repair-order-edit-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
 import { RequestApprovalResultDialog } from "@/components/orders/request-approval-result-dialog"
 import { ShipWithoutRoutingConfirmDialog } from "@/components/orders/ship-without-routing-confirm-dialog"
 import { SimulationSideSheet } from "@/components/orders/simulation-side-sheet"
+import { isRepairOrder } from "@/lib/order-utils"
 import type { OrderActions } from "@/hooks/use-order-actions"
 import type { Customer } from "@/types/customer"
 import type { Product } from "@/types/product"
@@ -29,14 +31,22 @@ export function OrderActionDialogs({
 }: OrderActionDialogsProps) {
   return (
     <>
-      {actions.editingOrder && (
-        <EditOrderDialog
-          key={`${actions.editingOrder.id}-${actions.editDialogGeneration}`}
-          order={actions.editingOrder}
-          open={actions.isEditDialogOpen}
-          onOpenChange={actions.setIsEditDialogOpen}
-        />
-      )}
+      {actions.editingOrder &&
+        (isRepairOrder(actions.editingOrder) ? (
+          <RepairOrderEditDialog
+            key={`${actions.editingOrder.id}-${actions.editDialogGeneration}`}
+            order={actions.editingOrder}
+            open={actions.isEditDialogOpen}
+            onOpenChange={actions.setIsEditDialogOpen}
+          />
+        ) : (
+          <EditOrderDialog
+            key={`${actions.editingOrder.id}-${actions.editDialogGeneration}`}
+            order={actions.editingOrder}
+            open={actions.isEditDialogOpen}
+            onOpenChange={actions.setIsEditDialogOpen}
+          />
+        ))}
 
       <OrderViewDialog
         order={actions.viewingOrder}

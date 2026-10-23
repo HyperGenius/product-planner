@@ -154,7 +154,9 @@ describe("OrdersIntakePage（Issue #555）", () => {
     expect(within(getSection("情報不足")).getByRole("button", { name: "編集" })).toBeInTheDocument()
 
     const unsimulated = getSection("シミュ未実行")
-    expect(within(unsimulated).getAllByRole("button", { name: "シミュレーション実行" })).toHaveLength(2)
+    // 修理等はシミュレーションせず、詳細ページで日付を入力する（Issue #494）
+    expect(within(unsimulated).getAllByRole("button", { name: "シミュレーション実行" })).toHaveLength(1)
+    expect(within(unsimulated).getByRole("button", { name: "日付を入力" })).toBeInTheDocument()
     expect(within(unsimulated).getByRole("checkbox", { name: "シミュ未実行をすべて選択" })).toBeInTheDocument()
 
     const simulated = getSection("シミュ納期の確認")

@@ -11,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
+import { getOrderProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
@@ -52,7 +52,7 @@ export function DeleteOrderDialog({
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">製品</span>
-                    <span>{getProductName(order.product_id, products, order.extracted_product_name)}</span>
+                    <span>{getOrderProductName(order, products)}</span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">顧客</span>
