@@ -4,11 +4,10 @@ import { useId } from "react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { OrderDialogLayout } from "@/components/orders/order-dialog-layout"
+import { ReadOnlyField } from "@/components/orders/read-only-field"
 import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
-import { cn } from "@/lib/utils"
 import {
   formatDeadlineDate,
   getCustomerName,
@@ -145,32 +144,5 @@ export function OrderViewDialog({
         <CustomerCertaintyValue certainty={order.customer_certainty} />
       </div>
     </OrderDialogLayout>
-  )
-}
-
-function ReadOnlyField({
-  id,
-  label,
-  value,
-  placeholder = "未設定",
-  inputClassName,
-}: {
-  id: string
-  label: string
-  value: string | null | undefined
-  placeholder?: string
-  inputClassName?: string
-}) {
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        readOnly
-        value={value ?? ""}
-        placeholder={placeholder}
-        className={cn("cursor-default", inputClassName)}
-      />
-    </div>
   )
 }

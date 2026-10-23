@@ -303,6 +303,16 @@ Issue #392 の「シミュ済」（`simulated`）タブは Issue #558 で廃止�
 
 **内部状態のリセット**
 `EditOrderDialog` は開くたびに `key` に `editDialogGeneration`（ダイアログを開く操作のたびにインクリメントするカウンタ）を含めて再マウントされる。同一注文を「未保存でキャンセル→再オープン」した場合でも、DB上の値で初期化し直される (#277)。
+
+### 編集モーダルの参照用 ReadOnly 項目（Issue #565）
+
+`EditOrderDialog` には、編集対象ではない次の3項目を読み取り専用で表示する（PATCH には含めない）。`ReadOnlyField`（`components/orders/read-only-field.tsx`）は `OrderViewDialog` と共有し、`id` は `useId()` ベースの `fieldId()` で付ける。
+
+- **受注日**: `order_date ?? created_at` を `formatDeadlineDate()` で `yyyy/MM/dd` 表示（受注詳細ページと同じフォールバック）。作業開始日（`scheduling_start_date`）とは別物（Issue #372）。
+- **顧客注番**: `customer_order_no`。未設定なら「未設定」。社内採番の「注文番号（`order_no`、編集可）」とはラベルで区別する。
+- **抽出した製品名**: `extracted_product_name`。`product_id == null` のときだけ表示し、製品確定済み・修理注文（`order_type === 'repair'`）では行ごと出さない。`ProductSelector` で製品を選ぶ際の手がかり。
+
+確認モーダル（`OrderViewDialog`）への同3項目の追加は本Issueのスコープ外。
 一覧ページ (`orders/page.tsx`) は `key={`${selectedOrder.id}-${editDialogGeneration}`}`、注文詳細ページ (`orders/[id]/page.tsx`) は `key={editDialogGeneration}` を使用。
 
 **希望納期・確定納期の日付/時刻の扱い (#293)**

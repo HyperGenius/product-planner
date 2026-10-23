@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -8,12 +8,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
+import { ReadOnlyField } from "@/components/orders/read-only-field"
 import { OrderDialogLayout } from "@/components/orders/order-dialog-layout"
 import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
 import { ApiError } from "@/lib/api-client"
 import { useUpdateOrder } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
-import { jstTodayIso, toDateInputValue } from "@/lib/order-utils"
+import { formatDeadlineDate, jstTodayIso, toDateInputValue } from "@/lib/order-utils"
 import type { ConflictingOrder, Order } from "@/types/order"
 
 interface EditOrderDialogProps {
@@ -23,6 +24,7 @@ interface EditOrderDialogProps {
 }
 
 export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogProps) {
+  const idPrefix = useId()
   const updateOrder = useUpdateOrder()
   const { data: currentMember } = useCurrentMember()
 
@@ -52,6 +54,10 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   const productChanged = productId !== (order.product_id?.toString() ?? "")
   const quantityChanged = quantity !== (order.quantity?.toString() ?? "")
   const showScheduleWarning = order.is_scheduled && (productChanged || quantityChanged)
+
+  const fieldId = (name: string) => `${idPrefix}-${name}`
+  // 抽出した製品名は製品未確定のときだけ出す。修理注文は製品を持たないので先に除く（Issue #565）
+  const showExtractedProductName = order.order_type !== "repair" && order.product_id == null
 
   const schedulingStartChanged =
     schedulingStartDate !== toDateInputValue(order.scheduling_start_date)
@@ -139,6 +145,26 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
           onChange={(e) => setOrderNo(e.target.value)}
         />
       </div>
+
+      {/* 以下3項目は参照用の読み取り専用で、PATCH には含めない（Issue #565） */}
+      <ReadOnlyField
+        id={fieldId("order-date")}
+        label="受注日"
+        value={formatDeadlineDate(order.order_date ?? order.created_at)}
+      />
+      <ReadOnlyField
+        id={fieldId("customer-order-no")}
+        label="顧客注番"
+        value={order.customer_order_no}
+      />
+
+      {showExtractedProductName && (
+        <ReadOnlyField
+          id={fieldId("extracted-product-name")}
+          label="抽出した製品名"
+          value={order.extracted_product_name}
+        />
+      )}
 
       <ProductSelector value={productId} onValueChange={setProductId} />
 

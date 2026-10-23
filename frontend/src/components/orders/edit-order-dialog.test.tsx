@@ -150,4 +150,109 @@ describe("EditOrderDialog", () => {
       customer_id: null,
     })
   })
+
+  describe("読み取り専用の参照項目（Issue #565）", () => {
+    it("受注日・顧客注番を読み取り専用で表示する", () => {
+      mockCurrentMember()
+      mockCustomers()
+      render(
+        <EditOrderDialog
+          order={makeOrder({ order_date: "2026-10-05", customer_order_no: "CO-123" })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      )
+
+      const orderDate = screen.getByLabelText("受注日")
+      expect(orderDate).toHaveValue("2026/10/05")
+      expect(orderDate).toHaveAttribute("readonly")
+      const customerOrderNo = screen.getByLabelText("顧客注番")
+      expect(customerOrderNo).toHaveValue("CO-123")
+      expect(customerOrderNo).toHaveAttribute("readonly")
+    })
+
+    it("order_date が無ければ created_at、顧客注番が無ければ「未設定」を出す", () => {
+      mockCurrentMember()
+      mockCustomers()
+      render(
+        <EditOrderDialog
+          order={makeOrder({ order_date: null, created_at: "2026-10-03T01:00:00+00:00" })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      )
+
+      expect(screen.getByLabelText("受注日")).toHaveValue("2026/10/03")
+      expect(screen.getByLabelText("顧客注番")).toHaveAttribute("placeholder", "未設定")
+    })
+
+    it("製品未確定のときだけ抽出した製品名を表示する", () => {
+      mockCurrentMember()
+      mockCustomers()
+      render(
+        <EditOrderDialog
+          order={makeOrder({ product_id: null, extracted_product_name: "抽出された品名" })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      )
+
+      expect(screen.getByLabelText("抽出した製品名")).toHaveValue("抽出された品名")
+    })
+
+    it("製品が確定済みなら抽出した製品名を表示しない", () => {
+      mockCurrentMember()
+      mockCustomers()
+      render(
+        <EditOrderDialog
+          order={makeOrder({ extracted_product_name: "抽出された品名" })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      )
+
+      expect(screen.queryByLabelText("抽出した製品名")).not.toBeInTheDocument()
+    })
+
+    it("修理注文では抽出した製品名を表示しない", () => {
+      mockCurrentMember()
+      mockCustomers()
+      render(
+        <EditOrderDialog
+          order={makeOrder({ order_type: "repair", product_id: null, quantity: null })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      )
+
+      expect(screen.queryByLabelText("抽出した製品名")).not.toBeInTheDocument()
+    })
+
+    it("3項目は PATCH のペイロードに含めない", async () => {
+      mockCurrentMember()
+      mockCustomers()
+      const patches: Record<string, unknown>[] = []
+      server.use(
+        http.patch(`${API_BASE}/orders/1`, async ({ request }) => {
+          patches.push((await request.json()) as Record<string, unknown>)
+          return HttpResponse.json(makeOrder())
+        }),
+      )
+      render(
+        <EditOrderDialog
+          order={makeOrder({ order_date: "2026-10-05", customer_order_no: "CO-123" })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      )
+
+      const user = userEvent.setup()
+      await user.click(screen.getByRole("button", { name: "保存" }))
+
+      await waitFor(() => expect(patches).toHaveLength(1))
+      expect(patches[0]).not.toHaveProperty("order_date")
+      expect(patches[0]).not.toHaveProperty("customer_order_no")
+      expect(patches[0]).not.toHaveProperty("extracted_product_name")
+    })
+  })
 })
