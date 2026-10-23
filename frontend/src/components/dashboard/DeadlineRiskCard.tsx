@@ -10,7 +10,9 @@ import {
 import {
   formatDeadlineShort,
   getCustomerDisplayName,
-  getProductName,
+  getOrderProductName,
+  isRepairOrder,
+  ORDER_TYPE_LABELS,
 } from "@/lib/order-utils"
 import type { Customer } from "@/types/customer"
 import type { Order } from "@/types/order"
@@ -84,19 +86,22 @@ export function DeadlineRiskCard({
                 <span className="flex-shrink-0 text-sm text-muted-foreground">
                   /
                 </span>
+                {isRepairOrder(order) && (
+                  <Badge className="flex-shrink-0 bg-slate-100 text-slate-700 hover:bg-slate-100">
+                    {ORDER_TYPE_LABELS.repair}
+                  </Badge>
+                )}
                 <span className="truncate text-sm text-foreground">
-                  {getProductName(
-                    order.product_id,
-                    products,
-                    order.extracted_product_name,
-                  )}
+                  {getOrderProductName(order, products)}
                 </span>
               </div>
 
               <Badge variant="outline" className="justify-self-end font-normal">
-                {order.quantity != null
-                  ? `${order.quantity.toLocaleString("ja-JP")} 個`
-                  : "-"}
+                {isRepairOrder(order)
+                  ? "作業"
+                  : order.quantity != null
+                    ? `${order.quantity.toLocaleString("ja-JP")} 個`
+                    : "-"}
               </Badge>
 
               <span className="justify-self-end whitespace-nowrap text-sm text-muted-foreground">

@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
+import { getOrderProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
@@ -63,7 +63,7 @@ export function RequestApprovalResultDialog({
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground shrink-0">製品</dt>
               <dd className="text-right break-all">
-                {getProductName(order.product_id, products, order.extracted_product_name)}
+                {getOrderProductName(order, products)}
               </dd>
             </div>
             <div className="flex justify-between gap-4">

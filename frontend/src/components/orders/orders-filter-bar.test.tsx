@@ -11,6 +11,7 @@ import { OrdersFilterBar } from "./orders-filter-bar"
  */
 describe("OrdersFilterBar", () => {
   const defaultProps = {
+    typeFilter: "production" as const,
     statusFilter: "" as const,
     sortKey: "desired_deadline_asc" as const,
     customerFilterId: null,
@@ -22,6 +23,7 @@ describe("OrdersFilterBar", () => {
     products: [{ id: 10, name: "ブラケット", code: "BR-01" }] as Product[],
     onCustomerChange: vi.fn(),
     onProductChange: vi.fn(),
+    onTypeChange: vi.fn(),
     onStatusChange: vi.fn(),
     onSortChange: vi.fn(),
   }
@@ -32,6 +34,24 @@ describe("OrdersFilterBar", () => {
     for (const tab of STATUS_TABS) {
       expect(screen.getByRole("tab", { name: tab.label })).toBeInTheDocument()
     }
+  })
+
+  it("種別の切り替え（生産／修理等）を描画し、選ぶと onTypeChange に値が渡る", async () => {
+    const user = userEvent.setup()
+    const onTypeChange = vi.fn()
+    render(<OrdersFilterBar {...defaultProps} onTypeChange={onTypeChange} />)
+
+    expect(screen.getByRole("tab", { name: "生産" })).toHaveAttribute("aria-selected", "true")
+    await user.click(screen.getByRole("tab", { name: "修理等" }))
+
+    expect(onTypeChange).toHaveBeenCalledWith("repair")
+  })
+
+  it("修理等を選んでいるときは製品の絞り込みを出さない", () => {
+    render(<OrdersFilterBar {...defaultProps} typeFilter="repair" />)
+
+    expect(screen.queryByRole("combobox", { name: "製品で絞り込み" })).not.toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "顧客で絞り込み" })).toBeInTheDocument()
   })
 
   it("タブをクリックすると onStatusChange にその値が渡る", async () => {

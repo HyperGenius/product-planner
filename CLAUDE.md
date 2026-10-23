@@ -239,6 +239,12 @@ cd backend && ruff check . && mypy .
   `order_type` は作成後に変えないので `OrderUpdate` に入れない。PDF 取り込みは `upsert_order_by_dedupe_key` を通さず
   直接 INSERT し、部分 UNIQUE `orders_repair_customer_order_no_key` の 23505 で再受信をスキップする。
   詳細は [docs/features/repair-orders.md](docs/features/repair-orders.md)
+- **修理等の注文の画面（Issue #494）**: 修理のほかメンテナンス・洗浄など製品を持たない作業依頼も `order_type='repair'` にまとめ、
+  画面では「修理等」と呼ぶ（`ORDER_TYPE_LABELS`）。受注の品名を出す箇所は `getProductName(order.product_id, ...)` ではなく
+  `getOrderProductName(order, products)` / `getOrderProductDisplayParts()` を使う（修理等は `work_description` の先頭行を件名に出す。
+  直接渡すと「不明」になる）。一覧の種別は `?type=`（`toValidOrderTypeFilter()` で生産にクランプ、`STATUS_TABS` には足さない）、
+  詳細は別コンポーネント `RepairOrderDetail`、編集は `RepairOrderEditDialog`。修理等にシミュレーション系の操作を出さない
+  （一括シミュレーションはスキップ）。詳細は [docs/features/repair-orders.md](docs/features/repair-orders.md)
 - **顧客側の確度 (`orders.customer_certainty`)**: `confirmed` / `forecast` / `forecast_tentative` / NULL。
   確度を判定できない取り込み（PDFテキスト抽出失敗・抽出値が許容値外等）は `forecast_tentative`（内々示）へ
   フォールバックせず **NULL（確度不明）** で保存する（内々示と誤認させるため。Issue #474）。NULL は

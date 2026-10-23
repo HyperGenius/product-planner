@@ -1,3 +1,6 @@
+/** 受注種別（Issue #493）。`repair` は修理・メンテナンス・洗浄など製品を持たない作業依頼 */
+export type OrderType = 'production' | 'repair'
+
 /**
  * 注文のデータ型
  */
@@ -6,9 +9,10 @@ export interface Order {
   /**
    * 受注種別。`repair`（修理）は製品・工程・設備を持たず、実施開始日（scheduling_start_date）と
    * 完了予定日（simulated_deadline）を受注担当者が入力する。作成後は変更できない（Issue #493）。
-   * API は常に返すが、既存のテストフィクスチャが持たないため optional にしている（画面対応は #494）
+   * API は常に返すが、既存のテストフィクスチャが持たないため optional にしている（未指定は生産として扱う）。
+   * `repair` は修理のほかメンテナンス・洗浄など、製品を持たない作業依頼の注文も含む（Issue #494）
    */
-  order_type?: 'production' | 'repair'
+  order_type?: OrderType
   /** 件名・作業内容のフリーテキスト（修理で使う。Issue #493） */
   work_description?: string | null
   order_no: string | null
@@ -67,12 +71,20 @@ export interface Order {
  */
 export interface OrderCreate {
   order_no?: string
-  product_id: number
+  /** 修理（`order_type: 'repair'`）では送らない（送ると 422 `repair_order_product_not_allowed`） */
+  product_id?: number
   customer_id?: number
-  quantity: number
+  /** 修理では送らない */
+  quantity?: number
   desired_deadline?: string
-  /** 作業開始日 (YYYY-MM-DD)。null で解除。過去日は president / platform_admin のみ（Issue #372） */
+  /** 作業開始日 (YYYY-MM-DD)。null で解除。過去日は president / platform_admin のみ（Issue #372）。修理では実施開始日 */
   scheduling_start_date?: string | null
+  /** 受注種別。省略時は生産。作成後は変更できない（Issue #494） */
+  order_type?: OrderType
+  /** 件名・作業内容（修理で使う） */
+  work_description?: string
+  /** 承認前の完了予定日 (YYYY-MM-DD)。修理でのみ受け付ける（生産はシミュレーションで算出） */
+  simulated_deadline?: string
 }
 
 /**
@@ -92,6 +104,10 @@ export interface OrderUpdate {
   desired_deadline?: string | null
   /** 作業開始日 (YYYY-MM-DD)。null で解除。過去日は president / platform_admin のみ（Issue #372） */
   scheduling_start_date?: string | null
+  /** 件名・作業内容（修理のみ。空欄に戻すときは null。Issue #494） */
+  work_description?: string | null
+  /** 承認前の完了予定日（修理のみ。空欄に戻すときは null。Issue #494） */
+  simulated_deadline?: string | null
 }
 
 /**

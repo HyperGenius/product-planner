@@ -7,7 +7,7 @@ import type { Schedule } from "@/types/schedule"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
-import { getProductDisplayParts, getCustomerDisplayName, jstTodayIso } from "@/lib/order-utils"
+import { getOrderProductDisplayParts, getCustomerDisplayName, jstTodayIso } from "@/lib/order-utils"
 import {
   IN_PRODUCTION_STATUSES,
   toJstDateIso,
@@ -87,7 +87,7 @@ export function groupSchedulesByShipmentDate(
     }
 
     const product = order
-      ? getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+      ? getOrderProductDisplayParts(order, products)
       : { primary: finalSchedule.product_name ?? "不明", secondary: null }
 
     const customerName =

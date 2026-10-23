@@ -23,7 +23,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import {
-  getProductDisplayParts,
+  getOrderProductDisplayParts,
   getCustomerDisplayName,
   getEffectiveOrderStatus,
   getStatusLabel,
@@ -36,6 +36,8 @@ import {
   getOrderUrgency,
   isDeadlineOverdue,
   isNoRoutingOrder,
+  isRepairOrder,
+  ORDER_TYPE_LABELS,
   canShipWithoutRouting,
   canApproveOrder,
   canRejectOrder,
@@ -163,13 +165,18 @@ export function OrderTableRow({
   const isEmailOrder = order.source_type === "email"
   // 製品はマッチ済みだが工程が無く起票できない下書き（Issue #406）
   const noRouting = isNoRoutingOrder(order)
+  // 修理等は製品・数量・シミュレーションを持たない。日付の入力は詳細ページで行う（Issue #494）
+  const isRepair = isRepairOrder(order)
   const effectiveStatus = getEffectiveOrderStatus(order)
   const tabDeadline = getDeadlineForTab(order, statusFilter)
   const tabDeadlineLabel = formatDeadlineDate(tabDeadline)
-  const product = getProductDisplayParts(order.product_id, products, order.extracted_product_name)
+  const product = getOrderProductDisplayParts(order, products)
 
   const shows = (action: OrderRowAction) => visibleActions.includes(action)
-  const canSimulate = shows("simulate") && order.status === "draft" && !order.is_scheduled
+  const canSimulate =
+    shows("simulate") && !isRepair && order.status === "draft" && !order.is_scheduled
+  const canEnterRepairDates =
+    shows("simulate") && isRepair && order.status === "draft" && !order.is_scheduled
   const canRequestApproval =
     shows("request_approval") &&
     order.status === "draft" &&
@@ -183,7 +190,8 @@ export function OrderTableRow({
   const canShip = shows("ship") && canShipOrder(order, role)
   const canShipNoRouting =
     shows("ship_without_routing") && canShipWithoutRouting(order, role)
-  const canResimulate = shows("simulate") && order.status === "draft" && order.is_scheduled
+  const canResimulate =
+    shows("simulate") && !isRepair && order.status === "draft" && order.is_scheduled
   const canEditOrder = shows("edit") && order.status === "draft"
   const canDelete = shows("delete")
   const hasMenuActionGroup =
@@ -289,7 +297,14 @@ export function OrderTableRow({
         </TableCell>
         <TableCell>
           <div className="flex flex-col leading-tight">
-            <span className="text-sm text-muted-foreground">{product.primary}</span>
+            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+              {isRepair && (
+                <Badge className="shrink-0 bg-slate-100 text-slate-700 hover:bg-slate-100">
+                  {ORDER_TYPE_LABELS.repair}
+                </Badge>
+              )}
+              {product.primary}
+            </span>
             {product.secondary && (
               <span className="text-xs text-muted-foreground">{product.secondary}</span>
             )}
@@ -318,7 +333,9 @@ export function OrderTableRow({
           )}
         </TableCell>
         <TableCell className="text-right">
-          {order.quantity != null ? (
+          {isRepair ? (
+            <span className="text-muted-foreground">-</span>
+          ) : order.quantity != null ? (
             <span className="text-muted-foreground">
               {order.quantity.toLocaleString("ja-JP")}
             </span>
@@ -439,6 +456,15 @@ export function OrderTableRow({
                 </Tooltip>
               )}
               {leadingActions}
+              {canEnterRepairDates && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => router.push(`/orders/${order.id}`)}
+                >
+                  日付を入力
+                </Button>
+              )}
               {canSimulate && (
                 isEmailOrder ? (
                   <Button

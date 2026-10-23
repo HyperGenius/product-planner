@@ -5,7 +5,12 @@ import { ArrowRight, PackageSearch, Plus } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { ja } from "date-fns/locale"
 import { Button } from "@/components/ui/button"
-import { getProductName, getStatusLabel } from "@/lib/order-utils"
+import {
+  getOrderProductName,
+  getStatusLabel,
+  isRepairOrder,
+  ORDER_TYPE_LABELS,
+} from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -78,10 +83,16 @@ export function RecentOrders({
                   >
                     {getStatusLabel(order.status)}
                   </span>
+                  {isRepairOrder(order) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                      {ORDER_TYPE_LABELS.repair}
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground truncate">
-                  {getProductName(order.product_id, products, order.extracted_product_name)} ×{" "}
-                  {order.quantity}
+                  {isRepairOrder(order)
+                    ? getOrderProductName(order, products)
+                    : `${getOrderProductName(order, products)} × ${order.quantity}`}
                 </p>
               </div>
               <div className="text-right text-sm text-muted-foreground ml-4 shrink-0">

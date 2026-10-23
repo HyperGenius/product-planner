@@ -10,6 +10,8 @@ import {
   filterOrder,
   compareOrders,
   matchesCustomerProductFilter,
+  matchesOrderType,
+  toValidOrderTypeFilter,
   toValidMasterId,
   DEFAULT_SORT,
   STATUS_TABS,
@@ -33,7 +35,7 @@ export function toValidStatusFilter(raw: string | null): StatusFilter {
 }
 
 /**
- * 「すべての注文」の URL の状態（`?status=` / `?sort=` / `?page=` / `?customer=` / `?product=`）・絞り込み・ページング。
+ * 「すべての注文」の URL の状態（`?type=` / `?status=` / `?sort=` / `?page=` / `?customer=` / `?product=`）・絞り込み・ページング。
  * 作業の入口は「起票の確認」「承認」「送品の消し込み」の各画面に移したので、ここには一括操作を持たない（Issue #558）
  */
 export function useOrdersPage() {
@@ -42,6 +44,8 @@ export function useOrdersPage() {
 
   // `?status=` が無いときは「すべて」（Issue #558）。未知の値もクランプする（toValidStatusFilter 参照）
   const statusFilter = toValidStatusFilter(searchParams.get("status"))
+  // `?type=`（生産／修理等、Issue #494）。未知の値は生産にクランプする
+  const typeFilter = toValidOrderTypeFilter(searchParams.get("type"))
   const sortKey = (searchParams.get("sort") ?? DEFAULT_SORT) as SortKey
   const page = Number(searchParams.get("page") ?? "1")
 
@@ -59,7 +63,9 @@ export function useOrdersPage() {
     [products]
   )
   const customerFilterId = toValidMasterId(searchParams.get("customer"), customerIdSet)
-  const productFilterId = toValidMasterId(searchParams.get("product"), productIdSet)
+  // 修理等は製品を持たないので、製品での絞り込みは生産の一覧でだけ効かせる
+  const productFilterId =
+    typeFilter === "production" ? toValidMasterId(searchParams.get("product"), productIdSet) : null
   const currentUserRole = currentMember?.role ?? null
 
   const setParam = (key: string, value: string) => {
@@ -86,10 +92,11 @@ export function useOrdersPage() {
   const filteredOrders = useMemo(() => {
     if (!orders) return []
     return orders
+      .filter((order) => matchesOrderType(order, typeFilter))
       .filter((order) => filterOrder(order, statusFilter))
       .filter((order) => matchesCustomerProductFilter(order, customerFilterId, productFilterId))
       .sort((a, b) => compareOrders(a, b, sortKey))
-  }, [orders, statusFilter, sortKey, customerFilterId, productFilterId])
+  }, [orders, typeFilter, statusFilter, sortKey, customerFilterId, productFilterId])
 
   const pagedOrders = useMemo(() => {
     const offset = (page - 1) * PAGE_SIZE
@@ -98,6 +105,7 @@ export function useOrdersPage() {
 
   return {
     // URL state
+    typeFilter,
     statusFilter,
     customerFilterId,
     productFilterId,

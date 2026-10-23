@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { getProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
+import { getOrderProductName, getCustomerName, formatDeadlineDate } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 import type { Customer } from "@/types/customer"
@@ -64,7 +64,7 @@ function RejectOrderDialogForm({
             <div className="space-y-1">
               <dt className="text-xs text-muted-foreground">製品</dt>
               <dd className="font-medium break-words">
-                {getProductName(order.product_id, products, order.extracted_product_name)}
+                {getOrderProductName(order, products)}
               </dd>
             </div>
             <div className="space-y-1">

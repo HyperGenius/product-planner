@@ -11,7 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { getProductName, formatDeadlineDate } from "@/lib/order-utils"
+import { getOrderProductName, formatDeadlineDate, isRepairOrder } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -48,13 +48,28 @@ export function RequestApprovalConfirmDialog({
                     <span>{order.order_no ?? "未設定"}</span>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">製品</span>
-                    <span>{getProductName(order.product_id, products, order.extracted_product_name)}</span>
+                    <span className="text-muted-foreground">
+                      {isRepairOrder(order) ? "件名" : "製品"}
+                    </span>
+                    <span>{getOrderProductName(order, products)}</span>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">数量</span>
-                    <span>{order.quantity}</span>
-                  </div>
+                  {isRepairOrder(order) ? (
+                    <>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">実施開始日</span>
+                        <span>{formatDeadlineDate(order.scheduling_start_date) ?? "未設定"}</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted-foreground">完了予定日</span>
+                        <span>{formatDeadlineDate(order.simulated_deadline) ?? "未設定"}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">数量</span>
+                      <span>{order.quantity}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">希望納期</span>
                     <span>{formatDeadlineDate(order.desired_deadline) ?? "未設定"}</span>

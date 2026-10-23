@@ -11,7 +11,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { getProductName, formatDeadlineDate, isDeadlineOverdue } from "@/lib/order-utils"
+import {
+  getOrderProductName,
+  formatDeadlineDate,
+  isDeadlineOverdue,
+  isRepairOrder,
+} from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -40,7 +45,11 @@ export function ApproveConfirmDialog({
           <AlertDialogTitle>注文の承認</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-3">
-              <p>この内容で承認しますか？（確定後はスケジュールが作成されます）</p>
+              <p>
+                {order && isRepairOrder(order)
+                  ? "この内容で承認しますか？（完了予定日が確定します。スケジュールは作成されません）"
+                  : "この内容で承認しますか？（確定後はスケジュールが作成されます）"}
+              </p>
               {order && (
                 <div className="rounded-md border p-3 text-sm text-foreground space-y-1">
                   <div className="flex justify-between gap-4">
@@ -48,19 +57,30 @@ export function ApproveConfirmDialog({
                     <span>{order.order_no ?? "未設定"}</span>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">製品</span>
-                    <span>{getProductName(order.product_id, products, order.extracted_product_name)}</span>
+                    <span className="text-muted-foreground">
+                      {isRepairOrder(order) ? "件名" : "製品"}
+                    </span>
+                    <span>{getOrderProductName(order, products)}</span>
                   </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">数量</span>
-                    <span>{order.quantity}</span>
-                  </div>
+                  {isRepairOrder(order) ? (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">実施開始日</span>
+                      <span>{formatDeadlineDate(order.scheduling_start_date) ?? "未設定"}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">数量</span>
+                      <span>{order.quantity}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">希望納期</span>
                     <span>{formatDeadlineDate(order.desired_deadline) ?? "未設定"}</span>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">シミュ納期</span>
+                    <span className="text-muted-foreground">
+                      {isRepairOrder(order) ? "完了予定日" : "シミュ納期"}
+                    </span>
                     <span
                       className={
                         isDeadlineOverdue(order, order.simulated_deadline)
