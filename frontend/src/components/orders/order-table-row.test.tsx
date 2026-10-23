@@ -54,6 +54,7 @@ const rowProps = {
   onWithdraw: vi.fn(),
   onShip: vi.fn(),
   onShipWithoutRouting: vi.fn(),
+  onConvertToRepair: vi.fn(),
   onEdit: vi.fn(),
   onDelete: vi.fn(),
   onToggleSelect: vi.fn(),
@@ -118,6 +119,49 @@ describe("OrderTableRow", () => {
       renderRow(makeOrder({ has_no_routings: true, status: "pending_approval" }), {
         currentUserRole: "president",
       })
+
+      await openMenu()
+
+      expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+    })
+  })
+
+  describe("修理等への変更（Issue #568）", () => {
+    const LABEL = "修理等に変更"
+
+    async function openMenu() {
+      await userEvent.click(screen.getByRole("button", { name: "メニューを開く" }))
+    }
+
+    it("生産の下書きならメニューに表示し、クリックで onConvertToRepair を呼ぶ", async () => {
+      const onConvertToRepair = vi.fn()
+      const order = makeOrder({ product_id: null })
+      renderRow(order, { onConvertToRepair })
+
+      await openMenu()
+      await userEvent.click(await screen.findByText(LABEL))
+
+      expect(onConvertToRepair).toHaveBeenCalledWith(order)
+    })
+
+    it("修理等の注文には表示しない", async () => {
+      renderRow(makeOrder({ order_type: "repair", product_id: null, quantity: null }))
+
+      await openMenu()
+
+      expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+    })
+
+    it("下書き以外には表示しない", async () => {
+      renderRow(makeOrder({ status: "pending_approval" }), { currentUserRole: "president" })
+
+      await openMenu()
+
+      expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+    })
+
+    it("visibleActions に含めない画面では表示しない", async () => {
+      renderRow(makeOrder({}), { visibleActions: ["edit", "delete"] })
 
       await openMenu()
 

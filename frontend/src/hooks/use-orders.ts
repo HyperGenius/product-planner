@@ -11,6 +11,7 @@ import type {
   OrderApprovalLog,
   OrderAttachment,
   OrderBulkApproveResponse,
+  OrderConvertToRepair,
   OrderCreate,
   OrderSimulateRequest,
   OrderSimulateResponse,
@@ -273,6 +274,24 @@ export function useShipOrderWithoutRouting() {
     onSuccess: (_data, orderId) => {
       queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
       queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
+    },
+  })
+}
+
+/**
+ * 取り込みで生産として起票された下書きを修理等へ変更するフック（Issue #568）
+ */
+export function useConvertOrderToRepair() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: OrderConvertToRepair }) =>
+      apiClient<Order>(`/orders/${id}/convert-to-repair`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
     },
   })
 }

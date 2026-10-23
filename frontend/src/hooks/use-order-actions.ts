@@ -33,13 +33,14 @@ export type OrderRowActionProps = Pick<
   | "onWithdraw"
   | "onShip"
   | "onShipWithoutRouting"
+  | "onConvertToRepair"
   | "onEdit"
   | "onDelete"
   | "onView"
 >
 
 /**
- * 注文の行操作（シミュ・承認依頼・承認・差し戻し・取り下げ・送品・例外送品・編集・削除・閲覧）の
+ * 注文の行操作（シミュ・承認依頼・承認・差し戻し・取り下げ・送品・例外送品・修理等への変更・編集・削除・閲覧）の
  * mutation・確認ダイアログの対象・トースト表示をまとめたフック（Issue #554）。
  * 確認ダイアログ群は戻り値をそのまま `OrderActionDialogs` に渡して描画する。
  *
@@ -65,6 +66,7 @@ export function useOrderActions(orders: Order[] | undefined) {
   const [requestApprovalResultOrder, setRequestApprovalResultOrder] = useState<Order | null>(null)
   const [approveTargetOrder, setApproveTargetOrder] = useState<Order | null>(null)
   const [shipWithoutRoutingTarget, setShipWithoutRoutingTarget] = useState<Order | null>(null)
+  const [convertToRepairTarget, setConvertToRepairTarget] = useState<Order | null>(null)
 
   const confirmOrder = useConfirmOrder()
   const requestApproval = useRequestApproval()
@@ -248,6 +250,7 @@ export function useOrderActions(orders: Order[] | undefined) {
     onWithdraw: handleWithdrawFromRow,
     onShip: handleShipFromRow,
     onShipWithoutRouting: handleShipWithoutRoutingRequest,
+    onConvertToRepair: setConvertToRepairTarget,
     onEdit: handleOpenEditDialog,
     onDelete: setDeleteTargetOrder,
     onView: handleOpenViewDialog,
@@ -311,6 +314,9 @@ export function useOrderActions(orders: Order[] | undefined) {
     handleShipWithoutRoutingRequest,
     handleShipWithoutRoutingConfirm,
     handleShipWithoutRoutingCancel,
+    // 生産の下書き → 修理等（Issue #568）
+    convertToRepairTarget,
+    setConvertToRepairTarget,
   }
 }
 

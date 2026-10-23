@@ -77,6 +77,23 @@ class OrderUpdate(BaseSchema):
     simulated_deadline: str | None = None
 
 
+class OrderConvertToRepairRequest(BaseSchema):
+    """生産の下書きを修理等へ変更するリクエスト（Issue #568）。
+
+    修理等の編集ダイアログと同じ項目を送り、変更と同時に入力した値で置き換える
+    （未入力の任意項目は None で消す）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    order_number: str | None = Field(None, alias="order_no")
+    customer_id: int | None = None
+    deadline_date: str | None = Field(None, alias="desired_deadline")
+    work_description: str
+    scheduling_start_date: str | None = None
+    simulated_deadline: str | None = None
+
+
 class OrderSplitLineItem(BaseSchema):
     """分割後の1受注を表すスキーマ"""
 
@@ -166,6 +183,7 @@ class OrderApprovalLogResponse(BaseModel):
         "reject",
         "withdraw",
         "ship_without_routing",
+        "convert_to_repair",
     ]
     actor_user_id: str
     actor_full_name: str | None

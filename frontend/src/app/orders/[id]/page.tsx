@@ -15,6 +15,7 @@ import {
   Trash2,
   Truck,
   Undo2,
+  Wrench,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +25,7 @@ import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { RejectOrderDialog } from "@/components/orders/reject-order-dialog"
 import { RequestApprovalConfirmDialog } from "@/components/orders/request-approval-confirm-dialog"
 import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
+import { ConvertToRepairDialog } from "@/components/orders/convert-to-repair-dialog"
 import { ShipWithoutRoutingConfirmDialog } from "@/components/orders/ship-without-routing-confirm-dialog"
 import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
@@ -53,6 +55,7 @@ import {
   usesSimulatedDeadlineForOrder,
   isDeadlineOverdue,
   canShipWithoutRouting,
+  canConvertToRepair,
   isRepairOrder,
 } from "@/lib/order-utils"
 import type { OrderSimulateResponse } from "@/types/order"
@@ -83,6 +86,7 @@ export default function OrderDetailPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editDialogGeneration, setEditDialogGeneration] = useState(0)
   const [isShipWithoutRoutingDialogOpen, setIsShipWithoutRoutingDialogOpen] = useState(false)
+  const [isConvertToRepairDialogOpen, setIsConvertToRepairDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false)
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false)
@@ -575,6 +579,12 @@ export default function OrderDetailPage() {
                 編集
               </Button>
             )}
+            {canConvertToRepair(order) && (
+              <Button variant="outline" onClick={() => setIsConvertToRepairDialogOpen(true)}>
+                <Wrench className="mr-2 h-4 w-4" />
+                修理等に変更
+              </Button>
+            )}
             {isDraft && order.source_type === "email" && order.source_attachment_id && (
               <Button
                 variant="outline"
@@ -612,6 +622,15 @@ export default function OrderDetailPage() {
         open={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
       />
+
+      {isConvertToRepairDialogOpen && (
+        <ConvertToRepairDialog
+          order={order}
+          open
+          onOpenChange={setIsConvertToRepairDialogOpen}
+          onConverted={() => setSimulationResult(null)}
+        />
+      )}
 
       <ShipWithoutRoutingConfirmDialog
         open={isShipWithoutRoutingDialogOpen}

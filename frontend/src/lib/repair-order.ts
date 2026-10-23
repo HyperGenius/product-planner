@@ -1,5 +1,6 @@
 import { ApiError } from "@/lib/api-client"
-import { jstTodayIso } from "@/lib/order-utils"
+import { jstTodayIso, toDateInputValue } from "@/lib/order-utils"
+import type { Order } from "@/types/order"
 
 /** 修理注文（修理・メンテナンス・洗浄など、Issue #493 / #494）の入力値 */
 export interface RepairOrderFormValues {
@@ -20,6 +21,27 @@ export const EMPTY_REPAIR_ORDER_FORM: RepairOrderFormValues = {
   desiredDeadline: "",
   schedulingStartDate: "",
   simulatedDeadline: "",
+}
+
+/**
+ * 生産として起票された下書きを修理等へ変更するときの初期値（Issue #568）。
+ * 製品・数量は変更で消えるので、取り込みで読み取った品名と数量を件名・作業内容の下書きにする。
+ * 実施開始日はシミュレーションで自動補完された値の場合があり修理の実施日ではないので、日付は空にする
+ */
+export function repairFormValuesFromProductionOrder(order: Order): RepairOrderFormValues {
+  const extracted = [
+    order.extracted_product_name?.trim(),
+    order.quantity != null ? `×${order.quantity}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  return {
+    ...EMPTY_REPAIR_ORDER_FORM,
+    orderNo: order.order_no ?? "",
+    customerId: order.customer_id?.toString() ?? "",
+    workDescription: order.work_description || extracted,
+    desiredDeadline: toDateInputValue(order.desired_deadline),
+  }
 }
 
 /**
@@ -51,6 +73,7 @@ const REPAIR_ERROR_MESSAGES: Record<string, string> = {
   invalid_simulated_deadline: "完了予定日の形式が正しくありません",
   repair_order_product_not_allowed: "修理等の注文には製品・数量を指定できません",
   duplicate_repair_order: "同じ顧客・注文番号の修理等の注文がすでに登録されています",
+  work_description_required: "件名・作業内容を入力してください",
 }
 
 /**

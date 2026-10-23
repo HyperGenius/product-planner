@@ -236,7 +236,8 @@ cd backend && ruff check . && mypy .
   判定している箇所は、修理を先に `repair_order_service.is_repair_order()` で分岐させる（承認依頼・承認・シミュ・
   `has_no_routings`・分割で対応済み）。修理の `is_scheduled` は「実施開始日と完了予定日が両方入っている」に合わせて
   起票・PATCH のたびに書き直す（一覧の「シミュ済」タブ・承認依頼ボタンが draft の `is_scheduled` で判定するため）。
-  `order_type` は作成後に変えないので `OrderUpdate` に入れない。PDF 取り込みは `upsert_order_by_dedupe_key` を通さず
+  `order_type` は作成後に変えないので `OrderUpdate` に入れない（例外は生産の draft → 修理等の専用操作
+  `POST /orders/{id}/convert-to-repair`だけ。`status`/`order_type` を条件にした UPDATE で書き、承認ログ `convert_to_repair` を残す。Issue #568）。PDF 取り込みは `upsert_order_by_dedupe_key` を通さず
   直接 INSERT し、部分 UNIQUE `orders_repair_customer_order_no_key` の 23505 で再受信をスキップする。
   詳細は [docs/features/repair-orders.md](docs/features/repair-orders.md)
 - **修理等の注文の画面（Issue #494）**: 修理のほかメンテナンス・洗浄など製品を持たない作業依頼も `order_type='repair'` にまとめ、

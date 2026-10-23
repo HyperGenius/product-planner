@@ -1,4 +1,4 @@
-# 修理注文（受注種別 `order_type`）（Issue #493 / #494）
+# 修理注文（受注種別 `order_type`）（Issue #493 / #494 / #568）
 
 生産ではなく**修理**（例: 顧客から預かった部品のはんだ補修）の注文書が届くことがある（月1回未満）。
 修理は図番・品名が規格化されておらず、製品マスタ・工程ルートに当てはめられない。
@@ -33,7 +33,7 @@
 
 | 列・制約 | 内容 |
 |---|---|
-| `orders.order_type` | `text NOT NULL DEFAULT 'production'`、CHECK で `production` / `repair`。あとで値を増やしやすいよう enum 型にしない。**作成後は変更しない**（`OrderUpdate` に持たせない） |
+| `orders.order_type` | `text NOT NULL DEFAULT 'production'`、CHECK で `production` / `repair`。あとで値を増やしやすいよう enum 型にしない。**作成後は変更しない**（`OrderUpdate` に持たせない）。例外は生産の下書きを修理等へ変える専用の操作だけ（[後述](#生産の下書きを修理等へ変更するissue-568)） |
 | `orders.work_description` | 件名・作業内容のフリーテキスト |
 | CHECK `orders_repair_without_product` | `order_type = 'production' OR product_id IS NULL`（修理は製品を持たない） |
 | 部分 UNIQUE `orders_repair_customer_order_no_key` | `(tenant_id, customer_id, customer_order_no) WHERE order_type = 'repair' AND customer_order_no IS NOT NULL`。同じ注文書の再受信で重複起票しない |
@@ -133,12 +133,39 @@
 `PATCH` で顧客を変えて修理の部分 UNIQUE に当たった場合は、`_duplicate_order_conflict_exception()` が
 409 `{"error": "duplicate_repair_order", "message": ...}` を返す（衝突先の検索は製品・納期キー用なので行わない）。
 
+## 生産の下書きを修理等へ変更する（Issue #568）
+
+PDF の種別判定の誤りや、抽出に失敗した空の下書き（`failed_image` 等）では、修理等の注文書が生産（`production`）として
+起票される。削除して `POST /orders` で作り直すと取り込み元の添付・メールとの紐付けが切れるので、
+**生産の下書きを修理等へ変える専用の操作**を用意した。逆方向（修理等 → 生産）は無い。
+
+`POST /orders/{id}/convert-to-repair`（`routers/transaction/orders/repair_conversion.py`）:
+
+| 項目 | 内容 |
+|---|---|
+| 対象 | `order_type='production'` かつ `status='draft'`。それ以外は 400（承認依頼後は差し戻してから）。ロールの制限は `PATCH` と同じく無い |
+| ボディ | 修理等の編集ダイアログと同じ項目（`order_no` / `customer_id` / `desired_deadline` / `work_description` / `scheduling_start_date` / `simulated_deadline`）。送った値で置き換え、`null` は消す。`work_description` が空白だけなら 422 `work_description_required` |
+| 書き込み | `order_type='repair'`、`product_id` / `quantity` / `extracted_product_name` / `product_candidates` を NULL、`scheduling_start_date_auto=false`、`is_scheduled` は実施開始日と完了予定日が揃っているか（起票・PATCH と同じ規則） |
+| 検証 | 実施開始日の形式・過去日の権限（Issue #372、過去日は監査ログにも残す）と、日付の前後（422 `repair_dates_out_of_order`）は起票・PATCH と共通 |
+| 競合 | 更新は `OrderRepository.convert_draft_to_repair()` で `status='draft' AND order_type='production'` を条件にする。確認後に承認依頼された等で0件なら 400 |
+| 重複 | 修理の部分 UNIQUE（顧客 × 顧客注番）・注文番号に当たったら 409（`duplicate_repair_order` / `duplicate_order_number`） |
+| 記録 | 承認ログに `action='convert_to_repair'`（マイグレーション `20261023000000_add_convert_to_repair_action_to_order_approval_log.sql` で CHECK を張り直した）。承認ログ画面・CSV では「修理等に変更」 |
+
+draft には実スケジュール（`production_schedules`）が無い（承認で初めて作られ、確定後に draft へ戻る遷移も無い）ので、
+スケジュールの削除はしない。シミュ納期（`simulated_deadline`）は入力した完了予定日で置き換わる。
+
+画面: 「起票の確認」の各区分の「…」メニューと、生産の注文詳細に「修理等に変更」を出す（`canConvertToRepair()`）。
+`ConvertToRepairDialog` は `RepairOrderFields` を使い、取り込みで読み取った品名と数量（`品名 ×数量`）を件名・作業内容の
+初期値にする（`repairFormValuesFromProductionOrder()`）。実施開始日はシミュで自動補完された値の場合があるので、日付は空から入力する。
+変更後、詳細ページは `RepairOrderDetail` に切り替わる。
+
 ## テスト
 
 - `__tests__/unit/services/test_repair_order_service.py`: 日付の検証・作業内容の組み立て
 - `__tests__/unit/services/test_pdf_order_parsing_service.py::TestRepairOrderIntake`: 修理の起票・重複スキップ・画像PDF
 - `__tests__/unit/services/test_pdf_order_extraction_service.py::TestOrderTypeExtraction`: 種別の抽出と既定値
-- `__tests__/api/routers/transaction/test_repair_orders.py`: 起票・更新・承認依頼・承認・シミュ・分割
+- `__tests__/api/routers/transaction/test_repair_orders.py`: 起票・更新・承認依頼・承認・シミュ・分割・生産の下書きからの変更（#568）
+- `__tests__/unit/repositories/supabase/transaction/test_order_repo.py::TestOrderRepositoryConvertDraftToRepair`: 条件付き UPDATE
 - `__tests__/unit/services/test_order_auto_transition_service.py`: 修理（スケジュール無し）の着手日での `in_progress` 遷移
 
 ## 画面（Issue #494）
@@ -164,3 +191,5 @@ DB・API は変えず、フロントエンドだけで生産と分けて表示�
 
 テスト: `lib/order-utils.test.ts`（クランプ・件名・承認依頼の可否）、`components/orders/repair-order-detail.test.tsx`、
 `components/orders/orders-filter-bar.test.tsx`、`app/orders/new/page.test.tsx`。
+修理等への変更（#568）: `components/orders/convert-to-repair-dialog.test.tsx`、`lib/repair-order.test.ts`、
+`components/orders/order-table-row.test.tsx`、`hooks/use-order-actions.test.ts`。

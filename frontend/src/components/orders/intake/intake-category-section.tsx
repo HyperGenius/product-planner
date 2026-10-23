@@ -27,7 +27,7 @@ interface IntakeCategoryConfig {
 
 const INTAKE_CATEGORY_CONFIG: Record<IntakeCategory, IntakeCategoryConfig> = {
   no_product: {
-    visibleActions: ["ship_without_routing", "delete"],
+    visibleActions: ["convert_to_repair", "ship_without_routing", "delete"],
     selectable: false,
     leadingActions: (order, actions) => (
       <>
@@ -41,7 +41,7 @@ const INTAKE_CATEGORY_CONFIG: Record<IntakeCategory, IntakeCategoryConfig> = {
     ),
   },
   no_routing: {
-    visibleActions: ["edit", "ship_without_routing", "delete"],
+    visibleActions: ["edit", "convert_to_repair", "ship_without_routing", "delete"],
     selectable: false,
     leadingActions: (order) => (
       <Button size="sm" variant="outline" asChild>
@@ -50,7 +50,7 @@ const INTAKE_CATEGORY_CONFIG: Record<IntakeCategory, IntakeCategoryConfig> = {
     ),
   },
   incomplete: {
-    visibleActions: ["delete"],
+    visibleActions: ["convert_to_repair", "delete"],
     selectable: false,
     leadingActions: (order, actions) => (
       <Button size="sm" variant="outline" onClick={() => actions.handleOpenEditDialog(order)}>
@@ -59,11 +59,11 @@ const INTAKE_CATEGORY_CONFIG: Record<IntakeCategory, IntakeCategoryConfig> = {
     ),
   },
   unsimulated: {
-    visibleActions: ["simulate", "edit", "delete"],
+    visibleActions: ["simulate", "edit", "convert_to_repair", "delete"],
     selectable: true,
   },
   simulated: {
-    visibleActions: ["request_approval", "simulate", "edit", "delete"],
+    visibleActions: ["request_approval", "simulate", "edit", "convert_to_repair", "delete"],
     selectable: true,
   },
 }

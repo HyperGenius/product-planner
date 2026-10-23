@@ -79,12 +79,25 @@ export interface OrderCreate {
   desired_deadline?: string
   /** 作業開始日 (YYYY-MM-DD)。null で解除。過去日は president / platform_admin のみ（Issue #372）。修理では実施開始日 */
   scheduling_start_date?: string | null
-  /** 受注種別。省略時は生産。作成後は変更できない（Issue #494） */
+  /** 受注種別。省略時は生産。作成後は生産の下書き→修理等への変更（`convert-to-repair`、Issue #568）だけができる */
   order_type?: OrderType
   /** 件名・作業内容（修理で使う） */
   work_description?: string
   /** 承認前の完了予定日 (YYYY-MM-DD)。修理でのみ受け付ける（生産はシミュレーションで算出） */
   simulated_deadline?: string
+}
+
+/**
+ * 生産の下書きを修理等へ変更するときのデータ型（`POST /orders/{id}/convert-to-repair`、Issue #568）。
+ * 修理等の編集ダイアログと同じ項目を送り、入力値で置き換える（空欄は `null` で消す）
+ */
+export interface OrderConvertToRepair {
+  order_no: string | null
+  customer_id: number | null
+  desired_deadline: string | null
+  work_description: string
+  scheduling_start_date: string | null
+  simulated_deadline: string | null
 }
 
 /**
@@ -257,7 +270,13 @@ export interface OrderApprovalLog {
   id: string
   order_id: number
   order_number: string | null
-  action: 'request_approval' | 'approve' | 'reject' | 'withdraw' | 'ship_without_routing'
+  action:
+    | 'request_approval'
+    | 'approve'
+    | 'reject'
+    | 'withdraw'
+    | 'ship_without_routing'
+    | 'convert_to_repair'
   actor_user_id: string
   actor_full_name: string | null
   actor_email: string | null
