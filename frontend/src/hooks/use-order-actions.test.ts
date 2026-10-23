@@ -179,6 +179,17 @@ describe("useOrderActions（Issue #554）", () => {
     expect(toast.success).toHaveBeenCalledWith("注文「O-6」を送品済みにしました")
   })
 
+  it("修理等への変更はダイアログの対象を行の注文にする（Issue #568）", () => {
+    const order = makeOrder({ id: 9 })
+    const { result } = renderHook(() => useOrderActions([order]))
+
+    act(() => result.current.getRowProps(order).onConvertToRepair(order))
+    expect(result.current.convertToRepairTarget).toEqual(order)
+
+    act(() => result.current.setConvertToRepairTarget(null))
+    expect(result.current.convertToRepairTarget).toBeNull()
+  })
+
   it("閲覧中の注文は一覧の再取得結果から引き直す（Issue #527）", () => {
     const order = makeOrder({ id: 7, status: "confirmed" })
     const { result, rerender } = renderHook(({ orders }) => useOrderActions(orders), {

@@ -76,6 +76,14 @@ export function matchesOrderType(order: Order, type: OrderTypeFilter): boolean {
 }
 
 /**
+ * 生産の下書きを修理等へ変更できるか（Issue #568）。取り込みで種別を誤った注文を直すための操作で、
+ * サーバー（`POST /orders/{id}/convert-to-repair`）と同じく生産の `draft` に限る。ロールの制限は編集と同じく無い
+ */
+export function canConvertToRepair(order: Order): boolean {
+  return order.status === "draft" && !isRepairOrder(order)
+}
+
+/**
  * 修理注文が承認依頼できない理由（できるなら null）。実施開始日と完了予定日が両方入るまで押せない
  * （サーバーの 422 `repair_dates_missing` と同じ条件）。入力するのは受注担当者
  */

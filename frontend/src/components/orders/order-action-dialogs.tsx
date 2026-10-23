@@ -1,6 +1,7 @@
 "use client"
 
 import { ApproveConfirmDialog } from "@/components/orders/approve-confirm-dialog"
+import { ConvertToRepairDialog } from "@/components/orders/convert-to-repair-dialog"
 import { DeleteOrderDialog } from "@/components/orders/delete-order-dialog"
 import { EditOrderDialog } from "@/components/orders/edit-order-dialog"
 import { OrderViewDialog } from "@/components/orders/order-view-dialog"
@@ -114,6 +115,15 @@ export function OrderActionDialogs({
         onConfirm={actions.handleShipWithoutRoutingConfirm}
         onCancel={actions.handleShipWithoutRoutingCancel}
       />
+
+      {actions.convertToRepairTarget && (
+        <ConvertToRepairDialog
+          key={actions.convertToRepairTarget.id}
+          order={actions.convertToRepairTarget}
+          open
+          onOpenChange={(open) => { if (!open) actions.setConvertToRepairTarget(null) }}
+        />
+      )}
     </>
   )
 }

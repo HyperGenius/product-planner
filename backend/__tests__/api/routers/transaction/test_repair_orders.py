@@ -51,6 +51,10 @@ class TestRepairOrderRouter:
         return MagicMock()
 
     @pytest.fixture
+    def mock_approval_log_repo(self):
+        return MagicMock()
+
+    @pytest.fixture
     def mock_schedule_order(self, monkeypatch):
         """承認で schedule_order を呼ばないことを確認する（呼び出し元モジュールを差し替える）"""
         mock = MagicMock(return_value=[])
@@ -58,14 +62,22 @@ class TestRepairOrderRouter:
         return mock
 
     @pytest.fixture(autouse=True)
-    def override_dependency(self, mock_repo, mock_schedule_repo, mock_supabase_client):
+    def override_dependency(
+        self,
+        mock_repo,
+        mock_schedule_repo,
+        mock_supabase_client,
+        mock_approval_log_repo,
+    ):
         app.dependency_overrides[get_order_repo] = lambda: mock_repo
         app.dependency_overrides[get_product_repo] = lambda: MagicMock()
         app.dependency_overrides[get_equipment_repo] = lambda: MagicMock()
         app.dependency_overrides[get_schedule_repo] = lambda: mock_schedule_repo
         app.dependency_overrides[get_settings_repo] = lambda: MagicMock()
         app.dependency_overrides[get_supabase_client] = lambda: mock_supabase_client
-        app.dependency_overrides[get_order_approval_log_repo] = lambda: MagicMock()
+        app.dependency_overrides[get_order_approval_log_repo] = lambda: (
+            mock_approval_log_repo
+        )
         app.dependency_overrides[get_order_scheduling_start_backdate_log_repo] = (
             lambda: MagicMock()
         )
@@ -470,3 +482,193 @@ class TestRepairOrderRouter:
 
         assert response.status_code == 400
         mock_repo.update.assert_not_called()
+
+    # --- 生産の下書き → 修理等（Issue #568） ---------------------------------
+
+    _PRODUCTION_DRAFT = {
+        "id": 1,
+        "order_type": "production",
+        "product_id": None,
+        "quantity": 11,
+        "extracted_product_name": "基板 はんだ補修",
+        "status": "draft",
+        "deadline_date": "2099-11-10",
+        "scheduling_start_date": "2099-10-25",
+        "scheduling_start_date_auto": True,
+        "simulated_deadline": None,
+        "is_scheduled": False,
+    }
+
+    _CONVERT_BODY = {
+        "order_no": "R-001",
+        "customer_id": 3,
+        "desired_deadline": "2099-11-10",
+        "work_description": "  基板 はんだ補修\n・補修部1〜3ヶ所 ×11  ",
+        "scheduling_start_date": "2099-11-01",
+        "simulated_deadline": "2099-11-03",
+    }
+
+    def test_convert_to_repair_clears_product_and_sets_repair_fields(
+        self, headers, mock_repo, mock_approval_log_repo
+    ):
+        mock_repo.get_by_id.return_value = {**self._PRODUCTION_DRAFT}
+        mock_repo.convert_draft_to_repair.return_value = {
+            **_REPAIR_DRAFT,
+            "order_number": "R-001",
+        }
+
+        response = client.post(
+            "/orders/1/convert-to-repair", json=self._CONVERT_BODY, headers=headers
+        )
+
+        assert response.status_code == 200
+        assert response.json()["order_no"] == "R-001"
+        order_id, payload = mock_repo.convert_draft_to_repair.call_args.args
+        assert order_id == 1
+        assert payload == {
+            "order_number": "R-001",
+            "customer_id": 3,
+            "deadline_date": "2099-11-10",
+            "work_description": "基板 はんだ補修\n・補修部1〜3ヶ所 ×11",
+            "scheduling_start_date": "2099-11-01",
+            "scheduling_start_date_auto": False,
+            "simulated_deadline": "2099-11-03",
+            "is_scheduled": True,
+            "product_id": None,
+            "quantity": None,
+            "extracted_product_name": None,
+            "product_candidates": None,
+        }
+        mock_repo.update.assert_not_called()
+        mock_approval_log_repo.log_action.assert_called_once_with(
+            headers["x-tenant-id"], 1, "convert_to_repair", "test-user-id", None
+        )
+
+    def test_convert_to_repair_without_dates_is_not_scheduled(self, headers, mock_repo):
+        mock_repo.get_by_id.return_value = {**self._PRODUCTION_DRAFT}
+        mock_repo.convert_draft_to_repair.return_value = {**_REPAIR_DRAFT}
+
+        response = client.post(
+            "/orders/1/convert-to-repair",
+            json={"work_description": "補修"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        _, payload = mock_repo.convert_draft_to_repair.call_args.args
+        assert payload["is_scheduled"] is False
+        assert payload["scheduling_start_date"] is None
+        assert payload["order_number"] is None
+
+    @pytest.mark.parametrize("work_description", ["", "  \n "])
+    def test_convert_to_repair_requires_work_description(
+        self, headers, mock_repo, work_description
+    ):
+        response = client.post(
+            "/orders/1/convert-to-repair",
+            json={"work_description": work_description},
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == {"error": "work_description_required"}
+        mock_repo.convert_draft_to_repair.assert_not_called()
+
+    def test_convert_to_repair_end_before_start_returns_422(self, headers, mock_repo):
+        response = client.post(
+            "/orders/1/convert-to-repair",
+            json={
+                "work_description": "補修",
+                "scheduling_start_date": "2099-11-05",
+                "simulated_deadline": "2099-11-03",
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == {"error": "repair_dates_out_of_order"}
+        mock_repo.convert_draft_to_repair.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "order",
+        [
+            {**_REPAIR_DRAFT},
+            {**_PRODUCTION_DRAFT, "status": "pending_approval"},
+            {**_PRODUCTION_DRAFT, "status": "confirmed"},
+        ],
+        ids=["already_repair", "pending_approval", "confirmed"],
+    )
+    def test_convert_to_repair_rejects_non_production_draft(
+        self, headers, mock_repo, mock_approval_log_repo, order
+    ):
+        mock_repo.get_by_id.return_value = order
+
+        response = client.post(
+            "/orders/1/convert-to-repair",
+            json={"work_description": "補修"},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        mock_repo.convert_draft_to_repair.assert_not_called()
+        mock_approval_log_repo.log_action.assert_not_called()
+
+    def test_convert_to_repair_not_found(self, headers, mock_repo):
+        mock_repo.get_by_id.return_value = None
+
+        response = client.post(
+            "/orders/999/convert-to-repair",
+            json={"work_description": "補修"},
+            headers=headers,
+        )
+
+        assert response.status_code == 404
+
+    def test_convert_to_repair_returns_400_when_status_changed_before_update(
+        self, headers, mock_repo, mock_approval_log_repo
+    ):
+        """確認後に承認依頼された等で、条件付き UPDATE が0件だった"""
+        mock_repo.get_by_id.return_value = {**self._PRODUCTION_DRAFT}
+        mock_repo.convert_draft_to_repair.return_value = None
+
+        response = client.post(
+            "/orders/1/convert-to-repair",
+            json={"work_description": "補修"},
+            headers=headers,
+        )
+
+        assert response.status_code == 400
+        mock_approval_log_repo.log_action.assert_not_called()
+
+    def test_convert_to_repair_duplicate_returns_409(
+        self, headers, mock_repo, mock_approval_log_repo
+    ):
+        mock_repo.get_by_id.return_value = {**self._PRODUCTION_DRAFT}
+        mock_repo.convert_draft_to_repair.side_effect = DuplicateRecordError(
+            "重複データにより更新できません",
+            constraint='duplicate key value violates unique constraint "orders_repair_customer_order_no_key"',
+        )
+
+        response = client.post(
+            "/orders/1/convert-to-repair", json=self._CONVERT_BODY, headers=headers
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["error"] == "duplicate_repair_order"
+        assert "orders_repair" not in detail["message"]
+        mock_approval_log_repo.log_action.assert_not_called()
+
+    def test_convert_to_repair_backdated_start_forbidden_for_order_handler(
+        self, headers, mock_repo, mock_supabase_client
+    ):
+        self._set_role(mock_supabase_client, "order_handler")
+
+        response = client.post(
+            "/orders/1/convert-to-repair",
+            json={"work_description": "補修", "scheduling_start_date": "2000-01-01"},
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        mock_repo.convert_draft_to_repair.assert_not_called()

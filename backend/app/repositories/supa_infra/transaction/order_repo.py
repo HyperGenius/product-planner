@@ -2,7 +2,13 @@
 from datetime import date
 from typing import Any, cast
 
-from app.repositories.supa_infra.common import BaseRepository, SupabaseTableName
+from postgrest.exceptions import APIError
+
+from app.repositories.supa_infra.common import (
+    BaseRepository,
+    DuplicateRecordError,
+    SupabaseTableName,
+)
 
 # 修理（Issue #493）は工程を持たない受注なので、「工程未入力・起票不可」として扱わない
 _REPAIR_ROUTING_STATUS = {"has_no_routings": False, "has_unconfirmed_routings": False}
@@ -122,6 +128,35 @@ class OrderRepository(BaseRepository):
             .execute()
         )
         return cast(list[dict[str, Any]], res.data or [])
+
+    def convert_draft_to_repair(
+        self, order_id: int, data: dict[str, Any]
+    ) -> dict | None:
+        """生産の下書きを修理等へ変更する（Issue #568）。
+
+        確認後に承認依頼・種別変更が割り込んでも書き換えないよう、`status = 'draft'`
+        かつ `order_type = 'production'` の行だけを更新する。該当行が無ければ None。
+
+        Raises:
+            DuplicateRecordError: 一意制約違反（修理の顧客注番・注文番号の重複）。
+        """
+        try:
+            res = (
+                self.client.table(self.table_name)
+                .update({**data, "order_type": "repair"})
+                .eq("id", order_id)
+                .eq("status", "draft")
+                .eq("order_type", "production")
+                .execute()
+            )
+        except APIError as e:
+            if e.code == "23505":  # unique_violation
+                raise DuplicateRecordError(
+                    "重複データにより更新できません", constraint=e.message or None
+                ) from e
+            raise
+        rows = cast(list[dict[str, Any]], res.data or [])
+        return rows[0] if rows else None
 
     def find_dedupe_conflict(
         self,

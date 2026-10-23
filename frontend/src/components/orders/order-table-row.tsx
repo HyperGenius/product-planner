@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Truck, Undo2 } from "lucide-react"
+import { AlertCircle, Loader2, Mail, MoreHorizontal, MessageSquareWarning, Truck, Undo2, Wrench } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import type React from "react"
@@ -39,6 +39,7 @@ import {
   isRepairOrder,
   ORDER_TYPE_LABELS,
   canShipWithoutRouting,
+  canConvertToRepair,
   canApproveOrder,
   canRejectOrder,
   canWithdrawApproval,
@@ -59,6 +60,7 @@ export type OrderRowAction =
   | "withdraw"
   | "ship"
   | "ship_without_routing"
+  | "convert_to_repair"
   | "edit"
   | "delete"
   | "view"
@@ -71,6 +73,7 @@ export const ALL_ORDER_ROW_ACTIONS: readonly OrderRowAction[] = [
   "withdraw",
   "ship",
   "ship_without_routing",
+  "convert_to_repair",
   "edit",
   "delete",
   "view",
@@ -102,6 +105,8 @@ export interface OrderTableRowProps {
   onShip: (orderId: number, orderNo: string) => void
   /** 工程未入力の下書きを送品済みにする暫定の例外処理（president のみ、Issue #547） */
   onShipWithoutRouting: (order: Order) => void
+  /** 取り込みで生産として起票された下書きを修理等へ変更する（Issue #568） */
+  onConvertToRepair: (order: Order) => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
   onToggleSelect?: (orderId: number) => void
@@ -151,6 +156,7 @@ export function OrderTableRow({
   onWithdraw,
   onShip,
   onShipWithoutRouting,
+  onConvertToRepair,
   onEdit,
   onDelete,
   onToggleSelect,
@@ -193,9 +199,16 @@ export function OrderTableRow({
   const canResimulate =
     shows("simulate") && !isRepair && order.status === "draft" && order.is_scheduled
   const canEditOrder = shows("edit") && order.status === "draft"
+  const canConvert = shows("convert_to_repair") && canConvertToRepair(order)
   const canDelete = shows("delete")
   const hasMenuActionGroup =
-    canWithdraw || canReject || canShip || canShipNoRouting || canResimulate || canEditOrder
+    canWithdraw ||
+    canReject ||
+    canShip ||
+    canShipNoRouting ||
+    canResimulate ||
+    canEditOrder ||
+    canConvert
   const hasMenu = order.status !== "completed" && (hasMenuActionGroup || canDelete)
 
   // 緊急度による段階的な背景色（Issue #461）。優先順位（高い順）:
@@ -584,6 +597,15 @@ export function OrderTableRow({
                     {canEditOrder && (
                       <DropdownMenuItem onClick={() => onEdit(order)}>
                         編集
+                      </DropdownMenuItem>
+                    )}
+                    {canConvert && (
+                      <DropdownMenuItem
+                        onClick={() => onConvertToRepair(order)}
+                        disabled={isBulkOperationInProgress}
+                      >
+                        <Wrench className="mr-2 h-3.5 w-3.5" />
+                        修理等に変更
                       </DropdownMenuItem>
                     )}
                     {hasMenuActionGroup && canDelete && <DropdownMenuSeparator />}

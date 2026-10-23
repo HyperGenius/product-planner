@@ -3,7 +3,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from app.repositories.supa_infra.common import DuplicateRecordError
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
+from postgrest.exceptions import APIError
 
 
 @pytest.mark.unit
@@ -291,3 +293,50 @@ class TestOrderRepositoryBulkUpdateStatus:
 
         assert repo.bulk_update_status([], "shipped") == []
         mock_client.table.return_value.update.assert_not_called()
+
+
+@pytest.mark.unit
+class TestOrderRepositoryConvertDraftToRepair:
+    """生産の下書きを修理等へ変える条件付き UPDATE（Issue #568）"""
+
+    @staticmethod
+    def _eq_chain(mock_client: MagicMock) -> MagicMock:
+        return mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.eq.return_value
+
+    def test_updates_only_production_draft(self):
+        mock_client = MagicMock()
+        self._eq_chain(mock_client).execute.return_value.data = [
+            {"id": 1, "order_type": "repair"}
+        ]
+
+        result = OrderRepository(mock_client).convert_draft_to_repair(
+            1, {"product_id": None}
+        )
+
+        assert result == {"id": 1, "order_type": "repair"}
+        update = mock_client.table.return_value.update
+        update.assert_called_once_with({"product_id": None, "order_type": "repair"})
+        update.return_value.eq.assert_called_once_with("id", 1)
+        update.return_value.eq.return_value.eq.assert_called_once_with(
+            "status", "draft"
+        )
+        update.return_value.eq.return_value.eq.return_value.eq.assert_called_once_with(
+            "order_type", "production"
+        )
+
+    def test_returns_none_when_no_row_matches(self):
+        mock_client = MagicMock()
+        self._eq_chain(mock_client).execute.return_value.data = []
+
+        assert OrderRepository(mock_client).convert_draft_to_repair(1, {}) is None
+
+    def test_raises_duplicate_record_error_on_unique_violation(self):
+        mock_client = MagicMock()
+        self._eq_chain(mock_client).execute.side_effect = APIError(
+            {"code": "23505", "message": "orders_repair_customer_order_no_key"}
+        )
+
+        with pytest.raises(DuplicateRecordError) as exc_info:
+            OrderRepository(mock_client).convert_draft_to_repair(1, {})
+
+        assert exc_info.value.constraint == "orders_repair_customer_order_no_key"
