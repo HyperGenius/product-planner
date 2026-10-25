@@ -111,6 +111,9 @@ cd backend && ruff check . && mypy .
   `uv pip install --no-build` で wheel だけで入るか（本番向けは `--python-platform x86_64-manylinux_2_28 --target <dir>`）、
   unit / api / integration を旧版と並べて結果が一致するかで確かめる。ruff の `target-version` は `UP` ルールの書き換えが
   大量に出るのでランタイムの変更と別 PR にする
+- **Docker イメージに入るのは `backend/app/` と `requirements.txt` だけ**（`backend/.dockerignore` が許可リスト方式）。
+  実行時に `app/` の外のファイル（`data/` 等）を読むようにしたら `.dockerignore` に `!` で追加する（しないと本番だけ
+  ファイルが無くて落ちる）
 - **Storage の「上書きしない」アップロード**: `upload(..., file_options={"upsert": "false"})` で既存キーに書くと
   storage3 は `StorageApiError` を投げ、実 Storage では `status == "409"`（文字列）/ `code == "Duplicate"` になる
   （ローカル Supabase で確認済み。既存オブジェクトは上書きされない）。重複を正常系として扱う場合はこれで判定し、
