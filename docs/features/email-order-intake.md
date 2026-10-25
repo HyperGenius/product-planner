@@ -424,6 +424,55 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 ---
 
+## 処理結果の Slack 通知（Issue #574）
+
+メール起票の処理結果を、**プラットフォーム管理者の Slack** に件数のサマリで通知する。詳細は
+アプリ（受信メール処理結果 `/orders/email-intake`）で確認する前提で、Slack には件数とリンクだけを載せる
+（顧客名・品名・本文は載せない）。ベルの通知（`notifications`）とは切り離している。
+
+```
+📨 メール起票（10/25 09:15）
+・テナントA：起票 3通（受注 7件）／うち要確認 1通／失敗 1通
+・テナントB：起票 1通（受注 1件）／処理待ちの滞留 1通
+詳細 → https://<APP_BASE_URL>/orders/email-intake
+```
+
+### 仕組み
+
+- cron `GET /api/cron/notify-email-intake-slack`（`routers/cron/notify_email_intake_slack.py`）を、
+  Edge Function `parse-order-pdfs-trigger` が `parse-order-pdfs` の直後に呼ぶ。ロジックは
+  `services/email_intake_slack_service.py`
+- 対象は **Gmail から受信したステージング行**（`order_attachments`、`order_id IS NULL AND gmail_message_id IS NOT NULL`）。
+  手入力の「メール起票」（Issue #358）は通知しない。件数は受信メール処理結果の一覧と同じくステージング行（PDF 添付ごと）単位で数える
+- 分類は受信メール処理結果と同じ `derive_email_intake_outcome()`（`services/email_intake_outcome.py`）を使い、
+  画面の表示と件数を一致させる。「起票」「うち要確認」「失敗」を載せ、「スキップ」は載せない
+- **処理待ちの滞留**: 受信（`created_at`）から1時間（`STALLED_AFTER`）以上 `parse_status='pending'` のままの行。
+  パース中の例外で `pending` のまま残った行に気づくためのもの
+- 二重通知を防ぐため、`order_attachments` に通知日時を2列持つ（マイグレーション
+  `20261025000000_add_order_attachments_slack_notified_at.sql`。既存の行は通知済みで埋めた）
+
+| 列 | 意味 |
+|---|---|
+| `slack_notified_at` | 処理結果（起票・要確認・失敗・スキップ）を通知した日時 |
+| `slack_stalled_notified_at` | 滞留を通知した日時。滞留を通知した行も、処理が終われば処理結果としてもう1回通知する |
+
+- **送信に成功したときだけ**通知日時を書く。送信に失敗したら書かず、次回の cron でまとめて再送する
+  （通知日時の書き込みが送信後に失敗した場合だけ1通重複しうる）。載せる件数が0（スキップだけ等）のときは送らずに通知済みにする
+- 1回の cron で集計するのは処理結果・滞留それぞれ最大500行（残りは次回）
+- httpx の例外文言には webhook URL が含まれるので、ログ・レスポンス・例外の連鎖に残さない（`SlackNotifyError` は `from None`）
+
+### 環境変数（Render）
+
+| 変数名 | 説明 |
+|---|---|
+| `SLACK_WEBHOOK_URL` | Slack の Incoming Webhook URL。未設定なら通知しない（ローカル・検証環境から送らない） |
+| `APP_BASE_URL` | フロントエンドの URL（末尾スラッシュ無し）。リンクの組み立てに使う。未設定なら通知しない |
+
+リンク先の画面はプラットフォーム管理者がそのとき選んでいるテナントのデータを表示するので、
+どのテナントの件数かは本文のテナント名で判断する。
+
+---
+
 ## 手動での「メール起票」（Issue #358）
 
 自動パイプライン（Gmail ポーリング）に乗せられない受注メール（フォーマットが抽出に
@@ -518,3 +567,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 社内転送者（社長）の登録。差出人で顧客を作らず、注文書の会社名・FAX番号（`customers.fax_number`）から顧客を決め、決まらなければ顧客不明（`customer_id` NULL）で起票（詳細は[internal-senders.md](internal-senders.md)） | ✅ #521 |
 | 注文書からの顧客照合で、番号の表記揺れ（市内局番の括弧等）・見出しの無い番号・電話番号（`customers.phone_number`）に対応（詳細は[internal-senders.md](internal-senders.md)） | ✅ #524 |
 | 自動起票時の作業開始日（JST 翌日）設定とシミュ納期の自動算出（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#起票後の自動シミュレーションissue-477)） | ✅ #477 |
+| 処理結果をプラットフォーム管理者の Slack に件数で通知（`GET /api/cron/notify-email-intake-slack`、[処理結果の Slack 通知](#処理結果の-slack-通知issue-574)） | ✅ #574 |

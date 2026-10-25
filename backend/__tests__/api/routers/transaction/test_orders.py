@@ -340,10 +340,10 @@ class TestOrderRouter:
         self, parse_status, created_count, reasons, expected
     ):
         """受信受注メールの処理結果を「起票 / スキップ / 失敗」の3値に固定する（Issue #422）"""
-        from app.routers.transaction.orders import _derive_email_intake_outcome
+        from app.services.email_intake_outcome import derive_email_intake_outcome
 
         assert (
-            _derive_email_intake_outcome(parse_status, created_count, reasons)
+            derive_email_intake_outcome(parse_status, created_count, reasons)
             == expected
         )
 

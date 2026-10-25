@@ -2,15 +2,17 @@
 // ロジック自体は持たず、Render(FastAPI)側の
 //   1. GET /api/cron/gmail-poll            （メール取得・添付のステージング保存）
 //   2. GET /api/cron/parse-order-pdfs      （ステージング済み行の解析・orders反映）
-//   3. GET /api/cron/advance-order-status  （着手日到来で confirmed <-> in_progress を自動遷移。Issue #400）
-//   4. GET /api/cron/parse-daily-reports   （受信済みの日報Excelをパースし明細を保存。Issue #487）
-//   5. GET /api/cron/compute-daily-report-progress（日報の実績を受注に割り付け進捗を再計算。Issue #490）
+//   3. GET /api/cron/notify-email-intake-slack（メール起票の処理結果を Slack に件数で通知。Issue #574）
+//   4. GET /api/cron/advance-order-status  （着手日到来で confirmed <-> in_progress を自動遷移。Issue #400）
+//   5. GET /api/cron/parse-daily-reports   （受信済みの日報Excelをパースし明細を保存。Issue #487）
+//   6. GET /api/cron/compute-daily-report-progress（日報の実績を受注に割り付け進捗を再計算。Issue #490）
 // をこの順で CRON_SECRET 付きに叩くだけ。1回の実行で複数のcronをまとめて処理する
 // （厳密にはgmail-pollの完了後にparse-order-pdfsを実行したいが、10〜15分間隔で
 // 繰り返し実行されるため多少の前後があっても実用上問題ない。Issue #261 参照）。
 //
 // gmail-poll が失敗しても、前回までにステージング済みの行が残っている可能性があるため
-// parse-order-pdfs は続けて実行する。advance-order-status はメール処理とは独立で、
+// parse-order-pdfs は続けて実行する。notify-email-intake-slack はその回のパース結果を通知するため直後に呼ぶ
+// （未通知の行だけを送るので、前段が失敗しても続けて実行してよい）。advance-order-status はメール処理とは独立で、
 // 着手日ベースの冪等なバルク更新のため毎回叩いても副作用はない（実質日次相当）。
 // parse-daily-reports もメール処理とは独立で、未処理（pending）のファイルだけを処理する。
 // compute-daily-report-progress はテナント単位の全量再計算（冪等）で、パース直後に呼んでその回の明細を反映する。
@@ -50,6 +52,7 @@ Deno.serve(async (_req: Request) => {
 
   const gmailPoll = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/gmail-poll")
   const parseOrderPdfs = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/parse-order-pdfs")
+  const notifyEmailIntakeSlack = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/notify-email-intake-slack")
   const advanceOrderStatus = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/advance-order-status")
   const parseDailyReports = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/parse-daily-reports")
   // 日報の実績の割り付け・進捗は、パース直後の明細で再計算する（Issue #490）
@@ -63,6 +66,7 @@ Deno.serve(async (_req: Request) => {
   const overallStatus =
     isSuccess(gmailPoll.status) &&
     isSuccess(parseOrderPdfs.status) &&
+    isSuccess(notifyEmailIntakeSlack.status) &&
     isSuccess(advanceOrderStatus.status) &&
     isSuccess(parseDailyReports.status) &&
     isSuccess(computeDailyReportProgress.status)
@@ -73,6 +77,7 @@ Deno.serve(async (_req: Request) => {
     JSON.stringify({
       gmailPoll,
       parseOrderPdfs,
+      notifyEmailIntakeSlack,
       advanceOrderStatus,
       parseDailyReports,
       computeDailyReportProgress,

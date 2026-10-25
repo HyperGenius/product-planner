@@ -18,7 +18,6 @@ from .approval_logs import router as approval_logs_router
 from .approval_workflow import router as approval_workflow_router
 from .attachments import router as attachments_router
 from .crud import router as crud_router
-from .email_intake import _derive_email_intake_outcome
 from .email_intake import router as email_intake_router
 from .progress import router as progress_router
 from .repair_conversion import router as repair_conversion_router
@@ -44,5 +43,4 @@ __all__ = [
     "orders_router",
     # 以下はテスト互換のための再エクスポート（Issue #376）
     "get_settings_repo",
-    "_derive_email_intake_outcome",
 ]

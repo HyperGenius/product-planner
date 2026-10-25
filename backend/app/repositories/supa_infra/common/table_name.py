@@ -6,6 +6,7 @@ class SupabaseTableName(Enum):
     """Supabaseのテーブル名を定義する列挙型クラス。"""
 
     USERS = "users"
+    TENANTS = "tenants"
     PRODUCTS = "products"
     ORDERS = "orders"
     CUSTOMERS = "customers"

@@ -3,6 +3,9 @@ from app.routers.cron.compute_daily_report_progress import (
     compute_daily_report_progress_router,
 )
 from app.routers.cron.gmail_poll import cron_router
+from app.routers.cron.notify_email_intake_slack import (
+    notify_email_intake_slack_router,
+)
 from app.routers.cron.parse_daily_reports import parse_daily_reports_router
 from app.routers.cron.parse_order_pdfs import parse_order_pdfs_router
 
@@ -12,4 +15,5 @@ __all__ = [
     "advance_order_status_router",
     "parse_daily_reports_router",
     "compute_daily_report_progress_router",
+    "notify_email_intake_slack_router",
 ]
