@@ -443,6 +443,11 @@ cd backend && ruff check . && mypy .
     デプロイ自体は成功している。もう一度 `terraform plan` して `No changes` なら state も一致している
 - cron は高頻度（10〜15分間隔）で回るため、処理は**冪等**に作る。全テナント横断で動くので `get_supabase_admin_client()` を使う（権限チェックは `CRON_SECRET` で代替）
 - エラー時のレスポンスに例外メッセージ（`{exc}`）をそのまま入れない。詳細は `logger.error(..., exc_info=True)` でログにのみ残し、レスポンスは固定文言にする
+- **外部へ通知する cron（Slack、Issue #574）**: 通知済みは送信に成功してから行に記録し（失敗時は次回に再送）、通知の判定は
+  画面と同じ関数を使う（メール起票は `services/email_intake_outcome.derive_email_intake_outcome()`。`order_parse_log.reason` を
+  足したらここの分類集合に登録すると画面と Slack の両方に効く）。httpx の例外文言には送信先 URL（webhook のトークン）が入るので、
+  ステータスコードだけをログに残し、独自の例外を `from None` で送出する（ルーターの `exc_info=True` に連鎖させない）。
+  受信メールのステージング行のうち、Gmail から来たものは `gmail_message_id` あり、手入力の「メール起票」は NULL で見分ける
 
 ## Git ワークフロー
 

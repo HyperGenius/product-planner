@@ -12,6 +12,7 @@ from app.routers.cron import (
     advance_order_status_router,
     compute_daily_report_progress_router,
     cron_router,
+    notify_email_intake_slack_router,
     parse_daily_reports_router,
     parse_order_pdfs_router,
 )
@@ -80,6 +81,7 @@ app.include_router(device_router)
 app.include_router(admin_router)
 app.include_router(cron_router)
 app.include_router(parse_order_pdfs_router)
+app.include_router(notify_email_intake_slack_router)
 app.include_router(advance_order_status_router)
 app.include_router(parse_daily_reports_router)
 app.include_router(compute_daily_report_progress_router)

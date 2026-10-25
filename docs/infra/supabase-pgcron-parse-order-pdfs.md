@@ -6,7 +6,7 @@ Issue: #261
 
 メール起票パイプラインは `GET /api/cron/gmail-poll` → `GET /api/cron/parse-order-pdfs`（いずれもRender/FastAPI）の2段階で構成されている（詳細は [email-order-intake.md](../features/email-order-intake.md) の「2段階Cronのスケジューリング設計」を参照）。特に2段目は取りこぼしを避けるため5〜15分間隔程度の高頻度実行が必要だが、Vercel Cron は無料（Hobby）プランの実行回数制限（1日2回まで）によりこれを満たせない（詳細は [env-setup-gmail-cron.md](env-setup-gmail-cron.md) の「既知のギャップ」を参照）。
 
-Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加コストなしで使えるため、Supabase Edge Function + pg_cron の組み合わせで高頻度スケジューリングを構築する。ロジック自体は Render 側の既存エンドポイントに残したまま、Edge Function は `CRON_SECRET` 付きで各エンドポイントを順に fetch するだけの薄いトリガーに徹する。1回の実行で `gmail-poll` → `parse-order-pdfs` → `advance-order-status` → `parse-daily-reports` → `compute-daily-report-progress` をまとめて処理するため、Vercel Cron によるスケジューリングは不要になった。
+Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加コストなしで使えるため、Supabase Edge Function + pg_cron の組み合わせで高頻度スケジューリングを構築する。ロジック自体は Render 側の既存エンドポイントに残したまま、Edge Function は `CRON_SECRET` 付きで各エンドポイントを順に fetch するだけの薄いトリガーに徹する。1回の実行で `gmail-poll` → `parse-order-pdfs` → `notify-email-intake-slack` → `advance-order-status` → `parse-daily-reports` → `compute-daily-report-progress` をまとめて処理するため、Vercel Cron によるスケジューリングは不要になった。
 
 ```
 [pg_cron（5〜15分間隔）]
@@ -15,24 +15,29 @@ Supabase は既に Pro プランを利用しており pg_cron / pg_net が追加
       → fetch (Authorization: Bearer CRON_SECRET)
         → 1. [Render: GET /api/cron/gmail-poll]
         → 2. [Render: GET /api/cron/parse-order-pdfs]
-        → 3. [Render: GET /api/cron/advance-order-status]  ← 着手日到来で confirmed ⇄ in_progress を自動遷移（Issue #400）
-        → 4. [Render: GET /api/cron/parse-daily-reports]   ← 受信済みの日報Excelをパースし明細を保存（Issue #487）
-        → 5. [Render: GET /api/cron/compute-daily-report-progress]  ← 日報の実績を受注に割り付け進捗を再計算（Issue #490）
+        → 3. [Render: GET /api/cron/notify-email-intake-slack]  ← メール起票の処理結果を Slack に件数で通知（Issue #574）
+        → 4. [Render: GET /api/cron/advance-order-status]  ← 着手日到来で confirmed ⇄ in_progress を自動遷移（Issue #400）
+        → 5. [Render: GET /api/cron/parse-daily-reports]   ← 受信済みの日報Excelをパースし明細を保存（Issue #487）
+        → 6. [Render: GET /api/cron/compute-daily-report-progress]  ← 日報の実績を受注に割り付け進捗を再計算（Issue #490）
 ```
 
-3本目の `advance-order-status` はメール起票パイプラインとは独立した処理で、着手日
+3本目の `notify-email-intake-slack` は、その回のパース結果をプラットフォーム管理者の Slack に件数で通知する。
+未通知の行だけを送るので毎回叩いても重複しない。Render に `SLACK_WEBHOOK_URL` / `APP_BASE_URL` が無ければ何もしない。
+詳細は [email-order-intake.md](../features/email-order-intake.md#処理結果の-slack-通知issue-574) を参照。
+
+4本目の `advance-order-status` はメール起票パイプラインとは独立した処理で、着手日
 （`orders.scheduling_start_date`、無ければ最早工程の `production_schedules.start_datetime`）
 を過ぎた `confirmed` 受注を `in_progress` に、未来へ戻ったものを `confirmed` に戻す全テナント
 横断のバルク更新。着手日は date 粒度のため本来は日次で十分だが、冪等なので高頻度実行でも
 副作用は無く、専用の pg_cron ジョブを追加せずこのトリガーに相乗りしている。詳細は
 [order-status-workflow.md](../features/order-status-workflow.md) の「着手日到来による生産中への自動遷移」を参照。
 
-4本目の `parse-daily-reports` も独立した処理で、日報取り込みエージェントが送った日報Excel
+5本目の `parse-daily-reports` も独立した処理で、日報取り込みエージェントが送った日報Excel
 （`daily_report_files` のうち `parse_status = 'pending'` のもの）をパースして明細に保存する。
 未処理のファイルだけを扱う冪等な処理なので、同じくこのトリガーに相乗りしている。詳細は
 [daily-report-agent.md](../features/daily-report-agent.md) の「日報のパースと明細の保存」を参照。
 
-5本目の `compute-daily-report-progress` は、日報の明細を受注の工程に割り付けて進捗を保存する。差分更新せず
+6本目の `compute-daily-report-progress` は、日報の明細を受注の工程に割り付けて進捗を保存する。差分更新せず
 テナント単位で毎回全量を再計算して置き換える冪等な処理で、`parse-daily-reports` の直後に呼ぶことで、その回に
 パースした明細が反映される。詳細は [daily-report-agent.md](../features/daily-report-agent.md) の
 「受注への割り付けと進捗の算出」を参照。
