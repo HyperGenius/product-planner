@@ -33,6 +33,10 @@ Gmail/Claude API を経由させて検証するとテストが不必要に重く
   （`yield` フィクスチャ + `finally`、または明示的な `.delete()`）。
   他のテストや開発中のデータと衝突しないよう、識別用の一意な値
   （`uuid.uuid4()` 等）をテナントID・注文番号等に含める
+- **RLS で「他テナントの行が見えない」を確かめるときは、検索をテスト内のテナントに絞る**
+  （`.in_("tenant_id", [own_id, other_id])`）。ログインユーザーは seed 済みの `TEST_TENANT_ID` の
+  テナントにも所属しているので、絞らずに「見える行がすべて own のもの」と書くと、開発中に
+  seed 済みテナントへ溜まった行（cron の実行記録等）で失敗する（Issue #571）
 - **teardown の削除順は外部キーの向きに合わせる**。`orders` は複数の子テーブルから参照され、
   中には `ON DELETE CASCADE` でないもの（例: `orders.source_attachment_id → order_attachments(id)`
   は `NO ACTION`）がある。子を先に消すと `23503` で teardown が ERROR になる。

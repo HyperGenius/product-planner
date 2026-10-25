@@ -474,8 +474,12 @@ class TestAllocationRls:
             "daily_report_unallocated_actuals",
             "daily_report_allocation_runs",
         ):
+            # ログインユーザーは seed 済みのテナントにも所属するので、テスト内のテナントに絞る
             visible = _rows(
-                real_supabase_client.table(table).select("tenant_id").execute()
+                real_supabase_client.table(table)
+                .select("tenant_id")
+                .in_("tenant_id", [own["id"], other["id"]])
+                .execute()
             )
             assert visible
             assert {r["tenant_id"] for r in visible} == {own["id"]}

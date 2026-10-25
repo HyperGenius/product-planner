@@ -271,7 +271,13 @@ class TestNameAliasRls:
         admin_db.table(table).insert(
             {**row(tenants["other"]), "created_by": auth_user_id}
         ).execute()
-        visible = _rows(real_supabase_client.table(table).select("tenant_id").execute())
+        # ログインユーザーは seed 済みのテナントにも所属するので、テスト内のテナントに絞る
+        visible = _rows(
+            real_supabase_client.table(table)
+            .select("tenant_id")
+            .in_("tenant_id", [tenants["own"]["id"], tenants["other"]["id"]])
+            .execute()
+        )
         assert {r["tenant_id"] for r in visible} == {tenants["own"]["id"]}
 
     def test_process_names_must_not_be_empty(
@@ -425,7 +431,12 @@ class TestIgnoredNames:
         admin_db.table("daily_report_ignored_names").insert(
             self._row(other, auth_user_id)
         ).execute()
-        visible = _rows(table.select("tenant_id").execute())
+        # ログインユーザーは seed 済みのテナントにも所属するので、テスト内のテナントに絞る
+        visible = _rows(
+            table.select("tenant_id")
+            .in_("tenant_id", [own["id"], other["id"]])
+            .execute()
+        )
         assert {r["tenant_id"] for r in visible} == {own["id"]}
 
     def test_api_ignore_and_entries(self, admin_db, auth_token, tenants):
