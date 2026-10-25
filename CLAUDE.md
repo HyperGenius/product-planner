@@ -102,16 +102,25 @@ cd backend && ruff check . && mypy .
     書くときは `get_supabase_admin_client()` で別のクライアントを作る（Issue #430 の調査で判明）
 - **supabase-py のバージョンを上げるとき（Issue #430）**: `requirements.txt` は推移的依存まで固定しているので、
   一式（`supabase`/`postgrest`/`storage3`/`realtime`/`supabase-auth`/`supabase-functions`）と、それらが要求する
-  下限（例: `supabase-auth` 2.31.0 → `PyJWT>=2.12.0`）をクリーンな venv（`uv venv -p 3.11`）で解決して確かめる。
+  下限（例: `supabase-auth` 2.31.0 → `PyJWT>=2.12.0`）をクリーンな venv（`uv venv -p 3.14`）で解決して確かめる。
   使わなくなった依存を消すときは `uv pip tree --invert --package <name>` で他に依存元が無いか見る
   （`pyparsing` は `httplib2` 経由で必要）
+- **Python のバージョンを上げるとき（Issue #570）**: 指定は `backend/Dockerfile`（Render は Dockerfile Path でこれを使う）・
+  `.github/workflows/ci-backend.yml`・`backend/pyproject.toml`（mypy `python_version` / ruff `target-version`）に散っているので揃える。
+  ベースイメージはタグを変えると Debian も変わるので `python:3.x-slim-<コード名>` まで固定する。互換性は、クリーンな venv に
+  `uv pip install --no-build` で wheel だけで入るか（本番向けは `--python-platform x86_64-manylinux_2_28 --target <dir>`）、
+  unit / api / integration を旧版と並べて結果が一致するかで確かめる。ruff の `target-version` は `UP` ルールの書き換えが
+  大量に出るのでランタイムの変更と別 PR にする
+- **Docker イメージに入るのは `backend/app/` と `requirements.txt` だけ**（`backend/.dockerignore` が許可リスト方式）。
+  実行時に `app/` の外のファイル（`data/` 等）を読むようにしたら `.dockerignore` に `!` で追加する（しないと本番だけ
+  ファイルが無くて落ちる）
 - **Storage の「上書きしない」アップロード**: `upload(..., file_options={"upsert": "false"})` で既存キーに書くと
   storage3 は `StorageApiError` を投げ、実 Storage では `status == "409"`（文字列）/ `code == "Duplicate"` になる
   （ローカル Supabase で確認済み。既存オブジェクトは上書きされない）。重複を正常系として扱う場合はこれで判定し、
   それ以外の `StorageApiError` は再送出する（`daily_report_service._upload_if_absent()`、Issue #471）
 - **Storage のオブジェクトキーと content-type**: 日本語ファイル名をキーに使わない場合でも、ダウンロードしてそのまま
   開けるよう元ファイル名の拡張子（ASCII 英数字のみ・小文字化）はキー末尾に付ける。content-type は `mimetypes` で
-  推測しない（本番の `python:3.11-slim` は `/etc/mime.types` が無く、Python バージョンによって `.xlsx` を解決できない）。
+  推測しない（本番の `python:3.14-slim-trixie` は `/etc/mime.types` が無く、Python バージョンによって `.xlsx` を解決できない）。
   扱う拡張子を明示した対応表で持つ（`daily_report_service.storage_extension()` / `content_type_for()`）
 - **raw body（octet-stream）を受けるエンドポイント**: `UploadFile` を使わずボディを直接受ける場合は
   `async def` にして `request.stream()` で読みながらサイズ上限（`Content-Length` 省略のチャンク転送に備えて
