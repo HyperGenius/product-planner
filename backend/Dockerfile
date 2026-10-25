@@ -1,6 +1,7 @@
 # for Cloud Run
-# 1. Python 3.11の軽量イメージを使用
-FROM python:3.11-slim
+# 1. Python 3.14の軽量イメージを使用
+# (タグを変えると OS の Debian も変わるので、コード名まで固定する)
+FROM python:3.14-slim-trixie
 
 # 2. コンテナ内の作業ディレクトリを設定
 WORKDIR /app

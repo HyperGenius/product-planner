@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       # pip のキャッシュはダウンロード済みの wheel しか持たず、解決・インストールに毎回 30秒近くかかっていたため
       # uv でインストールする（キャッシュは uv 自身のものを使う）

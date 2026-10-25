@@ -25,7 +25,7 @@
 
 ### Backend
 
-* **Runtime**: Python 3.11
+* **Runtime**: Python 3.14
 * **Framework**: [FastAPI](https://fastapi.tiangolo.com/)（[Cloud Run](https://cloud.google.com/run) 上で uvicorn により稼働）
 * **Architecture**: Clean Architecture / Repository Pattern
 
@@ -58,7 +58,7 @@
 ### 前提条件
 
 * Node.js 18+
-* Python 3.11
+* Python 3.14
 * Docker Desktop
 * [Supabase CLI](https://supabase.com/docs/guides/cli)
 
