@@ -37,28 +37,60 @@ describe("TaskBar の進捗表示", () => {
     expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
   })
 
-  it("遅れは赤枠で強調する", () => {
-    const bar = renderBar(task({ isDelayed: true }))
-    expect(bar).toHaveAttribute("data-delayed", "true")
-    expect(bar.className).toContain("ring-red-600")
+  it("グループヘッダーには進捗・外観を出さない", () => {
+    const bar = renderBar(task({ isGroupHeader: true, progress: 0.5, appearance: "danger", badge: "！" }))
+    expect(bar).not.toHaveAttribute("data-appearance")
+    expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("task-bar-badge")).not.toBeInTheDocument()
   })
 
-  it("遅れでなければ強調しない", () => {
-    const bar = renderBar(task({ progress: 0.5 }))
-    expect(bar).not.toHaveAttribute("data-delayed")
-    expect(bar.className).not.toContain("ring-red-600")
+  it("マイルストーンは外観だけ示す（塗り・バッジは無し）", () => {
+    const bar = renderBar(task({ isMilestone: true, progress: 0.5, appearance: "danger", badge: "！" }))
+    expect(bar).toHaveAttribute("data-appearance", "danger")
+    expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("task-bar-badge")).not.toBeInTheDocument()
+  })
+})
+
+describe("TaskBar の外観とバッジ（Issue #580）", () => {
+  it("外観の指定が無ければ default（color の塗り）", () => {
+    const bar = renderBar(task())
+    expect(bar).toHaveAttribute("data-appearance", "default")
+    expect(bar).toHaveStyle({ backgroundColor: "#3b82f6" })
   })
 
-  it("グループヘッダーには進捗・遅れを出さない", () => {
-    const bar = renderBar(task({ isGroupHeader: true, progress: 0.5, isDelayed: true }))
-    expect(bar).not.toHaveAttribute("data-delayed")
+  it("neutral は color を使わない無彩色の塗り", () => {
+    const bar = renderBar(task({ appearance: "neutral", progress: 0.5 }))
+    expect(bar.className).toContain("bg-gray-300")
+    expect(bar.style.backgroundColor).toBe("")
     expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
   })
 
-  it("マイルストーンは遅れだけ示す（塗りは無し）", () => {
-    const bar = renderBar(task({ isMilestone: true, progress: 0.5, isDelayed: true }))
-    expect(bar).toHaveAttribute("data-delayed", "true")
+  it("subtle は淡い塗り＋color の枠線", () => {
+    const bar = renderBar(task({ appearance: "subtle" }))
+    expect(bar.className).toContain("border-dashed")
+    expect(bar).toHaveStyle({ borderColor: "#3b82f6" })
+    expect(bar.style.backgroundColor).toBe("")
+  })
+
+  it("muted はくすんだ色で、進捗の塗りを重ねない", () => {
+    const bar = renderBar(task({ appearance: "muted", progress: 1, badge: "✓" }))
+    expect(bar.className).toContain("bg-gray-200")
     expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
+    expect(screen.getByTestId("task-bar-badge")).toHaveTextContent("✓")
+  })
+
+  it("danger は赤の斜線入りの塗りで、進捗の塗りは重ねる", () => {
+    const bar = renderBar(task({ appearance: "danger", progress: 0.4, badge: "！" }))
+    expect(bar.className).toContain("bg-red-600")
+    expect(bar.className).toContain("repeating-linear-gradient")
+    expect(screen.getByTestId("task-bar-progress")).toHaveStyle({ width: "40%" })
+    expect(screen.getByTestId("task-bar-badge")).toHaveTextContent("！")
+  })
+
+  it("バッジが無ければ描かない", () => {
+    renderBar(task())
+    expect(screen.queryByTestId("task-bar-badge")).not.toBeInTheDocument()
   })
 })
 

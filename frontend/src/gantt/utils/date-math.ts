@@ -225,15 +225,23 @@ function binarySearchFirstGe(slots: Date[], targetMs: number): number {
  * 現在時刻のグリッド上の小数列位置を返す（表示範囲外なら null）
  */
 export function getNowFractionalColumn(config: TimelineConfig): number | null {
-  const now = Date.now()
+  return getFractionalColumn(config, new Date())
+}
+
+/**
+ * 任意の時刻を、グリッド線の位置（1 始まりの列番号。小数あり）に変換する。
+ * 表示範囲の外なら null。非稼働時間を除いたグリッドでは、その時刻以降で最初のスロットの左端に寄せる
+ */
+export function getFractionalColumn(config: TimelineConfig, at: Date): number | null {
+  const time = at.getTime()
   const { rangeStart, rangeEnd, unitDurationMs, slotTimestamps } = config
 
-  if (now < rangeStart.getTime() || now > rangeEnd.getTime()) return null
+  if (time < rangeStart.getTime() || time > rangeEnd.getTime()) return null
 
   if (slotTimestamps && slotTimestamps.length > 0) {
-    const idx = binarySearchFirstGe(slotTimestamps, now)
+    const idx = binarySearchFirstGe(slotTimestamps, time)
     return idx + 1
   }
 
-  return (now - rangeStart.getTime()) / unitDurationMs + 1
+  return (time - rangeStart.getTime()) / unitDurationMs + 1
 }

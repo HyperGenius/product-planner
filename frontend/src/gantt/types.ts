@@ -1,6 +1,25 @@
 import type { ReactNode } from 'react'
 
 /**
+ * バーの見た目
+ * - default: color の塗り
+ * - neutral: 無彩色の塗り（color を使わない）
+ * - subtle: 淡い塗り＋color の枠線（まだ始まっていない）
+ * - muted: くすんだ色（目立たせない）
+ * - danger: 赤の斜線入りの塗り（最も目立たせる）
+ */
+export type GanttBarAppearance = 'default' | 'neutral' | 'subtle' | 'muted' | 'danger'
+
+/** 行に重ねる縦線の目印 */
+export interface GanttMarker {
+  at: Date
+  /** 線の脇に出す文言。表示範囲の外なら端に `→ label` / `← label` として出す */
+  label: string
+  /** 'danger' は赤で描く */
+  tone?: 'default' | 'danger'
+}
+
+/**
  * 汎用ガントチャートのタスク型
  * プロダクト固有のドメイン知識を持たない
  */
@@ -41,8 +60,17 @@ export interface GanttTask {
    * グループヘッダー・マイルストーンでは無視する
    */
   progress?: number
-  /** 遅れとして強調表示する場合 true（グループヘッダーでは無視する） */
-  isDelayed?: boolean
+  /**
+   * バーの見た目。未指定は 'default'（color の塗り＋progress の塗り）。
+   * グループヘッダーでは無視する
+   */
+  appearance?: GanttBarAppearance
+  /** バーの中に出す短いテキスト・記号（例: `60%`、`✓`）。マイルストーン・グループヘッダーでは出さない */
+  badge?: string
+  /**
+   * 行のタイムライン上に縦線で示す目印（納期など）。同じ rowId の行は先頭タスクのものを使う
+   */
+  markers?: GanttMarker[]
   /**
    * 同じ行に並べるタスクの識別子。同じ rowId のタスクは1行にまとめて描画する
    * （1つの作業が飛び飛びの区間に分かれる場合に、区間ごとのバーを1行に並べる）。

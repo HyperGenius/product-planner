@@ -345,6 +345,11 @@ cd backend && ruff check . && mypy .
     API は表示期間と重なるセグメントしか返さないので、期間外へ続くかは同 API の `process_/order_start/end_datetime`（期間外を含む範囲）で判定する。
     グループ行の細いサマリーバー・子行（`parentId`）の折りたたみ・続きの印（`continuesBefore/After`）は `src/gantt` の汎用機能で、
     注文・顧客などの語は `components/schedule` 側に置く。詳細は [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md)
+  - バーの状態表示（Issue #580）: 色は製品ではなく工程の状態（`processDisplayState()`）を表す。**進捗の行が無い工程は「計画のみ」
+    （未着手・遅れにしない）**。`src/gantt` には汎用の `appearance` / `badge` / `markers` だけを置き、状態名は `components/schedule` 側。
+    凡例の見本は実際の `TaskBar` で描いて見た目と食い違わせない。納期マーカーは日付のみの値を `parseISO` で読み、**日の終わり**
+    （翌日 0:00）に引く。超過判定は希望納期のときだけ（完成見込みは計画の終了から算出するので常に間に合う）。詳細は
+    [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md)
   - E2E でバーの「行」を比べるときは、グリッド要素の親（行 = ラベルセル＋グリッド、#578）の並び順で見る（`gantt-segment-bars.spec.ts` の `rowOf()`）
   - 稼働時間スロットの終了列は `binarySearchFirstGe`（終了時刻ちょうどのスロットは塗らない）。`FirstGt` にすると 10:00 終了のバーが
     10:00 開始の後工程と1列重なる（#163 で一度 `FirstGt` にして #535 で戻した）。詳細は [docs/features/gantt-date-math.md](docs/features/gantt-date-math.md)

@@ -106,32 +106,61 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
     )
   }
 
-  it("進捗率を塗りで示し、計画の終了を過ぎて未完了の工程を遅れにする", () => {
+  it("工程の状態をバーの外観とバッジで示す", () => {
     renderChart(PROGRESS)
 
-    expect(bar("プレス")).toHaveAttribute("data-progress", "100")
-    expect(bar("プレス")).not.toHaveAttribute("data-delayed")
+    // 完了: くすんだ色＋✓
+    expect(bar("プレス")).toHaveAttribute("data-appearance", "muted")
+    expect(bar("プレス")).toHaveTextContent("✓")
 
+    // 進行中で計画の終了を過ぎている: 遅れ（赤の斜線＋！）。進捗の塗りも残る
+    expect(bar("カシメ")).toHaveAttribute("data-appearance", "danger")
     expect(bar("カシメ")).toHaveAttribute("data-progress", "40")
-    expect(bar("カシメ")).toHaveAttribute("data-delayed", "true")
+    expect(bar("カシメ")).toHaveTextContent("！")
 
-    // 未着手は塗らない。計画の終了前なので遅れでもない（現状どおり）
-    expect(bar("検査")).not.toHaveAttribute("data-progress")
-    expect(bar("検査")).not.toHaveAttribute("data-delayed")
+    // 未着手で計画の終了前: 淡い塗り＋枠線、バッジなし
+    expect(bar("検査")).toHaveAttribute("data-appearance", "subtle")
+    expect(bar("検査")).not.toHaveTextContent(/./)
   })
 
-  it("進捗の行が無い工程・進捗を渡さないときは現状どおりの表示", () => {
+  it("進行中は進捗率をバッジに出す", () => {
+    renderChart([
+      progress({
+        process_routing_id: 12,
+        status: "in_progress",
+        good_qty: 60,
+        planned_end_datetime: at(12, 16),
+      }),
+    ])
+    expect(bar("カシメ")).toHaveAttribute("data-appearance", "default")
+    expect(bar("カシメ")).toHaveTextContent("60%")
+  })
+
+  it("進捗の行が無い工程は「計画のみ」で、未着手・遅れに見せない", () => {
     renderChart([PROGRESS[0]])
+    expect(bar("カシメ")).toHaveAttribute("data-appearance", "neutral")
     expect(bar("カシメ")).not.toHaveAttribute("data-progress")
-    expect(bar("カシメ")).not.toHaveAttribute("data-delayed")
+    expect(bar("カシメ")).not.toHaveTextContent(/./)
   })
 
-  it("進捗を渡さなければ塗り・遅れを出さない", () => {
+  it("進捗を渡さなければ全工程を「計画のみ」にする", () => {
     renderChart()
     for (const label of ["プレス", "カシメ", "検査"]) {
+      expect(bar(label)).toHaveAttribute("data-appearance", "neutral")
       expect(bar(label)).not.toHaveAttribute("data-progress")
-      expect(bar(label)).not.toHaveAttribute("data-delayed")
     }
+  })
+
+  it("ラベル列の工程行に状態のバッジを出す（計画のみは出さない）", () => {
+    renderChart([...PROGRESS.slice(0, 2)])
+    const badgeOf = (label: string) =>
+      screen
+        .getByText(label)
+        .closest<HTMLElement>('[data-testid="gantt-row-label"]')!
+        .querySelector('[data-testid="row-state-badge"]')
+    expect(badgeOf("プレス")).toHaveTextContent("完了")
+    expect(badgeOf("カシメ")).toHaveTextContent("遅れ")
+    expect(badgeOf("検査")).toBeNull()
   })
 
   it("週次でセグメントを1行に並べたバーにも進捗を載せる", () => {
@@ -145,7 +174,7 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
       />,
     )
     expect(bar("カシメ")).toHaveAttribute("data-progress", "40")
-    expect(bar("カシメ")).toHaveAttribute("data-delayed", "true")
+    expect(bar("カシメ")).toHaveAttribute("data-appearance", "danger")
   })
 
   it("ツールチップに実績数量・実績日・状態を出す", async () => {
@@ -518,5 +547,94 @@ describe("GanttChart（スケジュール）の注文行・工程行のラベル
     expect(bar("プレス")).not.toHaveAttribute("data-continues-after")
     expect(bar("カシメ")).toHaveAttribute("data-continues-after", "true")
     expect(bar("カシメ")).not.toHaveAttribute("data-continues-before")
+  })
+})
+
+describe("GanttChart（スケジュール）の注文行の状態と納期マーカー（Issue #580）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 8, 11, 10))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function order(overrides: Partial<Schedule>): Schedule[] {
+    const base = {
+      order_id: 1,
+      customer_name: "顧客A社",
+      product_name: "ピン",
+      quantity: 100,
+      desired_deadline: "2026-09-30",
+      confirmed_deadline: null,
+    }
+    return [
+      schedule({ ...base, id: 1, process_routing_id: 11, process_name: "プレス", sequence_order: 1, start_datetime: at(10, 9), end_datetime: at(10, 12), ...overrides }),
+      schedule({ ...base, id: 2, process_routing_id: 12, process_name: "検査", sequence_order: 2, start_datetime: at(10, 13), end_datetime: at(10, 16), ...overrides }),
+    ]
+  }
+
+  function renderOrder(tasks: Schedule[], progressItems?: ProcessProgress[]) {
+    return render(
+      <GanttChart tasks={tasks} viewMode="Day" groupBy="order" currentDate={BASE} progress={progressItems} />,
+    )
+  }
+
+  const orderBadge = () => {
+    const label = screen.getAllByTestId("gantt-row-label")[0]
+    return label.querySelector('[data-testid="row-state-badge"]')
+  }
+
+  it("全工程が完了した注文は「完了」", () => {
+    renderOrder(order({}), [
+      progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
+      progress({ process_routing_id: 12, sequence_order: 2, status: "completed" }),
+    ])
+    expect(orderBadge()).toHaveTextContent("完了")
+  })
+
+  it("遅れの工程がある注文は「遅れあり」", () => {
+    renderOrder(order({}), [
+      progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
+      progress({ process_routing_id: 12, sequence_order: 2, planned_end_datetime: at(10, 16) }),
+    ])
+    expect(orderBadge()).toHaveTextContent("遅れあり")
+  })
+
+  it("それ以外は最終工程の進捗", () => {
+    renderOrder(order({}), [
+      progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
+      progress({ process_routing_id: 12, sequence_order: 2, status: "in_progress", good_qty: 50, planned_end_datetime: at(20, 16) }),
+    ])
+    expect(orderBadge()).toHaveTextContent("進行中 50%")
+  })
+
+  it("進捗の行が無い注文には状態を出さない", () => {
+    renderOrder(order({}))
+    expect(orderBadge()).toBeNull()
+  })
+
+  it("納期が表示期間の外なら端に「→ 納期 M/d」を出す", () => {
+    renderOrder(order({ desired_deadline: "2026-09-30" }))
+    expect(screen.getByTestId("gantt-marker-edge")).toHaveTextContent("→ 納期 9/30")
+    expect(screen.queryByTestId("deadline-warning")).not.toBeInTheDocument()
+  })
+
+  it("納期が表示期間の中なら縦線を出し、計画が間に合っていれば警告しない", () => {
+    renderOrder(order({ desired_deadline: "2026-09-10" }))
+    expect(screen.getByTestId("gantt-marker")).toHaveTextContent("納期 9/10")
+    expect(screen.queryByTestId("deadline-warning")).not.toBeInTheDocument()
+  })
+
+  it("最後の工程の計画終了が希望納期を超える注文には警告を出す", () => {
+    renderOrder(order({ desired_deadline: "2026-09-09" }))
+    expect(screen.getByTestId("deadline-warning")).toHaveTextContent("納期超過")
+  })
+
+  it("完成見込みを納期に使う注文は超過の警告を出さない", () => {
+    renderOrder(order({ desired_deadline: null, confirmed_deadline: "2026-09-09" }))
+    expect(screen.getByTestId("gantt-marker")).toHaveTextContent("見込 9/9")
+    expect(screen.queryByTestId("deadline-warning")).not.toBeInTheDocument()
   })
 })
