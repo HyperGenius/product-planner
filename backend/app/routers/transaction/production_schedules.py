@@ -1,18 +1,29 @@
 # routers/transaction/production_schedules.py
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.dependencies import get_schedule_repo
+from app.dependencies import (
+    get_current_tenant_id,
+    get_current_user_id,
+    get_current_user_role,
+    get_schedule_repo,
+    get_supabase_client,
+)
 from app.models.transaction.schedule import ProductionScheduleItem, ScheduleUpdate
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.utils.logger import get_logger
+from supabase import Client  # type: ignore
 
 production_schedules_router = APIRouter(
     prefix="/production-schedules", tags=["Transaction (Production Schedules)"]
 )
 
 logger = get_logger(__name__)
+
+# スケジュールを直接書き換えられるロール（Issue #581）。承認系と同じく platform_admin を含めず社長に限る。
+# 生産管理者のロールができたらここに足す。Frontend `SCHEDULE_EDITOR_ROLES`（types/member.ts）と揃える
+_SCHEDULE_EDITOR_ROLES = ("president",)
 
 
 @production_schedules_router.get("", response_model=list[ProductionScheduleItem])
@@ -41,13 +52,22 @@ def get_production_schedules(
 def update_production_schedule(
     schedule_id: int,
     schedule_data: ScheduleUpdate,
+    tenant_id: str = Depends(get_current_tenant_id),
+    user_id: str = Depends(get_current_user_id),
+    client: Client = Depends(get_supabase_client),
     repo: ScheduleRepository = Depends(get_schedule_repo),
 ) -> dict[str, Any]:
     """
-    ガントチャート上でのドラッグ&ドロップによるスケジュール手動調整。
+    ガントチャートの詳細シートからのスケジュール手動調整（Issue #581）。
 
-    開始・終了日時、担当設備を変更することができます。
+    開始・終了日時、担当設備を変更することができます。`_SCHEDULE_EDITOR_ROLES` 以外は 403。
     """
+    role = get_current_user_role(tenant_id, user_id, client)
+    if role not in _SCHEDULE_EDITOR_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"スケジュールの変更は {'/'.join(_SCHEDULE_EDITOR_ROLES)} のみ操作できます",
+        )
     logger.info(f"Updating production schedule {schedule_id}")
     try:
         # exclude_unset=True により、指定されたフィールドのみ更新される

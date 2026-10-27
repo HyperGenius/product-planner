@@ -1,6 +1,15 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
 import type { GanttMarker, GanttTask, GanttViewMode } from '../types'
 import {
   buildTimelineConfig,
@@ -24,6 +33,8 @@ export interface GanttChartProps {
   rangeEnd: Date
   /** 通常行の高さ（px） */
   rowHeight?: number
+  /** 通常のバー・マイルストーンの高さ（px）。未指定なら 28px */
+  barHeight?: number
   /** グループ行（isGroupHeader）の高さ（px）。未指定なら rowHeight と同じ */
   groupRowHeight?: number
   /**
@@ -46,9 +57,17 @@ export interface GanttChartProps {
    */
   nonWorkingDays?: Date[]
   /**
-   * タスクバーがクリックされた際に発火するコールバック
+   * タスクバー（グループヘッダーのサマリーバーを含む）がタップ・クリックされた際に発火するコールバック。
+   * スクロール（スワイプ）の終わりのクリックでは発火しない
    */
   onTaskClick?: (task: GanttTask) => void
+  /**
+   * ラベル列の行がタップ・クリックされた際に発火するコールバック（折りたたみのボタンは除く）。
+   * 同じ rowId のタスクは1行なので、行のタスクをまとめて受け取る。スワイプの終わりでは発火しない
+   */
+  onRowClick?: (rowTasks: GanttTask[]) => void
+  /** 選択中の行（`getRowKey()` の値）。行をハイライトして、どの行を開いているかを示す */
+  selectedRowKeys?: ReadonlySet<string>
   /**
    * タスクバーをラップするレンダー関数（外部からTooltip等を注入する際に使用）。
    * 未指定の場合はバーをそのまま表示する。
@@ -67,6 +86,17 @@ export interface GanttChartProps {
 const DEFAULT_LABEL_WIDTH = 260
 
 /**
+ * これ以上ポインタが動いた（またはスクロールした）クリックはスワイプの終わりとみなして無視する（px）。
+ * タッチのスクロールでは通常クリックは発火しないが、指を止めてから離すと発火するブラウザがある
+ */
+const TAP_SLOP_PX = 10
+
+/** 行の識別子。同じ rowId のタスクは1行なので rowId、無ければタスクの id */
+export function getRowKey(task: Pick<GanttTask, 'id' | 'rowId'>): string {
+  return task.rowId ?? task.id
+}
+
+/**
  * 汎用ガントチャートコンポーネント
  *
  * プロダクト固有のドメイン知識を持たない独立したUIコンポーネント。
@@ -82,6 +112,7 @@ export function GanttChart({
   rangeStart,
   rangeEnd,
   rowHeight = 40,
+  barHeight,
   groupRowHeight,
   renderRowLabel,
   labelHeader,
@@ -89,6 +120,8 @@ export function GanttChart({
   workHours,
   nonWorkingDays,
   onTaskClick,
+  onRowClick,
+  selectedRowKeys,
   wrapTaskBar,
   collapsedGroupIds,
   onToggleGroup,
@@ -129,6 +162,31 @@ export function GanttChart({
     el.scrollLeft = Math.max(0, nowPx - visibleTimelineWidth / 2)
   }, [columnWidthPx, nowFrac, labelWidth, hasTasks])
 
+  // タップとスワイプの区別: ポインタを押した位置とスクロール位置を覚えておき、クリック時に比べる
+  const pointerStartRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null)
+  const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    const el = scrollRef.current
+    pointerStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: el?.scrollLeft ?? 0,
+      scrollTop: el?.scrollTop ?? 0,
+    }
+  }
+  const isTap = (e: MouseEvent) => {
+    // detail === 0 はキーボード等ポインタ以外からのクリック
+    if (e.detail === 0) return true
+    const start = pointerStartRef.current
+    const el = scrollRef.current
+    if (!start || !el) return true
+    return (
+      Math.abs(e.clientX - start.x) <= TAP_SLOP_PX &&
+      Math.abs(e.clientY - start.y) <= TAP_SLOP_PX &&
+      el.scrollLeft === start.scrollLeft &&
+      el.scrollTop === start.scrollTop
+    )
+  }
+
   const gridTemplateColumns = columnWidthPx
     ? `repeat(${totalUnits}, ${columnWidthPx}px)`
     : `repeat(${totalUnits}, minmax(0, 1fr))`
@@ -153,7 +211,7 @@ export function GanttChart({
   const labelCellStyle = { width: `${labelWidth}px`, minWidth: `${labelWidth}px` }
 
   return (
-    <div ref={scrollRef} className="h-full min-w-0 overflow-auto">
+    <div ref={scrollRef} className="h-full min-w-0 overflow-auto" onPointerDownCapture={handlePointerDown}>
       <div style={{ minWidth: `${labelWidth + timelineMinWidth}px` }}>
         {/* ヘッダー行: 上に固定。左上の角は左にも固定 */}
         <div className="sticky top-0 z-30 flex">
@@ -187,20 +245,31 @@ export function GanttChart({
           {/* タスク行（同じ rowId のタスクは1行に並べる） */}
           {rows.map((rowTasks, index) => {
             const head = rowTasks[0]
+            const rowKey = getRowKey(head)
             const isGroup = head.isGroupHeader === true
+            const selected = selectedRowKeys?.has(rowKey) === true
             const height = isGroup ? (groupRowHeight ?? rowHeight) : rowHeight
-            // グループ行は背景を付けて子行と区別する。通常行は縞模様
-            const background = isGroup
-              ? undefined
-              : index % 2 === 1
-                ? 'rgba(0,0,0,0.03)'
-                : 'transparent'
+            // 選択中の行は青く塗る。グループ行は背景を付けて子行と区別する。通常行は縞模様
+            const background = selected
+              ? 'rgba(37,99,235,0.10)'
+              : isGroup
+                ? undefined
+                : index % 2 === 1
+                  ? 'rgba(0,0,0,0.03)'
+                  : 'transparent'
             const collapsible = isGroup && onToggleGroup !== undefined && parentIdsWithChildren.has(head.id)
             const collapsed = collapsedGroupIds?.has(head.id) === true
+            const labelBackground = selected
+              ? 'bg-blue-50 shadow-[inset_4px_0_0_0_#2563eb] dark:bg-blue-950'
+              : isGroup
+                ? 'bg-gray-100 dark:bg-gray-800'
+                : 'bg-white dark:bg-gray-900'
+            const labelContent = renderRowLabel ? renderRowLabel(rowTasks) : head.name
             return (
               <div
-                key={head.rowId ?? head.id}
+                key={rowKey}
                 data-group-row={isGroup || undefined}
+                data-selected={selected || undefined}
                 className={`flex border-b border-gray-100 dark:border-gray-800${isGroup ? ' bg-gray-50 dark:bg-gray-800/60' : ''}`}
                 style={{ height: `${height}px`, backgroundColor: background }}
               >
@@ -208,10 +277,8 @@ export function GanttChart({
                 <div
                   data-testid="gantt-row-label"
                   style={labelCellStyle}
-                  className={`sticky left-0 z-10 flex shrink-0 items-center gap-1 overflow-hidden border-r border-gray-200 text-xs dark:border-gray-700 ${
-                    isGroup
-                      ? 'bg-gray-100 px-1 dark:bg-gray-800'
-                      : `bg-white dark:bg-gray-900 ${head.parentId !== undefined ? 'pl-7 pr-2' : 'px-2'}`
+                  className={`sticky left-0 z-10 flex shrink-0 items-center gap-1 overflow-hidden border-r border-gray-200 text-xs dark:border-gray-700 ${labelBackground} ${
+                    isGroup ? 'px-1' : head.parentId !== undefined ? 'pl-7 pr-2' : 'px-2'
                   }`}
                 >
                   {collapsible && (
@@ -220,7 +287,7 @@ export function GanttChart({
                       onClick={() => onToggleGroup?.(head.id)}
                       aria-expanded={!collapsed}
                       aria-label={collapsed ? '展開する' : '折りたたむ'}
-                      className="flex h-6 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-700"
+                      className="flex h-11 w-8 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-700"
                     >
                       <svg
                         aria-hidden
@@ -231,9 +298,27 @@ export function GanttChart({
                       </svg>
                     </button>
                   )}
-                  <div className="min-w-0 flex-1 break-words">
-                    {renderRowLabel ? renderRowLabel(rowTasks) : head.name}
-                  </div>
+                  {onRowClick ? (
+                    // 行の高さいっぱいをタップ範囲にする。中に折りたたみのボタンを入れないので role="button" にできる
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={selected}
+                      onClick={(e) => {
+                        if (isTap(e)) onRowClick(rowTasks)
+                      }}
+                      onKeyDown={(e: KeyboardEvent) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return
+                        e.preventDefault()
+                        onRowClick(rowTasks)
+                      }}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center self-stretch break-words focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600"
+                    >
+                      <div className="min-w-0 flex-1">{labelContent}</div>
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex-1 break-words">{labelContent}</div>
+                  )}
                 </div>
                 <div
                   className="relative min-w-0 flex-1"
@@ -266,9 +351,16 @@ export function GanttChart({
                         task={task}
                         colStart={colStart}
                         colEnd={colEnd}
-                        style={{ gridRow: 1 }}
+                        style={{
+                          gridRow: 1,
+                          ...(barHeight !== undefined && !task.isGroupHeader ? { height: `${barHeight}px` } : {}),
+                        }}
                         onClick={
-                          onTaskClick && !task.isGroupHeader ? () => onTaskClick(task) : undefined
+                          onTaskClick
+                            ? (e: MouseEvent) => {
+                                if (isTap(e)) onTaskClick(task)
+                              }
+                            : undefined
                         }
                       />
                     )

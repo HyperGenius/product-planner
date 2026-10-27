@@ -40,7 +40,7 @@ export interface ScheduleEditDialogProps {
 /**
  * スケジュール編集モーダル
  *
- * ガントチャート上のタスクバーをクリックした際に開き、
+ * ガントの詳細シートの「操作」（編集できるロールだけ。Issue #581）から区間ごとに開き、
  * 開始・終了日時を変更して保存できる。
  */
 export function ScheduleEditDialog({

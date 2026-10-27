@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { GanttTask } from "../types"
 import { GanttChart, groupTasksIntoRows } from "./gantt-chart"
@@ -184,5 +184,92 @@ describe("GanttChart の縦線マーカー（Issue #580）", () => {
   it("範囲の前なら左端に「←」を出す", () => {
     renderWith(new Date(2026, 7, 1))
     expect(screen.getByTestId("gantt-marker-edge")).toHaveTextContent("← 9/30")
+  })
+})
+
+describe("GanttChart のタップと選択中の行（Issue #581）", () => {
+  // jsdom には PointerEvent が無く、fireEvent.pointerDown の clientX が入らない。座標を持つ MouseEvent で代用する
+  const win = window as unknown as { PointerEvent?: typeof MouseEvent }
+  const originalPointerEvent = win.PointerEvent
+  beforeAll(() => {
+    win.PointerEvent ??= class PointerEvent extends MouseEvent {}
+  })
+  afterAll(() => {
+    win.PointerEvent = originalPointerEvent
+  })
+
+  const range = { rangeStart: new Date(2026, 8, 10), rangeEnd: new Date(2026, 8, 12) }
+  const tasks = [
+    task({ id: "g1", name: "グループ1", isGroupHeader: true }),
+    task({ id: "a", name: "工程A", parentId: "g1", rowId: "row-a" }),
+    task({ id: "a2", name: "工程A", parentId: "g1", rowId: "row-a", start: new Date(2026, 8, 11, 9), end: new Date(2026, 8, 11, 12) }),
+    task({ id: "b", name: "工程B", parentId: "g1" }),
+  ]
+  const bar = (id: string) => document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)!
+  const scrollContainer = () => screen.getByTestId("gantt-label-header").closest<HTMLElement>(".overflow-auto")!
+
+  it("ラベル列の行をタップすると onRowClick に行のタスクを渡す。折りたたみのボタンでは発火しない", () => {
+    const onRowClick = vi.fn()
+    const onToggleGroup = vi.fn()
+    render(
+      <GanttChart tasks={tasks} viewMode="Day" {...range} onRowClick={onRowClick} onToggleGroup={onToggleGroup} />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "工程A" }))
+    expect(onRowClick).toHaveBeenCalledWith([tasks[1], tasks[2]])
+
+    fireEvent.click(screen.getByRole("button", { name: "折りたたむ" }))
+    expect(onToggleGroup).toHaveBeenCalledWith("g1")
+    expect(onRowClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("キーボード（Enter）でも行を選べる", () => {
+    const onRowClick = vi.fn()
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} onRowClick={onRowClick} />)
+    fireEvent.keyDown(screen.getByRole("button", { name: "工程B" }), { key: "Enter" })
+    expect(onRowClick).toHaveBeenCalledWith([tasks[3]])
+  })
+
+  it("グループ行のサマリーバーも onTaskClick を発火する", () => {
+    const onTaskClick = vi.fn()
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} onTaskClick={onTaskClick} />)
+    fireEvent.click(bar("g1"), { detail: 1 })
+    expect(onTaskClick).toHaveBeenCalledWith(tasks[0])
+  })
+
+  it("ポインタが動いた・スクロールしたクリック（スワイプの終わり）では発火しない", () => {
+    const onTaskClick = vi.fn()
+    const onRowClick = vi.fn()
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} onTaskClick={onTaskClick} onRowClick={onRowClick} />)
+
+    // 指が 30px 動いた
+    fireEvent.pointerDown(bar("b"), { clientX: 100, clientY: 100 })
+    fireEvent.click(bar("b"), { detail: 1, clientX: 130, clientY: 100 })
+    expect(onTaskClick).not.toHaveBeenCalled()
+
+    // 指はほぼ動いていないが、その間にスクロールした
+    fireEvent.pointerDown(bar("b"), { clientX: 100, clientY: 100 })
+    scrollContainer().scrollTop = 80
+    fireEvent.click(bar("b"), { detail: 1, clientX: 100, clientY: 100 })
+    expect(onTaskClick).not.toHaveBeenCalled()
+
+    // 動きが小さいタップは通す
+    fireEvent.pointerDown(screen.getByRole("button", { name: "工程B" }), { clientX: 10, clientY: 10 })
+    fireEvent.click(screen.getByRole("button", { name: "工程B" }), { detail: 1, clientX: 14, clientY: 12 })
+    expect(onRowClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("selectedRowKeys の行をハイライトする（rowId でまとめた行は rowId）", () => {
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} selectedRowKeys={new Set(["row-a"])} />)
+    const rows = screen.getAllByTestId("gantt-row-label").map((label) => label.parentElement!)
+    expect(rows.map((row) => row.dataset.selected)).toEqual([undefined, "true", undefined])
+  })
+
+  it("barHeight でバーの高さを変え、タップできるバーにはタップ範囲を広げるクラスを付ける", () => {
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} barHeight={36} onTaskClick={vi.fn()} />)
+    expect(bar("b").style.height).toBe("36px")
+    expect(bar("b").className).toContain("before:h-11")
+    // サマリーバーの高さは変えない
+    expect(bar("g1").style.height).toBe("")
   })
 })

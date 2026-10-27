@@ -3,10 +3,16 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from app.dependencies import get_schedule_repo
+from app.dependencies import (
+    get_current_tenant_id,
+    get_current_user_id,
+    get_schedule_repo,
+    get_supabase_client,
+)
 
 # テスト対象のAPIインスタンス
 from app.main import app
+from app.routers.transaction import production_schedules as router_module
 from fastapi.testclient import TestClient
 
 # テストクライアントの作成
@@ -55,8 +61,25 @@ class TestProductionSchedulesRouter:
         テスト実行中だけ依存関係を mock に差し替える。
         """
         app.dependency_overrides[get_schedule_repo] = lambda: mock_repo
+        app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
+        app.dependency_overrides[get_current_tenant_id] = lambda: "test-tenant-id"
+        app.dependency_overrides[get_supabase_client] = lambda: MagicMock()
         yield
         app.dependency_overrides = {}
+
+    @pytest.fixture
+    def set_role(self, monkeypatch):
+        def _set(role: str) -> None:
+            monkeypatch.setattr(
+                router_module, "get_current_user_role", lambda *_args: role
+            )
+
+        return _set
+
+    @pytest.fixture
+    def as_president(self, set_role):
+        """スケジュールの変更は president のみ（Issue #581）"""
+        set_role("president")
 
     def test_get_production_schedules_with_period(self, headers, mock_repo):
         """GET /: 期間指定でスケジュール取得のテスト"""
@@ -228,7 +251,7 @@ class TestProductionSchedulesRouter:
         response = client.get("/production-schedules", headers=headers)
         assert response.status_code == 422  # Unprocessable Entity
 
-    def test_update_production_schedule(self, headers, mock_repo):
+    def test_update_production_schedule(self, headers, as_president, mock_repo):
         """PATCH /{schedule_id}: スケジュールの更新テスト"""
         schedule_id = 10000001
         update_data = {
@@ -256,7 +279,9 @@ class TestProductionSchedulesRouter:
         assert response.json() == expected_response
         mock_repo.update.assert_called_once_with(schedule_id, update_data)
 
-    def test_update_production_schedule_partial_update(self, headers, mock_repo):
+    def test_update_production_schedule_partial_update(
+        self, headers, as_president, mock_repo
+    ):
         """PATCH /{schedule_id}: 部分更新のテスト（開始日時のみ）"""
         schedule_id = 10000001
         update_data = {"start_datetime": "2024-01-01T08:00:00+00:00"}
@@ -280,7 +305,9 @@ class TestProductionSchedulesRouter:
         assert response.json() == expected_response
         mock_repo.update.assert_called_once_with(schedule_id, update_data)
 
-    def test_update_production_schedule_equipment_only(self, headers, mock_repo):
+    def test_update_production_schedule_equipment_only(
+        self, headers, as_president, mock_repo
+    ):
         """PATCH /{schedule_id}: 設備のみ変更するテスト"""
         schedule_id = 10000001
         update_data = {"equipment_id": 103}
@@ -304,7 +331,9 @@ class TestProductionSchedulesRouter:
         assert response.json() == expected_response
         mock_repo.update.assert_called_once_with(schedule_id, update_data)
 
-    def test_update_production_schedule_not_found(self, headers, mock_repo):
+    def test_update_production_schedule_not_found(
+        self, headers, as_president, mock_repo
+    ):
         """PATCH /{schedule_id}: 存在しないスケジュールの更新テスト"""
         schedule_id = 99999999
         update_data = {"start_datetime": "2024-01-01T10:00:00+00:00"}
@@ -322,7 +351,9 @@ class TestProductionSchedulesRouter:
         assert "detail" in response.json()
         mock_repo.update.assert_called_once_with(schedule_id, update_data)
 
-    def test_update_production_schedule_invalid_datetime_order(self, headers):
+    def test_update_production_schedule_invalid_datetime_order(
+        self, headers, as_president
+    ):
         """PATCH /{schedule_id}: 開始日時が終了日時より後の場合のテスト"""
         schedule_id = 10000001
         update_data = {
@@ -339,7 +370,9 @@ class TestProductionSchedulesRouter:
         assert response.status_code == 422  # Validation error
         assert "detail" in response.json()
 
-    def test_update_production_schedule_empty_payload(self, headers, mock_repo):
+    def test_update_production_schedule_empty_payload(
+        self, headers, as_president, mock_repo
+    ):
         """PATCH /{schedule_id}: 空のペイロードの場合のテスト"""
         schedule_id = 10000001
         update_data: dict[str, Any] = {}
@@ -363,3 +396,19 @@ class TestProductionSchedulesRouter:
         assert response.status_code == 200
         assert response.json() == expected_response
         mock_repo.update.assert_called_once_with(schedule_id, {})
+
+    @pytest.mark.parametrize("role", ["order_handler", "iso_officer", "platform_admin"])
+    def test_update_production_schedule_forbidden_for_non_president(
+        self, headers, mock_repo, set_role, role
+    ):
+        """PATCH /{schedule_id}: president 以外は 403 で、スケジュールを書き換えない（Issue #581）"""
+        set_role(role)
+
+        response = client.patch(
+            "/production-schedules/10000001",
+            json={"start_datetime": "2024-01-01T10:00:00+00:00"},
+            headers=headers,
+        )
+
+        assert response.status_code == 403
+        mock_repo.update.assert_not_called()

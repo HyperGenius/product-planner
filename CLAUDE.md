@@ -351,6 +351,15 @@ cd backend && ruff check . && mypy .
     （翌日 0:00）に引く。超過判定は希望納期のときだけ（完成見込みは計画の終了から算出するので常に間に合う）。詳細は
     [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md)
   - E2E でバーの「行」を比べるときは、グリッド要素の親（行 = ラベルセル＋グリッド、#578）の並び順で見る（`gantt-segment-bars.spec.ts` の `rowOf()`）
+  - タブレット対応（Issue #581）: 詳細はホバーのツールチップに頼らず、タップで開く詳細シート（モーダルにせずガントの右に並べる `aside`）に出す。
+    タップは `src/gantt` の `onRowClick` / `onTaskClick` で、**スワイプの終わりのクリックを無視する判定（ポインタの移動量・スクロール量）は
+    `src/gantt` 側にある**ので、ガントの中に別のクリックハンドラを足すときも `isTap()` を通す。シートの中身は表示中のスケジュールと進捗から
+    `lib/schedule-detail-utils.ts` で組み立てる。スケジュールの直接編集は `president` のみ（Frontend `SCHEDULE_EDITOR_ROLES` と
+    Backend `_SCHEDULE_EDITOR_ROLES` を揃える）。表示の選択の保存は `useLocalStorageState()`（`useSyncExternalStore`。エフェクトで
+    localStorage を読んで setState しない）で、保存値は外部入力として `parse` で検証する
+  - jsdom には `PointerEvent` が無く、`fireEvent.pointerDown(el, { clientX })` の座標が入らない。座標が要るテストは、そのファイルだけ
+    `MouseEvent` を継承した `PointerEvent` を `window` に当てる（前例は `gantt/components/gantt-chart.test.tsx`）。E2E でスワイプを再現するときは
+    CDP の `Input.dispatchTouchEvent`（`gantt-tablet-touch.spec.ts`）
   - 稼働時間スロットの終了列は `binarySearchFirstGe`（終了時刻ちょうどのスロットは塗らない）。`FirstGt` にすると 10:00 終了のバーが
     10:00 開始の後工程と1列重なる（#163 で一度 `FirstGt` にして #535 で戻した）。詳細は [docs/features/gantt-date-math.md](docs/features/gantt-date-math.md)
   - 生産スケジュール画面は**固定ラベル列＋1つのスクロールコンテナ**（Issue #578）。ヘッダーと本体を別々の `overflow` 要素に

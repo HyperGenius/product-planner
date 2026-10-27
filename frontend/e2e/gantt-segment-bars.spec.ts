@@ -96,9 +96,11 @@ async function mockScheduleApis(page: Page) {
   )
 }
 
-async function selectOption(page: Page, triggerLabel: string, option: string) {
-  await page.getByRole("combobox", { name: triggerLabel }).click()
-  await page.getByRole("option", { name: option, exact: true }).click()
+/** ツールバーのセグメントボタン（表示単位・期間。Issue #581 で Select から変更）を選ぶ */
+async function selectOption(page: Page, groupLabel: string, option: string) {
+  const radio = page.getByRole("radiogroup", { name: groupLabel }).getByRole("radio", { name: option, exact: true })
+  await radio.click()
+  await expect(radio).toHaveAttribute("aria-checked", "true")
 }
 
 async function openSchedule(page: Page) {
@@ -171,7 +173,7 @@ test.describe("ガントチャート週次表示の工程バー（Issue #535）"
 
   test("フラット表示でも同じ工程のセグメントを1行に並べる", async ({ page }) => {
     await openSchedule(page)
-    await selectOption(page, "グルーピングモード選択", "フラット表示")
+    await selectOption(page, "表示単位", "フラット")
     await screenshot(page, "week-flat")
 
     expect(await rowOf(page, 201)).toBe(await rowOf(page, 202))
@@ -180,7 +182,7 @@ test.describe("ガントチャート週次表示の工程バー（Issue #535）"
 
   test("日次表示（比較用）はセグメントごとに行を分ける", async ({ page }) => {
     await openSchedule(page)
-    await selectOption(page, "表示モード選択", "日次")
+    await selectOption(page, "期間", "日")
     await screenshot(page, "day-order")
 
     expect(await rowOf(page, 102)).not.toBe(await rowOf(page, 103))
@@ -191,7 +193,7 @@ test.describe("ガントチャート月次表示の工程バー（Issue #537）"
   // 月次の表示範囲は基準日（9/16）の前3日〜後31日。9/13(日) が1列目なので、9/N の列は N-12
   async function openMonth(page: Page) {
     await openSchedule(page)
-    await selectOption(page, "表示モード選択", "月次")
+    await selectOption(page, "期間", "月")
     await expect(bar(page, 101)).toBeVisible()
   }
 
@@ -220,7 +222,7 @@ test.describe("ガントチャート月次表示の工程バー（Issue #537）"
 
   test("フラット表示でも同じ工程のセグメントを1行に並べる", async ({ page }) => {
     await openMonth(page)
-    await selectOption(page, "グルーピングモード選択", "フラット表示")
+    await selectOption(page, "表示単位", "フラット")
     await screenshot(page, "month-flat")
 
     expect(await rowOf(page, 201)).toBe(await rowOf(page, 202))

@@ -6,7 +6,7 @@
  * 将来的なNPMパッケージ化を見据えたクリーンなアーキテクチャ境界を維持してください。
  */
 
-export { GanttChart } from './components/gantt-chart'
+export { GanttChart, getRowKey } from './components/gantt-chart'
 export type { GanttChartProps } from './components/gantt-chart'
 export { TaskBar } from './components/task-bar'
 export type { GanttTask, GanttViewMode, GanttBarAppearance, GanttMarker } from './types'

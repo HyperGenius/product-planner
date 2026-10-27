@@ -53,3 +53,10 @@ export const DAILY_REPORT_NAME_EDITOR_ROLES: MemberRole[] = [
  * Backend `services/product_merge_service.py` の `MERGE_EDITOR_ROLES` と揃える（Issue #515）。
  */
 export const PRODUCT_MERGE_ROLES: MemberRole[] = ["president", "platform_admin"]
+
+/**
+ * 生産スケジュールの開始・終了を変更できるロール（ガントの詳細シートの「操作」）。
+ * Backend `routers/transaction/production_schedules.py` の `_SCHEDULE_EDITOR_ROLES` と揃える（Issue #581）。
+ * 承認系の操作と同じく platform_admin を含めない。生産管理者のロールができたらここに足す
+ */
+export const SCHEDULE_EDITOR_ROLES: MemberRole[] = ["president"]
