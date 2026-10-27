@@ -27,18 +27,15 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
           ...style,
         }}
         data-task-id={task.id}
-        className={`flex items-center px-2 h-8 rounded text-xs font-semibold text-gray-700 dark:text-gray-300 overflow-hidden mx-0.5${className ? ` ${className}` : ''}`}
+        className={`flex items-center px-2 h-8 rounded overflow-hidden mx-0.5${className ? ` ${className}` : ''}`}
         {...props}
       >
-        <span className="truncate">{task.name}</span>
+        <span className="sr-only">{task.name}</span>
       </div>
     )
   }
 
   const delayed = task.isDelayed === true
-  const labelClass = delayed
-    ? 'text-red-600 dark:text-red-400 font-semibold'
-    : 'text-gray-700 dark:text-gray-300'
 
   if (task.isMilestone) {
     const accent = delayed ? '#dc2626' : task.color || '#3b82f6'
@@ -58,11 +55,6 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
           style={{ borderColor: accent }}
           className="absolute left-0 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 rounded-[2px] border-2 bg-white dark:bg-gray-900"
         />
-        {!task.hideLabel && (
-          <span className={`absolute left-4 whitespace-nowrap pointer-events-none ${labelClass}`}>
-            {task.name}
-          </span>
-        )}
       </div>
     )
   }
@@ -95,11 +87,6 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
           style={{ width: `${progressPct}%` }}
           className={`absolute inset-y-0 left-0 bg-black/35 pointer-events-none ${progressPct >= 100 ? 'rounded' : 'rounded-l'}`}
         />
-      )}
-      {!task.hideLabel && (
-        <span className={`absolute left-full ml-1 whitespace-nowrap pointer-events-none ${labelClass}`}>
-          {task.name}
-        </span>
       )}
     </div>
   )

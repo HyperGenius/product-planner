@@ -341,6 +341,10 @@ cd backend && ruff check . && mypy .
     **切り捨て**（開始時刻を含む列）、終了列は切り上げ。切り上げにすると月次で 09:00 開始のバーが翌日の列に描かれて1日ずれる
   - 稼働時間スロットの終了列は `binarySearchFirstGe`（終了時刻ちょうどのスロットは塗らない）。`FirstGt` にすると 10:00 終了のバーが
     10:00 開始の後工程と1列重なる（#163 で一度 `FirstGt` にして #535 で戻した）。詳細は [docs/features/gantt-date-math.md](docs/features/gantt-date-math.md)
+  - 生産スケジュール画面は**固定ラベル列＋1つのスクロールコンテナ**（Issue #578）。ヘッダーと本体を別々の `overflow` 要素に
+    分けない（両方向の sticky が効かない）。ラベルはバーの外に描かず `renderRowLabel` で列に出す（`hideLabel` は廃止）。
+    ページの高さは `100dvh` からレイアウトのヘッダー・余白を引いた値で決め打ちしている。詳細は
+    [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md)
 - **Tailwind クラス文字列から特定のクラスを抽出するとき**: `"bg-red-600 text-white hover:bg-red-600"` のような
   複数クラスをまとめて持つ定数（例: `DeadlineBadge.tsx` の `STATUS_CLASS`）から特定の役割のクラス（背景色等）
   だけを取り出して別の要素（凡例のスウォッチ等）に使い回す場合、`.split(" ")[0]` のような**位置依存**の抽出は

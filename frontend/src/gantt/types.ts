@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 export interface GanttTask {
   /** ユニークなID */
   id: string
-  /** バー上に表示するラベル */
+  /** タスク名（ラベル列の既定表示・ツールチップ等に使う。バー自体には描かない） */
   name: string
   /** タスク開始時刻 */
   start: Date
@@ -37,8 +37,6 @@ export interface GanttTask {
    * 未指定ならタスクごとに1行
    */
   rowId?: string
-  /** バー横のラベルを出さない場合 true（同じ行の2本目以降のバー等） */
-  hideLabel?: boolean
 }
 
 /**

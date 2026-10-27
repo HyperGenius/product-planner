@@ -37,10 +37,67 @@ describe("GanttChart の行", () => {
       />,
     )
 
-    const seg1 = screen.getByText("内職-1").parentElement!
-    const seg2 = screen.getByText("内職-2").parentElement!
+    const [seg1, seg2] = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
     expect(seg1.parentElement).toBe(seg2.parentElement)
     expect(seg1.style.gridColumn).toBe("10 / 13")
     expect(seg2.style.gridColumn).toBe("34 / 35")
+    // 行のラベルは1つだけ
+    expect(screen.getAllByTestId("gantt-row-label")).toHaveLength(1)
+  })
+})
+
+describe("GanttChart の固定ラベル列", () => {
+  const range = { rangeStart: new Date(2026, 8, 10), rangeEnd: new Date(2026, 8, 12) }
+
+  it("renderRowLabel の結果をラベル列に出し、sticky left で固定する", () => {
+    render(
+      <GanttChart
+        tasks={[task({ id: "a", name: "切削" }), task({ id: "b", name: "組立" })]}
+        viewMode="Day"
+        {...range}
+        renderRowLabel={(rowTasks) => <span>ラベル:{rowTasks[0].name}</span>}
+        labelHeader="見出し"
+      />,
+    )
+    expect(screen.getByText("ラベル:切削")).toBeInTheDocument()
+    expect(screen.getByText("ラベル:組立")).toBeInTheDocument()
+    expect(screen.getByTestId("gantt-label-header")).toHaveTextContent("見出し")
+    expect(screen.getByTestId("gantt-label-header").className).toContain("sticky")
+    screen.getAllByTestId("gantt-row-label").forEach((el) => {
+      expect(el.className).toContain("sticky")
+      expect(el.className).toContain("left-0")
+    })
+  })
+
+  it("renderRowLabel 未指定なら行の先頭タスクの name を出す", () => {
+    render(<GanttChart tasks={[task({ id: "a", name: "切削" })]} viewMode="Day" {...range} />)
+    expect(screen.getByTestId("gantt-row-label")).toHaveTextContent("切削")
+  })
+
+  it("ラベル列の幅を指定でき、グループ行は groupRowHeight で高さを変えられる", () => {
+    render(
+      <GanttChart
+        tasks={[
+          task({ id: "g", name: "注文", isGroupHeader: true }),
+          task({ id: "t", name: "工程" }),
+        ]}
+        viewMode="Day"
+        {...range}
+        labelWidth={280}
+        rowHeight={40}
+        groupRowHeight={56}
+      />,
+    )
+    const [groupLabel, rowLabel] = screen.getAllByTestId("gantt-row-label")
+    expect(groupLabel).toHaveStyle({ width: "280px" })
+    expect(groupLabel.parentElement).toHaveStyle({ height: "56px" })
+    expect(rowLabel.parentElement).toHaveStyle({ height: "40px" })
+  })
+
+  it("ヘッダーと本体を1つのスクロールコンテナに入れ、ヘッダー行は sticky top で固定する", () => {
+    render(<GanttChart tasks={[task({ id: "a" })]} viewMode="Day" {...range} />)
+    const scroller = screen.getByTestId("gantt-label-header").parentElement!.parentElement!.parentElement!
+    expect(scroller.className).toContain("overflow-auto")
+    expect(screen.getByTestId("gantt-label-header").parentElement!.className).toContain("top-0")
   })
 })

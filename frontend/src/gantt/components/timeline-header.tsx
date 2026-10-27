@@ -100,7 +100,7 @@ export function TimelineHeader({ config, viewMode }: TimelineHeaderProps) {
   }, [viewMode, rangeStart, totalUnits, slotTimestamps])
 
   return (
-    <div className="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 select-none">
+    <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 select-none">
       {/* 日付行 */}
       <div
         style={{ display: 'grid', gridTemplateColumns }}

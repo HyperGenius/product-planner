@@ -143,7 +143,7 @@ export function convertScheduleToTask(
  *
  * スケジューラは1工程を日・休憩・既存スケジュールの隙間ごとのセグメントに分けるので、
  * 1本のバー（先頭の開始〜最後の終了）にまとめると間の空き時間まで作業中に見える（Issue #535）。
- * バーはセグメントごとに描き、行だけをまとめる。ラベルは行の右端（最後のセグメント）にだけ出す。
+ * バーはセグメントごとに描き、行だけをまとめる。ラベルは固定のラベル列に行ごとに1つ出る。
  * 工程名ではなく process_routing_id で束ねるのは、同じ工程名がルーティングに2回ある場合に
  * 別の工程を1行に合体させないため
  */
@@ -164,11 +164,10 @@ function segmentRowTasks(
     const sorted = [...items].sort(
       (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime(),
     )
-    sorted.forEach((s, i) => {
+    sorted.forEach((s) => {
       result.push({
         ...convertScheduleToTask(s, colorMode, groupBy),
         rowId: `segments-${key}`,
-        hideLabel: i < sorted.length - 1,
       })
     })
   })
@@ -371,6 +370,19 @@ function ProgressTooltipLines({ progress, delayed }: { progress: ProcessProgress
   )
 }
 
+/** ラベル列の幅（px）。1180px 級のタブレット横向きでもタイムラインが残る幅 */
+const LABEL_COLUMN_WIDTH = 260
+
+/** 固定ラベル列の1行分。注文・設備グループの行は太字、工程の行は工程名（設備グループ名） */
+function renderRowLabel(rowTasks: GanttTask[]) {
+  const task = rowTasks[0]
+  return task.isGroupHeader ? (
+    <span className="font-semibold text-gray-700 dark:text-gray-300">{task.name}</span>
+  ) : (
+    <span className="text-gray-700 dark:text-gray-300">{task.name}</span>
+  )
+}
+
 /**
  * ガントチャート表示コンポーネント（プロダクト固有ラッパー）
  *
@@ -465,6 +477,10 @@ export function GanttChart({
       viewMode={viewMode}
       rangeStart={rangeStart}
       rangeEnd={rangeEnd}
+      labelWidth={LABEL_COLUMN_WIDTH}
+      labelHeader="注文 / 工程"
+      groupRowHeight={48}
+      renderRowLabel={renderRowLabel}
       workHours={workHoursForLib}
       nonWorkingDays={nonWorkingDaysForLib}
       onTaskClick={handleTaskClick}

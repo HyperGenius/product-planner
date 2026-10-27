@@ -78,8 +78,10 @@ const PROGRESS: ProcessProgress[] = [
   progress({ process_routing_id: 13, planned_end_datetime: at(11, 12) }),
 ]
 
+/** ラベル列のラベルと同じ行にあるバー */
 function bar(label: string): HTMLElement {
-  return screen.getByText(label).parentElement!
+  const row = screen.getByText(label).closest<HTMLElement>('[data-testid="gantt-row-label"]')!.parentElement!
+  return row.querySelector<HTMLElement>("[data-task-id]")!
 }
 
 describe("GanttChart（スケジュール）の進捗表示", () => {

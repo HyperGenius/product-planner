@@ -37,11 +37,10 @@ describe("TaskBar の進捗表示", () => {
     expect(screen.queryByTestId("task-bar-progress")).not.toBeInTheDocument()
   })
 
-  it("遅れは赤枠とラベルの色で強調する", () => {
+  it("遅れは赤枠で強調する", () => {
     const bar = renderBar(task({ isDelayed: true }))
     expect(bar).toHaveAttribute("data-delayed", "true")
     expect(bar.className).toContain("ring-red-600")
-    expect(screen.getByText("プレス").className).toContain("text-red-600")
   })
 
   it("遅れでなければ強調しない", () => {
@@ -64,13 +63,13 @@ describe("TaskBar の進捗表示", () => {
 })
 
 describe("TaskBar のラベル", () => {
-  it("hideLabel ならバー横のラベルを出さない", () => {
-    renderBar(task({ hideLabel: true }))
+  it("バーの外（右）に工程名を描かない（ラベルは固定ラベル列に出す）", () => {
+    renderBar(task())
     expect(screen.queryByText("プレス")).not.toBeInTheDocument()
   })
 
-  it("マイルストーンでも hideLabel ならラベルを出さない", () => {
-    renderBar(task({ isMilestone: true, hideLabel: true }))
+  it("マイルストーンもバー外にラベルを描かない", () => {
+    renderBar(task({ isMilestone: true }))
     expect(screen.queryByText("プレス")).not.toBeInTheDocument()
   })
 })
