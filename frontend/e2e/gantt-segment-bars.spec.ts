@@ -126,10 +126,13 @@ async function gridColumn(page: Page, scheduleId: number) {
   return bar(page, scheduleId).evaluate((el) => (el as HTMLElement).style.gridColumn)
 }
 
-/** そのバーが描かれている行（グリッドの行要素） */
+/**
+ * そのバーが描かれている行の位置。行は「ラベルセル＋タイムラインのグリッド」なので（Issue #578）、
+ * グリッドの親（行）が行の並びの何番目かを返す
+ */
 async function rowOf(page: Page, scheduleId: number) {
   return bar(page, scheduleId).evaluate((el) => {
-    const row = el.closest('[style*="grid-template-columns"]')
+    const row = el.closest('[style*="grid-template-columns"]')?.parentElement
     return Array.from(row?.parentElement?.children ?? []).indexOf(row as Element)
   })
 }

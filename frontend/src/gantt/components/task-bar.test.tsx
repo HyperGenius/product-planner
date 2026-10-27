@@ -73,3 +73,32 @@ describe("TaskBar のラベル", () => {
     expect(screen.queryByText("プレス")).not.toBeInTheDocument()
   })
 })
+
+describe("TaskBar のサマリーバー（グループヘッダー）", () => {
+  it("細いブラケット形で描き、両端に脚を付ける", () => {
+    const bar = renderBar(task({ isGroupHeader: true }))
+    expect(bar).toHaveAttribute("data-summary-bar")
+    expect(bar.className).toContain("h-3")
+    expect(bar.className).not.toContain("h-7")
+    expect(screen.queryByTestId("task-bar-continues-start")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("task-bar-continues-end")).not.toBeInTheDocument()
+  })
+
+  it("範囲外へ続く側は脚の代わりに矢印を出す", () => {
+    const bar = renderBar(task({ isGroupHeader: true, continuesBefore: true, continuesAfter: true }))
+    expect(bar).toHaveAttribute("data-continues-before", "true")
+    expect(bar).toHaveAttribute("data-continues-after", "true")
+    expect(screen.getByTestId("task-bar-continues-start")).toBeInTheDocument()
+    expect(screen.getByTestId("task-bar-continues-end")).toBeInTheDocument()
+  })
+})
+
+describe("TaskBar の続きの印", () => {
+  it("通常のバーは続く側の端に矢印を出す", () => {
+    const bar = renderBar(task({ continuesAfter: true }))
+    expect(bar).toHaveAttribute("data-continues-after", "true")
+    expect(bar).not.toHaveAttribute("data-continues-before")
+    expect(screen.getByTestId("task-bar-continues-end")).toBeInTheDocument()
+    expect(screen.queryByTestId("task-bar-continues-start")).not.toBeInTheDocument()
+  })
+})

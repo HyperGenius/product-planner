@@ -12,6 +12,32 @@ from fastapi.testclient import TestClient
 # テストクライアントの作成
 client = TestClient(app)
 
+# レスポンスモデル（ProductionScheduleItem）の任意項目。リポジトリが返さなかった項目は null で返る
+_OPTIONAL_FIELDS = (
+    "equipment_id",
+    "order_number",
+    "customer_order_no",
+    "order_status",
+    "quantity",
+    "desired_deadline",
+    "confirmed_deadline",
+    "product_name",
+    "customer_name",
+    "process_name",
+    "sequence_order",
+    "equipment_name",
+    "equipment_group_id",
+    "equipment_group_name",
+    "process_start_datetime",
+    "process_end_datetime",
+    "order_start_datetime",
+    "order_end_datetime",
+)
+
+
+def _with_defaults(item: dict[str, Any]) -> dict[str, Any]:
+    return {**dict.fromkeys(_OPTIONAL_FIELDS), **item}
+
 
 @pytest.mark.api
 class TestProductionSchedulesRouter:
@@ -69,7 +95,7 @@ class TestProductionSchedulesRouter:
         )
 
         assert response.status_code == 200
-        assert response.json() == expected_data
+        assert response.json() == [_with_defaults(item) for item in expected_data]
         mock_repo.get_by_period.assert_called_once_with(
             "2024-01-01", "2024-01-31", None
         )
@@ -105,8 +131,46 @@ class TestProductionSchedulesRouter:
         )
 
         assert response.status_code == 200
-        assert response.json() == expected_data
+        assert response.json() == [_with_defaults(item) for item in expected_data]
         mock_repo.get_by_period.assert_called_once_with("2024-01-01", "2024-01-31", 1)
+
+    def test_get_production_schedules_returns_order_fields(self, headers, mock_repo):
+        """GET /: ガントのラベル用の受注・工程の項目を返す（Issue #579）"""
+        item = {
+            "id": 1,
+            "order_id": 1000001,
+            "process_routing_id": 100001,
+            "equipment_id": 101,
+            "start_datetime": "2026-10-27T00:00:00+00:00",
+            "end_datetime": "2026-10-27T03:00:00+00:00",
+            "order_number": "ORD-001",
+            "customer_order_no": "PO-123",
+            "order_status": "confirmed",
+            "quantity": 500,
+            "desired_deadline": "2026-10-31",
+            "confirmed_deadline": "2026-11-02",
+            "product_name": "製品A",
+            "customer_name": None,
+            "process_name": "切削",
+            "sequence_order": 2,
+            "equipment_name": "設備1",
+            "equipment_group_id": 7,
+            "equipment_group_name": "設備1",
+            "process_start_datetime": "2026-10-20T00:00:00+00:00",
+            "process_end_datetime": "2026-10-27T03:00:00+00:00",
+            "order_start_datetime": "2026-10-20T00:00:00+00:00",
+            "order_end_datetime": "2026-11-02T08:00:00+00:00",
+        }
+        mock_repo.get_by_period.return_value = [item]
+
+        response = client.get(
+            "/production-schedules",
+            params={"start_date": "2026-10-25", "end_date": "2026-10-31"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == [item]
 
     def test_get_production_schedules_empty_result(self, headers, mock_repo):
         """GET /: 結果が空の場合のテスト"""

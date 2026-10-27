@@ -7,7 +7,27 @@ from app.repositories.supa_infra.master.equipment_repo import (
     EQUIPMENT_DISPLAY_COLUMNS,
     equipment_display_name,
 )
+from app.services.daily_report_name_matching_service import fetch_all_rows
 from supabase import Client  # type: ignore
+
+
+def _parse_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+class _Extent:
+    """開始の最小〜終了の最大。比較は datetime で行い、返すのは DB の文字列のまま"""
+
+    def __init__(self, start: str, end: str):
+        self.start = start
+        self.end = end
+
+    def union(self, other: "_Extent | None") -> "_Extent":
+        if other is None:
+            return self
+        start = min(self.start, other.start, key=_parse_datetime)
+        end = max(self.end, other.end, key=_parse_datetime)
+        return _Extent(start, end)
 
 
 class ScheduleRepository(BaseRepository):
@@ -105,138 +125,166 @@ class ScheduleRepository(BaseRepository):
             equipment_group_id: (Optional) 特定の設備グループで絞り込む場合に使用
 
         Returns:
-            スケジュールオブジェクトのリスト。
-            各オブジェクトには order_number, product_name, customer_name, process_name, equipment_name を含む。
+            `ProductionScheduleItem` の形の dict のリスト。受注（顧客・製品・数量・納期）・工程・設備を結合し、
+            表示期間の外へ続くかの判定用に工程・受注全体の開始〜終了（期間外のセグメントを含む）を付ける
         """
-        # Supabaseのリレーション解決を使用して関連データを取得
-        # orders -> products のネストされた関係も取得する
         # スケジュールが期間と重複するものを取得: schedule.start <= end_date AND schedule.end >= start_date
-        # 日付をISO8601形式に変換（YYYY-MM-DDをYYYY-MM-DDTHH:MM:SS+00:00形式に）
         start_datetime_str = f"{start_date}T00:00:00+00:00"
         end_datetime_str = f"{end_date}T23:59:59.999999+00:00"
 
         query = (
             self.client.table(self.table_name)
             .select(
-                "*, orders(order_number, products(name), customers(name)), process_routings(process_name, equipment_group_id), "
-                f"equipments({EQUIPMENT_DISPLAY_COLUMNS})"
+                "*, orders(order_number, customer_order_no, status, quantity, deadline_date,"
+                " confirmed_deadline, products(name), customers(name)),"
+                " process_routings(process_name, sequence_order, equipment_group_id),"
+                f" equipments({EQUIPMENT_DISPLAY_COLUMNS})"
             )
             .lte("start_datetime", end_datetime_str)
             .gte("end_datetime", start_datetime_str)
         )
 
-        # equipment_group_id が指定されている場合、設備グループでフィルタリング
         if equipment_group_id is not None:
-            # 設備グループに所属する設備IDのリストを取得
+            # 設備グループに所属する設備IDのリストで絞り込む
             equipment_res = (
                 self.client.table("equipment_group_members")
                 .select("equipment_id")
                 .eq("equipment_group_id", equipment_group_id)
                 .execute()
             )
-            print(f"[DEBUG] Equipment group members: {equipment_res.data}")
-
-            if equipment_res.data:
-                # Mypy対応: res.dataを適切な型にキャスト
-                equipment_data = cast(list[dict[str, Any]], equipment_res.data)
-                equipment_ids = [item["equipment_id"] for item in equipment_data]
-                print(
-                    f"[DEBUG] Equipment IDs for group {equipment_group_id}: {equipment_ids}"
-                )
-                # equipment_id が設備IDリストに含まれるものでフィルタリング
-                query = query.in_("equipment_id", equipment_ids)
-            else:
+            if not equipment_res.data:
                 # 設備グループにメンバーがいない場合は空のリストを返す
                 return []
+            equipment_data = cast(list[dict[str, Any]], equipment_res.data)
+            query = query.in_(
+                "equipment_id", [item["equipment_id"] for item in equipment_data]
+            )
 
         res = query.execute()
-        print(
-            f"[DEBUG] Query before execute - start_date: {start_date}, end_date: {end_date}, equipment_group_id: {equipment_group_id}"
-        )
-        print(f"[DEBUG] Query result data count: {len(res.data) if res.data else 0}")
-        print(f"[DEBUG] Query result data: {res.data}")
-
         if not res.data:
             return []
-
-        # Mypy対応: res.dataを適切な型にキャスト
         schedule_data = cast(list[dict[str, Any]], res.data)
 
-        # 設備グループ名を取得するため、全ての equipment_group_id を収集
-        equipment_group_ids = {
-            group_id
-            for item in schedule_data
-            if (process_routing := item.get("process_routings"))
-            and (group_id := process_routing.get("equipment_group_id")) is not None
-        }
-
-        # 設備グループ名のマップを作成
-        equipment_group_names = {}
-        if equipment_group_ids:
-            groups_res = (
-                self.client.table("equipment_groups")
-                .select("id, name")
-                .in_("id", list(equipment_group_ids))
-                .execute()
-            )
-            if groups_res.data:
-                for group in groups_res.data:
-                    g = cast(dict[str, Any], group)
-                    equipment_group_names[g["id"]] = g["name"]
-
-        # レスポンスを整形してフラットな構造にする
-        schedules = []
-        for item in schedule_data:
-            # Mypy対応: ネストされたオブジェクトを適切な型にキャスト
-            order = (
-                cast(dict[str, Any], item.get("orders")) if item.get("orders") else {}
-            )
-            product = (
-                cast(dict[str, Any], order.get("products"))
-                if order.get("products")
-                else None
-            )
-            customer = (
-                cast(dict[str, Any], order.get("customers"))
-                if order.get("customers")
-                else None
-            )
-            process_routing = (
-                cast(dict[str, Any], item.get("process_routings"))
-                if item.get("process_routings")
-                else {}
-            )
-            equipment = (
-                cast(dict[str, Any], item.get("equipments"))
-                if item.get("equipments")
-                else {}
-            )
-
-            # 設備グループ名を取得
-            equipment_group_name = None
-            if process_routing and process_routing.get("equipment_group_id"):
-                equipment_group_name = equipment_group_names.get(
-                    process_routing["equipment_group_id"]
-                )
-
-            schedule = {
-                "id": item.get("id"),
-                "order_id": item.get("order_id"),
-                "process_routing_id": item.get("process_routing_id"),
-                "equipment_id": item.get("equipment_id"),
-                "start_datetime": item.get("start_datetime"),
-                "end_datetime": item.get("end_datetime"),
-                "order_number": order.get("order_number") if order else None,
-                "product_name": product.get("name") if product else None,
-                "customer_name": customer.get("name") if customer else None,
-                "process_name": process_routing.get("process_name")
-                if process_routing
-                else None,
-                "equipment_name": equipment_display_name(equipment),
-                "equipment_group_name": equipment_group_name,
+        group_names = self._get_group_display_names(
+            {
+                group_id
+                for item in schedule_data
+                if (routing := item.get("process_routings"))
+                and (group_id := routing.get("equipment_group_id")) is not None
             }
-            schedules.append(schedule)
+        )
+        process_extents, order_extents = self._get_extents(
+            sorted({item["order_id"] for item in schedule_data})
+        )
 
-        print(schedules)
+        return [
+            _format_schedule(item, group_names, process_extents, order_extents)
+            for item in schedule_data
+        ]
 
-        return schedules
+    def _get_group_display_names(self, group_ids: set[int]) -> dict[int, str]:
+        """設備グループID → 表示名。1台グループはメンバーの設備の表示名にする。
+
+        1台グループの名前は設備名・呼称の変更に追従しないため（Issue #512）。
+        Frontend の `groupDisplayName()` と揃える
+        """
+        if not group_ids:
+            return {}
+        res = (
+            self.client.table(SupabaseTableName.EQUIPMENT_GROUPS.value)
+            .select(
+                "id, name, equipment_group_members(equipments("
+                f"{EQUIPMENT_DISPLAY_COLUMNS}))"
+            )
+            .in_("id", sorted(group_ids))
+            .execute()
+        )
+        names: dict[int, str] = {}
+        for group in cast(list[dict[str, Any]], res.data or []):
+            members = [
+                m["equipments"]
+                for m in group.get("equipment_group_members") or []
+                if m.get("equipments")
+            ]
+            if len(members) == 1:
+                names[group["id"]] = cast(str, equipment_display_name(members[0]))
+            else:
+                names[group["id"]] = group["name"]
+        return names
+
+    def _get_extents(
+        self, order_ids: list[int]
+    ) -> tuple[dict[tuple[int, int], _Extent], dict[int, _Extent]]:
+        """受注の全セグメント（表示期間外を含む）から、工程・受注ごとの開始の最小〜終了の最大を求める。
+
+        API は表示期間と重なるセグメントしか返さないので、ガントで期間の外へ続く工程・受注に
+        「続き」の印を出すのに使う（Issue #579）
+        """
+        if not order_ids:
+            return {}, {}
+        rows = fetch_all_rows(
+            lambda: (
+                self.client.table(self.table_name)
+                .select(
+                    "id, order_id, process_routing_id, start_datetime, end_datetime"
+                )
+                .in_("order_id", order_ids)
+                .order("id")
+            )
+        )
+        process_extents: dict[tuple[int, int], _Extent] = {}
+        order_extents: dict[int, _Extent] = {}
+        for row in rows:
+            segment = _Extent(row["start_datetime"], row["end_datetime"])
+            key = (row["order_id"], row["process_routing_id"])
+            process_extents[key] = segment.union(process_extents.get(key))
+            order_extents[row["order_id"]] = segment.union(
+                order_extents.get(row["order_id"])
+            )
+        return process_extents, order_extents
+
+
+def _format_schedule(
+    item: dict[str, Any],
+    group_names: dict[int, str],
+    process_extents: dict[tuple[int, int], _Extent],
+    order_extents: dict[int, _Extent],
+) -> dict[str, Any]:
+    """埋め込みを解いて `ProductionScheduleItem` の形のフラットな dict にする"""
+    order = cast(dict[str, Any], item.get("orders") or {})
+    product = cast(dict[str, Any], order.get("products") or {})
+    customer = cast(dict[str, Any], order.get("customers") or {})
+    routing = cast(dict[str, Any], item.get("process_routings") or {})
+    equipment = cast(dict[str, Any] | None, item.get("equipments"))
+    group_id = routing.get("equipment_group_id")
+    process_extent = process_extents.get((item["order_id"], item["process_routing_id"]))
+    order_extent = order_extents.get(item["order_id"])
+    return {
+        "id": item.get("id"),
+        "order_id": item.get("order_id"),
+        "process_routing_id": item.get("process_routing_id"),
+        "equipment_id": item.get("equipment_id"),
+        "start_datetime": item.get("start_datetime"),
+        "end_datetime": item.get("end_datetime"),
+        "order_number": order.get("order_number"),
+        "customer_order_no": order.get("customer_order_no"),
+        "order_status": order.get("status"),
+        "quantity": order.get("quantity"),
+        # 希望納期の DB 列は deadline_date（受注 API と同じく desired_deadline で返す）
+        "desired_deadline": order.get("deadline_date"),
+        "confirmed_deadline": order.get("confirmed_deadline"),
+        "product_name": product.get("name"),
+        # 顧客不明（customer_id が NULL、#521）は null のまま。表示側で「顧客不明」と出す
+        "customer_name": customer.get("name"),
+        "process_name": routing.get("process_name"),
+        "sequence_order": routing.get("sequence_order"),
+        "equipment_name": equipment_display_name(equipment),
+        "equipment_group_id": group_id,
+        "equipment_group_name": group_names.get(group_id)
+        if group_id is not None
+        else None,
+        "process_start_datetime": process_extent.start if process_extent else None,
+        "process_end_datetime": process_extent.end if process_extent else None,
+        "order_start_datetime": order_extent.start if order_extent else None,
+        "order_end_datetime": order_extent.end if order_extent else None,
+    }

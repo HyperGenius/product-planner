@@ -17,8 +17,20 @@ export interface GanttTask {
   color?: string
   /** ツールチップとして表示するReactNode（外部から注入可能） */
   tooltip?: ReactNode
-  /** グループヘッダー行として表示する場合 true */
+  /**
+   * グループヘッダー行として表示する場合 true。バーは期間を示す細いサマリーバー（ブラケット形）で描き、
+   * 通常のバーと太さで区別する
+   */
   isGroupHeader?: boolean
+  /**
+   * 属するグループヘッダーのタスクの id。指定すると子行としてラベルをインデントし、
+   * グループを折りたたんだときに隠す
+   */
+  parentId?: string
+  /** 表示範囲より前から続いている場合 true（バーの始端に「続き」の印を出す） */
+  continuesBefore?: boolean
+  /** 表示範囲より後へ続いている場合 true（バーの終端に「続き」の印を出す） */
+  continuesAfter?: boolean
   /**
    * 所要時間 0（start と end が同一時刻）のマイルストーン工程として
    * 幅0のバーではなくひし形マーカーで描画する場合 true
