@@ -157,10 +157,11 @@ async function openSchedule(page: Page) {
   await expect(page.getByText("E2E顧客A社").first()).toBeVisible({ timeout: 15000 })
 }
 
-async function selectOption(page: Page, triggerLabel: string, option: string) {
-  await page.getByRole("combobox", { name: triggerLabel }).click()
-  await page.getByRole("option", { name: option, exact: true }).click()
-  await expect(page.getByRole("listbox")).toBeHidden()
+/** ツールバーのセグメントボタン（表示単位・期間。Issue #581 で Select から変更）を選ぶ */
+async function selectOption(page: Page, groupLabel: string, option: string) {
+  const radio = page.getByRole("radiogroup", { name: groupLabel }).getByRole("radio", { name: option, exact: true })
+  await radio.click()
+  await expect(radio).toHaveAttribute("aria-checked", "true")
 }
 
 async function screenshot(page: Page, name: string) {
@@ -226,13 +227,13 @@ for (const viewport of [
     test("設備グループ別・フラット: 工程行にどの注文（顧客・製品）の工程かを出す", async ({ page }) => {
       await openSchedule(page)
 
-      await selectOption(page, "グルーピングモード選択", "設備グループ別")
+      await selectOption(page, "表示単位", "設備グループ別")
       await screenshot(page, `${viewport.width}-week-equipment-group`)
       // グループ行（5グループ）＋工程行（5行）
       await expect(rowLabels(page)).toHaveCount(10)
       await expect(rowLabels(page).filter({ hasText: "プレス" }).first()).toContainText("E2E顧客A社")
 
-      await selectOption(page, "グルーピングモード選択", "フラット表示")
+      await selectOption(page, "表示単位", "フラット")
       await screenshot(page, `${viewport.width}-week-flat`)
       await expect(rowLabels(page).filter({ hasText: "内職" })).toContainText("顧客不明 E2E製品B")
     })

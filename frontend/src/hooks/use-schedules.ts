@@ -51,7 +51,8 @@ export function useSchedules(params: ScheduleQueryParams, options?: { refetchInt
 }
 
 /**
- * スケジュールを更新するフック (ガントチャートのドラッグ&ドロップ用)
+ * スケジュールを更新するフック（ガントの詳細シートの「操作」から開始・終了を変更する。Issue #581）。
+ * 変更できるのは `SCHEDULE_EDITOR_ROLES` のロールだけ（それ以外は 403）
  */
 export function useUpdateSchedule() {
   const queryClient = useQueryClient()
@@ -77,6 +78,7 @@ export function useUpdateSchedule() {
     },
     onError: (error) => {
       console.error("Failed to update schedule:", error)
+      toast.error("スケジュールを更新できませんでした")
     },
   })
 }

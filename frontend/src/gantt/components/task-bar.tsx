@@ -8,6 +8,13 @@ type TaskBarProps = {
 } & React.HTMLAttributes<HTMLDivElement>
 
 /**
+ * タップできるバーのタップ範囲（44px 四方以上。Issue #581）。見た目の大きさは変えず、透明な ::before を
+ * バーの中心に重ねて広げる。同じ行のバーは同じ作業（rowId）なので、隣のバーと重なっても困らない
+ */
+const HIT_AREA =
+  'before:absolute before:left-1/2 before:top-1/2 before:h-11 before:w-full before:min-w-11 before:-translate-x-1/2 before:-translate-y-1/2'
+
+/**
  * ガントチャートの1タスク分のバーコンポーネント
  * forwardRef で ref と HTML イベントハンドラーを DOM に転送することで
  * Radix UI の Tooltip（asChild）などが正常に動作する
@@ -22,6 +29,7 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
     'data-continues-before': continuesBefore || undefined,
     'data-continues-after': continuesAfter || undefined,
   }
+  const hitArea = props.onClick ? ` cursor-pointer ${HIT_AREA}` : ''
 
   if (task.isGroupHeader) {
     // 細いサマリーバー（ブラケット形）: 上辺の梁＋両端の短い脚。工程のバー（h-7）と太さで区別する。
@@ -34,7 +42,7 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
         data-task-id={task.id}
         data-summary-bar
         {...continuationAttrs}
-        className={`relative h-3 mx-0.5${className ? ` ${className}` : ''}`}
+        className={`relative h-3 mx-0.5${hitArea}${className ? ` ${className}` : ''}`}
         {...props}
       >
         <span
@@ -69,7 +77,7 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
       <div
         ref={ref}
         style={{ gridColumn: `${colStart} / ${colEnd}`, ...style }}
-        className={`relative flex items-center h-7 text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2]${className ? ` ${className}` : ''}`}
+        className={`relative flex items-center h-7 text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2]${hitArea}${className ? ` ${className}` : ''}`}
         data-appearance={appearance}
         data-task-id={task.id}
         {...props}
@@ -104,7 +112,7 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
         ...(appearance === 'subtle' ? { borderColor: baseColor } : {}),
         ...style,
       }}
-      className={`relative flex items-center h-7 rounded text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2] ${look}${className ? ` ${className}` : ''}`}
+      className={`relative flex items-center h-7 rounded text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2] ${look}${hitArea}${className ? ` ${className}` : ''}`}
       data-progress={progressPct !== null ? Math.round(progressPct) : undefined}
       data-appearance={appearance}
       data-task-id={task.id}

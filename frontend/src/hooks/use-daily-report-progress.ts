@@ -19,8 +19,14 @@ const PROGRESS_STALE_TIME_MS = 5 * 60 * 1000
 /**
  * 複数受注の工程ごとの進捗（ガントチャート用）。受注ごとに引かず1リクエストにまとめる（N+1 にしない）。
  * 上限を超える件数は分割して並列に取得し結合する。`orderIds` が空の間は取得しない。
+ *
+ * @param options.refetchInterval 自動再取得の間隔(ms)。置きっぱなしのタブレットで見る生産スケジュール
+ *   （Issue #581）から指定する。未指定時は自動再取得しない
  */
-export function useOrderProgressList(orderIds: readonly number[]) {
+export function useOrderProgressList(
+  orderIds: readonly number[],
+  options?: { refetchInterval?: number },
+) {
   const ids = Array.from(new Set(orderIds)).sort((a, b) => a - b)
   return useQuery<OrderProgressList>({
     queryKey: [...DAILY_REPORT_PROGRESS_QUERY_KEY, "list", ids],
@@ -44,6 +50,7 @@ export function useOrderProgressList(orderIds: readonly number[]) {
     enabled: ids.length > 0,
     staleTime: PROGRESS_STALE_TIME_MS,
     refetchOnWindowFocus: false,
+    refetchInterval: options?.refetchInterval,
   })
 }
 

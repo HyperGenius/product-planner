@@ -71,7 +71,7 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
 - 文言は `lib/schedule-label-utils.ts`。納期は「送品の消し込み」と同じ**希望納期 → 無ければ完成見込み**
   （`pickShippingDeadline()` を共有）で、完成見込みのときは「見込 M/d」と出して区別する。日付のみの列なので `parseISO()` でパースする
 - 注文番号は `order_number` → `customer_order_no` → `#<内部ID>` の順
-- 注文行の全文（長い製品名）はサマリーバーのツールチップで見られる（詳細シートは #581）
+- 注文行の全文（長い製品名）はサマリーバーのツールチップ（PC）と詳細シート（#581）で見られる
 
 ### 見た目（`src/gantt` の汎用機能）
 
@@ -115,3 +115,59 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
 - 凡例（`components/schedule/progress-legend.tsx`）は常時表示。見本は実際の `TaskBar` で描く。進捗の計算時刻（`computed_at`）も出す。
   未計算のテナントは「計画のみ」だけ
 - 「遅れのみ」「完了を隠す」の絞り込みトグル（Issue では任意）は未実装
+
+## タブレットのタッチ操作（Issue #581）
+
+想定は工場に置くタブレット（横向き 1180×820〜1280×800、タッチ・ホバー無し）で社長が見て操作すること。PC でも崩れないこと。
+
+### 詳細シート（`components/schedule/schedule-detail-sheet.tsx`）
+
+- 工程バー・工程行のラベルのタップで**工程の詳細**、注文行のラベル・サマリーバーのタップで**注文の詳細**を開く。
+  設備グループ行のラベルのタップは折りたたみの切り替え（詳細は開かない）
+- シートはモーダルにせず、ガントの右に並べる `aside`（幅 360px、`xl` で 400px）。ガントは隠れないので、開いたまま別の行を
+  タップして切り替えられる。開いている行は `src/gantt` の `selectedRowKeys` でハイライトする（日次・設備グループ別は工程が
+  区間ごとの行になるので、その工程の行をすべて塗る。注文は注文行、注文行の無い表示単位ではその注文の工程の行）
+- 中身は表示中のスケジュールと進捗から `lib/schedule-detail-utils.ts` の `buildScheduleDetail()` で組み立てる（シート用の API は無い）
+
+| 種類 | 内容 |
+|---|---|
+| 工程 | 工程名・設備（グループ）・計画（表示中の範囲と区間数、工程全体の範囲が違えば併記）／実績（状態・`good_qty / order_quantity`・初回〜最終実績日・計画終了・完了の根拠 `completed_by`）／注文の項目（顧客・製品・数量・希望納期・完成見込み・注文番号・顧客の注文番号・ステータス）と受注詳細へのリンク／操作（編集できるロールだけ） |
+| 注文 | 注文の項目・計画（全体）・注文の状態、工程の一覧（工程順。タップでその工程へ）。工程は**表示中の期間にある工程と、進捗の行がある工程**を合わせたもの（確定済み・生産中なら全工程が出る） |
+
+- 選択は `ScheduleSelection`（`order_id` / `process_routing_id`）で持つので、自動更新で取り直しても同じものを指す。
+  選んだものが表示中の期間に無くなったらシートは閉じる（`buildScheduleDetail()` が null）
+- ホバーのツールチップは PC 用に残すが、情報の正はシート（Radix Tooltip はタッチでは開かない）
+
+### 閲覧と編集の分離
+
+- 「編集モード」トグルは廃止。タップは詳細を開くだけで、開始・終了の編集（既存の `ScheduleEditDialog`）はシートの「操作」で区間ごとに開く
+- 編集できるロールは **`president` のみ**（承認系と同じく `platform_admin` を含めない。生産管理者ロールができたら足す）。
+  Frontend `SCHEDULE_EDITOR_ROLES`（`types/member.ts`）と Backend `_SCHEDULE_EDITOR_ROLES`（`routers/transaction/production_schedules.py`、
+  それ以外は `PATCH /production-schedules/{id}` が 403）を揃える
+- 前倒し・後ろ倒し（後工程の連動）は #582
+
+### タップとスワイプ・タップ目標（`src/gantt`）
+
+| props | 内容 |
+|---|---|
+| `onRowClick(rowTasks)` | ラベル列の行のタップ（折りたたみボタンは除く）。中身は `role="button"`（Enter / Space でも発火） |
+| `onTaskClick(task)` | バーのタップ。グループヘッダーのサマリーバーでも発火する（以前は除外していた） |
+| `selectedRowKeys` | ハイライトする行（`getRowKey(task)` = `rowId ?? id`） |
+| `barHeight` | 通常のバー・マイルストーンの高さ |
+
+- スクロールコンテナの `pointerdown`（capture）で位置とスクロール位置を覚え、クリック時に 10px を超えて動いた・スクロールした
+  ものは無視する（スワイプの終わりで誤って開かない）。`detail === 0`（キーボード由来）は常に通す
+- タップできるバーには透明な `::before`（44px 四方以上、バーの中心に重ねる）でタップ範囲を広げる。同じ行のバーは同じ工程なので重なっても困らない
+- 画面側は工程行 52px・工程バー 36px・設備グループ行 48px・注文行 60px。折りたたみボタン・見出しのボタンも 44px
+
+### ツールバー・置きっぱなし運用（`app/schedule/page.tsx`）
+
+- 表示単位（注文別／設備グループ別／フラット）と期間（日／週／月）は `SegmentedControl`（`role="radiogroup"`、各 44px）。
+  設備グループは件数が増えうるので検索付きコンボボックスのまま。「今日」「前へ」「次へ」、日付へのジャンプ（`input type="date"`）を置く
+- 幅 1366px 以下で開くとサイドバーを閉じ、画面を離れるときに元へ戻す（`useCollapseSidebarOnTablet()`、`useEffectEvent`）
+- スケジュール・進捗は5分ごとに自動更新（`useSchedules` / `useOrderProgressList` の `refetchInterval`）し、最終更新時刻と「更新」ボタンを出す。
+  再取得に失敗したら「取得に失敗しました（最終更新 …）」に切り替え、取得済みのガントは出したままにする
+- 表示単位・期間・設備グループ・折りたたみは localStorage（`schedule-view-prefs`）に覚える。読み書きは
+  `hooks/use-local-storage-state.ts`（`useSyncExternalStore` で SSR 中は既定値、ストレージが使えない端末では開いている間だけ保つ）、
+  値の検証は `lib/schedule-view-prefs.ts`（外れた項目は既定値に戻す。削除された設備グループは「すべて」扱い）。折りたたみは新しい 300 件まで
+- E2E: `frontend/e2e/gantt-tablet-touch.spec.ts`（1180×820・`hasTouch`。スワイプは CDP の `Input.dispatchTouchEvent` で再現）

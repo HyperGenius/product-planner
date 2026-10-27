@@ -10,10 +10,9 @@ import {
   startOfWeek,
   endOfWeek,
   format,
-  isSameDay,
 } from 'date-fns'
 import { ja } from 'date-fns/locale'
-import { GanttChart as GanttChartLib } from '@/gantt'
+import { GanttChart as GanttChartLib, getRowKey } from '@/gantt'
 import type { GanttBarAppearance, GanttMarker, GanttTask } from '@/gantt'
 import type { Schedule, GanttViewMode, GroupByMode } from '@/types/schedule'
 import type { ProcessProgress } from '@/types/daily-report-progress'
@@ -36,6 +35,8 @@ import {
   scheduleOrderMeta,
   scheduleOrderTitle,
 } from '@/lib/schedule-label-utils'
+import { formatDateTime, formatRange, type ScheduleSelection } from '@/lib/schedule-detail-utils'
+import { StateBadge, type StateBadgeState } from '@/components/schedule/state-badge'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -64,10 +65,6 @@ export interface GanttChartProps {
    */
   colorMode?: 'product' | 'process'
   /**
-   * 編集可能かどうか（Phase 1: Read-Only のため現在は未使用）
-   */
-  isEditable?: boolean
-  /**
    * グルーピングモード: 'none' (フラット表示) | 'order' (オーダー別) | 'equipment_group' (設備グループ別)
    */
   groupBy?: GroupByMode
@@ -80,9 +77,17 @@ export interface GanttChartProps {
    */
   nonWorkingDays?: Date[]
   /**
-   * タスクバーがクリックされた際に発火するコールバック
+   * 詳細シートで開いている工程・注文（Issue #581）。その行をハイライトする
    */
-  onTaskClick?: (schedule: Schedule) => void
+  selection?: ScheduleSelection | null
+  /**
+   * 工程バー・工程行のラベル（→ 工程）、注文行のラベル・サマリーバー（→ 注文）をタップしたときのコールバック。
+   * 設備グループ行のラベルのタップは折りたたみの切り替え
+   */
+  onSelect?: (selection: ScheduleSelection) => void
+  /** 折りたたみ中のグループ行の id（制御する場合。未指定なら内部で持つ） */
+  collapsedGroupIds?: ReadonlySet<string>
+  onCollapsedGroupIdsChange?: (ids: ReadonlySet<string>) => void
   /**
    * 日報の実績による受注×工程の進捗（Issue #491）。指定するとバーに進捗率の塗り・遅れの強調を付け、
    * ツールチップに実績を出す。進捗の行が無い工程（割り付けの対象外の受注等）は現状どおりの表示
@@ -433,16 +438,6 @@ function applyProgress(
   })
 }
 
-function formatDateTime(d: Date): string {
-  return format(d, 'M/d HH:mm', { locale: ja })
-}
-
-/** 期間を日付付きで出す（同じ日なら終了は時刻だけ）。週次で複数日にわたる範囲を1日分に見せないため */
-function formatRange(start: Date, end: Date): string {
-  const endLabel = isSameDay(start, end) ? format(end, 'HH:mm', { locale: ja }) : formatDateTime(end)
-  return `${formatDateTime(start)} - ${endLabel}`
-}
-
 /** 同じ行に並ぶセグメントの数と表示中の範囲（Issue #535） */
 interface RowSummary {
   count: number
@@ -510,38 +505,11 @@ const LABEL_COLUMN_WIDTH = 260
 
 /** 注文行の高さ（px）。1行目（顧客名・製品名）が2行に折り返しても2行目（数量・納期・注文番号）が収まる高さ */
 const ORDER_ROW_HEIGHT = 60
-/** 設備グループ行の高さ（px） */
-const EQUIPMENT_GROUP_ROW_HEIGHT = 36
-
-/** ラベル列の状態バッジの色。色だけに頼らず文言（と ✓ / ！）も出す */
-const STATE_BADGE_CLASS: Record<ProcessDisplayState | 'delayed_some', string> = {
-  planned_only: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
-  not_started: 'border border-dashed border-blue-500 text-blue-700 dark:text-blue-300',
-  in_progress: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200',
-  completed: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-  delayed: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
-  delayed_some: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
-}
-
-function StateBadge({
-  state,
-  text,
-}: {
-  state: ProcessDisplayState | 'delayed_some'
-  text: string
-}) {
-  const icon = state === 'completed' ? '✓ ' : state === 'delayed' || state === 'delayed_some' ? '！' : ''
-  return (
-    <span
-      data-testid="row-state-badge"
-      data-state={state}
-      className={`shrink-0 whitespace-nowrap rounded px-1 text-[10px] font-semibold leading-4 ${STATE_BADGE_CLASS[state]}`}
-    >
-      {icon}
-      {text}
-    </span>
-  )
-}
+/** 設備グループ行の高さ（px）。タップ目標 44px 以上（Issue #581） */
+const EQUIPMENT_GROUP_ROW_HEIGHT = 48
+/** 工程行の高さ・工程バーの高さ（px）。タブレットの指でも狙えるよう、行は 44px 以上にする（Issue #581） */
+const PROCESS_ROW_HEIGHT = 52
+const PROCESS_BAR_HEIGHT = 36
 
 /** 固定ラベル列の1行分（Issue #579）。`stateBadge` は工程行・注文行の状態（Issue #580） */
 function RowLabelContent({
@@ -549,7 +517,7 @@ function RowLabelContent({
   stateBadge,
 }: {
   label: RowLabel | undefined
-  stateBadge?: { state: ProcessDisplayState | 'delayed_some'; text: string } | null
+  stateBadge?: { state: StateBadgeState; text: string } | null
 }) {
   if (!label) return null
   switch (label.kind) {
@@ -619,7 +587,10 @@ export function GanttChart({
   groupBy = 'none',
   currentDate,
   nonWorkingDays,
-  onTaskClick,
+  selection,
+  onSelect,
+  collapsedGroupIds: controlledCollapsedGroupIds,
+  onCollapsedGroupIdsChange,
   progress,
 }: GanttChartProps) {
   // タイムライン表示範囲の計算（表示モードに応じた前後を含む期間）
@@ -677,15 +648,22 @@ export function GanttChart({
     [model, scheduleMap, progressIndex, now],
   )
 
-  // 折りたたみ中のグループ行（注文・設備グループ）の id。グルーピングを切り替えても id が衝突しないので持ち越す
-  const [collapsedGroupIds, setCollapsedGroupIds] = useState<ReadonlySet<string>>(() => new Set())
-  const toggleGroup = (groupId: string) =>
-    setCollapsedGroupIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(groupId)) next.delete(groupId)
-      else next.add(groupId)
-      return next
-    })
+  // 折りたたみ中のグループ行（注文・設備グループ）の id。グルーピングを切り替えても id が衝突しないので持ち越す。
+  // 画面が localStorage に覚えるときは props で制御する（Issue #581）
+  const [internalCollapsedGroupIds, setInternalCollapsedGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  )
+  const collapsedGroupIds = controlledCollapsedGroupIds ?? internalCollapsedGroupIds
+  const setCollapsedGroupIds = (ids: ReadonlySet<string>) => {
+    if (controlledCollapsedGroupIds === undefined) setInternalCollapsedGroupIds(ids)
+    onCollapsedGroupIdsChange?.(ids)
+  }
+  const toggleGroup = (groupId: string) => {
+    const next = new Set(collapsedGroupIds)
+    if (next.has(groupId)) next.delete(groupId)
+    else next.add(groupId)
+    setCollapsedGroupIds(next)
+  }
 
   const rowSummaries = useMemo(() => summarizeRows(ganttTasks), [ganttTasks])
 
@@ -706,12 +684,52 @@ export function GanttChart({
     return text ? { state, text } : null
   }
 
-  const handleTaskClick = onTaskClick
+  // 詳細シートで開いている行。工程は日次・設備グループ別だとセグメントごとの行になるので、その工程の行をすべて塗る。
+  // 注文は注文行（オーダー別）、注文行の無い表示単位ではその注文の工程の行
+  const selectedRowKeys = useMemo(() => {
+    const keys = new Set<string>()
+    if (!selection) return keys
+    model.tasks.forEach((task) => {
+      if (selection.kind === 'order' && task.id === `group-order-${selection.orderId}`) {
+        keys.add(getRowKey(task))
+        return
+      }
+      const schedule = scheduleMap.get(task.id)
+      if (!schedule || schedule.order_id !== selection.orderId) return
+      if (selection.kind === 'process' ? schedule.process_routing_id === selection.processRoutingId : groupBy !== 'order') {
+        keys.add(getRowKey(task))
+      }
+    })
+    return keys
+  }, [selection, model, scheduleMap, groupBy])
+
+  /** タスク（行の先頭・バー）→ 選ぶもの。設備グループの行は null */
+  const selectionOf = (task: GanttTask): ScheduleSelection | null => {
+    const label = model.labels.get(task.id)
+    if (label?.kind === 'order') return { kind: 'order', orderId: label.orderId }
+    const schedule = scheduleMap.get(task.id)
+    return schedule
+      ? { kind: 'process', orderId: schedule.order_id, processRoutingId: schedule.process_routing_id }
+      : null
+  }
+
+  const handleTaskClick = onSelect
     ? (task: GanttTask) => {
-        const schedule = scheduleMap.get(task.id)
-        if (schedule) onTaskClick(schedule)
+        const next = selectionOf(task)
+        if (next) onSelect(next)
       }
     : undefined
+
+  const handleRowClick = (rowTasks: GanttTask[]) => {
+    const head = rowTasks[0]
+    const next = selectionOf(head)
+    if (next) {
+      onSelect?.(next)
+      return
+    }
+    // 設備グループ行: ラベル全体を折りたたみの切り替えにする（小さいボタンを狙わなくてよい）
+    if (head.isGroupHeader && model.groupIds.includes(head.id)) toggleGroup(head.id)
+  }
 
   if (ganttTasks.length === 0) {
     return (
@@ -733,6 +751,8 @@ export function GanttChart({
       rangeStart={rangeStart}
       rangeEnd={rangeEnd}
       labelWidth={LABEL_COLUMN_WIDTH}
+      rowHeight={PROCESS_ROW_HEIGHT}
+      barHeight={PROCESS_BAR_HEIGHT}
       labelHeader={
         <div className="flex w-full items-center justify-between gap-1">
           <span>{LABEL_HEADERS[groupBy]}</span>
@@ -741,22 +761,22 @@ export function GanttChart({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-11 w-11"
                 aria-label="すべて展開"
                 title="すべて展開"
                 onClick={() => setCollapsedGroupIds(new Set())}
               >
-                <ChevronsUpDown className="h-3.5 w-3.5" />
+                <ChevronsUpDown className="h-5 w-5" />
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-11 w-11"
                 aria-label="すべて折りたたむ"
                 title="すべて折りたたむ"
                 onClick={() => setCollapsedGroupIds(new Set(model.groupIds))}
               >
-                <ChevronsDownUp className="h-3.5 w-3.5" />
+                <ChevronsDownUp className="h-5 w-5" />
               </Button>
             </div>
           )}
@@ -772,6 +792,8 @@ export function GanttChart({
       workHours={workHoursForLib}
       nonWorkingDays={nonWorkingDaysForLib}
       onTaskClick={handleTaskClick}
+      onRowClick={onSelect ? handleRowClick : undefined}
+      selectedRowKeys={selectedRowKeys}
       wrapTaskBar={(task: GanttTask, children) => {
         const taskProgress = task.isGroupHeader ? undefined : progressOf(task)
         const label = model.labels.get(task.id)

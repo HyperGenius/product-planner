@@ -280,9 +280,9 @@ describe("GanttChart（スケジュール）の週次表示のセグメント（
     expect(tooltip).toHaveTextContent("この工程（表示中）: 9/14 09:00 - 9/17 17:00（2区間）")
   })
 
-  it("クリックするとそのセグメントを渡す", async () => {
+  it("バーをタップするとその工程を選ぶ（Issue #581）", async () => {
     const user = userEvent.setup()
-    const onTaskClick = vi.fn()
+    const onSelect = vi.fn()
     render(
       <GanttChart
         tasks={SEGMENTED}
@@ -290,12 +290,12 @@ describe("GanttChart（スケジュール）の週次表示のセグメント（
         groupBy="none"
         currentDate={WEEK}
         nonWorkingDays={WEEKEND}
-        onTaskClick={onTaskClick}
+        onSelect={onSelect}
       />,
     )
 
     await user.click(segmentBars()[1])
-    expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: 22 }))
+    expect(onSelect).toHaveBeenCalledWith({ kind: "process", orderId: 1, processRoutingId: 31 })
   })
 })
 
@@ -330,14 +330,14 @@ describe("GanttChart（スケジュール）の月次表示のセグメント（
     }),
   ]
 
-  function renderMonth(groupBy: "none" | "order" | "equipment_group" = "none", onTaskClick?: () => void) {
+  function renderMonth(groupBy: "none" | "order" | "equipment_group" = "none", onSelect?: () => void) {
     return render(
       <GanttChart
         tasks={SEGMENTED}
         viewMode="Month"
         groupBy={groupBy}
         currentDate={MONTH_BASE}
-        onTaskClick={onTaskClick}
+        onSelect={onSelect}
       />,
     )
   }
@@ -375,13 +375,13 @@ describe("GanttChart（スケジュール）の月次表示のセグメント（
     expect(first.parentElement).not.toBe(second.parentElement)
   })
 
-  it("クリックするとそのセグメントを渡す", async () => {
+  it("バーをタップするとその工程を選ぶ（Issue #581）", async () => {
     const user = userEvent.setup()
-    const onTaskClick = vi.fn()
-    renderMonth("none", onTaskClick)
+    const onSelect = vi.fn()
+    renderMonth("none", onSelect)
 
     await user.click(segmentBars()[1])
-    expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: 32 }))
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: "process", processRoutingId: 41 }))
   })
 })
 
@@ -636,5 +636,100 @@ describe("GanttChart（スケジュール）の注文行の状態と納期マー
     renderOrder(order({ desired_deadline: null, confirmed_deadline: "2026-09-09" }))
     expect(screen.getByTestId("gantt-marker")).toHaveTextContent("見込 9/9")
     expect(screen.queryByTestId("deadline-warning")).not.toBeInTheDocument()
+  })
+})
+
+describe("GanttChart（スケジュール）の詳細シートを開くタップと選択中の行（Issue #581）", () => {
+  // 注文1: プレス（2区間）・カシメ、注文2: 検査
+  const TASKS: Schedule[] = [
+    schedule({ id: 1, process_routing_id: 11, process_name: "プレス", sequence_order: 1, equipment_group_id: 1, start_datetime: at(10, 9), end_datetime: at(10, 10) }),
+    schedule({ id: 2, process_routing_id: 11, process_name: "プレス", sequence_order: 1, equipment_group_id: 1, start_datetime: at(10, 13), end_datetime: at(10, 14) }),
+    schedule({ id: 3, process_routing_id: 12, process_name: "カシメ", sequence_order: 2, equipment_group_id: 2, equipment_group_name: "カシメG", start_datetime: at(11, 9), end_datetime: at(11, 12) }),
+    schedule({ id: 4, order_id: 2, customer_name: "顧客B社", product_name: "ボルト", process_routing_id: 21, process_name: "検査", equipment_group_id: 1, start_datetime: at(11, 13), end_datetime: at(11, 15) }),
+  ]
+  const bar = (id: string) => document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)!
+  const selectedLabels = () =>
+    screen
+      .getAllByTestId("gantt-row-label")
+      .filter((label) => label.parentElement?.dataset.selected === "true")
+      .map((label) => label.textContent)
+
+  it("注文行のラベル・サマリーバーは注文を、工程行のラベルは工程を選ぶ", async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<GanttChart tasks={TASKS} viewMode="Week" groupBy="order" currentDate={BASE} onSelect={onSelect} />)
+
+    await user.click(screen.getByRole("button", { name: /顧客B社/ }))
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "order", orderId: 2 })
+
+    await user.click(bar("group-order-1"))
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "order", orderId: 1 })
+
+    await user.click(screen.getByRole("button", { name: /カシメ/ }))
+    expect(onSelect).toHaveBeenLastCalledWith({ kind: "process", orderId: 1, processRoutingId: 12 })
+  })
+
+  it("選んだ工程の行をハイライトする。日次は区間ごとの行をすべて塗る", () => {
+    const selection = { kind: "process", orderId: 1, processRoutingId: 11 } as const
+    const { rerender } = render(
+      <GanttChart tasks={TASKS} viewMode="Week" groupBy="order" currentDate={BASE} selection={selection} />,
+    )
+    expect(selectedLabels()).toEqual(["プレスプレスG"])
+
+    rerender(<GanttChart tasks={TASKS} viewMode="Day" groupBy="order" currentDate={BASE} selection={selection} />)
+    expect(selectedLabels()).toEqual(["プレスプレスG", "プレスプレスG"])
+  })
+
+  it("選んだ注文は注文行を、注文行の無いフラット表示ではその注文の工程の行を塗る", () => {
+    const selection = { kind: "order", orderId: 2 } as const
+    const { rerender } = render(
+      <GanttChart tasks={TASKS} viewMode="Week" groupBy="order" currentDate={BASE} selection={selection} />,
+    )
+    expect(selectedLabels()).toHaveLength(1)
+    expect(selectedLabels()[0]).toContain("顧客B社")
+
+    rerender(<GanttChart tasks={TASKS} viewMode="Week" groupBy="none" currentDate={BASE} selection={selection} />)
+    expect(selectedLabels()).toEqual(["顧客B社 ボルト検査"])
+  })
+
+  it("設備グループ行のラベルのタップは折りたたみの切り替え（詳細は開かない）", async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    const onCollapsedGroupIdsChange = vi.fn()
+    render(
+      <GanttChart
+        tasks={TASKS}
+        viewMode="Week"
+        groupBy="equipment_group"
+        currentDate={BASE}
+        onSelect={onSelect}
+        collapsedGroupIds={new Set()}
+        onCollapsedGroupIdsChange={onCollapsedGroupIdsChange}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "カシメG" }))
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(onCollapsedGroupIdsChange).toHaveBeenCalledWith(new Set(["group-equip-2"]))
+  })
+
+  it("折りたたみを props で制御できる（画面が localStorage に覚える）", async () => {
+    const user = userEvent.setup()
+    const onCollapsedGroupIdsChange = vi.fn()
+    render(
+      <GanttChart
+        tasks={TASKS}
+        viewMode="Week"
+        groupBy="order"
+        currentDate={BASE}
+        collapsedGroupIds={new Set(["group-order-1"])}
+        onCollapsedGroupIdsChange={onCollapsedGroupIdsChange}
+      />,
+    )
+    // 注文1の工程行は隠れている（注文1・注文2・検査）
+    expect(screen.getAllByTestId("gantt-row-label")).toHaveLength(3)
+
+    await user.click(screen.getByRole("button", { name: "すべて展開" }))
+    expect(onCollapsedGroupIdsChange).toHaveBeenCalledWith(new Set())
   })
 })
