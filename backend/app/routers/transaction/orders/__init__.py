@@ -22,6 +22,7 @@ from .email_intake import router as email_intake_router
 from .progress import router as progress_router
 from .repair_conversion import router as repair_conversion_router
 from .routing_queue import router as routing_queue_router
+from .schedule_shift import router as schedule_shift_router
 from .simulation import router as simulation_router
 
 orders_router = APIRouter(tags=["Transaction (Orders)"])
@@ -38,6 +39,7 @@ orders_router.include_router(progress_router, prefix="/orders")
 orders_router.include_router(simulation_router, prefix="/orders")
 orders_router.include_router(approval_workflow_router, prefix="/orders")
 orders_router.include_router(repair_conversion_router, prefix="/orders")
+orders_router.include_router(schedule_shift_router, prefix="/orders")
 
 __all__ = [
     "orders_router",

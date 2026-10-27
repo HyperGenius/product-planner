@@ -12,6 +12,7 @@ from app.dependencies import (
 )
 from app.models.transaction.schedule import ProductionScheduleItem, ScheduleUpdate
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
+from app.services.schedule_shift_service import SCHEDULE_EDITOR_ROLES
 from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
 
@@ -21,9 +22,8 @@ production_schedules_router = APIRouter(
 
 logger = get_logger(__name__)
 
-# スケジュールを直接書き換えられるロール（Issue #581）。承認系と同じく platform_admin を含めず社長に限る。
-# 生産管理者のロールができたらここに足す。Frontend `SCHEDULE_EDITOR_ROLES`（types/member.ts）と揃える
-_SCHEDULE_EDITOR_ROLES = ("president",)
+# スケジュールを直接書き換えられるロール（Issue #581）。工程の前倒し・後ろ倒し（#582）と共有する
+_SCHEDULE_EDITOR_ROLES = SCHEDULE_EDITOR_ROLES
 
 
 @production_schedules_router.get("", response_model=list[ProductionScheduleItem])

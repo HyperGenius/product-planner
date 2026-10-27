@@ -40,15 +40,31 @@ const PROGRESS: ProcessProgress[] = [
   },
 ]
 
-function renderProcess(canEdit: boolean, handlers: { onSelect?: () => void; onEditSegment?: () => void } = {}) {
+const SHIFT = {
+  workingDays: 0,
+  preview: undefined,
+  isPreviewLoading: false,
+  previewError: null,
+  isSaving: false,
+  onChange: vi.fn(),
+  onCancel: vi.fn(),
+  onConfirm: vi.fn(),
+}
+
+function renderProcess(
+  canEdit: boolean,
+  handlers: { onSelect?: () => void; onEditSegment?: () => void } = {},
+  schedules: Schedule[] = SCHEDULES,
+) {
   return render(
     <ScheduleDetailSheet
-      detail={buildProcessDetail(SCHEDULES, PROGRESS, 1, 11, NOW)!}
+      detail={buildProcessDetail(schedules, PROGRESS, 1, 11, NOW)!}
       now={NOW}
       canEdit={canEdit}
       onClose={vi.fn()}
       onSelect={handlers.onSelect ?? vi.fn()}
       onEditSegment={handlers.onEditSegment ?? vi.fn()}
+      shift={SHIFT}
     />,
   )
 }
@@ -91,6 +107,23 @@ describe("ScheduleDetailSheet（Issue #581）", () => {
     expect(buttons).toHaveLength(2)
     await user.click(buttons[1])
     expect(onEditSegment).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }))
+  })
+
+  it("編集できるロールは確定済み・生産中の注文の工程を前倒し・後ろ倒しできる（Issue #582）", () => {
+    renderProcess(true)
+    expect(screen.getByRole("button", { name: /前倒し/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /後ろ倒し/ })).toBeInTheDocument()
+  })
+
+  it("編集できないロール・出荷済みの注文には前倒し・後ろ倒しを出さない（Issue #582）", () => {
+    const { unmount } = renderProcess(false)
+    expect(screen.queryByRole("button", { name: /前倒し/ })).not.toBeInTheDocument()
+    unmount()
+
+    renderProcess(true, {}, SCHEDULES.map((s) => ({ ...s, order_status: "shipped" as const })))
+    expect(screen.queryByRole("button", { name: /前倒し/ })).not.toBeInTheDocument()
+    // 区間ごとの編集は残す
+    expect(screen.getAllByRole("button", { name: /開始・終了を編集/ })).toHaveLength(2)
   })
 
   it("工程から注文の全工程へ移れる", async () => {

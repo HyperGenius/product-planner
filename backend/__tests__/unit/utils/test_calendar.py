@@ -2,11 +2,15 @@
 稼働カレンダーユーティリティの単体テスト
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from app.utils.calendar import (
+    JST,
+    CalendarConfig,
+    add_working_days,
     calculate_end_time,
+    count_working_minutes,
     get_next_available_start_time,
     get_next_work_start,
     is_workday,
@@ -470,3 +474,75 @@ class TestBreakTimeLogic:
         duration = 420  # 7時間
         result = calculate_end_time(start_dt, duration)
         assert result == datetime(2025, 1, 6, 17, 0)  # 月曜日 17:00
+
+
+@pytest.mark.unit
+class TestCountWorkingMinutes:
+    """count_working_minutes のテスト（Issue #582）。2026-11-02 は月曜日"""
+
+    def test_excludes_break(self):
+        assert (
+            count_working_minutes(
+                datetime(2026, 11, 2, 11, tzinfo=JST),
+                datetime(2026, 11, 2, 14, tzinfo=JST),
+            )
+            == 120
+        )
+
+    def test_across_days_and_weekend(self):
+        # 金 16:00 〜 月 10:00 は金の1時間＋月の1時間
+        assert (
+            count_working_minutes(
+                datetime(2026, 11, 6, 16, tzinfo=JST),
+                datetime(2026, 11, 9, 10, tzinfo=JST),
+            )
+            == 120
+        )
+
+    def test_outside_work_hours_is_zero(self):
+        assert (
+            count_working_minutes(
+                datetime(2026, 11, 2, 18, tzinfo=JST),
+                datetime(2026, 11, 2, 20, tzinfo=JST),
+            )
+            == 0
+        )
+
+    def test_holiday_is_zero(self):
+        config = CalendarConfig(holidays={date(2026, 11, 3)})
+        assert (
+            count_working_minutes(
+                datetime(2026, 11, 3, 9, tzinfo=JST),
+                datetime(2026, 11, 3, 17, tzinfo=JST),
+                config,
+            )
+            == 0
+        )
+
+
+@pytest.mark.unit
+class TestAddWorkingDays:
+    """add_working_days のテスト（Issue #582）"""
+
+    def test_forward_skips_weekend(self):
+        assert add_working_days(datetime(2026, 11, 6, 10, tzinfo=JST), 1) == datetime(
+            2026, 11, 9, 10, tzinfo=JST
+        )
+
+    def test_backward_skips_weekend(self):
+        assert add_working_days(datetime(2026, 11, 9, 10, tzinfo=JST), -1) == datetime(
+            2026, 11, 6, 10, tzinfo=JST
+        )
+
+    def test_skips_holiday(self):
+        config = CalendarConfig(holidays={date(2026, 11, 3)})
+        assert add_working_days(
+            datetime(2026, 11, 2, 10, tzinfo=JST), 2, config
+        ) == datetime(2026, 11, 5, 10, tzinfo=JST)
+
+    def test_converts_to_jst(self):
+        # UTC 2026-11-06 23:00 は JST 土曜 8:00。翌稼働日は月曜
+        result = add_working_days(
+            datetime.fromisoformat("2026-11-06T23:00:00+00:00"), 1
+        )
+        assert result == datetime(2026, 11, 9, 8, tzinfo=JST)

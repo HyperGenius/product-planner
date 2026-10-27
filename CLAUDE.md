@@ -355,8 +355,16 @@ cd backend && ruff check . && mypy .
     タップは `src/gantt` の `onRowClick` / `onTaskClick` で、**スワイプの終わりのクリックを無視する判定（ポインタの移動量・スクロール量）は
     `src/gantt` 側にある**ので、ガントの中に別のクリックハンドラを足すときも `isTap()` を通す。シートの中身は表示中のスケジュールと進捗から
     `lib/schedule-detail-utils.ts` で組み立てる。スケジュールの直接編集は `president` のみ（Frontend `SCHEDULE_EDITOR_ROLES` と
-    Backend `_SCHEDULE_EDITOR_ROLES` を揃える）。表示の選択の保存は `useLocalStorageState()`（`useSyncExternalStore`。エフェクトで
+    Backend `SCHEDULE_EDITOR_ROLES`（`services/schedule_shift_service.py`）を揃える）。表示の選択の保存は `useLocalStorageState()`（`useSyncExternalStore`。エフェクトで
     localStorage を読んで setState しない）で、保存値は外部入力として `parse` で検証する
+  - 工程の前倒し・後ろ倒し（Issue #582）: 計算は純粋関数 `schedule_shift_service.plan_process_shift()`（元の開始から稼働日を数えた日の同じ時刻を起点に、
+    稼働時間ベースの所要時間で詰め直す。前工程の終了より前には置かない）、保存は RPC `shift_order_process_schedules`（計算に使った注文の全セグメントと
+    突き合わせて違えば失敗）。**RPC で「やり直して」を表すエラーに `40001` を使わない**（PostgREST が再試行対象として 504 にする。`P0001` 等にする）。
+    遅れの基準 `planned_end_datetime` は `order_process_progress` の列ではなく参照 API がスケジュールから都度求めるので、スケジュールを変えたら進捗の
+    クエリを無効化するだけでよい。着手日は `scheduling_start_date` を優先するので、注文の最初の工程を動かす経路は作業開始日も合わせる
+    （#400 の自動遷移が追従しない）。承認時のスケジューラ `schedule_order()` は**テナントの稼働カレンダーを使っていない**（`calendar_config` 未指定＝土日のみ休み）。
+    プレビューのバーは `src/gantt` の `isGhost` / `dimmed` で重ね、既存の行の rowId に並べる（ゴーストだけの行を作らない）。詳細は
+    [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md#工程の前倒し後ろ倒しissue-582)
   - jsdom には `PointerEvent` が無く、`fireEvent.pointerDown(el, { clientX })` の座標が入らない。座標が要るテストは、そのファイルだけ
     `MouseEvent` を継承した `PointerEvent` を `window` に当てる（前例は `gantt/components/gantt-chart.test.tsx`）。E2E でスワイプを再現するときは
     CDP の `Input.dispatchTouchEvent`（`gantt-tablet-touch.spec.ts`）

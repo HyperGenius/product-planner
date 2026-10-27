@@ -356,7 +356,7 @@ export function GanttChart({
                           ...(barHeight !== undefined && !task.isGroupHeader ? { height: `${barHeight}px` } : {}),
                         }}
                         onClick={
-                          onTaskClick
+                          onTaskClick && !task.isGhost
                             ? (e: MouseEvent) => {
                                 if (isTap(e)) onTaskClick(task)
                               }
@@ -364,7 +364,7 @@ export function GanttChart({
                         }
                       />
                     )
-                    return wrapTaskBar ? (
+                    return wrapTaskBar && !task.isGhost ? (
                       <Fragment key={task.id}>{wrapTaskBar(task, bar)}</Fragment>
                     ) : (
                       bar

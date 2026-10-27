@@ -16,6 +16,7 @@ import { GanttChart as GanttChartLib, getRowKey } from '@/gantt'
 import type { GanttBarAppearance, GanttMarker, GanttTask } from '@/gantt'
 import type { Schedule, GanttViewMode, GroupByMode } from '@/types/schedule'
 import type { ProcessProgress } from '@/types/daily-report-progress'
+import type { ProcessShiftResult } from '@/types/schedule-shift'
 import {
   formatActualDateRange,
   formatProgressQuantity,
@@ -93,6 +94,11 @@ export interface GanttChartProps {
    * ツールチップに実績を出す。進捗の行が無い工程（割り付けの対象外の受注等）は現状どおりの表示
    */
   progress?: readonly ProcessProgress[]
+  /**
+   * 工程の前倒し・後ろ倒しのプレビュー（Issue #582）。動く工程の元のバーを薄くし、ずらした後のバーを
+   * 同じ行に重ねて描く
+   */
+  shiftPreview?: ProcessShiftResult | null
 }
 
 /** バーの基本色（未着手の枠・進行中の塗り） */
@@ -438,6 +444,50 @@ function applyProgress(
   })
 }
 
+/**
+ * 工程の前倒し・後ろ倒しのプレビューを重ねる（Issue #582）。動く工程の元のバーは薄くし、ずらした後の
+ * セグメントをゴーストバーとしてその工程の最初の行に重ねる。表示中に行が無い工程（表示期間の外）には
+ * 重ねない（ゴーストバーだけの行を作らない）。1セグメント1行の表示（日次・設備グループ別）は行に rowId が
+ * 無いので、元のバーの id を rowId にして同じ行へ並べる（行の識別子は変わらない）
+ */
+export function applyShiftPreview(
+  tasks: GanttTask[],
+  scheduleMap: Map<string, Schedule>,
+  preview: ProcessShiftResult | null | undefined,
+): GanttTask[] {
+  if (!preview) return tasks
+  const moved = new Map(preview.processes.map((p) => [p.process_routing_id, p]))
+  const anchored = new Set<number>()
+  const ghosts: GanttTask[] = []
+  const result = tasks.map((task) => {
+    const schedule = scheduleMap.get(task.id)
+    const process =
+      schedule && schedule.order_id === preview.order_id ? moved.get(schedule.process_routing_id) : undefined
+    if (!process) return task
+    const rowId = task.rowId ?? task.id
+    if (!anchored.has(process.process_routing_id)) {
+      anchored.add(process.process_routing_id)
+      process.segments.forEach((seg, i) => {
+        const start = new Date(seg.start_datetime)
+        const end = new Date(seg.end_datetime)
+        ghosts.push({
+          id: `shift-preview-${process.process_routing_id}-${i}`,
+          name: `${task.name}（変更後）`,
+          start,
+          end,
+          color: task.color,
+          isGhost: true,
+          isMilestone: start.getTime() === end.getTime(),
+          rowId,
+          ...(task.parentId !== undefined ? { parentId: task.parentId } : {}),
+        })
+      })
+    }
+    return { ...task, rowId, dimmed: true }
+  })
+  return [...result, ...ghosts]
+}
+
 /** 同じ行に並ぶセグメントの数と表示中の範囲（Issue #535） */
 interface RowSummary {
   count: number
@@ -592,6 +642,7 @@ export function GanttChart({
   collapsedGroupIds: controlledCollapsedGroupIds,
   onCollapsedGroupIdsChange,
   progress,
+  shiftPreview,
 }: GanttChartProps) {
   // タイムライン表示範囲の計算（表示モードに応じた前後を含む期間）
   const { rangeStart, rangeEnd } = useMemo(() => {
@@ -644,8 +695,8 @@ export function GanttChart({
   )
 
   const ganttTasks = useMemo(
-    () => applyProgress(model.tasks, scheduleMap, progressIndex, now),
-    [model, scheduleMap, progressIndex, now],
+    () => applyShiftPreview(applyProgress(model.tasks, scheduleMap, progressIndex, now), scheduleMap, shiftPreview),
+    [model, scheduleMap, progressIndex, now, shiftPreview],
   )
 
   // 折りたたみ中のグループ行（注文・設備グループ）の id。グルーピングを切り替えても id が衝突しないので持ち越す。
@@ -665,7 +716,8 @@ export function GanttChart({
     setCollapsedGroupIds(next)
   }
 
-  const rowSummaries = useMemo(() => summarizeRows(ganttTasks), [ganttTasks])
+  // プレビューのゴーストバーは区間の数に数えない
+  const rowSummaries = useMemo(() => summarizeRows(ganttTasks.filter((t) => !t.isGhost)), [ganttTasks])
 
   const progressOf = (task: GanttTask): ProcessProgress | undefined => {
     const schedule = scheduleMap.get(task.id)

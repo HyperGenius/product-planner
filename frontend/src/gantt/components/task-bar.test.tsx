@@ -134,3 +134,20 @@ describe("TaskBar の続きの印", () => {
     expect(screen.queryByTestId("task-bar-continues-start")).not.toBeInTheDocument()
   })
 })
+
+describe("TaskBar の重ね描き・薄い表示（Issue #582）", () => {
+  it("ゴーストバーは破線の重ね描きで、クリックを受けない", () => {
+    const bar = renderBar(task({ isGhost: true, appearance: "danger", badge: "60%" }))
+    expect(bar).toHaveAttribute("data-ghost")
+    expect(bar.className).toContain("pointer-events-none")
+    // 外観・バッジは出さない
+    expect(bar).not.toHaveAttribute("data-appearance")
+    expect(screen.queryByTestId("task-bar-badge")).not.toBeInTheDocument()
+  })
+
+  it("dimmed のバーは薄く描く", () => {
+    const bar = renderBar(task({ dimmed: true }))
+    expect(bar).toHaveAttribute("data-dimmed", "true")
+    expect(bar.className).toContain("opacity-40")
+  })
+})
