@@ -88,3 +88,30 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
   行の最初・最後のバーに付ける
 - 注文行の高さは 60px（1行目が2行に折り返しても2行目が収まる）、設備グループ行は 36px
 - E2E（`frontend/e2e/gantt-order-labels.spec.ts`）で 1180×820 と 1920×1080 のスクリーンショットを撮る
+
+## 工程の状態と納期（Issue #580）
+
+バーの色は製品ではなく**工程の状態**を表す（製品の識別はラベル列）。状態は `lib/daily-report-progress-utils.ts` の
+`processDisplayState()`（`planned_only` / `not_started` / `in_progress` / `completed` / `delayed`）に集約し、遅れの判定は
+#491 の `isProgressDelayed()`（バックエンドの `planned_end_datetime` 基準）をそのまま使う。
+**進捗の行が無い工程は「計画のみ」**で、未着手・遅れに見せない（進捗を一度も計算していないテナントは全バーが計画のみ）。
+
+| 状態 | `appearance` | バー | バッジ |
+|---|---|---|---|
+| 計画のみ | `neutral` | グレーの塗り | なし |
+| 未着手 | `subtle` | 白地＋基本色の破線枠 | なし |
+| 進行中 | `default` | 基本色（青）＋進捗の暗い塗り | `60%` |
+| 完了 | `muted` | くすんだグレー | ✓ |
+| 遅れ | `danger` | 赤＋斜線（進捗の塗りも残す） | ！ |
+
+- 状態 → 外観の対応は `components/schedule/gantt-chart.tsx` の `STATE_APPEARANCE`（`Record<ProcessDisplayState, …>`）。
+  `src/gantt` は汎用の `GanttTask.appearance` / `badge` / `markers` だけを持ち、完了・遅れ等の語は持たない（`isDelayed` は廃止）
+- 1工程が複数セグメントに分かれる場合は全セグメントに同じ状態を出す。マイルストーンは外観の色（ひし形）だけ変える
+- ラベル列: 工程行に `完了` / `進行中 60%` / `遅れ` / `未着手`（計画のみは出さない）。注文行には注文全体の状態
+  （全工程完了 → `完了`、遅れの工程あり → `遅れあり`、それ以外は最終工程＝`sequence_order` 最大の状態。`orderStateLabelText()`）
+- 納期マーカー（`GanttTask.markers`、注文行＝オーダー別のみ）: 希望納期 → 無ければ完成見込み（#579 と同じ `pickShippingDeadline()`）の
+  **日の終わり**に縦線と `⚑ 納期 M/d` を出す。表示期間の外は端に `→ 納期 M/d` / `← …`。注文の最終工程の計画終了が
+  **希望納期**の日を超えるときは線を赤にして注文行に「納期超過」を出す（完成見込みは計画の終了から算出した値なので超過判定しない）
+- 凡例（`components/schedule/progress-legend.tsx`）は常時表示。見本は実際の `TaskBar` で描く。進捗の計算時刻（`computed_at`）も出す。
+  未計算のテナントは「計画のみ」だけ
+- 「遅れのみ」「完了を隠す」の絞り込みトグル（Issue では任意）は未実装

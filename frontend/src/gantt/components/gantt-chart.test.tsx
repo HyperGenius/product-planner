@@ -155,3 +155,34 @@ describe("GanttChart のグループ行・子行", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
 })
+
+describe("GanttChart の縦線マーカー（Issue #580）", () => {
+  const range = { rangeStart: new Date(2026, 8, 9), rangeEnd: new Date(2026, 8, 11, 23, 59, 59) }
+
+  function renderWith(at: Date) {
+    render(
+      <GanttChart
+        tasks={[task({ id: "a", markers: [{ at, label: "9/30", tone: "danger" }] })]}
+        viewMode="Day"
+        {...range}
+      />,
+    )
+  }
+
+  it("表示範囲の中なら行に縦線とラベルを出す", () => {
+    renderWith(new Date(2026, 8, 10, 12))
+    expect(screen.getByTestId("gantt-marker")).toHaveTextContent("9/30")
+    expect(screen.queryByTestId("gantt-marker-edge")).not.toBeInTheDocument()
+  })
+
+  it("範囲の後ろなら右端に「→」、前なら左端に「←」を出す", () => {
+    renderWith(new Date(2026, 9, 1))
+    expect(screen.getByTestId("gantt-marker-edge")).toHaveTextContent("→ 9/30")
+    expect(screen.getByTestId("gantt-marker-edge")).toHaveAttribute("data-marker-side", "after")
+  })
+
+  it("範囲の前なら左端に「←」を出す", () => {
+    renderWith(new Date(2026, 7, 1))
+    expect(screen.getByTestId("gantt-marker-edge")).toHaveTextContent("← 9/30")
+  })
+})

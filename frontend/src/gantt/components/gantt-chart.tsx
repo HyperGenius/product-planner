@@ -1,12 +1,13 @@
 'use client'
 
 import { Fragment, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import type { GanttTask, GanttViewMode } from '../types'
+import type { GanttMarker, GanttTask, GanttViewMode } from '../types'
 import {
   buildTimelineConfig,
   getTaskGridColumns,
   getMilestoneGridColumn,
   getNowFractionalColumn,
+  getFractionalColumn,
 } from '../utils/date-math'
 import type { WorkHoursConfig } from '../utils/date-math'
 import { TimelineHeader } from './timeline-header'
@@ -235,9 +236,21 @@ export function GanttChart({
                   </div>
                 </div>
                 <div
-                  className="min-w-0 flex-1"
+                  className="relative min-w-0 flex-1"
                   style={{ display: 'grid', gridTemplateColumns, alignItems: 'center' }}
                 >
+                  {head.markers?.map((marker) => (
+                    <MarkerLine
+                      key={`${marker.label}-${marker.at.getTime()}`}
+                      marker={marker}
+                      config={config}
+                      toLeft={(frac) =>
+                        columnWidthPx
+                          ? `${(frac - 1) * columnWidthPx}px`
+                          : `${((frac - 1) / totalUnits) * 100}%`
+                      }
+                    />
+                  ))}
                   {rowTasks.map((task) => {
                     const isMilestone = !task.isGroupHeader && task.isMilestone === true
                     const milestoneCol = isMilestone
@@ -271,6 +284,53 @@ export function GanttChart({
           })}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 行のタイムラインに重ねる縦線の目印。表示範囲の外なら端に `→ label` / `← label` を出す。
+ * バーのクリック・ホバーを邪魔しないよう pointer-events は切る
+ */
+function MarkerLine({
+  marker,
+  config,
+  toLeft,
+}: {
+  marker: GanttMarker
+  config: ReturnType<typeof buildTimelineConfig>
+  toLeft: (fractionalColumn: number) => string
+}) {
+  const danger = marker.tone === 'danger'
+  const color = danger ? 'text-red-600 dark:text-red-400' : 'text-blue-700 dark:text-blue-300'
+  const lineColor = danger ? 'bg-red-600 dark:bg-red-400' : 'bg-blue-700 dark:bg-blue-300'
+  const frac = getFractionalColumn(config, marker.at)
+
+  if (frac === null) {
+    const before = marker.at.getTime() < config.rangeStart.getTime()
+    return (
+      <span
+        data-testid="gantt-marker-edge"
+        data-marker-side={before ? 'before' : 'after'}
+        className={`pointer-events-none absolute top-0 z-[3] rounded bg-white/90 px-1 text-[10px] font-semibold leading-4 dark:bg-gray-900/90 ${color} ${before ? 'left-0' : 'right-0'}`}
+      >
+        {before ? `← ${marker.label}` : `→ ${marker.label}`}
+      </span>
+    )
+  }
+
+  return (
+    <div
+      data-testid="gantt-marker"
+      className="pointer-events-none absolute inset-y-0 z-[3]"
+      style={{ left: toLeft(frac) }}
+    >
+      <span aria-hidden className={`absolute inset-y-0 w-0.5 -translate-x-1/2 ${lineColor}`} />
+      <span
+        className={`absolute top-0 left-0.5 whitespace-nowrap rounded bg-white/90 px-1 text-[10px] font-semibold leading-4 dark:bg-gray-900/90 ${color}`}
+      >
+        ⚑ {marker.label}
+      </span>
     </div>
   )
 }

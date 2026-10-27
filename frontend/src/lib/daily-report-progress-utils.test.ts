@@ -5,6 +5,10 @@ import {
   formatProgressQuantity,
   indexProgress,
   isProgressDelayed,
+  orderStateLabelText,
+  processDisplayState,
+  processStateBadge,
+  processStateLabelText,
   progressKey,
   progressRatio,
   progressStatusLabel,
@@ -132,5 +136,89 @@ describe("indexProgress", () => {
     expect(index.get(progressKey(2, 11))).toBe(b)
     expect(index.get(progressKey(1, 12))).toBeUndefined()
     expect(indexProgress(undefined).size).toBe(0)
+  })
+})
+
+describe("processDisplayState（Issue #580）", () => {
+  const now = new Date(2026, 8, 11, 10)
+  const past = new Date(2026, 8, 10, 16).toISOString()
+  const future = new Date(2026, 8, 12, 16).toISOString()
+
+  it("進捗の行が無ければ計画のみ（未着手・遅れにしない）", () => {
+    expect(processDisplayState(undefined, now)).toBe("planned_only")
+  })
+
+  it("完了は計画の終了を過ぎていても完了", () => {
+    expect(processDisplayState(progress({ status: "completed", planned_end_datetime: past }), now)).toBe("completed")
+  })
+
+  it("計画の終了を過ぎて未完了なら、未着手・進行中でも遅れ", () => {
+    expect(processDisplayState(progress({ planned_end_datetime: past }), now)).toBe("delayed")
+    expect(processDisplayState(progress({ status: "in_progress", planned_end_datetime: past }), now)).toBe("delayed")
+  })
+
+  it("計画の終了前なら未着手・進行中", () => {
+    expect(processDisplayState(progress({ planned_end_datetime: future }), now)).toBe("not_started")
+    expect(processDisplayState(progress({ status: "in_progress", planned_end_datetime: future }), now)).toBe("in_progress")
+  })
+
+  it("計画の終了が無い（未スケジュール）未完了は遅れにしない", () => {
+    expect(processDisplayState(progress({ planned_end_datetime: null }), now)).toBe("not_started")
+  })
+})
+
+describe("processStateBadge / processStateLabelText（Issue #580）", () => {
+  const inProgress = progress({ status: "in_progress", good_qty: 60 })
+
+  it("バーのバッジ: 完了 ✓ / 遅れ ！ / 進行中は進捗率 / 未着手・計画のみは無し", () => {
+    expect(processStateBadge("completed", progress({ status: "completed" }))).toBe("✓")
+    expect(processStateBadge("delayed", inProgress)).toBe("！")
+    expect(processStateBadge("in_progress", inProgress)).toBe("60%")
+    expect(processStateBadge("not_started", progress())).toBeNull()
+    expect(processStateBadge("planned_only", undefined)).toBeNull()
+  })
+
+  it("受注数量が不明な進行中は進捗率を出さない", () => {
+    expect(processStateBadge("in_progress", progress({ status: "in_progress", order_quantity: null }))).toBeNull()
+  })
+
+  it("ラベル列のバッジ文言", () => {
+    expect(processStateLabelText("completed", progress({ status: "completed" }))).toBe("完了")
+    expect(processStateLabelText("in_progress", inProgress)).toBe("進行中 60%")
+    expect(processStateLabelText("in_progress", progress({ status: "in_progress", order_quantity: null }))).toBe("進行中")
+    expect(processStateLabelText("delayed", inProgress)).toBe("遅れ")
+    expect(processStateLabelText("not_started", progress())).toBe("未着手")
+    expect(processStateLabelText("planned_only", undefined)).toBeNull()
+  })
+})
+
+describe("orderStateLabelText（Issue #580）", () => {
+  const now = new Date(2026, 8, 11, 10)
+  const past = new Date(2026, 8, 10, 16).toISOString()
+  const future = new Date(2026, 8, 12, 16).toISOString()
+
+  it("進捗の行が無い注文は null", () => {
+    expect(orderStateLabelText([], now)).toBeNull()
+  })
+
+  it("全工程完了なら完了", () => {
+    const done = [1, 2].map((n) => progress({ sequence_order: n, status: "completed" }))
+    expect(orderStateLabelText(done, now)).toEqual({ state: "completed", text: "完了" })
+  })
+
+  it("遅れの工程があれば遅れあり", () => {
+    const items = [
+      progress({ sequence_order: 1, planned_end_datetime: past }),
+      progress({ sequence_order: 2, planned_end_datetime: future }),
+    ]
+    expect(orderStateLabelText(items, now)).toEqual({ state: "delayed_some", text: "遅れあり" })
+  })
+
+  it("それ以外は最終工程（sequence_order 最大）の進捗", () => {
+    const items = [
+      progress({ sequence_order: 2, status: "in_progress", good_qty: 30, planned_end_datetime: future }),
+      progress({ sequence_order: 1, status: "completed" }),
+    ]
+    expect(orderStateLabelText(items, now)).toEqual({ state: "in_progress", text: "進行中 30%" })
   })
 })

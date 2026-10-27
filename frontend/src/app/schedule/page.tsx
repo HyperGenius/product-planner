@@ -11,6 +11,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { GanttChart } from "@/components/schedule/gantt-chart"
+import { ProgressLegend } from "@/components/schedule/progress-legend"
 import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
 import { useSchedules, useUpdateSchedule } from "@/hooks/use-schedules"
 import { useOrderProgressList } from "@/hooks/use-daily-report-progress"
@@ -307,13 +308,8 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      {/* 進捗表示の凡例（日報の進捗を一度でも計算したテナントのみ） */}
-      {orderProgress?.computed_at && (
-        <p className="mb-2 shrink-0 text-xs text-muted-foreground">
-          バーの暗い塗り＝日報の実績による進捗、赤枠＝計画の終了を過ぎて未完了の工程（
-          {format(new Date(orderProgress.computed_at), "M/d HH:mm", { locale: ja })} 時点の日報）
-        </p>
-      )}
+      {/* 状態の凡例（日報の進捗を一度でも計算したテナントは全状態、未計算なら「計画のみ」だけ） */}
+      <ProgressLegend computedAt={orderProgress?.computed_at} />
 
       {/* メインエリア - ガントチャート */}
       <div

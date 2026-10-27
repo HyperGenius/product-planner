@@ -4,6 +4,7 @@
 import { useMemo, useState } from 'react'
 import {
   addDays,
+  parseISO,
   startOfDay,
   endOfDay,
   startOfWeek,
@@ -13,18 +14,23 @@ import {
 } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { GanttChart as GanttChartLib } from '@/gantt'
-import type { GanttTask } from '@/gantt'
+import type { GanttBarAppearance, GanttMarker, GanttTask } from '@/gantt'
 import type { Schedule, GanttViewMode, GroupByMode } from '@/types/schedule'
 import type { ProcessProgress } from '@/types/daily-report-progress'
 import {
   formatActualDateRange,
   formatProgressQuantity,
   indexProgress,
-  isProgressDelayed,
+  orderStateLabelText,
+  processDisplayState,
+  processStateBadge,
+  processStateLabelText,
   progressKey,
   progressRatio,
   progressStatusLabel,
 } from '@/lib/daily-report-progress-utils'
+import type { ProcessDisplayState } from '@/lib/daily-report-progress-utils'
+import { pickShippingDeadline } from '@/lib/shipping-candidate-utils'
 import {
   scheduleCustomerLabel,
   scheduleOrderMeta,
@@ -36,7 +42,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown, TriangleAlert } from 'lucide-react'
 
 /** 稼働時間定数（backend/app/utils/calendar.py と同値） */
 const WORK_HOURS = { start: 9, end: 17, breakStart: 12, breakEnd: 13 } as const
@@ -84,16 +90,15 @@ export interface GanttChartProps {
   progress?: readonly ProcessProgress[]
 }
 
+/** バーの基本色（未着手の枠・進行中の塗り） */
+const BASE_BAR_COLOR = '#2563eb'
+
 /**
  * スケジュールに基づいてバーの色を決定する
  */
 function getBarColor(schedule: Schedule, colorMode: 'product' | 'process'): string {
-  if (colorMode === 'product') {
-    const productName = schedule.product_name || 'default'
-    const hash = productName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
-    const hue = hash % 360
-    return `hsl(${hue}, 70%, 50%)`
-  }
+  // 製品の識別はラベル列が担うので、バーの色は状態（外観）で塗り分ける。基本色は固定の青（Issue #580）
+  if (colorMode === 'product') return BASE_BAR_COLOR
 
   const processColors: Record<string, string> = {
     '切削': '#ef4444',
@@ -137,7 +142,16 @@ export function convertScheduleToTask(
 /** ラベル列の1行分の中身 */
 export type RowLabel =
   /** 注文行: 1行目 = 顧客名・製品名（太字）、2行目 = 数量・納期・注文番号 */
-  | { kind: 'order'; customer: string; isUnknownCustomer: boolean; product: string | null; meta: string[] }
+  | {
+      kind: 'order'
+      orderId: number
+      customer: string
+      isUnknownCustomer: boolean
+      product: string | null
+      meta: string[]
+      /** 最後の工程の計画終了が希望納期を超えている */
+      deadlineExceeded: boolean
+    }
   /** 設備グループ行 */
   | { kind: 'group'; title: string }
   /** 工程行: 1行目 = primary、2行目 = secondary（小さく） */
@@ -221,6 +235,30 @@ function buildProcessRows(
   return { tasks, labels }
 }
 
+/**
+ * 注文行の納期マーカー（希望納期 → 無ければ完成見込み。#579 と同じ基準）。
+ * 納期の日の終わりに線を引く。最後の工程の計画終了が希望納期の日を超えていれば超過（赤）。
+ * 完成見込みは計画の終了から算出した値なので、超過の判定は希望納期があるときだけ行う
+ */
+function orderDeadline(
+  head: Schedule,
+  orderEnd: Date,
+): { marker: GanttMarker; exceeded: boolean } | null {
+  const deadline = pickShippingDeadline(head.desired_deadline, head.confirmed_deadline)
+  if (!deadline) return null
+  // 日付のみの値は parseISO でローカル深夜として読む（new Date だと UTC 深夜になり日付がずれる）
+  const day = parseISO(deadline.date)
+  const exceeded = deadline.source === 'desired' && orderEnd.getTime() >= addDays(day, 1).getTime()
+  return {
+    exceeded,
+    marker: {
+      at: addDays(day, 1),
+      label: `${deadline.source === 'desired' ? '納期' : '見込'} ${format(day, 'M/d')}`,
+      tone: exceeded ? 'danger' : 'default',
+    },
+  }
+}
+
 /** 工程行のラベル（フラット・設備グループ別）: どの注文の工程か */
 function processWithOrderLabel(s: Schedule): RowLabel {
   return { kind: 'process', primary: scheduleOrderTitle(s), secondary: s.process_name || '工程' }
@@ -299,6 +337,7 @@ export function buildScheduleGanttModel(
       const visible = visibleExtent(items)
       const start = head.order_start_datetime ? new Date(head.order_start_datetime) : visible.start
       const end = head.order_end_datetime ? new Date(head.order_end_datetime) : visible.end
+      const deadline = orderDeadline(head, end)
       tasks.push({
         id,
         name: scheduleOrderTitle(head),
@@ -306,11 +345,14 @@ export function buildScheduleGanttModel(
         end,
         color: SUMMARY_BAR_COLOR,
         isGroupHeader: true,
+        ...(deadline ? { markers: [deadline.marker] } : {}),
         ...(start < range.start ? { continuesBefore: true } : {}),
         ...(end > range.end ? { continuesAfter: true } : {}),
       })
       labels.set(id, {
         kind: 'order',
+        orderId: head.order_id,
+        deadlineExceeded: deadline?.exceeded ?? false,
         customer: scheduleCustomerLabel(head),
         isUnknownCustomer: !head.customer_name,
         product: head.product_name ?? null,
@@ -355,9 +397,18 @@ export function buildScheduleGanttModel(
   return { tasks, labels, groupIds }
 }
 
+/** 工程の状態 → バーの外観 */
+const STATE_APPEARANCE: Record<ProcessDisplayState, GanttBarAppearance> = {
+  planned_only: 'neutral',
+  not_started: 'subtle',
+  in_progress: 'default',
+  completed: 'muted',
+  delayed: 'danger',
+}
+
 /**
- * バーに進捗率・遅れを載せる。進捗は工程単位なので、工程が複数のセグメントに分かれる場合は
- * 各セグメントのバーに同じ進捗を出す
+ * バーに工程の状態（外観・バッジ・進捗率）を載せる。進捗は工程単位なので、工程が複数のセグメントに
+ * 分かれる場合は各セグメントのバーに同じ状態を出す。進捗の行が無い工程は「計画のみ」（未着手と見せない）
  */
 function applyProgress(
   tasks: GanttTask[],
@@ -365,18 +416,19 @@ function applyProgress(
   progressIndex: Map<string, ProcessProgress>,
   now: Date,
 ): GanttTask[] {
-  if (progressIndex.size === 0) return tasks
   return tasks.map((task) => {
     if (task.isGroupHeader) return task
     const schedule = scheduleMap.get(task.id)
     const progress = schedule
       ? progressIndex.get(progressKey(schedule.order_id, schedule.process_routing_id))
       : undefined
-    if (!progress) return task
+    const state = processDisplayState(progress, now)
+    const badge = processStateBadge(state, progress)
     return {
       ...task,
-      progress: progressRatio(progress) ?? undefined,
-      isDelayed: isProgressDelayed(progress, now),
+      appearance: STATE_APPEARANCE[state],
+      ...(badge ? { badge } : {}),
+      ...(progress ? { progress: progressRatio(progress) ?? undefined } : {}),
     }
   })
 }
@@ -461,8 +513,44 @@ const ORDER_ROW_HEIGHT = 60
 /** 設備グループ行の高さ（px） */
 const EQUIPMENT_GROUP_ROW_HEIGHT = 36
 
-/** 固定ラベル列の1行分（Issue #579） */
-function RowLabelContent({ label }: { label: RowLabel | undefined }) {
+/** ラベル列の状態バッジの色。色だけに頼らず文言（と ✓ / ！）も出す */
+const STATE_BADGE_CLASS: Record<ProcessDisplayState | 'delayed_some', string> = {
+  planned_only: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+  not_started: 'border border-dashed border-blue-500 text-blue-700 dark:text-blue-300',
+  in_progress: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200',
+  completed: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  delayed: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
+  delayed_some: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
+}
+
+function StateBadge({
+  state,
+  text,
+}: {
+  state: ProcessDisplayState | 'delayed_some'
+  text: string
+}) {
+  const icon = state === 'completed' ? '✓ ' : state === 'delayed' || state === 'delayed_some' ? '！' : ''
+  return (
+    <span
+      data-testid="row-state-badge"
+      data-state={state}
+      className={`shrink-0 whitespace-nowrap rounded px-1 text-[10px] font-semibold leading-4 ${STATE_BADGE_CLASS[state]}`}
+    >
+      {icon}
+      {text}
+    </span>
+  )
+}
+
+/** 固定ラベル列の1行分（Issue #579）。`stateBadge` は工程行・注文行の状態（Issue #580） */
+function RowLabelContent({
+  label,
+  stateBadge,
+}: {
+  label: RowLabel | undefined
+  stateBadge?: { state: ProcessDisplayState | 'delayed_some'; text: string } | null
+}) {
   if (!label) return null
   switch (label.kind) {
     case 'order':
@@ -478,6 +566,20 @@ function RowLabelContent({ label }: { label: RowLabel | undefined }) {
           <p className="mt-0.5 truncate text-[11px] text-gray-600 dark:text-gray-400">
             {label.meta.join(' ・ ')}
           </p>
+          {(stateBadge || label.deadlineExceeded) && (
+            <div className="mt-0.5 flex items-center gap-1">
+              {stateBadge && <StateBadge state={stateBadge.state} text={stateBadge.text} />}
+              {label.deadlineExceeded && (
+                <span
+                  data-testid="deadline-warning"
+                  className="flex items-center gap-0.5 whitespace-nowrap text-[10px] font-semibold text-red-700 dark:text-red-300"
+                >
+                  <TriangleAlert aria-hidden className="h-3 w-3" />
+                  納期超過
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )
     case 'group':
@@ -486,11 +588,14 @@ function RowLabelContent({ label }: { label: RowLabel | undefined }) {
       )
     case 'process':
       return (
-        <div className="min-w-0 leading-tight">
-          <p className="truncate text-gray-800 dark:text-gray-200">{label.primary}</p>
-          {label.secondary && (
-            <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{label.secondary}</p>
-          )}
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-gray-800 dark:text-gray-200">{label.primary}</p>
+            {label.secondary && (
+              <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{label.secondary}</p>
+            )}
+          </div>
+          {stateBadge && <StateBadge state={stateBadge.state} text={stateBadge.text} />}
         </div>
       )
   }
@@ -549,6 +654,14 @@ export function GanttChart({
   }, [tasks])
 
   const progressIndex = useMemo(() => indexProgress(progress), [progress])
+  const progressByOrder = useMemo(() => {
+    const map = new Map<number, ProcessProgress[]>()
+    progress?.forEach((p) => map.set(p.order_id, [...(map.get(p.order_id) ?? []), p]))
+    return map
+  }, [progress])
+  // 遅れの判定の「今」。進捗を取り直したときに更新する
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- progress は「今」を取り直す合図（値は使わない）
+  const now = useMemo(() => new Date(), [progress])
 
   const model = useMemo(
     () =>
@@ -560,8 +673,8 @@ export function GanttChart({
   )
 
   const ganttTasks = useMemo(
-    () => applyProgress(model.tasks, scheduleMap, progressIndex, new Date()),
-    [model, scheduleMap, progressIndex],
+    () => applyProgress(model.tasks, scheduleMap, progressIndex, now),
+    [model, scheduleMap, progressIndex, now],
   )
 
   // 折りたたみ中のグループ行（注文・設備グループ）の id。グルーピングを切り替えても id が衝突しないので持ち越す
@@ -581,6 +694,16 @@ export function GanttChart({
     return schedule
       ? progressIndex.get(progressKey(schedule.order_id, schedule.process_routing_id))
       : undefined
+  }
+
+  /** ラベル列の状態バッジ: 工程行はその工程の状態、注文行は注文全体の状態 */
+  const stateBadgeOf = (label: RowLabel | undefined, task: GanttTask) => {
+    if (label?.kind === 'order') return orderStateLabelText(progressByOrder.get(label.orderId) ?? [], now)
+    if (label?.kind !== 'process') return null
+    const taskProgress = progressOf(task)
+    const state = processDisplayState(taskProgress, now)
+    const text = processStateLabelText(state, taskProgress)
+    return text ? { state, text } : null
   }
 
   const handleTaskClick = onTaskClick
@@ -640,7 +763,10 @@ export function GanttChart({
         </div>
       }
       groupRowHeight={groupBy === 'order' ? ORDER_ROW_HEIGHT : EQUIPMENT_GROUP_ROW_HEIGHT}
-      renderRowLabel={(rowTasks) => <RowLabelContent label={model.labels.get(rowTasks[0].id)} />}
+      renderRowLabel={(rowTasks) => {
+        const label = model.labels.get(rowTasks[0].id)
+        return <RowLabelContent label={label} stateBadge={stateBadgeOf(label, rowTasks[0])} />
+      }}
       collapsedGroupIds={collapsedGroupIds}
       onToggleGroup={toggleGroup}
       workHours={workHoursForLib}
@@ -658,7 +784,7 @@ export function GanttChart({
               <p>{task.isMilestone ? formatDateTime(task.start) : formatRange(task.start, task.end)}</p>
               {!task.isGroupHeader && <RowSegmentsTooltipLine summary={rowSummaries.get(task.id)} />}
               {taskProgress && (
-                <ProgressTooltipLines progress={taskProgress} delayed={task.isDelayed === true} />
+                <ProgressTooltipLines progress={taskProgress} delayed={task.appearance === 'danger'} />
               )}
             </TooltipContent>
           </Tooltip>
