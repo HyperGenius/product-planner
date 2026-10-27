@@ -430,6 +430,24 @@ export function useOrder(orderId: number) {
 }
 
 /**
+ * 注文の保存済みシミュレーション結果（工程スケジュール）を取得するフック
+ *
+ * シミュ済み（is_scheduled かつ simulated_deadline あり）でなければ null。
+ * キーは ["orders"] 配下なので、注文を変えるミューテーションの無効化で再取得される。
+ */
+export function useOrderSimulation(orderId: number, options?: { enabled?: boolean }) {
+  return useQuery<OrderSimulateResponse | null>({
+    queryKey: orderSimulationQueryKey(orderId),
+    queryFn: () => apiClient<OrderSimulateResponse | null>(`/orders/${orderId}/simulation`),
+    enabled: !!orderId && (options?.enabled ?? true),
+  })
+}
+
+function orderSimulationQueryKey(orderId: number) {
+  return ["orders", orderId, "simulation"]
+}
+
+/**
  * 注文に紐づく添付ファイル一覧を取得するフック
  */
 export function useOrderAttachments(orderId: number) {
@@ -481,7 +499,10 @@ export function useSimulateOrderById() {
           : undefined,
       })
     },
-    onSuccess: () => {
+    onSuccess: (result, arg) => {
+      // 保存された工程スケジュールは実行結果と同じなので、再取得を待たずに詳細へ出す
+      const orderId = typeof arg === "number" ? arg : arg.orderId
+      queryClient.setQueryData(orderSimulationQueryKey(orderId), result)
       // シミュ実行で simulated_deadline と（未設定なら補完された）作業開始日が保存されるため、
       // 詳細（["orders", id]）だけでなく一覧（["orders"]）にも反映させる（Issue #477）。
       // ["orders"] は前方一致で詳細キーも含む。

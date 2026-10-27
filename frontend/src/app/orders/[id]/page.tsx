@@ -34,6 +34,7 @@ import { OrderProcessProgress } from "@/components/orders/order-process-progress
 import {
   useOrder,
   useOrderAttachments,
+  useOrderSimulation,
   useSimulateOrderById,
   useConfirmOrder,
   useRequestApproval,
@@ -58,7 +59,6 @@ import {
   canConvertToRepair,
   isRepairOrder,
 } from "@/lib/order-utils"
-import type { OrderSimulateResponse } from "@/types/order"
 import { ApiError } from "@/lib/api-client"
 
 export default function OrderDetailPage() {
@@ -70,6 +70,11 @@ export default function OrderDetailPage() {
   const { data: products } = useProducts()
   const { data: customers } = useCustomers()
   const { data: attachments } = useOrderAttachments(orderId)
+  // シミュ済みの受注は、保存済みの工程スケジュールを開き直しても表示する。
+  // 修理等はシミュしないので取得しない
+  const { data: storedSimulation } = useOrderSimulation(orderId, {
+    enabled: !!order && !isRepairOrder(order),
+  })
   const { data: currentMember } = useCurrentMember()
   const currentUserRole = currentMember?.role ?? null
 
@@ -82,7 +87,6 @@ export default function OrderDetailPage() {
   const shipWithoutRoutingMutation = useShipOrderWithoutRouting()
   const deleteMutation = useDeleteOrder()
 
-  const [simulationResult, setSimulationResult] = useState<OrderSimulateResponse | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editDialogGeneration, setEditDialogGeneration] = useState(0)
   const [isShipWithoutRoutingDialogOpen, setIsShipWithoutRoutingDialogOpen] = useState(false)
@@ -100,8 +104,7 @@ export default function OrderDetailPage() {
 
   const handleSimulate = async () => {
     try {
-      const result = await simulateMutation.mutateAsync(orderId)
-      setSimulationResult(result)
+      await simulateMutation.mutateAsync(orderId)
       toast.success("シミュレーションが完了しました")
     } catch (error) {
       if (error instanceof ApiError && error.status === 422 && error.errorCode === "no_routing") {
@@ -260,6 +263,10 @@ export default function OrderDetailPage() {
     !order.is_scheduled &&
     !hasUnmatchedProduct
   const blocksSimulation = hasUnmatchedProduct || hasNoRouting || hasUnconfirmedRouting
+  // 承認後は確定納期・実スケジュールが正になるので、承認前のシミュ結果は出さない
+  // （「シミュ納期」を表示する状態と揃える）
+  const simulationResult = usesSimulatedDeadlineForOrder(order) ? (storedSimulation ?? null) : null
+  const simulateButtonLabel = order.is_scheduled ? "シミュレーション再実行" : "シミュレーション実行"
 
   return (
     <div className="container mx-auto py-6 px-4">
@@ -467,7 +474,7 @@ export default function OrderDetailPage() {
                   className="w-full"
                 >
                   <Calculator className="mr-2 h-4 w-4" />
-                  {simulateMutation.isPending ? "計算中..." : "シミュレーション実行"}
+                  {simulateMutation.isPending ? "計算中..." : simulateButtonLabel}
                 </Button>
                 {hasUnmatchedProduct && (
                   <p className="text-xs text-muted-foreground">
@@ -628,7 +635,6 @@ export default function OrderDetailPage() {
           order={order}
           open
           onOpenChange={setIsConvertToRepairDialogOpen}
-          onConverted={() => setSimulationResult(null)}
         />
       )}
 

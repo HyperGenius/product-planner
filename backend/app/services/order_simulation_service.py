@@ -13,6 +13,7 @@ from app.repositories.supa_infra.common.scheduling_settings_repo import (
     SchedulingSettingsRepository,
 )
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
+from app.repositories.supa_infra.master.equipment_repo import EquipmentRepository
 from app.repositories.supa_infra.master.product_repo import ProductRepository
 from app.repositories.supa_infra.transaction.order_repo import OrderRepository
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
@@ -27,6 +28,7 @@ from app.services.scheduling_start_service import (
     parse_scheduling_start_date,
     to_scheduling_start_time,
 )
+from app.services.simulation_service import build_simulate_response
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -56,16 +58,20 @@ def simulate_and_persist(
     start_time: datetime | None,
     order_repo: OrderRepository,
     product_repo: ProductRepository,
+    equipment_repo: EquipmentRepository,
     schedule_repo: ScheduleRepository,
     settings_repo: SchedulingSettingsRepository,
     auto_scheduling_start_date: date | None = None,
-) -> list[dict[str, Any]]:
-    """既存受注を dry_run でスケジュールし、シミュ納期を受注へ保存する。
+) -> dict[str, Any]:
+    """既存受注を dry_run でスケジュールし、シミュ納期と工程スケジュールを保存する。
 
     dry_run のため実スケジュールは保存されないが、完成見込み日（シミュ納期）は
     confirmed_deadline と同一ロジックで算出し、承認前の表示用に永続化する（Issue #394-A）。
     `auto_scheduling_start_date` を渡すと、自動補完した作業開始日も同一 UPDATE で
     保存する（Issue #477）。
+    受注詳細で工程を再表示できるよう、レスポンス（`build_simulate_response()` の形）を
+    `order_simulation_results` に保存してから返す。受注の is_scheduled を立てる前に
+    保存するので、保存に失敗してもシミュ納期と工程の組み合わせは食い違わない。
 
     Raises:
         RoutingUnconfirmedError / InvalidRoutingDurationError / ValueError:
@@ -82,13 +88,17 @@ def simulate_and_persist(
         dry_run=True,
         settings_repo=settings_repo,
     )
+    response = build_simulate_response(
+        result, order.get("deadline_date"), product_repo, equipment_repo
+    )
+    order_repo.save_simulation_result(order["id"], tenant_id, response)
     order_repo.mark_as_scheduled(
         order["id"],
         deadline_from_schedules(result),
         auto_scheduling_start_date=auto_scheduling_start_date,
         tenant_id=tenant_id,
     )
-    return result
+    return response
 
 
 def auto_simulate_intake_order(
@@ -115,7 +125,9 @@ def auto_simulate_intake_order(
     try:
         res = (
             db.table(SupabaseTableName.ORDERS.value)
-            .select("id, product_id, quantity, scheduling_start_date, order_type")
+            .select(
+                "id, product_id, quantity, deadline_date, scheduling_start_date, order_type"
+            )
             .eq("id", order_id)
             .eq("tenant_id", tenant_id)
             .limit(1)
@@ -149,6 +161,7 @@ def auto_simulate_intake_order(
             start_time=start_time,
             order_repo=OrderRepository(db),
             product_repo=ProductRepository(db),
+            equipment_repo=EquipmentRepository(db),
             schedule_repo=ScheduleRepository(db),
             settings_repo=SchedulingSettingsRepository(db),
             auto_scheduling_start_date=auto_start,

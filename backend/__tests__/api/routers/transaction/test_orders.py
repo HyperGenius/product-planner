@@ -913,6 +913,84 @@ class TestOrderRouter:
         simulated_deadline = mark_args[0][1]
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", simulated_deadline)
         assert simulated_deadline == result["calculated_deadline"][:10]
+        # 受注詳細で再表示できるよう、レスポンスと同じ内容を保存する
+        mock_repo.save_simulation_result.assert_called_once_with(
+            order_id, headers["x-tenant-id"], result
+        )
+
+    def test_get_stored_simulation_returns_saved_result(self, headers, mock_repo):
+        """GET /{order_id}/simulation: シミュ済みの受注は保存済みの結果を返す。"""
+        saved = {
+            "calculated_deadline": "2026-10-05T12:00:00+09:00",
+            "is_feasible": True,
+            "process_schedules": [
+                {
+                    "process_name": "切削",
+                    "start_time": "2026-10-01T09:00:00+09:00",
+                    "end_time": "2026-10-05T12:00:00+09:00",
+                    "equipment_name": "1号機",
+                }
+            ],
+        }
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "product_id": 100,
+            "is_scheduled": True,
+            "simulated_deadline": "2026-10-05",
+        }
+        mock_repo.get_simulation_result.return_value = saved
+
+        response = client.get("/orders/1/simulation", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == saved
+        mock_repo.get_simulation_result.assert_called_once_with(1)
+
+    @pytest.mark.parametrize(
+        "order",
+        [
+            # 編集でシミュ納期がクリアされた受注には古い工程を出さない
+            {
+                "id": 1,
+                "product_id": 100,
+                "is_scheduled": False,
+                "simulated_deadline": None,
+            },
+            {
+                "id": 1,
+                "product_id": 100,
+                "is_scheduled": True,
+                "simulated_deadline": None,
+            },
+            # 修理等はシミュしない（完了予定日は手入力）
+            {
+                "id": 1,
+                "product_id": None,
+                "order_type": "repair",
+                "is_scheduled": True,
+                "simulated_deadline": "2026-10-05",
+            },
+        ],
+    )
+    def test_get_stored_simulation_returns_null_when_not_simulated(
+        self, headers, mock_repo, order
+    ):
+        """GET /{order_id}/simulation: シミュ済みでない受注は null を返す。"""
+        mock_repo.get_by_id.return_value = order
+
+        response = client.get("/orders/1/simulation", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() is None
+        mock_repo.get_simulation_result.assert_not_called()
+
+    def test_get_stored_simulation_not_found(self, headers, mock_repo):
+        """GET /{order_id}/simulation: 注文が存在しなければ 404。"""
+        mock_repo.get_by_id.return_value = None
+
+        response = client.get("/orders/999/simulation", headers=headers)
+
+        assert response.status_code == 404
 
     def test_simulate_schedule_not_found(self, headers, mock_repo):
         """POST /{order_id}/simulate: 注文が存在しない場合の404エラーテスト"""
