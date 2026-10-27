@@ -17,7 +17,6 @@ import { useOrderProgressList } from "@/hooks/use-daily-report-progress"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
 import { useCalendars } from "@/hooks/use-calendars"
 import type { GanttViewMode, GroupByMode, Schedule } from "@/types/schedule"
-import { useSidebar } from "@/components/ui/sidebar"
 
 /**
  * スケジュール一覧画面
@@ -37,9 +36,6 @@ export default function SchedulePage() {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
 
   const updateSchedule = useUpdateSchedule()
-
-  // state は "expanded" | "collapsed" | "mobile" などを返す
-  const { state, open } = useSidebar()
 
   // 設備グループの取得
   const { data: equipmentGroups, isLoading: equipmentGroupsLoading, error: equipmentGroupsError } = useEquipmentGroups()
@@ -185,13 +181,12 @@ export default function SchedulePage() {
     }
   }, [currentDate, viewMode, weekStart, weekEnd])
 
-  const viewWidth = open ? '78vw' : '96vw'
-
   return (
-    <div className="flex-2 py-6 px-4">
-      <div className="flex-2-1 gap-4 py-">
+    // 高さ = 画面 − レイアウトのヘッダー(3.75rem) − 上下余白(3rem)。ページ全体はスクロールさせず、ガントの中だけで動かす
+    <div className="flex h-[calc(100dvh-6.75rem)] min-w-0 flex-col">
+      <div className="shrink-0">
         {/* ヘッダーエリア */}
-        <div className="mb-6" style={{ width: viewWidth }}>
+        <div className="mb-4">
           <h1 className="text-3xl font-bold mb-4">生産スケジュール</h1>
 
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -314,7 +309,7 @@ export default function SchedulePage() {
 
       {/* 進捗表示の凡例（日報の進捗を一度でも計算したテナントのみ） */}
       {orderProgress?.computed_at && (
-        <p className="mb-2 text-xs text-muted-foreground" style={{ width: viewWidth }}>
+        <p className="mb-2 shrink-0 text-xs text-muted-foreground">
           バーの暗い塗り＝日報の実績による進捗、赤枠＝計画の終了を過ぎて未完了の工程（
           {format(new Date(orderProgress.computed_at), "M/d HH:mm", { locale: ja })} 時点の日報）
         </p>
@@ -322,8 +317,7 @@ export default function SchedulePage() {
 
       {/* メインエリア - ガントチャート */}
       <div
-        className="rounded-lg border bg-card shadow-sm p-4"
-        style={{ overflowX: 'auto', overflowY: 'hidden', width: viewWidth }}
+        className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card shadow-sm"
       >
         {schedulesError ? (
           <div className="flex h-96 items-center justify-center">
