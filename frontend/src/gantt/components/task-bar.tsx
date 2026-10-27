@@ -70,6 +70,36 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
   }
 
   const appearance = task.appearance ?? 'default'
+  const dimmed = task.dimmed === true ? ' opacity-40' : ''
+
+  if (task.isGhost) {
+    const color = task.color || '#3b82f6'
+    return (
+      <div
+        ref={ref}
+        style={{ gridColumn: `${colStart} / ${colEnd}`, ...style }}
+        data-task-id={task.id}
+        data-ghost
+        className={`pointer-events-none relative z-[3] mx-0.5 my-0.5 h-7 overflow-visible${className ? ` ${className}` : ''}`}
+        {...props}
+      >
+        {task.isMilestone ? (
+          <span
+            aria-hidden
+            style={{ borderColor: color }}
+            className="absolute left-0 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 rounded-[2px] border-2 border-dashed bg-white/70 dark:bg-gray-900/70"
+          />
+        ) : (
+          <span
+            aria-hidden
+            style={{ borderColor: color, backgroundColor: `color-mix(in srgb, ${color} 25%, transparent)` }}
+            className="absolute inset-0 rounded border-2 border-dashed"
+          />
+        )}
+        <span className="sr-only">{task.name}</span>
+      </div>
+    )
+  }
 
   if (task.isMilestone) {
     const accent = MILESTONE_ACCENT[appearance] ?? task.color ?? '#3b82f6'
@@ -77,8 +107,9 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
       <div
         ref={ref}
         style={{ gridColumn: `${colStart} / ${colEnd}`, ...style }}
-        className={`relative flex items-center h-7 text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2]${hitArea}${className ? ` ${className}` : ''}`}
+        className={`relative flex items-center h-7 text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2]${dimmed}${hitArea}${className ? ` ${className}` : ''}`}
         data-appearance={appearance}
+        data-dimmed={task.dimmed || undefined}
         data-task-id={task.id}
         {...props}
       >
@@ -112,7 +143,8 @@ export const TaskBar = forwardRef<HTMLDivElement, TaskBarProps>(function TaskBar
         ...(appearance === 'subtle' ? { borderColor: baseColor } : {}),
         ...style,
       }}
-      className={`relative flex items-center h-7 rounded text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2] ${look}${hitArea}${className ? ` ${className}` : ''}`}
+      className={`relative flex items-center h-7 rounded text-xs overflow-visible mx-0.5 my-0.5 cursor-pointer z-[1] hover:z-[2] ${look}${dimmed}${hitArea}${className ? ` ${className}` : ''}`}
+      data-dimmed={task.dimmed || undefined}
       data-progress={progressPct !== null ? Math.round(progressPct) : undefined}
       data-appearance={appearance}
       data-task-id={task.id}

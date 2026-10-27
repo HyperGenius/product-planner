@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, userEvent } from "@/test-utils/render"
 import type { Schedule } from "@/types/schedule"
 import type { ProcessProgress } from "@/types/daily-report-progress"
+import type { ProcessShiftResult } from "@/types/schedule-shift"
 import { GanttChart } from "./gantt-chart"
 
 // 表示の基準日（端末 TZ 非依存にローカル時刻で作る）
@@ -731,5 +732,70 @@ describe("GanttChart（スケジュール）の詳細シートを開くタップ
 
     await user.click(screen.getByRole("button", { name: "すべて展開" }))
     expect(onCollapsedGroupIdsChange).toHaveBeenCalledWith(new Set())
+  })
+})
+
+describe("GanttChart（スケジュール）の前倒し・後ろ倒しのプレビュー（Issue #582）", () => {
+  const TASKS: Schedule[] = [
+    schedule({ id: 1, process_routing_id: 11, process_name: "プレス", sequence_order: 1, start_datetime: at(10, 9), end_datetime: at(10, 12) }),
+    schedule({ id: 2, process_routing_id: 12, process_name: "カシメ", sequence_order: 2, equipment_group_name: "カシメG", start_datetime: at(10, 13), end_datetime: at(10, 16) }),
+    schedule({ id: 3, order_id: 2, process_routing_id: 12, process_name: "カシメ", sequence_order: 2, product_name: "ボルト", start_datetime: at(11, 9), end_datetime: at(11, 12) }),
+  ]
+  const PREVIEW: ProcessShiftResult = {
+    order_id: 1,
+    process_routing_id: 12,
+    working_days: 1,
+    stopped_at_previous: false,
+    processes: [
+      {
+        process_routing_id: 12,
+        process_name: "カシメ",
+        sequence_order: 2,
+        is_milestone: false,
+        is_completed: false,
+        before: { start_datetime: at(10, 13), end_datetime: at(10, 16) },
+        after: { start_datetime: at(11, 13), end_datetime: at(14, 10) },
+        segments: [
+          { start_datetime: at(11, 13), end_datetime: at(11, 17), equipment_id: null },
+          { start_datetime: at(14, 9), end_datetime: at(14, 10), equipment_id: null },
+        ],
+      },
+      // 表示中に行の無い後工程にはゴーストバーを出さない
+      {
+        process_routing_id: 13,
+        process_name: "検査",
+        sequence_order: 3,
+        is_milestone: false,
+        is_completed: false,
+        before: { start_datetime: at(20, 9), end_datetime: at(20, 10) },
+        after: { start_datetime: at(21, 9), end_datetime: at(21, 10) },
+        segments: [{ start_datetime: at(21, 9), end_datetime: at(21, 10), equipment_id: null }],
+      },
+    ],
+    confirmed_deadline_before: "2026-09-20",
+    confirmed_deadline_after: "2026-09-21",
+    desired_deadline: null,
+    exceeds_desired_deadline: false,
+    overlaps: [],
+    saved: false,
+  }
+  const ghosts = () => Array.from(document.querySelectorAll<HTMLElement>("[data-ghost]"))
+
+  it.each(["Week", "Day"] as const)("%s: 動く工程の元のバーを薄くし、ずらした後のバーを同じ行に重ねる", (viewMode) => {
+    render(<GanttChart tasks={TASKS} viewMode={viewMode} groupBy="order" currentDate={BASE} shiftPreview={PREVIEW} />)
+
+    const original = document.querySelector<HTMLElement>('[data-task-id="schedule-2"]')!
+    expect(original).toHaveAttribute("data-dimmed", "true")
+    expect(ghosts().map((g) => g.dataset.taskId)).toEqual(["shift-preview-12-0", "shift-preview-12-1"])
+    ghosts().forEach((g) => expect(g.parentElement).toBe(original.parentElement))
+    // 前の工程・他の注文の同じ工程は変わらない
+    expect(document.querySelector('[data-task-id="schedule-1"]')).not.toHaveAttribute("data-dimmed")
+    expect(document.querySelector('[data-task-id="schedule-3"]')).not.toHaveAttribute("data-dimmed")
+  })
+
+  it("プレビューが無ければ重ねない", () => {
+    render(<GanttChart tasks={TASKS} viewMode="Week" groupBy="order" currentDate={BASE} shiftPreview={null} />)
+    expect(ghosts()).toHaveLength(0)
+    expect(document.querySelector("[data-dimmed]")).toBeNull()
   })
 })

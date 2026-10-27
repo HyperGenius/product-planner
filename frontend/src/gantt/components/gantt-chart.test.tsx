@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
+import type { ReactNode } from "react"
 import type { GanttTask } from "../types"
 import { GanttChart, groupTasksIntoRows } from "./gantt-chart"
 
@@ -271,5 +272,36 @@ describe("GanttChart のタップと選択中の行（Issue #581）", () => {
     expect(bar("b").className).toContain("before:h-11")
     // サマリーバーの高さは変えない
     expect(bar("g1").style.height).toBe("")
+  })
+})
+
+describe("GanttChart のゴーストバー（Issue #582）", () => {
+  it("同じ rowId の行に重ね、タップ・wrapTaskBar の対象にしない", () => {
+    const onTaskClick = vi.fn()
+    const wrapTaskBar = vi.fn((_task: GanttTask, children: ReactNode) => children)
+    render(
+      <GanttChart
+        tasks={[
+          task({ id: "seg", rowId: "r", dimmed: true }),
+          task({ id: "ghost", rowId: "r", isGhost: true, start: new Date(2026, 8, 11, 9), end: new Date(2026, 8, 11, 12) }),
+        ]}
+        viewMode="Day"
+        rangeStart={new Date(2026, 8, 10)}
+        rangeEnd={new Date(2026, 8, 12)}
+        onTaskClick={onTaskClick}
+        wrapTaskBar={wrapTaskBar}
+      />,
+    )
+
+    const seg = document.querySelector<HTMLElement>('[data-task-id="seg"]')!
+    const ghost = document.querySelector<HTMLElement>('[data-task-id="ghost"]')!
+    expect(ghost.parentElement).toBe(seg.parentElement)
+    expect(screen.getAllByTestId("gantt-row-label")).toHaveLength(1)
+    expect(wrapTaskBar.mock.calls.map(([t]) => t.id)).toEqual(["seg"])
+
+    fireEvent.click(ghost)
+    expect(onTaskClick).not.toHaveBeenCalled()
+    fireEvent.click(seg)
+    expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: "seg" }))
   })
 })

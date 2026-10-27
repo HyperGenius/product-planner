@@ -142,9 +142,9 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
 
 - 「編集モード」トグルは廃止。タップは詳細を開くだけで、開始・終了の編集（既存の `ScheduleEditDialog`）はシートの「操作」で区間ごとに開く
 - 編集できるロールは **`president` のみ**（承認系と同じく `platform_admin` を含めない。生産管理者ロールができたら足す）。
-  Frontend `SCHEDULE_EDITOR_ROLES`（`types/member.ts`）と Backend `_SCHEDULE_EDITOR_ROLES`（`routers/transaction/production_schedules.py`、
-  それ以外は `PATCH /production-schedules/{id}` が 403）を揃える
-- 前倒し・後ろ倒し（後工程の連動）は #582
+  Frontend `SCHEDULE_EDITOR_ROLES`（`types/member.ts`）と Backend `SCHEDULE_EDITOR_ROLES`（`services/schedule_shift_service.py`。
+  それ以外は `PATCH /production-schedules/{id}` と前倒し・後ろ倒しの API が 403）を揃える
+- 前倒し・後ろ倒し（後工程の連動）は #582（下記）
 
 ### タップとスワイプ・タップ目標（`src/gantt`）
 
@@ -171,3 +171,58 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
   `hooks/use-local-storage-state.ts`（`useSyncExternalStore` で SSR 中は既定値、ストレージが使えない端末では開いている間だけ保つ）、
   値の検証は `lib/schedule-view-prefs.ts`（外れた項目は既定値に戻す。削除された設備グループは「すべて」扱い）。折りたたみは新しい 300 件まで
 - E2E: `frontend/e2e/gantt-tablet-touch.spec.ts`（1180×820・`hasTouch`。スワイプは CDP の `Input.dispatchTouchEvent` で再現）
+
+## 工程の前倒し・後ろ倒し（Issue #582）
+
+詳細シートの「操作 → 計画をずらす」で、工程を**稼働日単位**でずらす。ずらした工程の全セグメントと、同じ注文の
+`sequence_order` がそれより後の工程を連動して配置し直し、**前の工程・他の注文の工程は再計算しない**（2026-09-30 の顧客合意）。
+ドラッグ&ドロップはしない（#438）。区間ごとの開始・終了の直接編集（`ScheduleEditDialog`）は細かい調整用に残す（後工程は連動しない）。
+
+### 決定事項
+
+| 項目 | 決定 |
+|---|---|
+| 同じ設備の他の注文との重なり | 警告のうえ保存を許可する |
+| 完成見込み（`orders.confirmed_deadline`） | 追従させる（`deadline_from_schedules()` と同じ規則。JST の暦日） |
+| 変更の記録 | 専用テーブル `production_schedule_shift_logs`（追記専用。閲覧画面は未実装） |
+| 調整の単位 | 稼働日のみ（半日などの時間単位は初版では無し）。1回の上限は ±30 稼働日 |
+| 完了済みの工程（日報の進捗で `completed`） | 動かせるが警告する |
+| 対象の受注 | `confirmed` / `in_progress` のみ（それ以外は 409 `order_not_adjustable`） |
+| 権限 | `SCHEDULE_EDITOR_ROLES`（`president`）。RPC・記録テーブルの INSERT ポリシーでもロールを検査する |
+
+### ずらし方（`services/schedule_shift_service.py`）
+
+- `plan_process_shift()`（純粋関数）: 動く工程ごとに、元の開始から稼働日を数えた日の**同じ時刻**を起点に、
+  所要時間（稼働時間ベース。`utils/calendar.count_working_minutes()`）を保ったまま `split_work_across_days()` で稼働時間へ詰め直す。
+  単純な平行移動にしないのは、休日・夜間・休憩にかかるため。他の注文の隙間に詰めて飛び飛びだった工程は詰めて置き直す
+- どの工程も1つ前に置いた工程の終了より前には置かない。前倒しで前工程の終了より前に食い込むときは前工程の終了で止め、
+  `stopped_at_previous` を返す（画面はそれ以上の前倒しを無効にする）
+- マイルストーン（所要時間 0、#379）は時刻だけずらす。設備は工程の最初のセグメントの設備のまま
+- 稼働日はテナントの稼働カレンダー（`work_calendars`）で判定する（`add_working_days()`）。**承認時のスケジューラ
+  （`scheduler_logic.schedule_order()`）はまだテナントのカレンダーを使っていない**ので、祝日の扱いはずらしの方が正しい
+- `find_overlaps()`（純粋関数）: ずらした後のセグメントと時間が重なる、同じ設備の他の注文のセグメント（マイルストーン・設備なしは数えない）
+
+### API・保存
+
+- `POST /orders/{order_id}/processes/{process_routing_id}/shift`、ボディ `{ "working_days": -1, "dry_run": true }`
+  （`routers/transaction/orders/schedule_shift.py`）。`dry_run=true` はプレビュー、`false` で保存。保存時もサーバーで計算し直す
+- レスポンス `ProcessShiftResponse`: 動く工程ごとの前後の期間と新しいセグメント・完了済みか、新旧の完成見込み・希望納期の超過、
+  重なり、`stopped_at_previous`
+- 保存は RPC `shift_order_process_schedules`（`SECURITY INVOKER`）で、受注の行をロックして**計算に使った注文の全セグメントと現在を突き合わせ**、
+  違えば `P0001`（409 `schedule_changed`）で何も変えない。そのうえで動く工程のセグメントの削除・作り直し、完成見込みの更新、記録の INSERT を
+  1トランザクションで行う。`40001`（serialization_failure）は PostgREST が再試行対象として 504 にするので使わない
+- 着手日（受注ステータスの自動遷移 #400 の基準）は作業開始日（`scheduling_start_date`）を優先するので、**注文の最初の工程の日が変わったら
+  作業開始日もその日に書き換え**、手動で決めた計画として `scheduling_start_date_auto=false` にする。次回の cron が `confirmed ⇄ in_progress` を追従させる
+- 遅れの判定の基準 `planned_end_datetime`（#491）は `order_process_progress` の列ではなく、参照 API が `production_schedules` から都度求めるので、
+  保存後に進捗のクエリを無効化すれば直後から新しい計画で判定される
+
+### 画面
+
+- `components/schedule/process-shift-controls.tsx`: 「◀ 前倒し」「後ろ倒し ▶」を1回押すごとに1稼働日ずつ量を増減し、
+  量（例: `+2日`）・動く工程の前後の期間・完成見込みの新旧・警告（前工程で停止／希望納期の超過／完了済み／重なり）を出す。「確定」「取り消し」
+- 状態は `app/schedule/page.tsx` が持つ（`useProcessShiftPreview()` を押すたびに `mutate`。`variables` が今の量と一致するときだけ結果を使う）。
+  別の工程・注文を開いたら破棄する。保存（`useShiftProcess()`）後はスケジュール・受注・進捗のクエリを無効化する
+- ガントには `src/gantt` の汎用機能で重ねる: `GanttTask.isGhost`（破線＋半透明、クリック・`wrapTaskBar` の対象外）と `dimmed`（元の位置を薄く）。
+  `applyShiftPreview()`（`components/schedule/gantt-chart.tsx`）がゴーストバーを**その工程の最初の行の rowId** で並べる。
+  1セグメント1行の表示では元のバーの id を rowId にする（行の識別子 `rowId ?? id` は変わらない）。表示中に行の無い工程には重ねない
+

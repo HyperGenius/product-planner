@@ -1,6 +1,7 @@
 import { format, isSameDay } from "date-fns"
 import { ja } from "date-fns/locale"
 import type { ProcessProgress } from "@/types/daily-report-progress"
+import type { Order } from "@/types/order"
 import type { Schedule } from "@/types/schedule"
 import { indexProgress, progressKey, processDisplayState } from "@/lib/daily-report-progress-utils"
 import type { ProcessDisplayState } from "@/lib/daily-report-progress-utils"
@@ -189,4 +190,15 @@ export function formatDateTime(d: Date): string {
 export function formatRange(start: Date, end: Date): string {
   const endLabel = isSameDay(start, end) ? format(end, "HH:mm", { locale: ja }) : formatDateTime(end)
   return `${formatDateTime(start)} - ${endLabel}`
+}
+
+/** 1回でずらせる稼働日の上限（Backend `MAX_SHIFT_WORKING_DAYS`。Issue #582） */
+export const MAX_SHIFT_WORKING_DAYS = 30
+
+/**
+ * 計画を前倒し・後ろ倒しできる注文か（Backend `SHIFTABLE_ORDER_STATUSES`。Issue #582）。
+ * スケジュールが確定していて、まだ出荷していない注文だけ
+ */
+export function canShiftOrderSchedule(status: Order["status"] | null | undefined): boolean {
+  return status === "confirmed" || status === "in_progress"
 }

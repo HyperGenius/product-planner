@@ -7,6 +7,7 @@ import { ja } from 'date-fns/locale'
 import { ChevronRight, ExternalLink, Pencil, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StateBadge } from '@/components/schedule/state-badge'
+import { ProcessShiftControls, type ProcessShiftControlsProps } from '@/components/schedule/process-shift-controls'
 import {
   formatActualDateRange,
   formatProgressQuantity,
@@ -19,6 +20,7 @@ import type { ProcessDisplayState } from '@/lib/daily-report-progress-utils'
 import { getStatusLabel } from '@/lib/order-utils'
 import { scheduleCustomerLabel } from '@/lib/schedule-label-utils'
 import {
+  canShiftOrderSchedule,
   formatDateTime,
   formatRange,
   type OrderDetail,
@@ -33,13 +35,15 @@ export interface ScheduleDetailSheetProps {
   detail: ScheduleDetail
   /** 遅れの判定の「今」（ガントと揃える） */
   now: Date
-  /** 操作（開始・終了の編集）を出すか。`SCHEDULE_EDITOR_ROLES` のロールだけ */
+  /** 操作（前倒し・後ろ倒し、開始・終了の編集）を出すか。`SCHEDULE_EDITOR_ROLES` のロールだけ */
   canEdit: boolean
   onClose: () => void
   /** シートの中で別の工程・注文へ移る */
   onSelect: (selection: ScheduleSelection) => void
   /** セグメントの開始・終了を編集する（`ScheduleEditDialog` を開く） */
   onEditSegment: (schedule: Schedule) => void
+  /** 工程の前倒し・後ろ倒し（Issue #582）。確定済み・生産中の注文の工程で、canEdit のときだけ出す */
+  shift?: ProcessShiftControlsProps
 }
 
 /** 日付のみの値（YYYY-MM-DD）。parseISO でローカル深夜として読む */
@@ -140,7 +144,8 @@ function ProcessDetailBody({
   canEdit,
   onSelect,
   onEditSegment,
-}: { detail: ProcessDetail } & Pick<ScheduleDetailSheetProps, 'canEdit' | 'onSelect' | 'onEditSegment'>) {
+  shift,
+}: { detail: ProcessDetail } & Pick<ScheduleDetailSheetProps, 'canEdit' | 'onSelect' | 'onEditSegment' | 'shift'>) {
   const { visibleRange, processRange, segments } = detail
   const showWholeRange =
     processRange.start.getTime() !== visibleRange.start.getTime() ||
@@ -176,6 +181,13 @@ function ProcessDetailBody({
       </Section>
       {canEdit && (
         <Section title="操作">
+          {shift && canShiftOrderSchedule(detail.head.order_status) && (
+            <div className="mb-4">
+              <h4 className="mb-2 text-sm font-medium">計画をずらす</h4>
+              <ProcessShiftControls {...shift} />
+            </div>
+          )}
+          <h4 className="mb-1 text-sm font-medium">区間ごとの編集</h4>
           <p className="mb-2 text-xs text-muted-foreground">
             区間ごとに開始・終了を変更します。同じ注文の後工程は動きません。
           </p>
@@ -284,6 +296,7 @@ export function ScheduleDetailSheet({
   onClose,
   onSelect,
   onEditSegment,
+  shift,
 }: ScheduleDetailSheetProps) {
   const orderState =
     detail.kind === 'order' ? orderStateLabelText(detail.progressItems, now) : null
@@ -314,7 +327,13 @@ export function ScheduleDetailSheet({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         {detail.kind === 'process' ? (
-          <ProcessDetailBody detail={detail} canEdit={canEdit} onSelect={onSelect} onEditSegment={onEditSegment} />
+          <ProcessDetailBody
+            detail={detail}
+            canEdit={canEdit}
+            onSelect={onSelect}
+            onEditSegment={onEditSegment}
+            shift={shift}
+          />
         ) : (
           <OrderDetailBody detail={detail} onSelect={onSelect} />
         )}

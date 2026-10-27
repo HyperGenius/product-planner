@@ -501,3 +501,43 @@ def split_work_in_window(
                 break
 
     return segments, remaining_duration
+
+
+def count_working_minutes(
+    start_dt: datetime,
+    end_dt: datetime,
+    calendar_config: CalendarConfig | None = None,
+) -> float:
+    """start_dt 〜 end_dt のうち稼働時間（稼働日の 9:00-17:00、昼休憩を除く）に当たる分数を返す。
+
+    手動調整で稼働時間外・非稼働日にかかったセグメントでも、稼働時間に当たる部分だけを数える
+    （工程の前倒し・後ろ倒しで所要時間を保つため。Issue #582）。
+    """
+    start_dt = _to_business_tz(start_dt)
+    end_dt = _to_business_tz(end_dt)
+    total = 0.0
+    day = start_dt.date()
+    while day <= end_dt.date():
+        work_start = datetime.combine(day, time(WORK_START_HOUR, 0), start_dt.tzinfo)
+        if is_workday(work_start, calendar_config):
+            work_end = work_start.replace(hour=WORK_END_HOUR)
+            slot_start = max(start_dt, work_start)
+            slot_end = min(end_dt, work_end)
+            if slot_end > slot_start:
+                total += _break_adjusted_slot_minutes(slot_start, slot_end)
+        day += timedelta(days=1)
+    return total
+
+
+def add_working_days(
+    dt: datetime, days: int, calendar_config: CalendarConfig | None = None
+) -> datetime:
+    """dt から稼働日を days 日（負なら前へ）数えた日の、同じ時刻を返す。非稼働日は数えない。"""
+    dt = _to_business_tz(dt)
+    step = 1 if days > 0 else -1
+    remaining = abs(days)
+    while remaining > 0:
+        dt += timedelta(days=step)
+        if is_workday(dt, calendar_config):
+            remaining -= 1
+    return dt

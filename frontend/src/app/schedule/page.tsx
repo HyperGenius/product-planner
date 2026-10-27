@@ -16,7 +16,7 @@ import { ProgressLegend } from "@/components/schedule/progress-legend"
 import { ScheduleDetailSheet } from "@/components/schedule/schedule-detail-sheet"
 import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
 import { SegmentedControl } from "@/components/schedule/segmented-control"
-import { useSchedules, useUpdateSchedule } from "@/hooks/use-schedules"
+import { useProcessShiftPreview, useSchedules, useShiftProcess, useUpdateSchedule } from "@/hooks/use-schedules"
 import { useOrderProgressList } from "@/hooks/use-daily-report-progress"
 import { useLocalStorageState } from "@/hooks/use-local-storage-state"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
@@ -32,6 +32,10 @@ import {
 } from "@/lib/schedule-view-prefs"
 import { SCHEDULE_EDITOR_ROLES } from "@/types/member"
 import type { GanttViewMode, GroupByMode, Schedule } from "@/types/schedule"
+import type { ProcessShiftTarget } from "@/types/schedule-shift"
+
+const isSameShiftTarget = (a: ProcessShiftTarget | undefined, b: ProcessShiftTarget | null) =>
+  !!a && !!b && a.orderId === b.orderId && a.processRoutingId === b.processRoutingId && a.workingDays === b.workingDays
 
 /** 自動更新の間隔（現場ダッシュボード #440 と同じ5分） */
 const REFETCH_INTERVAL_MS = 5 * 60 * 1000
@@ -96,6 +100,49 @@ export default function SchedulePage() {
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null)
 
   const updateSchedule = useUpdateSchedule()
+
+  // 工程の前倒し・後ろ倒し（Issue #582）。ずらす量を変えるたびにプレビューし、確定で保存する。
+  // 別の工程・注文を開いたら破棄する
+  const [shiftDraft, setShiftDraft] = useState<ProcessShiftTarget | null>(null)
+  const shiftPreview = useProcessShiftPreview()
+  const shiftProcess = useShiftProcess()
+  const activeShift =
+    shiftDraft &&
+    selection?.kind === "process" &&
+    shiftDraft.orderId === selection.orderId &&
+    shiftDraft.processRoutingId === selection.processRoutingId
+      ? shiftDraft
+      : null
+  // 続けて押したときは、今の量のプレビューだけを使う
+  const previewIsCurrent = isSameShiftTarget(shiftPreview.variables, activeShift)
+  const shiftPreviewData = previewIsCurrent ? shiftPreview.data : undefined
+
+  const discardShift = () => {
+    setShiftDraft(null)
+    shiftPreview.reset()
+  }
+  const handleSelect = (next: ScheduleSelection | null) => {
+    setSelection(next)
+    const sameProcess =
+      next?.kind === "process" &&
+      shiftDraft?.orderId === next.orderId &&
+      shiftDraft.processRoutingId === next.processRoutingId
+    if (!sameProcess) discardShift()
+  }
+  const handleShiftChange = (workingDays: number) => {
+    if (selection?.kind !== "process") return
+    if (workingDays === 0) {
+      discardShift()
+      return
+    }
+    const target = { orderId: selection.orderId, processRoutingId: selection.processRoutingId, workingDays }
+    setShiftDraft(target)
+    shiftPreview.mutate(target)
+  }
+  const handleShiftConfirm = () => {
+    if (!activeShift) return
+    shiftProcess.mutate(activeShift, { onSuccess: discardShift })
+  }
   const { data: currentMember } = useCurrentMember()
   const canEdit = currentMember != null && SCHEDULE_EDITOR_ROLES.includes(currentMember.role)
 
@@ -442,12 +489,13 @@ export default function SchedulePage() {
               currentDate={currentDate}
               nonWorkingDays={nonWorkingDays}
               selection={detail ? selection : null}
-              onSelect={setSelection}
+              onSelect={handleSelect}
               collapsedGroupIds={collapsedGroupIds}
               onCollapsedGroupIdsChange={(ids) =>
                 updatePrefs({ collapsedGroupIds: Array.from(ids).slice(-MAX_COLLAPSED_GROUP_IDS) })
               }
               progress={orderProgress?.items}
+              shiftPreview={shiftPreviewData}
             />
           ) : (
             <div className="flex h-96 items-center justify-center">
@@ -464,9 +512,19 @@ export default function SchedulePage() {
             detail={detail}
             now={now}
             canEdit={canEdit}
-            onClose={() => setSelection(null)}
-            onSelect={setSelection}
+            onClose={() => handleSelect(null)}
+            onSelect={handleSelect}
             onEditSegment={setEditingSchedule}
+            shift={{
+              workingDays: activeShift?.workingDays ?? 0,
+              preview: shiftPreviewData,
+              isPreviewLoading: previewIsCurrent && shiftPreview.isPending,
+              previewError: previewIsCurrent ? shiftPreview.error : null,
+              isSaving: shiftProcess.isPending,
+              onChange: handleShiftChange,
+              onCancel: discardShift,
+              onConfirm: handleShiftConfirm,
+            }}
           />
         )}
       </div>
