@@ -148,8 +148,9 @@ def simulate_schedule(
     settings_repo: SchedulingSettingsRepository = Depends(get_settings_repo),
 ):
     """
-    スケジュールのシミュレーションを行う（DB保存なし）。
-    既存の注文をベースにシミュレーションを実行。
+    スケジュールのシミュレーションを行う（production_schedules には保存しない）。
+    既存の注文をベースにシミュレーションを実行し、シミュ納期と工程スケジュール
+    （レスポンスと同じ形）を受注へ保存する（`GET /orders/{id}/simulation` で再表示する）。
 
     作業開始日は、リクエストボディの scheduling_start_date（上書き指定）→
     受注に保存済みの scheduling_start_date の順で解決する（Issue #372）。
@@ -199,18 +200,16 @@ def simulate_schedule(
         ) from None
 
     try:
-        result = simulate_and_persist(
+        return simulate_and_persist(
             order,
             tenant_id=tenant_id,
             start_time=start_time,
             order_repo=order_repo,
             product_repo=product_repo,
+            equipment_repo=equipment_repo,
             schedule_repo=schedule_repo,
             settings_repo=settings_repo,
             auto_scheduling_start_date=auto_start,
-        )
-        return build_simulate_response(
-            result, order.get("deadline_date"), product_repo, equipment_repo
         )
     except RoutingUnconfirmedError as e:
         raise HTTPException(
@@ -243,3 +242,26 @@ def simulate_schedule(
         raise HTTPException(
             status_code=500, detail="シミュレーションの計算に失敗しました"
         ) from None
+
+
+@router.get("/{order_id}/simulation")
+def get_stored_simulation(
+    order_id: int,
+    order_repo: OrderRepository = Depends(get_order_repo),
+):
+    """保存済みのシミュレーション結果（`POST /orders/{id}/simulate` と同じ形）を返す。
+
+    受注がシミュ済み（is_scheduled かつ simulated_deadline あり）のときだけ返し、
+    それ以外は null。スケジュール条件の編集でシミュ納期がクリアされた受注に古い工程を
+    出さないよう、保存行を消さずにここでシミュ納期と同じ寿命にそろえる。
+    """
+    order = order_repo.get_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if (
+        is_repair_order(order)
+        or not order.get("is_scheduled")
+        or order.get("simulated_deadline") is None
+    ):
+        return None
+    return order_repo.get_simulation_result(order_id)

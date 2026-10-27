@@ -1,5 +1,5 @@
 # repositories/supa_infra/transaction/order_repo.py
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any, cast
 
 from postgrest.exceptions import APIError
@@ -241,3 +241,34 @@ class OrderRepository(BaseRepository):
         if tenant_id is not None:
             query = query.eq("tenant_id", tenant_id)
         query.execute()
+
+    def save_simulation_result(
+        self, order_id: int, tenant_id: str, result: dict[str, Any]
+    ) -> None:
+        """シミュレーション結果（工程スケジュール）を受注ごとに1行で上書き保存する。
+
+        dry_run のシミュは production_schedules に工程を残さないため、受注詳細で
+        再表示できるようスナップショットを保存する。`tenant_id` はサーバー側で解決した値を渡す
+        （admin クライアントの cron からも呼ぶため、行に明示的に入れる）。
+        """
+        self.client.table(SupabaseTableName.ORDER_SIMULATION_RESULTS.value).upsert(
+            {
+                "order_id": order_id,
+                "tenant_id": tenant_id,
+                "result": result,
+                "simulated_at": datetime.now(UTC).isoformat(),
+            },
+            on_conflict="order_id",
+        ).execute()
+
+    def get_simulation_result(self, order_id: int) -> dict[str, Any] | None:
+        """保存済みのシミュレーション結果（OrderSimulateResponse の形）を返す。無ければ None。"""
+        res = (
+            self.client.table(SupabaseTableName.ORDER_SIMULATION_RESULTS.value)
+            .select("result")
+            .eq("order_id", order_id)
+            .limit(1)
+            .execute()
+        )
+        rows = cast(list[dict[str, Any]], res.data or [])
+        return rows[0]["result"] if rows else None

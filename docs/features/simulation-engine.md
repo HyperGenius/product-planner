@@ -271,6 +271,7 @@ class CalendarConfig:
 | `is_scheduled` | `true` | 「シミュ済」派生ステータスの判定に使う（Issue #392） |
 | `simulated_deadline` | 算出された最終工程終了日（`date` 型） | 承認前の「シミュ納期」表示用。`confirmed_deadline` と同一ロジック（`services/order_simulation_service.deadline_from_schedules()`）で算出する（Issue #394-A） |
 | `scheduling_start_date` / `scheduling_start_date_auto` | 実行日（JST）の翌日 / `true` | **受注の作業開始日が未設定のときだけ**補完して同一 UPDATE で保存する（Issue #477）。保存済みの値・ボディの上書き指定があるときは書き込まない |
+| `order_simulation_results.result` | レスポンスと同じ JSON | 受注詳細で工程を再表示するためのスナップショット（1受注1行、再シミュで上書き）。`orders` の UPDATE より**先に** upsert する（下記「保存済みのシミュレーション結果」） |
 
 `production_schedules` への保存は行わない（`dry_run=True` のまま）。`product_id` /
 `quantity` / `desired_deadline` / `scheduling_start_date` を `PATCH /orders/{id}` で
@@ -293,6 +294,27 @@ Issue #477 以前は 3 が「実行日時」で、承認確定時も「承認し
 cron の自動起票（[pdf-order-parsing.md](pdf-order-parsing.md)「起票後の自動シミュレーション」）と共有する。
 一覧の単体シミュ・一括シミュ・詳細ページのシミュはすべてこのエンドポイントを使う。フロントの
 `useSimulateOrderById` は成功時に `["orders"]`（一覧・詳細の両方）を invalidate する。
+レスポンスの整形（`build_simulate_response()`）も `simulate_and_persist()` の中で行い、整形済みの
+結果を保存してから返す（cron の自動シミュでも保存される）。
+
+---
+
+### GET `/orders/{order_id}/simulation` — 保存済みのシミュレーション結果
+
+`POST /orders/{order_id}/simulate` が保存したレスポンス（`calculated_deadline` / `is_feasible` /
+`process_schedules`）を返す。受注が**シミュ済み（`is_scheduled` かつ `simulated_deadline` あり）のときだけ**
+返し、それ以外（未シミュ・編集で無効化済み・修理等）は `null`（200）。受注が無ければ 404。
+
+- **保存先を `orders` の列にしない理由**: 受注一覧（`GET /orders`）が `select("*")` で全列を返すため、
+  工程の配列を一覧に載せないよう別テーブル `order_simulation_results`（`order_id` PK、`orders` / `tenants` の
+  `ON DELETE CASCADE`、RLS は `is_tenant_member(tenant_id)` ＋ `order_id` が同テナントの受注であること）にした
+- **陳腐化の扱い**: 「編集時の無効化」で `simulated_deadline` / `is_scheduled` がクリアされても行は消さず、
+  この API の条件でシミュ納期と同じ寿命にそろえる（無効化の経路を増やさずに済む）
+- **画面**: 受注詳細（`app/orders/[id]/page.tsx`）は `useOrderSimulation()` で取得し、「シミュ納期」を出す状態
+  （`usesSimulatedDeadlineForOrder()`＝承認前）のときだけ右ペインに表示する。承認後は確定納期・
+  `production_schedules` が正なので出さない。`useSimulateOrderById` は成功時にこのクエリへ実行結果を
+  `setQueryData` してから無効化する。シミュ済み（`is_scheduled`）の下書きでは実行ボタンのラベルを
+  「シミュレーション再実行」にする
 
 **エラーレスポンス**（`POST /orders/simulate` も同方針。Issue #374）
 

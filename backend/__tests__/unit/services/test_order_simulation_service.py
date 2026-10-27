@@ -90,6 +90,29 @@ class TestAutoSimulateIntakeOrder:
             "scheduling_start_date_auto": True,
         }
 
+    def test_saves_simulation_result_for_order_detail(self, mock_schedule_order):
+        """受注詳細で工程を再表示できるよう、シミュ結果を tenant_id 付きで保存する。"""
+        db = _mock_db(
+            {
+                "id": 10,
+                "product_id": 100,
+                "quantity": 5,
+                "deadline_date": "2026-10-10",
+                "scheduling_start_date": None,
+            }
+        )
+
+        auto_simulate_intake_order(db, "tenant-1", 10, today=date(2026, 9, 29))
+
+        upsert_call = db.table.return_value.upsert.call_args
+        payload = upsert_call.args[0]
+        assert payload["order_id"] == 10
+        assert payload["tenant_id"] == "tenant-1"
+        assert payload["result"]["calculated_deadline"] == "2026-10-05T12:00:00+09:00"
+        assert payload["result"]["is_feasible"] is True
+        assert len(payload["result"]["process_schedules"]) == 2
+        assert upsert_call.kwargs == {"on_conflict": "order_id"}
+
     def test_keeps_existing_scheduling_start_date(self, mock_schedule_order):
         """既に作業開始日が入っている受注（updated 等）は上書きせず、その日を起点にする。"""
         db = _mock_db(
@@ -126,7 +149,8 @@ class TestAutoSimulateIntakeOrder:
         auto_simulate_intake_order(db, "tenant-1", 10, today=date(2026, 9, 29))
 
         select_chain = db.table.return_value.select.return_value
-        assert select_chain.eq.call_args == call("id", 10)
+        # 以降の工程名・設備名の参照も同じモックの select().eq() を通るので、最初の呼び出しを見る
+        assert select_chain.eq.call_args_list[0] == call("id", 10)
         assert select_chain.eq.return_value.eq.call_args == call(
             "tenant_id", "tenant-1"
         )
@@ -205,6 +229,7 @@ class TestAutoSimulateIntakeOrder:
 
         assert ok is False
         db.table.return_value.update.assert_not_called()
+        db.table.return_value.upsert.assert_not_called()
 
     def test_select_error_is_swallowed(self, mock_schedule_order):
         db = MagicMock()
