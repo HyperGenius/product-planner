@@ -1,0 +1,52 @@
+import { describe, expect, it } from "vitest"
+import {
+  scheduleDeadlineLabel,
+  scheduleOrderMeta,
+  scheduleOrderNumberLabel,
+  scheduleOrderTitle,
+} from "./schedule-label-utils"
+
+const BASE = {
+  order_id: 7,
+  order_number: "ORD-7",
+  customer_order_no: "PO-7",
+  customer_name: "顧客A社",
+  product_name: "ピン",
+  quantity: 500,
+  desired_deadline: "2026-10-31",
+  confirmed_deadline: "2026-11-02",
+}
+
+describe("scheduleDeadlineLabel", () => {
+  it("希望納期を優先し、無ければ完成見込みを「見込」で出す", () => {
+    expect(scheduleDeadlineLabel(BASE)).toBe("納期 10/31")
+    expect(scheduleDeadlineLabel({ ...BASE, desired_deadline: null })).toBe("見込 11/2")
+    expect(scheduleDeadlineLabel({ desired_deadline: null, confirmed_deadline: null })).toBeNull()
+  })
+
+  it("日付のみの値を端末の TZ でずらさない", () => {
+    expect(scheduleDeadlineLabel({ desired_deadline: "2026-01-01", confirmed_deadline: null })).toBe("納期 1/1")
+  })
+})
+
+describe("scheduleOrderNumberLabel", () => {
+  it("注文番号 → 顧客の注文番号 → 内部 ID の順に出す", () => {
+    expect(scheduleOrderNumberLabel(BASE)).toBe("ORD-7")
+    expect(scheduleOrderNumberLabel({ ...BASE, order_number: null })).toBe("PO-7")
+    expect(scheduleOrderNumberLabel({ ...BASE, order_number: null, customer_order_no: null })).toBe("#7")
+  })
+})
+
+describe("scheduleOrderMeta / scheduleOrderTitle", () => {
+  it("数量・納期・注文番号を並べ、値の無い項目は出さない", () => {
+    expect(scheduleOrderMeta(BASE)).toEqual(["500個", "納期 10/31", "ORD-7"])
+    expect(
+      scheduleOrderMeta({ ...BASE, quantity: null, desired_deadline: null, confirmed_deadline: null }),
+    ).toEqual(["ORD-7"])
+  })
+
+  it("顧客不明は「顧客不明」と出す", () => {
+    expect(scheduleOrderTitle(BASE)).toBe("顧客A社 ピン")
+    expect(scheduleOrderTitle({ customer_name: null, product_name: "ピン" })).toBe("顧客不明 ピン")
+  })
+})

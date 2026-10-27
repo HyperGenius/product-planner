@@ -339,6 +339,13 @@ cd backend && ruff check . && mypy .
     バーはセグメントごとに描く。先頭〜最後の1本にまとめると、隙間に詰めて飛び飛びになった工程の空き時間まで作業中に見える（Issue #535）
   - 月次表示（オーダー別・フラット）も週次と同じく行をまとめる（Issue #537）。日次・設備グループ別は1セグメント1行のまま。均一グリッド（月次・日次）の開始列は
     **切り捨て**（開始時刻を含む列）、終了列は切り上げ。切り上げにすると月次で 09:00 開始のバーが翌日の列に描かれて1日ずれる
+  - ラベル・注文行（Issue #579）: `GET /production-schedules` はレスポンスモデル `ProductionScheduleItem` で、Frontend の `Schedule` と揃える。
+    **受注の希望納期の DB 列は `orders.deadline_date`**（API・画面では `desired_deadline` と呼ぶ。埋め込みの `select` に `desired_deadline` と書くと
+    42703 になり、モックの unit テストでは気づけない。埋め込みを変えたら integration テスト `test_production_schedules_by_period.py` を流す）。
+    API は表示期間と重なるセグメントしか返さないので、期間外へ続くかは同 API の `process_/order_start/end_datetime`（期間外を含む範囲）で判定する。
+    グループ行の細いサマリーバー・子行（`parentId`）の折りたたみ・続きの印（`continuesBefore/After`）は `src/gantt` の汎用機能で、
+    注文・顧客などの語は `components/schedule` 側に置く。詳細は [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md)
+  - E2E でバーの「行」を比べるときは、グリッド要素の親（行 = ラベルセル＋グリッド、#578）の並び順で見る（`gantt-segment-bars.spec.ts` の `rowOf()`）
   - 稼働時間スロットの終了列は `binarySearchFirstGe`（終了時刻ちょうどのスロットは塗らない）。`FirstGt` にすると 10:00 終了のバーが
     10:00 開始の後工程と1列重なる（#163 で一度 `FirstGt` にして #535 で戻した）。詳細は [docs/features/gantt-date-math.md](docs/features/gantt-date-math.md)
   - 生産スケジュール画面は**固定ラベル列＋1つのスクロールコンテナ**（Issue #578）。ヘッダーと本体を別々の `overflow` 要素に

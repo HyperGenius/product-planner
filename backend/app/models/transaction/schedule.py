@@ -1,5 +1,5 @@
 # models/transaction/schedule.py
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -40,3 +40,50 @@ class ScheduleUpdate(BaseModel):
                 # ISO8601形式のパースエラーはそのまま伝播
                 raise ValueError(f"Invalid datetime format: {e}") from e
         return self
+
+
+class ProductionScheduleItem(BaseModel):
+    """`GET /production-schedules` の1行（工程スケジュールの1セグメント）。
+
+    ガントのラベル（顧客・製品・数量・納期）と、表示期間の外へ続くかの判定に使う項目を
+    受注・工程から結合して返す（Issue #579）。Frontend の `Schedule` 型と揃える
+    """
+
+    id: int
+    order_id: int
+    process_routing_id: int
+    equipment_id: int | None = None
+    start_datetime: str
+    end_datetime: str
+    order_number: str | None = None
+    customer_order_no: str | None = None
+    order_status: str | None = None
+    quantity: int | None = None
+    desired_deadline: date | None = Field(None, description="希望納期")
+    confirmed_deadline: date | None = Field(
+        None, description="完成見込み（承認確定時）"
+    )
+    product_name: str | None = None
+    customer_name: str | None = Field(
+        None, description="顧客名。顧客不明（customer_id が NULL、#521）は null"
+    )
+    process_name: str | None = None
+    sequence_order: int | None = None
+    equipment_name: str | None = None
+    equipment_group_id: int | None = None
+    equipment_group_name: str | None = Field(
+        None,
+        description="設備グループの表示名。1台グループはメンバーの設備の表示名（#512）",
+    )
+    process_start_datetime: str | None = Field(
+        None, description="この工程の全セグメントの開始の最小（表示期間外を含む）"
+    )
+    process_end_datetime: str | None = Field(
+        None, description="この工程の全セグメントの終了の最大（表示期間外を含む）"
+    )
+    order_start_datetime: str | None = Field(
+        None, description="この受注の全工程の開始の最小（表示期間外を含む）"
+    )
+    order_end_datetime: str | None = Field(
+        None, description="この受注の全工程の終了の最大（表示期間外を含む）"
+    )

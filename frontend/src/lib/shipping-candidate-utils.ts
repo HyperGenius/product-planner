@@ -45,8 +45,18 @@ export type ShippingDeadlineSource = "desired" | "effective"
 export function getShippingDeadline(
   order: Order,
 ): { date: string; source: ShippingDeadlineSource } | null {
-  if (order.desired_deadline) return { date: order.desired_deadline.slice(0, 10), source: "desired" }
-  const effective = getEffectiveDeadline(order)
+  return pickShippingDeadline(order.desired_deadline, getEffectiveDeadline(order))
+}
+
+/**
+ * 希望納期 → 無ければ完成見込みの順に納期を選ぶ。注文を持たない画面（ガントの注文行、Issue #579）でも
+ * 同じ基準で納期を出すために `getShippingDeadline()` から切り出している
+ */
+export function pickShippingDeadline(
+  desired: string | null | undefined,
+  effective: string | null | undefined,
+): { date: string; source: ShippingDeadlineSource } | null {
+  if (desired) return { date: desired.slice(0, 10), source: "desired" }
   return effective ? { date: effective.slice(0, 10), source: "effective" } : null
 }
 

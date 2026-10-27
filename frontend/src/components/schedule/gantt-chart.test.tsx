@@ -109,26 +109,26 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
   it("進捗率を塗りで示し、計画の終了を過ぎて未完了の工程を遅れにする", () => {
     renderChart(PROGRESS)
 
-    expect(bar("プレス - プレスG")).toHaveAttribute("data-progress", "100")
-    expect(bar("プレス - プレスG")).not.toHaveAttribute("data-delayed")
+    expect(bar("プレス")).toHaveAttribute("data-progress", "100")
+    expect(bar("プレス")).not.toHaveAttribute("data-delayed")
 
-    expect(bar("カシメ - カシメG")).toHaveAttribute("data-progress", "40")
-    expect(bar("カシメ - カシメG")).toHaveAttribute("data-delayed", "true")
+    expect(bar("カシメ")).toHaveAttribute("data-progress", "40")
+    expect(bar("カシメ")).toHaveAttribute("data-delayed", "true")
 
     // 未着手は塗らない。計画の終了前なので遅れでもない（現状どおり）
-    expect(bar("検査 - 検査G")).not.toHaveAttribute("data-progress")
-    expect(bar("検査 - 検査G")).not.toHaveAttribute("data-delayed")
+    expect(bar("検査")).not.toHaveAttribute("data-progress")
+    expect(bar("検査")).not.toHaveAttribute("data-delayed")
   })
 
   it("進捗の行が無い工程・進捗を渡さないときは現状どおりの表示", () => {
     renderChart([PROGRESS[0]])
-    expect(bar("カシメ - カシメG")).not.toHaveAttribute("data-progress")
-    expect(bar("カシメ - カシメG")).not.toHaveAttribute("data-delayed")
+    expect(bar("カシメ")).not.toHaveAttribute("data-progress")
+    expect(bar("カシメ")).not.toHaveAttribute("data-delayed")
   })
 
   it("進捗を渡さなければ塗り・遅れを出さない", () => {
     renderChart()
-    for (const label of ["プレス - プレスG", "カシメ - カシメG", "検査 - 検査G"]) {
+    for (const label of ["プレス", "カシメ", "検査"]) {
       expect(bar(label)).not.toHaveAttribute("data-progress")
       expect(bar(label)).not.toHaveAttribute("data-delayed")
     }
@@ -144,15 +144,15 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
         progress={PROGRESS}
       />,
     )
-    expect(bar("カシメ - カシメG")).toHaveAttribute("data-progress", "40")
-    expect(bar("カシメ - カシメG")).toHaveAttribute("data-delayed", "true")
+    expect(bar("カシメ")).toHaveAttribute("data-progress", "40")
+    expect(bar("カシメ")).toHaveAttribute("data-delayed", "true")
   })
 
   it("ツールチップに実績数量・実績日・状態を出す", async () => {
     const user = userEvent.setup()
     renderChart(PROGRESS)
 
-    await user.hover(bar("カシメ - カシメG"))
+    await user.hover(bar("カシメ"))
 
     const tooltip = await screen.findByRole("tooltip")
     expect(tooltip).toHaveTextContent("状態: 進行中（遅れ）")
@@ -165,7 +165,7 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
     const user = userEvent.setup()
     renderChart(PROGRESS)
 
-    await user.hover(bar("プレス - プレスG"))
+    await user.hover(bar("プレス"))
 
     const tooltip = await screen.findByRole("tooltip")
     expect(tooltip).toHaveTextContent("状態: 完了（後工程の実績から推定）")
@@ -353,5 +353,170 @@ describe("GanttChart（スケジュール）の月次表示のセグメント（
 
     await user.click(segmentBars()[1])
     expect(onTaskClick).toHaveBeenCalledWith(expect.objectContaining({ id: 32 }))
+  })
+})
+
+describe("GanttChart（スケジュール）の注文行・工程行のラベル（Issue #579）", () => {
+  const ORDER_A: Partial<Schedule> = {
+    order_id: 1,
+    order_number: "ORD-1",
+    customer_name: "顧客A社",
+    product_name: "ピン",
+    quantity: 500,
+    desired_deadline: "2026-09-30",
+    confirmed_deadline: "2026-09-25",
+  }
+  // 工程順（sequence_order）と開始日時の順が逆になるようにしている
+  const ORDERED: Schedule[] = [
+    schedule({
+      ...ORDER_A,
+      id: 1,
+      process_routing_id: 11,
+      process_name: "カシメ",
+      sequence_order: 2,
+      equipment_group_name: "カシメG",
+      start_datetime: at(10, 9),
+      end_datetime: at(10, 12),
+    }),
+    schedule({
+      ...ORDER_A,
+      id: 2,
+      process_routing_id: 12,
+      process_name: "プレス",
+      sequence_order: 1,
+      equipment_group_name: "ワシノ25t",
+      start_datetime: at(10, 13),
+      end_datetime: at(10, 16),
+    }),
+    schedule({
+      id: 3,
+      order_id: 2,
+      order_number: null,
+      customer_order_no: null,
+      customer_name: null,
+      product_name: "ボルト",
+      quantity: 1200,
+      desired_deadline: null,
+      confirmed_deadline: "2026-10-02",
+      process_routing_id: 21,
+      process_name: "検査",
+      sequence_order: 1,
+      equipment_group_id: 9,
+      equipment_group_name: "検査G",
+      start_datetime: at(11, 9),
+      end_datetime: at(11, 12),
+    }),
+  ]
+
+  function renderOrders(groupBy: "order" | "none" | "equipment_group" = "order", tasks = ORDERED) {
+    return render(<GanttChart tasks={tasks} viewMode="Day" groupBy={groupBy} currentDate={BASE} />)
+  }
+
+  function rowLabels(): string[] {
+    return screen.getAllByTestId("gantt-row-label").map((el) => el.textContent ?? "")
+  }
+
+  it("注文行に顧客名・製品名と、数量・納期・注文番号を出す", () => {
+    renderOrders()
+    const [orderA] = rowLabels()
+    expect(orderA).toContain("顧客A社")
+    expect(orderA).toContain("ピン")
+    // 納期は希望納期を優先する
+    expect(orderA).toContain("500個 ・ 納期 9/30 ・ ORD-1")
+  })
+
+  it("顧客不明は「顧客不明」、希望納期が無ければ完成見込み、注文番号が無ければ内部 ID を出す", () => {
+    renderOrders()
+    const orderB = rowLabels().find((t) => t.includes("ボルト"))!
+    expect(orderB).toContain("顧客不明")
+    expect(orderB).toContain("1,200個 ・ 見込 10/2 ・ #2")
+  })
+
+  it("オーダー別の工程行は工程順に並べ、工程名と設備（グループ）の表示名を出す", () => {
+    renderOrders()
+    const labels = rowLabels()
+    expect(labels.slice(0, 3)).toEqual([
+      expect.stringContaining("顧客A社"),
+      "プレスワシノ25t",
+      "カシメカシメG",
+    ])
+  })
+
+  it("注文行は細いサマリーバーで描く", () => {
+    renderOrders()
+    const summary = document.querySelector<HTMLElement>('[data-task-id="group-order-1"]')!
+    expect(summary).toHaveAttribute("data-summary-bar")
+  })
+
+  it("フラット・設備グループ別の工程行には、どの注文（顧客・製品）の工程かを出す", () => {
+    const { unmount } = renderOrders("none")
+    expect(rowLabels()).toContain("顧客A社 ピンプレス")
+    expect(rowLabels()).toContain("顧客不明 ボルト検査")
+    unmount()
+
+    renderOrders("equipment_group")
+    expect(rowLabels()).toContain("検査G")
+    expect(rowLabels()).toContain("顧客不明 ボルト検査")
+  })
+
+  it("注文行を個別に・まとめて折りたためる", async () => {
+    const user = userEvent.setup()
+    renderOrders()
+    expect(screen.getAllByTestId("gantt-row-label")).toHaveLength(5)
+
+    await user.click(screen.getAllByRole("button", { name: "折りたたむ" })[0])
+    expect(screen.queryByText("カシメ")).not.toBeInTheDocument()
+    expect(screen.getByText("検査")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "展開する" })).toHaveAttribute("aria-expanded", "false")
+
+    await user.click(screen.getByRole("button", { name: "すべて折りたたむ" }))
+    expect(screen.getAllByTestId("gantt-row-label")).toHaveLength(2)
+
+    await user.click(screen.getByRole("button", { name: "すべて展開" }))
+    expect(screen.getAllByTestId("gantt-row-label")).toHaveLength(5)
+  })
+
+  it("フラット表示には折りたたみのボタンを出さない", () => {
+    renderOrders("none")
+    expect(screen.queryByRole("button", { name: "すべて折りたたむ" })).not.toBeInTheDocument()
+  })
+
+  it("表示期間の外へ続く注文・工程は、サマリーバー・工程バーの端に続きの印を出す", () => {
+    const continued = [
+      schedule({
+        ...ORDER_A,
+        id: 1,
+        process_routing_id: 11,
+        process_name: "プレス",
+        sequence_order: 1,
+        process_start_datetime: at(4, 9),
+        process_end_datetime: at(10, 12),
+        order_start_datetime: at(4, 9),
+        order_end_datetime: at(14, 12),
+      }),
+      schedule({
+        ...ORDER_A,
+        id: 2,
+        process_routing_id: 12,
+        process_name: "カシメ",
+        sequence_order: 2,
+        start_datetime: at(11, 9),
+        end_datetime: at(11, 17),
+        process_start_datetime: at(11, 9),
+        process_end_datetime: at(14, 12),
+        order_start_datetime: at(4, 9),
+        order_end_datetime: at(14, 12),
+      }),
+    ]
+    render(<GanttChart tasks={continued} viewMode="Week" groupBy="order" currentDate={BASE} />)
+
+    const summary = document.querySelector<HTMLElement>('[data-task-id="group-order-1"]')!
+    expect(summary).toHaveAttribute("data-continues-before", "true")
+    expect(summary).toHaveAttribute("data-continues-after", "true")
+    // 週次の表示範囲（9/6〜9/12）より前から続くプレス・後へ続くカシメ
+    expect(bar("プレス")).toHaveAttribute("data-continues-before", "true")
+    expect(bar("プレス")).not.toHaveAttribute("data-continues-after")
+    expect(bar("カシメ")).toHaveAttribute("data-continues-after", "true")
+    expect(bar("カシメ")).not.toHaveAttribute("data-continues-before")
   })
 })

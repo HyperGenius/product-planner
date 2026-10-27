@@ -53,6 +53,13 @@ export interface GanttChartProps {
    * 未指定の場合はバーをそのまま表示する。
    */
   wrapTaskBar?: (task: GanttTask, children: ReactNode) => ReactNode
+  /** 折りたたみ中のグループヘッダーの id。子行（parentId がこの id のタスクの行）を隠す */
+  collapsedGroupIds?: ReadonlySet<string>
+  /**
+   * グループヘッダーの折りたたみ／展開を切り替えるコールバック。指定すると、子行のあるグループ行の
+   * ラベルに切り替えボタンを出す
+   */
+  onToggleGroup?: (groupId: string) => void
 }
 
 /** ラベル列の既定幅（px）。1180px 級のタブレット横向きでもタイムラインが残る幅 */
@@ -82,6 +89,8 @@ export function GanttChart({
   nonWorkingDays,
   onTaskClick,
   wrapTaskBar,
+  collapsedGroupIds,
+  onToggleGroup,
 }: GanttChartProps) {
   const config = useMemo(
     () => buildTimelineConfig(rangeStart, rangeEnd, viewMode, workHours, nonWorkingDays),
@@ -90,7 +99,21 @@ export function GanttChart({
 
   const nowFrac = useMemo(() => getNowFractionalColumn(config), [config])
 
-  const rows = useMemo(() => groupTasksIntoRows(tasks), [tasks])
+  const allRows = useMemo(() => groupTasksIntoRows(tasks), [tasks])
+  const parentIdsWithChildren = useMemo(
+    () => new Set(tasks.flatMap((t) => (t.parentId !== undefined ? [t.parentId] : []))),
+    [tasks],
+  )
+  const rows = useMemo(
+    () =>
+      collapsedGroupIds && collapsedGroupIds.size > 0
+        ? allRows.filter((rowTasks) => {
+            const parentId = rowTasks[0].parentId
+            return parentId === undefined || !collapsedGroupIds.has(parentId)
+          })
+        : allRows,
+    [allRows, collapsedGroupIds],
+  )
 
   const { totalUnits, columnWidthPx } = config
 
@@ -162,22 +185,53 @@ export function GanttChart({
 
           {/* タスク行（同じ rowId のタスクは1行に並べる） */}
           {rows.map((rowTasks, index) => {
-            const height = rowTasks[0].isGroupHeader ? (groupRowHeight ?? rowHeight) : rowHeight
-            const stripe = index % 2 === 1 ? 'rgba(0,0,0,0.03)' : 'transparent'
+            const head = rowTasks[0]
+            const isGroup = head.isGroupHeader === true
+            const height = isGroup ? (groupRowHeight ?? rowHeight) : rowHeight
+            // グループ行は背景を付けて子行と区別する。通常行は縞模様
+            const background = isGroup
+              ? undefined
+              : index % 2 === 1
+                ? 'rgba(0,0,0,0.03)'
+                : 'transparent'
+            const collapsible = isGroup && onToggleGroup !== undefined && parentIdsWithChildren.has(head.id)
+            const collapsed = collapsedGroupIds?.has(head.id) === true
             return (
               <div
-                key={rowTasks[0].rowId ?? rowTasks[0].id}
-                className="flex border-b border-gray-100 dark:border-gray-800"
-                style={{ height: `${height}px`, backgroundColor: stripe }}
+                key={head.rowId ?? head.id}
+                data-group-row={isGroup || undefined}
+                className={`flex border-b border-gray-100 dark:border-gray-800${isGroup ? ' bg-gray-50 dark:bg-gray-800/60' : ''}`}
+                style={{ height: `${height}px`, backgroundColor: background }}
               >
-                {/* ラベルセル: 左に固定。背景を塗らないと下を流れるバーが透ける */}
+                {/* ラベルセル: 左に固定。背景を塗らないと下を流れるバーが透ける。子行はインデントする */}
                 <div
                   data-testid="gantt-row-label"
                   style={labelCellStyle}
-                  className="sticky left-0 z-10 flex shrink-0 items-center overflow-hidden border-r border-gray-200 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
+                  className={`sticky left-0 z-10 flex shrink-0 items-center gap-1 overflow-hidden border-r border-gray-200 text-xs dark:border-gray-700 ${
+                    isGroup
+                      ? 'bg-gray-100 px-1 dark:bg-gray-800'
+                      : `bg-white dark:bg-gray-900 ${head.parentId !== undefined ? 'pl-7 pr-2' : 'px-2'}`
+                  }`}
                 >
-                  <div className="min-w-0 break-words">
-                    {renderRowLabel ? renderRowLabel(rowTasks) : rowTasks[0].name}
+                  {collapsible && (
+                    <button
+                      type="button"
+                      onClick={() => onToggleGroup?.(head.id)}
+                      aria-expanded={!collapsed}
+                      aria-label={collapsed ? '展開する' : '折りたたむ'}
+                      className="flex h-6 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-700"
+                    >
+                      <svg
+                        aria-hidden
+                        viewBox="0 0 16 16"
+                        className={`h-3 w-3 transition-transform${collapsed ? ' -rotate-90' : ''}`}
+                      >
+                        <path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="2" />
+                      </svg>
+                    </button>
+                  )}
+                  <div className="min-w-0 flex-1 break-words">
+                    {renderRowLabel ? renderRowLabel(rowTasks) : head.name}
                   </div>
                 </div>
                 <div

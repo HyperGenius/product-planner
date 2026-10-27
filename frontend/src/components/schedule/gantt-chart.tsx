@@ -1,7 +1,7 @@
 /* frontend/src/components/schedule/gantt-chart.tsx */
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   addDays,
   startOfDay,
@@ -26,10 +26,17 @@ import {
   progressStatusLabel,
 } from '@/lib/daily-report-progress-utils'
 import {
+  scheduleCustomerLabel,
+  scheduleOrderMeta,
+  scheduleOrderTitle,
+} from '@/lib/schedule-label-utils'
+import { Button } from '@/components/ui/button'
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 
 /** 稼働時間定数（backend/app/utils/calendar.py と同値） */
 const WORK_HOURS = { start: 9, end: 17, breakStart: 12, breakEnd: 13 } as const
@@ -100,13 +107,6 @@ function getBarColor(schedule: Schedule, colorMode: 'product' | 'process'): stri
 }
 
 /**
- * 注文の表示キーを返す（ユーザー定義注文番号 or 内部ID）
- */
-function orderKey(schedule: Schedule): string {
-  return schedule.order_number || `#${schedule.order_id}`
-}
-
-/**
  * Schedule型からGanttTask型に変換するユーティリティ関数
  */
 export function convertScheduleToTask(
@@ -115,15 +115,11 @@ export function convertScheduleToTask(
   groupBy: GroupByMode = 'none',
 ): GanttTask {
   const processName = schedule.process_name || '工程'
-
-  let suffix: string
-  if (groupBy === 'equipment_group') {
-    suffix = orderKey(schedule)
-  } else {
-    suffix = schedule.equipment_group_name ?? ''
-  }
-
-  const name = suffix ? `${processName} - ${suffix}` : processName
+  // ツールチップの見出しに使う。オーダー別は工程と設備、それ以外はどの注文の工程か
+  const name =
+    groupBy === 'order'
+      ? [processName, schedule.equipment_group_name].filter(Boolean).join(' - ')
+      : `${processName}（${scheduleOrderTitle(schedule)}）`
 
   const start = new Date(schedule.start_datetime)
   const end = new Date(schedule.end_datetime)
@@ -138,138 +134,225 @@ export function convertScheduleToTask(
   }
 }
 
+/** ラベル列の1行分の中身 */
+export type RowLabel =
+  /** 注文行: 1行目 = 顧客名・製品名（太字）、2行目 = 数量・納期・注文番号 */
+  | { kind: 'order'; customer: string; isUnknownCustomer: boolean; product: string | null; meta: string[] }
+  /** 設備グループ行 */
+  | { kind: 'group'; title: string }
+  /** 工程行: 1行目 = primary、2行目 = secondary（小さく） */
+  | { kind: 'process'; primary: string; secondary: string | null }
+
+/** ガントに渡すタスクと、行の先頭タスクの id → ラベルの中身 */
+export interface ScheduleGanttModel {
+  tasks: GanttTask[]
+  labels: Map<string, RowLabel>
+  /** 折りたためるグループ行（注文・設備グループ）の id */
+  groupIds: string[]
+}
+
+interface TimeRange {
+  start: Date
+  end: Date
+}
+
+/** 注文行のサマリーバーの色。工程のバー（製品・工程ごとの色）と区別するため無彩色にする */
+const SUMMARY_BAR_COLOR = '#4b5563'
+
+const toTime = (iso: string) => new Date(iso).getTime()
+const byStart = (a: Schedule, b: Schedule) => toTime(a.start_datetime) - toTime(b.start_datetime)
+
 /**
- * 週次・月次モード用: 同じ受注・工程（process_routing_id）のセグメントを1行に並べる。
+ * 工程の行を作る。
  *
+ * 週次・月次（shareRows）は同じ受注・工程（process_routing_id）のセグメントを1行に並べる。
  * スケジューラは1工程を日・休憩・既存スケジュールの隙間ごとのセグメントに分けるので、
  * 1本のバー（先頭の開始〜最後の終了）にまとめると間の空き時間まで作業中に見える（Issue #535）。
- * バーはセグメントごとに描き、行だけをまとめる。ラベルは固定のラベル列に行ごとに1つ出る。
  * 工程名ではなく process_routing_id で束ねるのは、同じ工程名がルーティングに2回ある場合に
- * 別の工程を1行に合体させないため
+ * 別の工程を1行に合体させないため。日次は1セグメント1行。
+ *
+ * 行の工程（セグメント1つの行はそのセグメント）が表示範囲の外へ続くなら、行の最初・最後のバーに
+ * 「続き」の印を付ける。工程全体の範囲は API の process_start/end_datetime（期間外のセグメントを含む）
  */
-function segmentRowTasks(
+function buildProcessRows(
   schedules: Schedule[],
-  colorMode: 'product' | 'process',
-  groupBy: GroupByMode,
-): GanttTask[] {
-  const groups = new Map<string, Schedule[]>()
+  options: {
+    colorMode: 'product' | 'process'
+    groupBy: GroupByMode
+    shareRows: boolean
+    range: TimeRange
+    parentId?: string
+    compareRows: (a: Schedule, b: Schedule) => number
+    label: (schedule: Schedule) => RowLabel
+  },
+): { tasks: GanttTask[]; labels: Map<string, RowLabel> } {
+  const rowsByKey = new Map<string, Schedule[]>()
   schedules.forEach((s) => {
-    const key = `${s.order_id}__${s.process_routing_id}`
+    const key = options.shareRows ? `${s.order_id}__${s.process_routing_id}` : `schedule-${s.id}`
+    if (!rowsByKey.has(key)) rowsByKey.set(key, [])
+    rowsByKey.get(key)!.push(s)
+  })
+
+  const rows = Array.from(rowsByKey.entries())
+    .map(([key, items]) => ({ key, items: [...items].sort(byStart) }))
+    .sort((a, b) => options.compareRows(a.items[0], b.items[0]))
+
+  const tasks: GanttTask[] = []
+  const labels = new Map<string, RowLabel>()
+  rows.forEach(({ key, items }) => {
+    const first = items[0]
+    const last = items.reduce((latest, s) => (toTime(s.end_datetime) > toTime(latest.end_datetime) ? s : latest))
+    const rowStart = options.shareRows ? (first.process_start_datetime ?? first.start_datetime) : first.start_datetime
+    const rowEnd = options.shareRows ? (last.process_end_datetime ?? last.end_datetime) : last.end_datetime
+    const continuesBefore = toTime(rowStart) < options.range.start.getTime()
+    const continuesAfter = toTime(rowEnd) > options.range.end.getTime()
+
+    items.forEach((s) => {
+      tasks.push({
+        ...convertScheduleToTask(s, options.colorMode, options.groupBy),
+        ...(options.shareRows ? { rowId: `segments-${key}` } : {}),
+        ...(options.parentId !== undefined ? { parentId: options.parentId } : {}),
+        ...(s === first && continuesBefore ? { continuesBefore: true } : {}),
+        ...(s === last && continuesAfter ? { continuesAfter: true } : {}),
+      })
+    })
+    labels.set(`schedule-${first.id}`, options.label(first))
+  })
+  return { tasks, labels }
+}
+
+/** 工程行のラベル（フラット・設備グループ別）: どの注文の工程か */
+function processWithOrderLabel(s: Schedule): RowLabel {
+  return { kind: 'process', primary: scheduleOrderTitle(s), secondary: s.process_name || '工程' }
+}
+
+/** 工程行のラベル（オーダー別）: 工程名と設備（グループ）の表示名 */
+function processWithEquipmentLabel(s: Schedule): RowLabel {
+  return { kind: 'process', primary: s.process_name || '工程', secondary: s.equipment_group_name ?? null }
+}
+
+/** オーダー別の工程の並び: 工程順（sequence_order）→ 開始日時 */
+function compareBySequence(a: Schedule, b: Schedule): number {
+  const seq = (a.sequence_order ?? Number.MAX_SAFE_INTEGER) - (b.sequence_order ?? Number.MAX_SAFE_INTEGER)
+  return seq !== 0 ? seq : byStart(a, b)
+}
+
+/** キーごとにまとめ、表示中の最初の開始が早い順に並べる */
+function groupByKey<K>(schedules: Schedule[], keyOf: (s: Schedule) => K): Schedule[][] {
+  const groups = new Map<K, Schedule[]>()
+  schedules.forEach((s) => {
+    const key = keyOf(s)
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(s)
   })
+  return Array.from(groups.values())
+    .map((items) => [...items].sort(byStart))
+    .sort((a, b) => byStart(a[0], b[0]))
+}
 
-  const result: GanttTask[] = []
-  groups.forEach((items, key) => {
-    const sorted = [...items].sort(
-      (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime(),
-    )
-    sorted.forEach((s) => {
-      result.push({
-        ...convertScheduleToTask(s, colorMode, groupBy),
-        rowId: `segments-${key}`,
-      })
-    })
-  })
-
-  return result.sort((a, b) => a.start.getTime() - b.start.getTime())
+function visibleExtent(items: Schedule[]): TimeRange {
+  return {
+    start: new Date(Math.min(...items.map((s) => toTime(s.start_datetime)))),
+    end: new Date(Math.max(...items.map((s) => toTime(s.end_datetime)))),
+  }
 }
 
 /**
- * スケジュールをグルーピングモードに応じてGanttTask配列に変換する
+ * スケジュールをグルーピングモードに応じて GanttTask とラベルに変換する
  */
-function transformSchedulesToGroupedTasks(
+export function buildScheduleGanttModel(
   schedules: Schedule[],
   groupBy: GroupByMode,
   colorMode: 'product' | 'process',
   viewMode: GanttViewMode,
-): GanttTask[] {
-  const sortByStartDate = (items: Schedule[]) =>
-    [...items].sort(
-      (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime(),
-    )
-
+  range: TimeRange,
+): ScheduleGanttModel {
   // 週次・月次は行数を抑えるため、同じ工程のセグメントを1行に並べる（日次は1セグメント1行）
-  const shouldShareRows = viewMode === 'Week' || viewMode === 'Month'
+  const shareRows = viewMode === 'Week' || viewMode === 'Month'
+  const tasks: GanttTask[] = []
+  const labels = new Map<string, RowLabel>()
+  const groupIds: string[] = []
+  const append = (rows: { tasks: GanttTask[]; labels: Map<string, RowLabel> }) => {
+    tasks.push(...rows.tasks)
+    rows.labels.forEach((label, id) => labels.set(id, label))
+  }
 
   if (groupBy === 'none') {
-    const sorted = sortByStartDate(schedules)
-    if (shouldShareRows) {
-      return segmentRowTasks(sorted, colorMode, 'none')
-    }
-    return sorted.map((s) => convertScheduleToTask(s, colorMode, 'none'))
+    append(
+      buildProcessRows(schedules, {
+        colorMode,
+        groupBy,
+        shareRows,
+        range,
+        compareRows: byStart,
+        label: processWithOrderLabel,
+      }),
+    )
+    return { tasks, labels, groupIds }
   }
-
-  const tasks: GanttTask[] = []
 
   if (groupBy === 'order') {
-    const groups = new Map<string, Schedule[]>()
-    schedules.forEach((s) => {
-      const key = s.order_number || String(s.order_id)
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(s)
+    groupByKey(schedules, (s) => s.order_id).forEach((items) => {
+      const head = items[0]
+      const id = `group-order-${head.order_id}`
+      // サマリーバーは注文の最初の工程の開始〜最後の工程の終了（表示期間外を含む。範囲外はグリッドの端で切れる）
+      const visible = visibleExtent(items)
+      const start = head.order_start_datetime ? new Date(head.order_start_datetime) : visible.start
+      const end = head.order_end_datetime ? new Date(head.order_end_datetime) : visible.end
+      tasks.push({
+        id,
+        name: scheduleOrderTitle(head),
+        start,
+        end,
+        color: SUMMARY_BAR_COLOR,
+        isGroupHeader: true,
+        ...(start < range.start ? { continuesBefore: true } : {}),
+        ...(end > range.end ? { continuesAfter: true } : {}),
+      })
+      labels.set(id, {
+        kind: 'order',
+        customer: scheduleCustomerLabel(head),
+        isUnknownCustomer: !head.customer_name,
+        product: head.product_name ?? null,
+        meta: scheduleOrderMeta(head),
+      })
+      groupIds.push(id)
+      append(
+        buildProcessRows(items, {
+          colorMode,
+          groupBy,
+          shareRows,
+          range,
+          parentId: id,
+          compareRows: compareBySequence,
+          label: processWithEquipmentLabel,
+        }),
+      )
     })
-
-    Array.from(groups.entries())
-      .map(([key, items]) => {
-        const sorted = sortByStartDate(items)
-        const minStart = new Date(
-          Math.min(...sorted.map((s) => new Date(s.start_datetime).getTime())),
-        )
-        return { key, items: sorted, minStart }
-      })
-      .sort((a, b) => a.minStart.getTime() - b.minStart.getTime())
-      .forEach(({ key, items }) => {
-        const starts = items.map((s) => new Date(s.start_datetime).getTime())
-        const ends = items.map((s) => new Date(s.end_datetime).getTime())
-        const displayKey = items[0]?.order_number || `#${items[0]?.order_id}`
-        const productName = items[0]?.product_name || ''
-        const headerName = productName ? `注文: ${displayKey} - ${productName}` : `注文: ${displayKey}`
-        tasks.push({
-          id: `group-order-${key}`,
-          name: headerName,
-          start: new Date(Math.min(...starts)),
-          end: new Date(Math.max(...ends)),
-          isGroupHeader: true,
-        })
-        if (shouldShareRows) {
-          segmentRowTasks(items, colorMode, 'order').forEach((t) => tasks.push(t))
-        } else {
-          items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode, 'order')))
-        }
-      })
-  } else if (groupBy === 'equipment_group') {
-    const groups = new Map<string, Schedule[]>()
-    schedules.forEach((s) => {
-      const key = s.equipment_group_name || '未分類'
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(s)
-    })
-
-    Array.from(groups.entries())
-      .map(([key, items]) => {
-        const sorted = sortByStartDate(items)
-        const minStart = new Date(
-          Math.min(...sorted.map((s) => new Date(s.start_datetime).getTime())),
-        )
-        return { key, items: sorted, minStart }
-      })
-      .sort((a, b) => a.minStart.getTime() - b.minStart.getTime())
-      .forEach(({ key, items }) => {
-        const starts = items.map((s) => new Date(s.start_datetime).getTime())
-        const ends = items.map((s) => new Date(s.end_datetime).getTime())
-        tasks.push({
-          id: `group-equip-${key}`,
-          name: `設備グループ: ${key}`,
-          start: new Date(Math.min(...starts)),
-          end: new Date(Math.max(...ends)),
-          isGroupHeader: true,
-        })
-        items.forEach((s) => tasks.push(convertScheduleToTask(s, colorMode, 'equipment_group')))
-      })
+    return { tasks, labels, groupIds }
   }
 
-  return tasks
+  // 設備グループ別: 同じ表示名のグループがあり得るので id でまとめる
+  groupByKey(schedules, (s) => s.equipment_group_id ?? null).forEach((items) => {
+    const head = items[0]
+    const id = `group-equip-${head.equipment_group_id ?? 'none'}`
+    const title = head.equipment_group_name || '未分類'
+    tasks.push({ id, name: title, ...visibleExtent(items), isGroupHeader: true })
+    labels.set(id, { kind: 'group', title })
+    groupIds.push(id)
+    append(
+      buildProcessRows(items, {
+        colorMode,
+        groupBy,
+        shareRows: false,
+        range,
+        parentId: id,
+        compareRows: byStart,
+        label: processWithOrderLabel,
+      }),
+    )
+  })
+  return { tasks, labels, groupIds }
 }
 
 /**
@@ -373,14 +456,50 @@ function ProgressTooltipLines({ progress, delayed }: { progress: ProcessProgress
 /** ラベル列の幅（px）。1180px 級のタブレット横向きでもタイムラインが残る幅 */
 const LABEL_COLUMN_WIDTH = 260
 
-/** 固定ラベル列の1行分。注文・設備グループの行は太字、工程の行は工程名（設備グループ名） */
-function renderRowLabel(rowTasks: GanttTask[]) {
-  const task = rowTasks[0]
-  return task.isGroupHeader ? (
-    <span className="font-semibold text-gray-700 dark:text-gray-300">{task.name}</span>
-  ) : (
-    <span className="text-gray-700 dark:text-gray-300">{task.name}</span>
-  )
+/** 注文行の高さ（px）。1行目（顧客名・製品名）が2行に折り返しても2行目（数量・納期・注文番号）が収まる高さ */
+const ORDER_ROW_HEIGHT = 60
+/** 設備グループ行の高さ（px） */
+const EQUIPMENT_GROUP_ROW_HEIGHT = 36
+
+/** 固定ラベル列の1行分（Issue #579） */
+function RowLabelContent({ label }: { label: RowLabel | undefined }) {
+  if (!label) return null
+  switch (label.kind) {
+    case 'order':
+      return (
+        <div className="min-w-0 leading-tight">
+          {/* 長い製品名は2行目の末尾で省略する。全文はツールチップで見られる */}
+          <p className="line-clamp-2 font-semibold text-gray-800 dark:text-gray-100">
+            <span className={label.isUnknownCustomer ? 'text-gray-500 dark:text-gray-400' : undefined}>
+              {label.customer}
+            </span>
+            {label.product && <span className="ml-1">{label.product}</span>}
+          </p>
+          <p className="mt-0.5 truncate text-[11px] text-gray-600 dark:text-gray-400">
+            {label.meta.join(' ・ ')}
+          </p>
+        </div>
+      )
+    case 'group':
+      return (
+        <p className="truncate font-semibold text-gray-800 dark:text-gray-100">{label.title}</p>
+      )
+    case 'process':
+      return (
+        <div className="min-w-0 leading-tight">
+          <p className="truncate text-gray-800 dark:text-gray-200">{label.primary}</p>
+          {label.secondary && (
+            <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{label.secondary}</p>
+          )}
+        </div>
+      )
+  }
+}
+
+const LABEL_HEADERS: Record<GroupByMode, string> = {
+  order: '注文 / 工程',
+  equipment_group: '設備グループ / 工程',
+  none: '工程',
 }
 
 /**
@@ -431,16 +550,29 @@ export function GanttChart({
 
   const progressIndex = useMemo(() => indexProgress(progress), [progress])
 
-  const ganttTasks = useMemo(
+  const model = useMemo(
     () =>
-      applyProgress(
-        transformSchedulesToGroupedTasks(tasks, groupBy, colorMode, viewMode),
-        scheduleMap,
-        progressIndex,
-        new Date(),
-      ),
-    [tasks, groupBy, colorMode, viewMode, scheduleMap, progressIndex],
+      buildScheduleGanttModel(tasks, groupBy, colorMode, viewMode, {
+        start: rangeStart,
+        end: rangeEnd,
+      }),
+    [tasks, groupBy, colorMode, viewMode, rangeStart, rangeEnd],
   )
+
+  const ganttTasks = useMemo(
+    () => applyProgress(model.tasks, scheduleMap, progressIndex, new Date()),
+    [model, scheduleMap, progressIndex],
+  )
+
+  // 折りたたみ中のグループ行（注文・設備グループ）の id。グルーピングを切り替えても id が衝突しないので持ち越す
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleGroup = (groupId: string) =>
+    setCollapsedGroupIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
 
   const rowSummaries = useMemo(() => summarizeRows(ganttTasks), [ganttTasks])
 
@@ -478,19 +610,51 @@ export function GanttChart({
       rangeStart={rangeStart}
       rangeEnd={rangeEnd}
       labelWidth={LABEL_COLUMN_WIDTH}
-      labelHeader="注文 / 工程"
-      groupRowHeight={48}
-      renderRowLabel={renderRowLabel}
+      labelHeader={
+        <div className="flex w-full items-center justify-between gap-1">
+          <span>{LABEL_HEADERS[groupBy]}</span>
+          {model.groupIds.length > 0 && (
+            <div className="flex">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label="すべて展開"
+                title="すべて展開"
+                onClick={() => setCollapsedGroupIds(new Set())}
+              >
+                <ChevronsUpDown className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label="すべて折りたたむ"
+                title="すべて折りたたむ"
+                onClick={() => setCollapsedGroupIds(new Set(model.groupIds))}
+              >
+                <ChevronsDownUp className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
+      }
+      groupRowHeight={groupBy === 'order' ? ORDER_ROW_HEIGHT : EQUIPMENT_GROUP_ROW_HEIGHT}
+      renderRowLabel={(rowTasks) => <RowLabelContent label={model.labels.get(rowTasks[0].id)} />}
+      collapsedGroupIds={collapsedGroupIds}
+      onToggleGroup={toggleGroup}
       workHours={workHoursForLib}
       nonWorkingDays={nonWorkingDaysForLib}
       onTaskClick={handleTaskClick}
       wrapTaskBar={(task: GanttTask, children) => {
         const taskProgress = task.isGroupHeader ? undefined : progressOf(task)
+        const label = model.labels.get(task.id)
         return (
           <Tooltip>
             <TooltipTrigger asChild>{children}</TooltipTrigger>
             <TooltipContent>
               <p className="font-semibold">{task.name}</p>
+              {label?.kind === 'order' && <p>{label.meta.join(' ・ ')}</p>}
               <p>{task.isMilestone ? formatDateTime(task.start) : formatRange(task.start, task.end)}</p>
               {!task.isGroupHeader && <RowSegmentsTooltipLine summary={rowSummaries.get(task.id)} />}
               {taskProgress && (

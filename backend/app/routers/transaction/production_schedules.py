@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.dependencies import get_schedule_repo
-from app.models.transaction.schedule import ScheduleUpdate
+from app.models.transaction.schedule import ProductionScheduleItem, ScheduleUpdate
 from app.repositories.supa_infra.transaction.schedule_repo import ScheduleRepository
 from app.utils.logger import get_logger
 
@@ -15,7 +15,7 @@ production_schedules_router = APIRouter(
 logger = get_logger(__name__)
 
 
-@production_schedules_router.get("")
+@production_schedules_router.get("", response_model=list[ProductionScheduleItem])
 def get_production_schedules(
     start_date: str = Query(..., description="取得開始日 (ISO8601 / YYYY-MM-DD)"),
     end_date: str = Query(..., description="取得終了日 (ISO8601 / YYYY-MM-DD)"),
@@ -27,7 +27,8 @@ def get_production_schedules(
     """
     指定された期間内の生産スケジュールを取得する。
 
-    製品名、工程名、注文番号、設備名などが結合された状態で返される。
+    受注（顧客名・製品名・数量・納期・注文番号）、工程名・工程順、設備名・設備グループの表示名が
+    結合された状態で返される。工程・受注全体の開始〜終了は表示期間外のセグメントも含む（Issue #579）。
     """
     logger.info(
         f"Fetching production schedules from {start_date} to {end_date}"

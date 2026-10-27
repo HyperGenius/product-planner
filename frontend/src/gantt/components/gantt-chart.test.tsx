@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { GanttTask } from "../types"
 import { GanttChart, groupTasksIntoRows } from "./gantt-chart"
 
@@ -99,5 +99,59 @@ describe("GanttChart の固定ラベル列", () => {
     const scroller = screen.getByTestId("gantt-label-header").parentElement!.parentElement!.parentElement!
     expect(scroller.className).toContain("overflow-auto")
     expect(screen.getByTestId("gantt-label-header").parentElement!.className).toContain("top-0")
+  })
+})
+
+describe("GanttChart のグループ行・子行", () => {
+  const range = { rangeStart: new Date(2026, 8, 10), rangeEnd: new Date(2026, 8, 12) }
+  const tasks = [
+    task({ id: "g1", name: "グループ1", isGroupHeader: true }),
+    task({ id: "c1", name: "子1", parentId: "g1" }),
+    task({ id: "c2", name: "子2", parentId: "g1" }),
+    task({ id: "g2", name: "グループ2", isGroupHeader: true }),
+    task({ id: "c3", name: "子3", parentId: "g2" }),
+  ]
+
+  it("子行のラベルをインデントし、グループ行に背景を付ける", () => {
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} />)
+    const [group, child] = screen.getAllByTestId("gantt-row-label")
+    expect(child.className).toContain("pl-7")
+    expect(group.className).not.toContain("pl-7")
+    expect(group.parentElement).toHaveAttribute("data-group-row", "true")
+  })
+
+  it("collapsedGroupIds のグループの子行を隠す", () => {
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} collapsedGroupIds={new Set(["g1"])} />)
+    expect(screen.getAllByTestId("gantt-row-label").map((el) => el.textContent)).toEqual([
+      "グループ1",
+      "グループ2",
+      "子3",
+    ])
+  })
+
+  it("onToggleGroup を渡すと、子行のあるグループ行に切り替えボタンを出す", () => {
+    const onToggleGroup = vi.fn()
+    render(
+      <GanttChart
+        tasks={[...tasks, task({ id: "g3", name: "空のグループ", isGroupHeader: true })]}
+        viewMode="Day"
+        {...range}
+        collapsedGroupIds={new Set(["g2"])}
+        onToggleGroup={onToggleGroup}
+      />,
+    )
+    expect(screen.getByRole("button", { name: "折りたたむ" })).toHaveAttribute("aria-expanded", "true")
+    const expand = screen.getByRole("button", { name: "展開する" })
+    expect(expand).toHaveAttribute("aria-expanded", "false")
+    // 子行の無いグループには出さない
+    expect(screen.getAllByRole("button")).toHaveLength(2)
+
+    fireEvent.click(expand)
+    expect(onToggleGroup).toHaveBeenCalledWith("g2")
+  })
+
+  it("onToggleGroup を渡さなければ切り替えボタンを出さない", () => {
+    render(<GanttChart tasks={tasks} viewMode="Day" {...range} />)
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
 })
