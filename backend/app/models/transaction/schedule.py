@@ -67,6 +67,10 @@ class ProductionScheduleItem(BaseModel):
     customer_name: str | None = Field(
         None, description="顧客名。顧客不明（customer_id が NULL、#521）は null"
     )
+    customer_alias: str | None = Field(
+        None,
+        description="顧客の通称（customers.alias）。ガントのラベルは通称を優先する（#589）",
+    )
     process_name: str | None = None
     sequence_order: int | None = None
     equipment_name: str | None = None

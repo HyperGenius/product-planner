@@ -152,16 +152,20 @@ describe("GanttChart（スケジュール）の進捗表示", () => {
     }
   })
 
-  it("ラベル列の工程行に状態のバッジを出す（計画のみは出さない）", () => {
+  it("ラベル列の工程行に状態をアイコンのみで出す（計画のみは出さない。Issue #589）", () => {
     renderChart([...PROGRESS.slice(0, 2)])
     const badgeOf = (label: string) =>
       screen
         .getByText(label)
         .closest<HTMLElement>('[data-testid="gantt-row-label"]')!
         .querySelector('[data-testid="row-state-badge"]')
-    expect(badgeOf("プレス")).toHaveTextContent("完了")
-    expect(badgeOf("カシメ")).toHaveTextContent("遅れ")
+    expect(badgeOf("プレス")).toHaveAttribute("data-state", "completed")
+    expect(badgeOf("プレス")).toHaveAccessibleName("完了")
+    expect(badgeOf("カシメ")).toHaveAttribute("data-state", "delayed")
+    expect(badgeOf("カシメ")).toHaveAccessibleName("遅れ")
     expect(badgeOf("検査")).toBeNull()
+    // 文言はラベル列に出さない（意味は凡例と詳細シート）
+    expect(screen.getByText("プレス").closest('[data-testid="gantt-row-label"]')).not.toHaveTextContent("完了")
   })
 
   it("週次でセグメントを1行に並べたバーにも進捗を載せる", () => {
@@ -391,6 +395,7 @@ describe("GanttChart（スケジュール）の注文行・工程行のラベル
     order_id: 1,
     order_number: "ORD-1",
     customer_name: "顧客A社",
+    customer_alias: null,
     product_name: "ピン",
     quantity: 500,
     desired_deadline: "2026-09-30",
@@ -446,20 +451,30 @@ describe("GanttChart（スケジュール）の注文行・工程行のラベル
     return screen.getAllByTestId("gantt-row-label").map((el) => el.textContent ?? "")
   }
 
-  it("注文行に顧客名・製品名と、数量・納期・注文番号を出す", () => {
+  it("注文行は顧客・製品名・数量だけを出し、納期・注文番号は出さない（Issue #589）", () => {
     renderOrders()
     const [orderA] = rowLabels()
-    expect(orderA).toContain("顧客A社")
-    expect(orderA).toContain("ピン")
-    // 納期は希望納期を優先する
-    expect(orderA).toContain("500個 ・ 納期 9/30 ・ ORD-1")
+    expect(orderA).toBe("顧客A社ピン500個")
+    expect(orderA).not.toContain("納期")
+    expect(orderA).not.toContain("ORD-1")
   })
 
-  it("顧客不明は「顧客不明」、希望納期が無ければ完成見込み、注文番号が無ければ内部 ID を出す", () => {
+  it("顧客は通称を優先し、通称が無ければ正式名称、顧客不明は「顧客不明」（Issue #589）", () => {
+    const withAlias = ORDERED.map((s) => (s.order_id === 1 ? { ...s, customer_alias: " A社 " } : s))
+    const { unmount } = renderOrders("order", withAlias)
+    expect(rowLabels()[0]).toBe("A社ピン500個")
+    expect(rowLabels().find((t) => t.includes("ボルト"))).toBe("顧客不明ボルト1,200個")
+    unmount()
+
+    renderOrders("none", withAlias)
+    expect(rowLabels()).toContain("A社 ピンプレス")
+  })
+
+  it("注文行のツールチップには数量・納期・注文番号を出す", async () => {
+    const user = userEvent.setup()
     renderOrders()
-    const orderB = rowLabels().find((t) => t.includes("ボルト"))!
-    expect(orderB).toContain("顧客不明")
-    expect(orderB).toContain("1,200個 ・ 見込 10/2 ・ #2")
+    await user.hover(document.querySelector<HTMLElement>('[data-task-id="group-order-1"]')!)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("500個 ・ 納期 9/30 ・ ORD-1")
   })
 
   it("オーダー別の工程行は工程順に並べ、工程名と設備（グループ）の表示名を出す", () => {
@@ -592,7 +607,8 @@ describe("GanttChart（スケジュール）の注文行の状態と納期マー
       progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
       progress({ process_routing_id: 12, sequence_order: 2, status: "completed" }),
     ])
-    expect(orderBadge()).toHaveTextContent("完了")
+    expect(orderBadge()).toHaveAttribute("data-state", "completed")
+    expect(orderBadge()).toHaveAccessibleName("完了")
   })
 
   it("遅れの工程がある注文は「遅れあり」", () => {
@@ -600,7 +616,8 @@ describe("GanttChart（スケジュール）の注文行の状態と納期マー
       progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
       progress({ process_routing_id: 12, sequence_order: 2, planned_end_datetime: at(10, 16) }),
     ])
-    expect(orderBadge()).toHaveTextContent("遅れあり")
+    expect(orderBadge()).toHaveAttribute("data-state", "delayed_some")
+    expect(orderBadge()).toHaveAccessibleName("遅れあり")
   })
 
   it("それ以外は最終工程の進捗", () => {
@@ -608,7 +625,8 @@ describe("GanttChart（スケジュール）の注文行の状態と納期マー
       progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
       progress({ process_routing_id: 12, sequence_order: 2, status: "in_progress", good_qty: 50, planned_end_datetime: at(20, 16) }),
     ])
-    expect(orderBadge()).toHaveTextContent("進行中 50%")
+    expect(orderBadge()).toHaveAttribute("data-state", "in_progress")
+    expect(orderBadge()).toHaveAccessibleName("進行中 50%")
   })
 
   it("進捗の行が無い注文には状態を出さない", () => {
@@ -628,9 +646,14 @@ describe("GanttChart（スケジュール）の注文行の状態と納期マー
     expect(screen.queryByTestId("deadline-warning")).not.toBeInTheDocument()
   })
 
-  it("最後の工程の計画終了が希望納期を超える注文には警告を出す", () => {
-    renderOrder(order({ desired_deadline: "2026-09-09" }))
-    expect(screen.getByTestId("deadline-warning")).toHaveTextContent("納期超過")
+  it("最後の工程の計画終了が希望納期を超える注文には警告のアイコンを、状態のアイコンより前に出す", () => {
+    renderOrder(order({ desired_deadline: "2026-09-09" }), [
+      progress({ process_routing_id: 11, sequence_order: 1, status: "completed" }),
+      progress({ process_routing_id: 12, sequence_order: 2, status: "completed" }),
+    ])
+    const warning = screen.getByTestId("deadline-warning")
+    expect(warning).toHaveAccessibleName("納期超過")
+    expect(warning.compareDocumentPosition(orderBadge()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("完成見込みを納期に使う注文は超過の警告を出さない", () => {

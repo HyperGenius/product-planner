@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
+  isDeadlineExceeded,
+  scheduleCustomerFullLabel,
+  scheduleCustomerLabel,
   scheduleDeadlineLabel,
   scheduleOrderMeta,
   scheduleOrderNumberLabel,
@@ -48,5 +51,33 @@ describe("scheduleOrderMeta / scheduleOrderTitle", () => {
   it("顧客不明は「顧客不明」と出す", () => {
     expect(scheduleOrderTitle(BASE)).toBe("顧客A社 ピン")
     expect(scheduleOrderTitle({ customer_name: null, product_name: "ピン" })).toBe("顧客不明 ピン")
+  })
+})
+
+describe("scheduleCustomerLabel / scheduleCustomerFullLabel（Issue #589）", () => {
+  it("ガントは通称（前後の空白を除く）→ 正式名称 → 顧客不明の順", () => {
+    expect(scheduleCustomerLabel({ customer_name: "顧客A社", customer_alias: " A社 " })).toBe("A社")
+    expect(scheduleCustomerLabel({ customer_name: "顧客A社", customer_alias: "  " })).toBe("顧客A社")
+    expect(scheduleCustomerLabel({ customer_name: null, customer_alias: null })).toBe("顧客不明")
+    expect(scheduleOrderTitle({ customer_name: "顧客A社", customer_alias: "A社", product_name: "ピン" })).toBe("A社 ピン")
+  })
+
+  it("詳細シートは正式名称に、違う通称があれば併記する", () => {
+    expect(scheduleCustomerFullLabel({ customer_name: "顧客A社", customer_alias: "A社" })).toBe("顧客A社（A社）")
+    expect(scheduleCustomerFullLabel({ customer_name: "顧客A社", customer_alias: "顧客A社" })).toBe("顧客A社")
+    expect(scheduleCustomerFullLabel({ customer_name: "顧客A社", customer_alias: null })).toBe("顧客A社")
+    expect(scheduleCustomerFullLabel({ customer_name: null, customer_alias: null })).toBe("顧客不明")
+  })
+})
+
+describe("isDeadlineExceeded", () => {
+  it("最後の工程の計画終了が希望納期の日の終わり以降なら超過", () => {
+    const deadline = { desired_deadline: "2026-09-30" }
+    expect(isDeadlineExceeded(deadline, new Date(2026, 8, 30, 17))).toBe(false)
+    expect(isDeadlineExceeded(deadline, new Date(2026, 9, 1, 0))).toBe(true)
+  })
+
+  it("希望納期が無ければ判定しない（完成見込みは計画から算出するので常に間に合う）", () => {
+    expect(isDeadlineExceeded({ desired_deadline: null }, new Date(2027, 0, 1))).toBe(false)
   })
 })

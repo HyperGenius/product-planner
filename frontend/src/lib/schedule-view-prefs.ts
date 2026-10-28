@@ -11,6 +11,8 @@ export interface ScheduleViewPrefs {
   equipmentGroupId: number | null
   /** 折りたたみ中のグループ行の id */
   collapsedGroupIds: string[]
+  /** 凡例を開いているか（Issue #589）。保存値が無い初回は開き、新しいアイコンの意味を最初に見せる */
+  legendOpen: boolean
 }
 
 export const SCHEDULE_VIEW_PREFS_STORAGE_KEY = "schedule-view-prefs"
@@ -20,6 +22,7 @@ export const DEFAULT_SCHEDULE_VIEW_PREFS: ScheduleViewPrefs = {
   groupBy: "order",
   equipmentGroupId: null,
   collapsedGroupIds: [],
+  legendOpen: true,
 }
 
 /** 覚えておく折りたたみの上限。注文は増え続けるので、古いもの（先に折りたたんだもの）から捨てる */
@@ -47,5 +50,6 @@ export function parseScheduleViewPrefs(value: unknown): ScheduleViewPrefs | null
     collapsedGroupIds: Array.isArray(v.collapsedGroupIds)
       ? v.collapsedGroupIds.filter((id): id is string => typeof id === "string").slice(-MAX_COLLAPSED_GROUP_IDS)
       : [],
+    legendOpen: typeof v.legendOpen === "boolean" ? v.legendOpen : DEFAULT_SCHEDULE_VIEW_PREFS.legendOpen,
   }
 }

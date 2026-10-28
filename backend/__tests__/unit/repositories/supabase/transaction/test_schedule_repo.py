@@ -32,7 +32,7 @@ def _schedule_row(**overrides: Any) -> dict[str, Any]:
             "deadline_date": "2026-10-31",
             "confirmed_deadline": "2026-11-02",
             "products": {"name": "製品A"},
-            "customers": {"name": "顧客A社"},
+            "customers": {"name": "顧客A社", "alias": "A社"},
         },
         "process_routings": {
             "process_name": "切削",
@@ -90,6 +90,7 @@ class TestScheduleRepositoryGetByPeriod:
         assert item["confirmed_deadline"] == "2026-11-02"
         assert item["product_name"] == "製品A"
         assert item["customer_name"] == "顧客A社"
+        assert item["customer_alias"] == "A社"
         assert item["process_name"] == "切削"
         assert item["sequence_order"] == 2
         assert item["equipment_name"] == "ワシノ25t"
@@ -106,6 +107,7 @@ class TestScheduleRepositoryGetByPeriod:
         )
 
         assert item["customer_name"] is None
+        assert item["customer_alias"] is None
 
     def test_single_member_group_uses_equipment_display_name(self, mock_client):
         """1台グループはメンバーの設備の表示名、複数台はグループ名（#512）"""

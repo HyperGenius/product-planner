@@ -4,7 +4,7 @@
 import { useState, useMemo, useCallback, useEffect, useEffectEvent } from "react"
 import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, parseISO, isValid } from "date-fns"
 import { ja } from "date-fns/locale"
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, ChevronsUpDown, RefreshCw } from "lucide-react"
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, ChevronsUpDown, Info, RefreshCw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useSidebar } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import { GanttChart } from "@/components/schedule/gantt-chart"
-import { ProgressLegend } from "@/components/schedule/progress-legend"
+import { formatProgressComputedAt, ProgressLegend } from "@/components/schedule/progress-legend"
 import { ScheduleDetailSheet } from "@/components/schedule/schedule-detail-sheet"
 import { ScheduleEditDialog } from "@/components/schedule/schedule-edit-dialog"
 import { SegmentedControl } from "@/components/schedule/segmented-control"
@@ -352,6 +352,10 @@ export default function SchedulePage() {
 
           {/* 最終更新（置きっぱなしでも、更新が止まっていることに気づけるようにする） */}
           <div className="ml-auto flex items-center gap-2" aria-live="polite">
+            {/* 日報の進捗の計算時刻。凡例を閉じていても見えるようここに出す（Issue #589） */}
+            {orderProgress?.computed_at && (
+              <span className="text-sm text-muted-foreground">{formatProgressComputedAt(orderProgress.computed_at)} ・</span>
+            )}
             {isRefreshError ? (
               <span className="flex items-center gap-1 text-sm text-destructive">
                 <AlertTriangle className="h-4 w-4" />
@@ -451,11 +455,46 @@ export default function SchedulePage() {
               </PopoverContent>
             </Popover>
           </div>
+
+          {/* 凡例の開閉（Issue #589）。タブレットでホバーに頼らず1回のタップで開閉する */}
+          <div className="ml-auto">
+            <Button
+              variant={prefs.legendOpen ? "secondary" : "outline"}
+              className="h-11 px-3"
+              aria-expanded={prefs.legendOpen}
+              aria-controls="schedule-legend"
+              onClick={() => updatePrefs({ legendOpen: !prefs.legendOpen })}
+            >
+              <Info className="h-5 w-5" />
+              凡例
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* 状態の凡例（日報の進捗を一度でも計算したテナントは全状態、未計算なら「計画のみ」だけ） */}
-      <ProgressLegend computedAt={orderProgress?.computed_at} />
+      {/*
+        状態の凡例（日報の進捗を一度でも計算したテナントは全状態、未計算なら「計画のみ」だけ）。
+        ポップオーバーにしない: パネルの外をタップすると閉じるので、ガントの行を触ると凡例と見比べられず、先頭の行も隠す
+      */}
+      {prefs.legendOpen && (
+        <div
+          id="schedule-legend"
+          role="region"
+          aria-label="凡例"
+          className="mb-2 flex shrink-0 items-center gap-2 rounded-lg border bg-card py-1 pl-3 pr-1"
+        >
+          <ProgressLegend computedAt={orderProgress?.computed_at} />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 shrink-0"
+            aria-label="凡例を閉じる"
+            onClick={() => updatePrefs({ legendOpen: false })}
+          >
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
+      )}
 
       {/* メインエリア - ガントチャートと、右に並べる詳細シート（ガントを隠さない） */}
       <div className="flex min-h-0 min-w-0 flex-1 gap-3">

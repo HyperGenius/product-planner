@@ -40,7 +40,9 @@ def seeded(admin_db):
         admin_db, "tenants", {"name": "integration test production schedules"}
     )[0]["id"]
     customer_id = _insert(
-        admin_db, "customers", {"tenant_id": tenant_id, "name": "顧客A社"}
+        admin_db,
+        "customers",
+        {"tenant_id": tenant_id, "name": "顧客A社", "alias": "A社"},
     )[0]["id"]
     product_id = _insert(
         admin_db, "products", {"tenant_id": tenant_id, "name": "ピン", "code": None}
@@ -244,6 +246,7 @@ class TestGetByPeriod:
 
         assert press["order_id"] == seeded["known_order_id"]
         assert press["customer_name"] == "顧客A社"
+        assert press["customer_alias"] == "A社"
         assert press["product_name"] == "ピン"
         assert press["quantity"] == 500
         assert press["desired_deadline"] == "2026-10-31"
@@ -261,6 +264,7 @@ class TestGetByPeriod:
 
         assert unknown["order_id"] == seeded["unknown_order_id"]
         assert unknown["customer_name"] is None
+        assert unknown["customer_alias"] is None
 
     def test_extents_include_segments_outside_period(self, admin_db, seeded):
         rows = _own_rows(
