@@ -32,19 +32,21 @@ import {
 import type { ProcessDisplayState } from '@/lib/daily-report-progress-utils'
 import { pickShippingDeadline } from '@/lib/shipping-candidate-utils'
 import {
+  isDeadlineExceeded,
   scheduleCustomerLabel,
   scheduleOrderMeta,
   scheduleOrderTitle,
+  scheduleQuantityLabel,
 } from '@/lib/schedule-label-utils'
 import { formatDateTime, formatRange, type ScheduleSelection } from '@/lib/schedule-detail-utils'
-import { StateBadge, type StateBadgeState } from '@/components/schedule/state-badge'
+import { DeadlineExceededIcon, StateIcon, type StateBadgeState } from '@/components/schedule/state-badge'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ChevronsDownUp, ChevronsUpDown, TriangleAlert } from 'lucide-react'
+import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 
 /** 稼働時間定数（backend/app/utils/calendar.py と同値） */
 const WORK_HOURS = { start: 9, end: 17, breakStart: 12, breakEnd: 13 } as const
@@ -152,13 +154,18 @@ export function convertScheduleToTask(
 
 /** ラベル列の1行分の中身 */
 export type RowLabel =
-  /** 注文行: 1行目 = 顧客名・製品名（太字）、2行目 = 数量・納期・注文番号 */
+  /**
+   * 注文行: 1行目 = 顧客の通称（太字）＋状態アイコン、2行目 = 製品名・数量（Issue #589）。
+   * 納期は納期マーカー、注文番号は詳細シートで見るのでラベルに出さない
+   */
   | {
       kind: 'order'
       orderId: number
       customer: string
       isUnknownCustomer: boolean
       product: string | null
+      quantity: string | null
+      /** サマリーバーのツールチップ（数量・納期・注文番号） */
       meta: string[]
       /** 最後の工程の計画終了が希望納期を超えている */
       deadlineExceeded: boolean
@@ -259,7 +266,7 @@ function orderDeadline(
   if (!deadline) return null
   // 日付のみの値は parseISO でローカル深夜として読む（new Date だと UTC 深夜になり日付がずれる）
   const day = parseISO(deadline.date)
-  const exceeded = deadline.source === 'desired' && orderEnd.getTime() >= addDays(day, 1).getTime()
+  const exceeded = isDeadlineExceeded(head, orderEnd)
   return {
     exceeded,
     marker: {
@@ -367,6 +374,7 @@ export function buildScheduleGanttModel(
         customer: scheduleCustomerLabel(head),
         isUnknownCustomer: !head.customer_name,
         product: head.product_name ?? null,
+        quantity: scheduleQuantityLabel(head),
         meta: scheduleOrderMeta(head),
       })
       groupIds.push(id)
@@ -553,15 +561,18 @@ function ProgressTooltipLines({ progress, delayed }: { progress: ProcessProgress
 /** ラベル列の幅（px）。1180px 級のタブレット横向きでもタイムラインが残る幅 */
 const LABEL_COLUMN_WIDTH = 260
 
-/** 注文行の高さ（px）。1行目（顧客名・製品名）が2行に折り返しても2行目（数量・納期・注文番号）が収まる高さ */
-const ORDER_ROW_HEIGHT = 60
+/** 注文行の高さ（px）。ラベルは2行（通称／製品名・数量）に収める。タップ目標 44px 以上（Issue #581 / #589） */
+const ORDER_ROW_HEIGHT = 48
 /** 設備グループ行の高さ（px）。タップ目標 44px 以上（Issue #581） */
 const EQUIPMENT_GROUP_ROW_HEIGHT = 48
 /** 工程行の高さ・工程バーの高さ（px）。タブレットの指でも狙えるよう、行は 44px 以上にする（Issue #581） */
 const PROCESS_ROW_HEIGHT = 52
 const PROCESS_BAR_HEIGHT = 36
 
-/** 固定ラベル列の1行分（Issue #579）。`stateBadge` は工程行・注文行の状態（Issue #580） */
+/**
+ * 固定ラベル列の1行分（Issue #579）。どの行も2行以内に収め、長い名前は1行で省略する（全文は詳細シート）。
+ * 状態・納期超過はアイコンのみで、意味は凡例と詳細シートで示す（Issue #589）
+ */
 function RowLabelContent({
   label,
   stateBadge,
@@ -570,32 +581,28 @@ function RowLabelContent({
   stateBadge?: { state: StateBadgeState; text: string } | null
 }) {
   if (!label) return null
+  const stateIcon = stateBadge && <StateIcon state={stateBadge.state} label={stateBadge.text} />
   switch (label.kind) {
     case 'order':
       return (
         <div className="min-w-0 leading-tight">
-          {/* 長い製品名は2行目の末尾で省略する。全文はツールチップで見られる */}
-          <p className="line-clamp-2 font-semibold text-gray-800 dark:text-gray-100">
-            <span className={label.isUnknownCustomer ? 'text-gray-500 dark:text-gray-400' : undefined}>
+          <div className="flex items-center gap-1">
+            <p
+              className={`min-w-0 flex-1 truncate font-semibold ${
+                label.isUnknownCustomer ? 'text-gray-500 dark:text-gray-400' : 'text-gray-800 dark:text-gray-100'
+              }`}
+            >
               {label.customer}
-            </span>
-            {label.product && <span className="ml-1">{label.product}</span>}
-          </p>
-          <p className="mt-0.5 truncate text-[11px] text-gray-600 dark:text-gray-400">
-            {label.meta.join(' ・ ')}
-          </p>
-          {(stateBadge || label.deadlineExceeded) && (
-            <div className="mt-0.5 flex items-center gap-1">
-              {stateBadge && <StateBadge state={stateBadge.state} text={stateBadge.text} />}
-              {label.deadlineExceeded && (
-                <span
-                  data-testid="deadline-warning"
-                  className="flex items-center gap-0.5 whitespace-nowrap text-[10px] font-semibold text-red-700 dark:text-red-300"
-                >
-                  <TriangleAlert aria-hidden className="h-3 w-3" />
-                  納期超過
-                </span>
-              )}
+            </p>
+            {/* 2つ並ぶときは「納期超過 → 状態」の順で固定する */}
+            {label.deadlineExceeded && <DeadlineExceededIcon />}
+            {stateIcon}
+          </div>
+          {(label.product || label.quantity) && (
+            // 製品名だけを省略し、数量は切らない
+            <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-gray-700 dark:text-gray-300">
+              {label.product && <span className="min-w-0 truncate">{label.product}</span>}
+              {label.quantity && <span className="shrink-0 tabular-nums">{label.quantity}</span>}
             </div>
           )}
         </div>
@@ -613,7 +620,7 @@ function RowLabelContent({
               <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{label.secondary}</p>
             )}
           </div>
-          {stateBadge && <StateBadge state={stateBadge.state} text={stateBadge.text} />}
+          {stateIcon}
         </div>
       )
   }

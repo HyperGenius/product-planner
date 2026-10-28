@@ -22,6 +22,8 @@ export interface Schedule {
   product_name?: string | null
   /** 顧客名。顧客不明（customer_id が NULL、#521）は null */
   customer_name?: string | null
+  /** 顧客の通称（`customers.alias`）。ガントのラベルは通称を優先する（Issue #589） */
+  customer_alias?: string | null
   process_name?: string | null
   /** 工程順（工程ルーティングの sequence_order） */
   sequence_order?: number | null

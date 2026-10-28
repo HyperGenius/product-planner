@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test"
 
 /**
- * ガントの注文行・工程行のラベルと、注文行のサマリーバー・折りたたみ（Issue #579）
+ * ガントの注文行・工程行のラベルと、注文行のサマリーバー・折りたたみ（Issue #579）、
+ * ラベルの絞り込み（顧客の通称・製品名・数量だけ）と凡例の開閉（Issue #589）
  *
  * 前提:
  * - Supabase (supabase start), backend (uvicorn app.main:app --port 8000),
@@ -16,6 +17,11 @@ import { test, expect, type Page } from "@playwright/test"
  */
 const email = process.env.E2E_USER_EMAIL ?? "test@example.com"
 const password = process.env.E2E_USER_PASSWORD ?? "Test123!"
+
+/** 顧客の通称（ダミー）。推奨の上限の全角6文字（Issue #589）で、ラベル列で省略されないことを確かめる */
+const ALIAS = "顧客甲乙丙社"
+/** 正式名称（ダミー）。ラベル列には出さず、詳細シートで通称と併記する */
+const CUSTOMER_FULL_NAME = "株式会社顧客甲乙丙社製作所"
 
 // 2026-09-13(日)〜09-19(土) の週（ja ロケールは日曜始まり）。水曜を「今」に固定する
 const NOW = new Date("2026-09-16T10:00:00+09:00")
@@ -37,6 +43,7 @@ interface OrderFields {
   orderId: number
   orderNumber: string | null
   customer: string | null
+  alias?: string | null
   product: string
   quantity: number
   desired: string | null
@@ -80,6 +87,7 @@ function order(fields: OrderFields, segments: Segment[]) {
       confirmed_deadline: fields.confirmed,
       product_name: fields.product,
       customer_name: fields.customer,
+      customer_alias: fields.alias ?? null,
       process_name: s.process,
       sequence_order: s.seq,
       equipment_name: null,
@@ -98,7 +106,8 @@ const SCHEDULES = [
     {
       orderId: 9101,
       orderNumber: "E2E-A",
-      customer: "E2E顧客A社",
+      customer: CUSTOMER_FULL_NAME,
+      alias: ALIAS,
       product: "E2E製品A φ10.0×20L SUS304 長い品名の例 両端面取り加工",
       quantity: 500,
       desired: "2026-09-30",
@@ -154,7 +163,7 @@ async function openSchedule(page: Page) {
   )
   await login(page)
   await page.goto("/schedule")
-  await expect(page.getByText("E2E顧客A社").first()).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(ALIAS).first()).toBeVisible({ timeout: 15000 })
 }
 
 /** ツールバーのセグメントボタン（表示単位・期間。Issue #581 で Select から変更）を選ぶ */
@@ -172,6 +181,19 @@ async function screenshot(page: Page, name: string) {
 
 const rowLabels = (page: Page) => page.getByTestId("gantt-row-label")
 
+/**
+ * ラベルの1行目（`p`、1行で省略する）の先頭 `length` 文字が省略されずに見えているか。
+ * 文字の範囲の右端が `p` の右端に収まっていれば、省略記号（…）より前にある
+ */
+async function leadingCharsFit(label: ReturnType<Page["getByTestId"]>, length: number): Promise<boolean> {
+  return label.locator("p").first().evaluate((p, n) => {
+    const range = document.createRange()
+    range.setStart(p.firstChild!, 0)
+    range.setEnd(p.firstChild!, n)
+    return range.getBoundingClientRect().right <= p.getBoundingClientRect().right + 0.5
+  }, length)
+}
+
 for (const viewport of [
   { width: 1180, height: 820 },
   { width: 1920, height: 1080 },
@@ -179,17 +201,26 @@ for (const viewport of [
   test.describe(`注文行・工程行のラベル（${viewport.width}×${viewport.height}）`, () => {
     test.use({ viewport })
 
-    test("オーダー別: 注文行に顧客・製品・数量・納期・注文番号、工程行は工程順", async ({ page }) => {
+    test("オーダー別: 注文行は通称・製品・数量の2行、工程行は工程順", async ({ page }) => {
       await openSchedule(page)
       await screenshot(page, `${viewport.width}-week-order`)
 
       // 注文は表示中の最初の開始が早い順（B: 9/14 → A: 9/15）
       const labels = await rowLabels(page).allTextContents()
-      expect(labels[0]).toContain("顧客不明")
-      expect(labels[0]).toContain("1,200個 ・ 見込 9/24 ・ #9102")
+      expect(labels[0]).toBe("顧客不明E2E製品B1,200個")
       expect(labels.slice(1, 3)).toEqual(["内職内職", "組立組立G"])
-      expect(labels[3]).toContain("E2E顧客A社")
-      expect(labels[3]).toContain("500個 ・ 納期 9/30 ・ E2E-A")
+      // 正式名称・納期・注文番号はラベルに出さない（Issue #589）
+      expect(labels[3]).toContain(ALIAS)
+      expect(labels[3]).toContain("500個")
+      expect(labels[3]).not.toContain("株式会社")
+      expect(labels[3]).not.toContain("納期")
+      expect(labels[3]).not.toContain("E2E-A")
+
+      // 注文行は行の高さ（48px）に収まり、長い製品名は1行で省略して数量は切らない
+      const orderA = rowLabels(page).nth(3)
+      expect((await orderA.boundingBox())!.height).toBeLessThanOrEqual(48)
+      expect(await leadingCharsFit(orderA, ALIAS.length)).toBe(true)
+      await expect(orderA.getByText("500個", { exact: true })).toBeInViewport()
       // 工程順（開始日時の順ではない）
       expect(labels.slice(4, 7)).toEqual(["プレスワシノ25t", "カシメカシメ機", "検査検査機"])
 
@@ -231,11 +262,46 @@ for (const viewport of [
       await screenshot(page, `${viewport.width}-week-equipment-group`)
       // グループ行（5グループ）＋工程行（5行）
       await expect(rowLabels(page)).toHaveCount(10)
-      await expect(rowLabels(page).filter({ hasText: "プレス" }).first()).toContainText("E2E顧客A社")
+      const pressRow = rowLabels(page).filter({ hasText: "プレス" }).first()
+      await expect(pressRow).toContainText(`${ALIAS} E2E製品A`)
+      // 通称（全角6文字）は省略されず、続けて製品名も読める（子行のインデントがあり最も狭い。Issue #589）
+      expect(await leadingCharsFit(pressRow, ALIAS.length + 1 + 8)).toBe(true)
 
       await selectOption(page, "表示単位", "フラット")
       await screenshot(page, `${viewport.width}-week-flat`)
       await expect(rowLabels(page).filter({ hasText: "内職" })).toContainText("顧客不明 E2E製品B")
+    })
+
+    test("凡例は1回のタップで開閉し、行のタップでは閉じず、開閉を覚える（Issue #589）", async ({ page }) => {
+      await openSchedule(page)
+      const toggle = page.getByRole("button", { name: "凡例", exact: true })
+      const legend = page.getByRole("region", { name: "凡例" })
+
+      // 初回（保存値なし）は開いている
+      await expect(toggle).toHaveAttribute("aria-expanded", "true")
+      await expect(legend).toBeVisible()
+      await screenshot(page, `${viewport.width}-legend-open`)
+
+      // 注文行をタップして詳細シートを開いても、凡例は閉じない
+      await rowLabels(page).nth(3).click()
+      const sheet = page.getByRole("complementary", { name: "注文の詳細" })
+      await expect(sheet).toContainText(`${CUSTOMER_FULL_NAME}（${ALIAS}）`)
+      await expect(legend).toBeVisible()
+
+      await toggle.click()
+      await expect(legend).toBeHidden()
+      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await screenshot(page, `${viewport.width}-legend-closed`)
+
+      // 開き直しても閉じたまま（端末ごとに覚える）
+      await page.reload()
+      await expect(page.getByText(ALIAS).first()).toBeVisible({ timeout: 15000 })
+      await expect(page.getByRole("button", { name: "凡例", exact: true })).toHaveAttribute("aria-expanded", "false")
+
+      await page.getByRole("button", { name: "凡例", exact: true }).click()
+      await expect(legend).toBeVisible()
+      await legend.getByRole("button", { name: "凡例を閉じる" }).click()
+      await expect(legend).toBeHidden()
     })
   })
 }

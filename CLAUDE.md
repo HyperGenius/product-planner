@@ -350,6 +350,10 @@ cd backend && ruff check . && mypy .
     凡例の見本は実際の `TaskBar` で描いて見た目と食い違わせない。納期マーカーは日付のみの値を `parseISO` で読み、**日の終わり**
     （翌日 0:00）に引く。超過判定は希望納期のときだけ（完成見込みは計画の終了から算出するので常に間に合う）。詳細は
     [docs/features/production-schedule-gantt.md](docs/features/production-schedule-gantt.md)
+  - ラベル列（Issue #589）: どの行も**2行以内**に収め（3行以上は詰まって読めない）、納期・注文番号などはラベルに足さず詳細シートに置く。
+    顧客は**通称**（`customers.alias`、`scheduleCustomerLabel()`）、設備は**呼称**（`short_name`）と呼び分ける（日報Excelの用語。統一しない）。
+    状態・納期超過はアイコンのみで、対応表は `state-badge.tsx` の `STATE_ICONS` 1か所からラベル列・凡例・詳細シートに描く。
+    凡例は常時表示せずツールバーのボタンで差し込む（**ポップオーバーにしない**: 外側のタップで閉じるのでタブレットで行と見比べられない）
   - E2E でバーの「行」を比べるときは、グリッド要素の親（行 = ラベルセル＋グリッド、#578）の並び順で見る（`gantt-segment-bars.spec.ts` の `rowOf()`）
   - タブレット対応（Issue #581）: 詳細はホバーのツールチップに頼らず、タップで開く詳細シート（モーダルにせずガントの右に並べる `aside`）に出す。
     タップは `src/gantt` の `onRowClick` / `onTaskClick` で、**スワイプの終わりのクリックを無視する判定（ポインタの移動量・スクロール量）は

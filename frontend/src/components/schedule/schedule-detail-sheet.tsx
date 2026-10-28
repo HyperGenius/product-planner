@@ -6,7 +6,7 @@ import { format, parseISO } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { ChevronRight, ExternalLink, Pencil, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { StateBadge } from '@/components/schedule/state-badge'
+import { DeadlineExceededIcon, StateBadge } from '@/components/schedule/state-badge'
 import { ProcessShiftControls, type ProcessShiftControlsProps } from '@/components/schedule/process-shift-controls'
 import {
   formatActualDateRange,
@@ -18,7 +18,12 @@ import {
 } from '@/lib/daily-report-progress-utils'
 import type { ProcessDisplayState } from '@/lib/daily-report-progress-utils'
 import { getStatusLabel } from '@/lib/order-utils'
-import { scheduleCustomerLabel } from '@/lib/schedule-label-utils'
+import {
+  isDeadlineExceeded,
+  scheduleCustomerFullLabel,
+  scheduleCustomerLabel,
+  scheduleQuantityLabel,
+} from '@/lib/schedule-label-utils'
 import {
   canShiftOrderSchedule,
   formatDateTime,
@@ -78,15 +83,25 @@ function processStateText(state: ProcessDisplayState, progress: ProcessProgress 
   return PROCESS_DISPLAY_STATE_LABEL[state]
 }
 
-/** 注文の項目（工程・注文の詳細で共通） */
-function OrderFields({ head }: { head: Schedule }) {
+/**
+ * 注文の項目（工程・注文の詳細で共通）。ガントのラベルに出さない項目（正式名称・納期・注文番号）はここで見る（Issue #589）。
+ * `orderEnd` は注文の最後の工程の計画終了（納期超過の判定。ガントの注文行と同じ基準）
+ */
+function OrderFields({ head, orderEnd }: { head: Schedule; orderEnd: Date | null }) {
+  const exceeded = orderEnd !== null && isDeadlineExceeded(head, orderEnd)
   return (
     <Fields
       items={[
-        ['顧客', scheduleCustomerLabel(head)],
+        ['顧客', scheduleCustomerFullLabel(head)],
         ['製品', head.product_name || '－'],
-        ['数量', head.quantity != null ? `${head.quantity.toLocaleString('ja-JP')}個` : '－'],
-        ['希望納期', formatDateOnly(head.desired_deadline)],
+        ['数量', scheduleQuantityLabel(head) ?? '－'],
+        [
+          '希望納期',
+          <span key="desired" className="inline-flex flex-wrap items-center gap-x-2">
+            {formatDateOnly(head.desired_deadline)}
+            {exceeded && <DeadlineExceededIcon withText />}
+          </span>,
+        ],
         ['完成見込み', formatDateOnly(head.confirmed_deadline)],
         ['注文番号', head.order_number || '－'],
         ['顧客の注文番号', head.customer_order_no || '－'],
@@ -119,7 +134,7 @@ function ProgressFields({ progress, state }: { progress: ProcessProgress | undef
   return (
     <Fields
       items={[
-        ['状態', <StateBadge key="state" state={state} text={processStateText(state, progress)} size="md" />],
+        ['状態', <StateBadge key="state" state={state} text={processStateText(state, progress)} />],
         [
           '実績数量',
           `${formatProgressQuantity(progress)}${ratio !== null && progress.status !== 'completed' ? `（${Math.round(ratio * 100)}%）` : ''}`,
@@ -168,7 +183,10 @@ function ProcessDetailBody({
         <ProgressFields progress={detail.progress} state={detail.state} />
       </Section>
       <Section title="注文">
-        <OrderFields head={detail.head} />
+        <OrderFields
+          head={detail.head}
+          orderEnd={detail.head.order_end_datetime ? new Date(detail.head.order_end_datetime) : null}
+        />
         <Button
           variant="outline"
           className="mt-3 h-11 w-full justify-between"
@@ -224,7 +242,7 @@ function OrderDetailBody({
   return (
     <>
       <Section title="注文">
-        <OrderFields head={detail.head} />
+        <OrderFields head={detail.head} orderEnd={detail.orderRange.end} />
         <div className="mt-1.5">
           <Fields items={[['計画（全体）', formatRange(detail.orderRange.start, detail.orderRange.end)]]} />
         </div>
@@ -250,7 +268,7 @@ function OrderDetailBody({
                   </p>
                 </div>
                 {p.state !== 'planned_only' && (
-                  <StateBadge state={p.state} text={PROCESS_DISPLAY_STATE_LABEL[p.state]} size="md" />
+                  <StateBadge state={p.state} text={PROCESS_DISPLAY_STATE_LABEL[p.state]} />
                 )}
               </>
             )
@@ -316,9 +334,9 @@ export function ScheduleDetailSheet({
           <h2 className="break-words text-lg font-semibold leading-snug">{title}</h2>
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {detail.kind === 'process' && detail.state !== 'planned_only' && (
-              <StateBadge state={detail.state} text={processStateText(detail.state, detail.progress)} size="md" />
+              <StateBadge state={detail.state} text={processStateText(detail.state, detail.progress)} />
             )}
-            {orderState && <StateBadge state={orderState.state} text={orderState.text} size="md" />}
+            {orderState && <StateBadge state={orderState.state} text={orderState.text} />}
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0" aria-label="詳細を閉じる" onClick={onClose}>

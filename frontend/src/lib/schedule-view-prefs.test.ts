@@ -3,7 +3,13 @@ import { DEFAULT_SCHEDULE_VIEW_PREFS, MAX_COLLAPSED_GROUP_IDS, parseScheduleView
 
 describe("parseScheduleViewPrefs", () => {
   it("既知の値はそのまま使う", () => {
-    const prefs = { viewMode: "Month", groupBy: "none", equipmentGroupId: 3, collapsedGroupIds: ["group-order-1"] }
+    const prefs = {
+      viewMode: "Month",
+      groupBy: "none",
+      equipmentGroupId: 3,
+      collapsedGroupIds: ["group-order-1"],
+      legendOpen: false,
+    }
     expect(parseScheduleViewPrefs(prefs)).toEqual(prefs)
   })
 
@@ -11,6 +17,11 @@ describe("parseScheduleViewPrefs", () => {
     expect(
       parseScheduleViewPrefs({ viewMode: "Year", groupBy: "order", equipmentGroupId: "3", collapsedGroupIds: [1, "g"] }),
     ).toEqual({ ...DEFAULT_SCHEDULE_VIEW_PREFS, groupBy: "order", collapsedGroupIds: ["g"] })
+  })
+
+  it("凡例の開閉が保存されていない（#589 より前の保存値）・不正なら開いた状態にする", () => {
+    expect(parseScheduleViewPrefs({ viewMode: "Week" })!.legendOpen).toBe(true)
+    expect(parseScheduleViewPrefs({ legendOpen: "false" })!.legendOpen).toBe(true)
   })
 
   it("オブジェクトでなければ null（既定値を使う）", () => {

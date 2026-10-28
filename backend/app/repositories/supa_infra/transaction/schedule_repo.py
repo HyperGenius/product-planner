@@ -136,7 +136,7 @@ class ScheduleRepository(BaseRepository):
             self.client.table(self.table_name)
             .select(
                 "*, orders(order_number, customer_order_no, status, quantity, deadline_date,"
-                " confirmed_deadline, products(name), customers(name)),"
+                " confirmed_deadline, products(name), customers(name, alias)),"
                 " process_routings(process_name, sequence_order, equipment_group_id),"
                 f" equipments({EQUIPMENT_DISPLAY_COLUMNS})"
             )
@@ -276,6 +276,7 @@ def _format_schedule(
         "product_name": product.get("name"),
         # 顧客不明（customer_id が NULL、#521）は null のまま。表示側で「顧客不明」と出す
         "customer_name": customer.get("name"),
+        "customer_alias": customer.get("alias"),
         "process_name": routing.get("process_name"),
         "sequence_order": routing.get("sequence_order"),
         "equipment_name": equipment_display_name(equipment),

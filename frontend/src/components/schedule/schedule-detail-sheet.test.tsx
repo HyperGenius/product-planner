@@ -154,4 +154,40 @@ describe("ScheduleDetailSheet（Issue #581）", () => {
     await user.click(screen.getByRole("button", { name: /カシメ/ }))
     expect(onSelect).toHaveBeenCalledWith({ kind: "process", orderId: 1, processRoutingId: 12 })
   })
+
+  function renderOrder(schedules: Schedule[]) {
+    return render(
+      <ScheduleDetailSheet
+        detail={buildOrderDetail(schedules, PROGRESS, 1, NOW)!}
+        now={NOW}
+        canEdit={false}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        onEditSegment={vi.fn()}
+      />,
+    )
+  }
+
+  it("顧客は正式名称に通称を併記し、見出しは通称で出す（Issue #589）", () => {
+    renderOrder(SCHEDULES.map((s) => ({ ...s, customer_alias: "A社" })))
+    const sheet = screen.getByRole("complementary", { name: "注文の詳細" })
+    expect(sheet).toHaveTextContent("顧客A社（A社）")
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("A社 ピン")
+  })
+
+  it("最後の工程の計画終了が希望納期を超える注文は、希望納期の横に「納期超過」を出す（Issue #589）", () => {
+    const { unmount } = renderOrder(SCHEDULES.map((s) => ({ ...s, desired_deadline: "2026-09-11" })))
+    expect(screen.getByTestId("deadline-warning")).toHaveTextContent("納期超過")
+    unmount()
+
+    renderOrder(SCHEDULES)
+    expect(screen.queryByTestId("deadline-warning")).not.toBeInTheDocument()
+  })
+
+  it("状態のバッジにラベル列と同じアイコンを付ける（Issue #589）", () => {
+    renderProcess(false)
+    const badge = screen.getAllByTestId("state-badge")[0]
+    expect(badge).toHaveAttribute("data-state", "completed")
+    expect(badge.querySelector("svg")).not.toBeNull()
+  })
 })
