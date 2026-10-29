@@ -54,6 +54,12 @@ describe("matchesCategoryFilter", () => {
     expect(matchesCategoryFilter(group({ category: "closed_order_only" }), "closed_order_only")).toBe(true)
     expect(matchesCategoryFilter(group({ category: "no_order" }), "before_order_date")).toBe(false)
   })
+
+  it("要確認は作り置き（#591）とみなした受注日より前の実績を除く", () => {
+    expect(matchesCategoryFilter(group({ category: "before_order_date" }), "hearing")).toBe(true)
+    expect(matchesCategoryFilter(group({ category: "stocked" }), "hearing")).toBe(false)
+    expect(matchesCategoryFilter(group({ category: "stocked" }), "stocked")).toBe(true)
+  })
 })
 
 describe("allocatedRatio / formatPercent", () => {

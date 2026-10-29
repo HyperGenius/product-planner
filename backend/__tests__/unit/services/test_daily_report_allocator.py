@@ -4,6 +4,7 @@ from datetime import date
 
 from app.services.daily_report_allocator import (
     ActualEntry,
+    Allocation,
     OrderRef,
     ProcessProgress,
     RoutingRef,
@@ -119,6 +120,26 @@ class TestAllocation:
                 qty=30,
                 reason="exceeds_order_qty",
             )
+        ]
+
+    def test_records_each_allocation_to_an_order(self):
+        """作り置きの推定（#591）で受注に割り付いた仕掛かりを除くため、受注ごとの充当を返す。"""
+        orders = [
+            _order(1, 100, date(2026, 10, 10)),
+            _order(2, 100, date(2026, 10, 20)),
+        ]
+        entries = [
+            _entry(1, 130, "プレス", date(2026, 9, 10)),
+            _entry(2, 20, ("カシメ", "クグシ"), date(2026, 9, 11)),
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS)
+
+        assert result.allocations == [
+            Allocation(1, PRODUCT, "プレス", date(2026, 9, 10), 100),
+            Allocation(2, PRODUCT, "プレス", date(2026, 9, 10), 30),
+            Allocation(1, PRODUCT, "カシメ", date(2026, 9, 11), 20),
+            Allocation(1, PRODUCT, "クグシ", date(2026, 9, 11), 20),
         ]
 
     def test_entries_are_applied_in_work_date_order(self):

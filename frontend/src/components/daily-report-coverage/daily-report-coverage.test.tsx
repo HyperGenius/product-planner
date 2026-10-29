@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { http, HttpResponse } from "msw"
 import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
@@ -87,6 +87,18 @@ const groupRows = () =>
     .map((b) => b.textContent)
 
 describe("DailyReportCoverage", () => {
+  beforeEach(() => {
+    // 作り置きの推定（#591）は stock-estimates.test.tsx で見るので、ここでは空にする
+    server.use(
+      http.get(`${API_BASE}/daily-reports/stock-estimates`, () =>
+        HttpResponse.json({ computed_at: null, items: [], feedback: [] }),
+      ),
+      http.get(`${API_BASE}/tenant/members/me`, () =>
+        HttpResponse.json({ user_id: "u1", tenant_id: "tenant-1", role: "order_handler" }),
+      ),
+    )
+  })
+
   it("割り付け済み・未割当・未照合の内訳と、未照合の名寄せへの導線を出す", async () => {
     const requests = mockCoverage()
 

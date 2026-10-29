@@ -86,6 +86,20 @@ def _fetch_other_order_statuses(db: Client, tenant_id: str) -> dict[int, set[str
     return statuses
 
 
+def _fetch_stocked_product_ids(db: Client, tenant_id: str) -> set[int]:
+    """作り置きの推定（#591）が出ている製品。割り付けと同じ再計算で保存されるので時点がそろう。"""
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.DAILY_REPORT_STOCK_ESTIMATES.value)
+            .select("product_id, process_name")
+            .eq("tenant_id", tenant_id)
+            .order("product_id")
+            .order("process_name")
+        )
+    )
+    return {int(r["product_id"]) for r in rows}
+
+
 def _fetch_by_id(db: Client, table: str, columns: str, tenant_id: str) -> list[dict]:
     return fetch_all_rows(
         lambda: db.table(table).select(columns).eq("tenant_id", tenant_id).order("id")
@@ -116,7 +130,11 @@ def get_coverage(
     since = period_start(today or datetime.now(JST).date(), months)
     computed_at, coverage = _fetch_run(db, tenant_id)
     rows = _fetch_unallocated_rows(db, tenant_id, since)
-    groups = group_unallocated(rows, _fetch_other_order_statuses(db, tenant_id))
+    groups = group_unallocated(
+        rows,
+        _fetch_other_order_statuses(db, tenant_id),
+        _fetch_stocked_product_ids(db, tenant_id),
+    )
     summary = build_summary(
         [m for m in coverage if in_period(m.work_month, since)], groups
     )

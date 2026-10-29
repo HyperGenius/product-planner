@@ -5,6 +5,7 @@ import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 import { Button } from "@/components/ui/button"
 import { useDailyReportCoverage } from "@/hooks/use-daily-report-coverage"
 import { useProducts } from "@/hooks/use-products"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
 import {
   DEFAULT_PERIOD_MONTHS,
   PERIOD_OPTIONS,
@@ -13,8 +14,10 @@ import {
   type CategoryFilter,
 } from "@/lib/daily-report-coverage-utils"
 import { formatWorkDate } from "@/lib/daily-report-name-utils"
+import { DAILY_REPORT_NAME_EDITOR_ROLES } from "@/types/member"
 import { CoverageSummaryCard } from "./coverage-summary-card"
 import { ProductsWithoutRoutings } from "./products-without-routings"
+import { StockEstimates } from "./stock-estimates"
 import { UnallocatedGroupList } from "./unallocated-group-list"
 
 /**
@@ -30,6 +33,9 @@ export function DailyReportCoverage() {
 
   const { data, isLoading, isError } = useDailyReportCoverage(months)
   const { data: products } = useProducts()
+  const { data: member } = useCurrentMember()
+  // 作り置きの指摘（#591）を書き込めるロールは別名辞書と同じ
+  const canEditStock = member != null && DAILY_REPORT_NAME_EDITOR_ROLES.includes(member.role)
   const productById = React.useMemo(
     () => new Map((products ?? []).map((p) => [p.id, p])),
     [products],
@@ -92,6 +98,7 @@ export function DailyReportCoverage() {
             canOpenRouting={canOpenRouting}
             onEditRouting={setRoutingProductId}
           />
+          <StockEstimates canEdit={canEditStock} />
           <div ref={listRef} className="scroll-mt-4">
             <UnallocatedGroupList
               key={`${filter}-${months}`}
@@ -104,7 +111,7 @@ export function DailyReportCoverage() {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            名寄せ・工程の変更は、次の集計（10〜15分ごと）で反映されます。
+            名寄せ・工程の変更・作り置きの指摘は、次の集計（10〜15分ごと）で反映されます。
           </p>
         </>
       )}

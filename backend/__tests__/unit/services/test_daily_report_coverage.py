@@ -146,6 +146,21 @@ class TestUnallocatedCategory:
     def test_other_reasons_are_kept(self, reason):
         assert unallocated_category(reason, {"draft", "shipped"}) == reason
 
+    def test_before_order_date_of_stocked_product_is_stocked(self):
+        """作り置きの推定（#591）が出ている製品の受注日より前の実績は作り置きとして要確認から外す。"""
+        assert (
+            unallocated_category("before_order_date", set(), stocked=True) == "stocked"
+        )
+        # 他の理由は作り置きの推定があっても変えない
+        assert (
+            unallocated_category("exceeds_order_qty", set(), stocked=True)
+            == "exceeds_order_qty"
+        )
+        assert (
+            unallocated_category("no_candidate_order", set(), stocked=True)
+            == "no_order"
+        )
+
 
 class TestGroupUnallocated:
     def test_groups_by_product_process_reason_sorted_by_qty(self):
@@ -176,6 +191,19 @@ class TestGroupUnallocated:
             date(2026, 9, 10),
         )
         assert press.customer_ids == [10, 20]
+
+    def test_stocked_products_are_categorized_per_product(self):
+        rows = [
+            _row(30, "before_order_date"),
+            _row(20, "before_order_date", product_id=200),
+        ]
+
+        groups = group_unallocated(rows, {}, stocked_product_ids=[200])
+
+        assert [(g.product_id, g.category) for g in groups] == [
+            (100, "before_order_date"),
+            (200, "stocked"),
+        ]
 
 
 class TestBuildSummary:

@@ -3,6 +3,7 @@
 計算本体は `daily_report_allocator`（純粋関数）。ここでは明細・受注・工程ルートを読み込み、
 明細を名寄せ（`daily_report_name_matching_service.load_matcher()`）で照合してから割り付け、
 RPC `replace_daily_report_allocation` でテナント単位に丸ごと置き換える（差分更新しない）。
+作り置きの推定（`daily_report_stock_estimator`、Issue #591）も同じ再計算で求め、同じ RPC で置き換える。
 
 cron（`GET /api/cron/compute-daily-report-progress`）から service role の admin client で
 全テナント横断に呼ばれる。service role では RLS が効かないため、クエリはすべて
@@ -21,11 +22,21 @@ from app.services.daily_report_allocator import (
     RoutingRef,
     allocate_actuals,
 )
-from app.services.daily_report_coverage import UnmatchedEntry, summarize_coverage
+from app.services.daily_report_coverage import (
+    CLOSED_ORDER_STATUSES,
+    UnmatchedEntry,
+    summarize_coverage,
+)
 from app.services.daily_report_name_matcher import DailyReportNameMatcher
 from app.services.daily_report_name_matching_service import (
     fetch_all_rows,
     load_matcher,
+)
+from app.services.daily_report_stock_estimator import (
+    ShippedOrderRef,
+    StockEstimate,
+    StockFeedback,
+    estimate_stock,
 )
 from app.utils.calendar import JST
 from app.utils.logger import get_logger
@@ -48,13 +59,13 @@ def _parse_date(value: Any) -> date | None:
 
 
 def _to_jst_date(value: Any) -> date | None:
-    """timestamptz（`order_date`）を JST の暦日にする。naive な値は JST とみなす。"""
+    """timestamptz（`order_date` / `shipped_at`）を JST の暦日にする。naive な値は JST とみなす。"""
     if not value:
         return None
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
-        logger.warning(f"daily_report_allocation: invalid order_date {value!r}")
+        logger.warning(f"daily_report_allocation: invalid timestamp {value!r}")
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=JST)
@@ -64,31 +75,39 @@ def _to_jst_date(value: Any) -> date | None:
 def load_actual_entries(
     db: Client, tenant_id: str, matcher: DailyReportNameMatcher
 ) -> tuple[list[ActualEntry], list[UnmatchedEntry]]:
-    """良品数が1以上の明細を照合し、製品と工程が照合できたものを返す。
+    """加工数が1以上の明細を照合し、製品と工程が照合できたものを返す。
 
-    戻り値の2つ目は製品か工程が照合できず割り付けに使えなかった明細
+    良品数が0（すべて不良）の明細も、作り置きの推定（#591）で前の工程の品物を使った数に数えるので含める
+    （割り付け・照合状況の集計は良品数が1以上の明細だけを使う）。
+    戻り値の2つ目は製品か工程が照合できず割り付けに使えなかった良品数が1以上の明細
     （未照合キュー #489 で解消するもの。未割当には含めず、照合状況の集計 #542 にだけ使う）。
     """
     rows = fetch_all_rows(
         lambda: (
             db.table(SupabaseTableName.DAILY_REPORT_ENTRIES.value)
-            .select("id, work_date, customer_raw, product_raw, process_raw, good_qty")
+            .select(
+                "id, work_date, customer_raw, product_raw, process_raw, "
+                "processed_qty, good_qty"
+            )
             .eq("tenant_id", tenant_id)
-            .gt("good_qty", 0)
+            # good_qty は processed_qty − defect_qty（0未満は0）なので、良品数が1以上の明細は必ず含まれる
+            .gt("processed_qty", 0)
             .order("id")
         )
     )
     entries: list[ActualEntry] = []
     unmatched: list[UnmatchedEntry] = []
     for row in rows:
+        good_qty = int(row.get("good_qty") or 0)
         match = matcher.match_entry(row)
         if match.product_id is None or not match.process_names:
-            unmatched.append(
-                UnmatchedEntry(
-                    work_date=_parse_date(row.get("work_date")),
-                    good_qty=int(row["good_qty"]),
+            if good_qty > 0:
+                unmatched.append(
+                    UnmatchedEntry(
+                        work_date=_parse_date(row.get("work_date")),
+                        good_qty=good_qty,
+                    )
                 )
-            )
             continue
         entries.append(
             ActualEntry(
@@ -97,7 +116,8 @@ def load_actual_entries(
                 product_id=int(match.product_id),
                 customer_id=match.customer_id,
                 process_names=tuple(match.process_names),
-                good_qty=int(row["good_qty"]),
+                good_qty=good_qty,
+                processed_qty=int(row["processed_qty"]),
             )
         )
     return entries, unmatched
@@ -126,6 +146,56 @@ def load_candidate_orders(db: Client, tenant_id: str) -> list[OrderRef]:
             deadline=_parse_date(row.get("deadline_date"))
             or _parse_date(row.get("confirmed_deadline")),
             order_date=_to_jst_date(row.get("order_date")),
+        )
+        for row in rows
+    ]
+
+
+def load_shipped_orders(db: Client, tenant_id: str) -> list[ShippedOrderRef]:
+    """送品済み・完了の受注（作り置きの推定で、日報に出てくる最後の工程の後を減らす。#591）。
+
+    送品日は `shipped_at` の JST 暦日。列を足す前に送品した受注は記録が無いので納期で代用する。
+    """
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.ORDERS.value)
+            .select(
+                "id, product_id, quantity, shipped_at, deadline_date, confirmed_deadline"
+            )
+            .eq("tenant_id", tenant_id)
+            .in_("status", list(CLOSED_ORDER_STATUSES))
+            .not_.is_("product_id", "null")
+            .order("id")
+        )
+    )
+    return [
+        ShippedOrderRef(
+            product_id=int(row["product_id"]),
+            quantity=int(row.get("quantity") or 0),
+            shipped_on=_to_jst_date(row.get("shipped_at"))
+            or _parse_date(row.get("deadline_date"))
+            or _parse_date(row.get("confirmed_deadline")),
+        )
+        for row in rows
+    ]
+
+
+def load_stock_feedback(db: Client, tenant_id: str) -> list[StockFeedback]:
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.DAILY_REPORT_STOCK_FEEDBACK.value)
+            .select("id, product_id, kind, process_name, baseline_qty, baseline_date")
+            .eq("tenant_id", tenant_id)
+            .order("id")
+        )
+    )
+    return [
+        StockFeedback(
+            product_id=int(row["product_id"]),
+            kind=row["kind"],
+            process_name=row.get("process_name"),
+            baseline_qty=row.get("baseline_qty"),
+            baseline_date=_parse_date(row.get("baseline_date")),
         )
         for row in rows
     ]
@@ -184,6 +254,19 @@ def _rpc_payload(result: AllocationResult) -> tuple[list[dict], list[dict]]:
     return progress, unallocated
 
 
+def _stock_payload(estimates: list[StockEstimate]) -> list[dict]:
+    return [
+        {
+            "product_id": s.product_id,
+            "process_name": s.process_name,
+            "next_process_name": s.next_process_name,
+            "qty": s.qty,
+            "last_movement_date": _iso(s.last_movement_date),
+        }
+        for s in estimates
+    ]
+
+
 def recompute_tenant_allocation(
     db: Client, tenant_id: str, computed_at: datetime | None = None
 ) -> dict[str, Any]:
@@ -201,6 +284,15 @@ def recompute_tenant_allocation(
     progress, unallocated = _rpc_payload(result)
     # 照合状況の画面（#542）用に、照合済み・未照合の数量を加工月ごとに残す
     coverage = [m.to_json() for m in summarize_coverage(entries, unmatched)]
+    # 作り置きの推定（#591）。期限切れの判定の「今日」は計算時刻の JST 暦日
+    stock = estimate_stock(
+        entries,
+        routings,
+        result.allocations,
+        load_shipped_orders(db, tenant_id),
+        load_stock_feedback(db, tenant_id),
+        today=computed_at.astimezone(JST).date(),
+    )
     rpc_result = db.rpc(
         "replace_daily_report_allocation",
         {
@@ -209,6 +301,7 @@ def recompute_tenant_allocation(
             "p_progress": progress,
             "p_unallocated": unallocated,
             "p_coverage": coverage,
+            "p_stock": _stock_payload(stock),
         },
     ).execute()
     return {
@@ -217,6 +310,7 @@ def recompute_tenant_allocation(
         "unmatched_entries": len(unmatched),
         "progress": len(progress),
         "unallocated": len(unallocated),
+        "stock_estimates": len(stock),
     }
 
 
@@ -253,6 +347,7 @@ def recompute_all_tenants(db: Client) -> dict[str, int]:
         "progress": 0,
         "unallocated": 0,
         "unmatched_entries": 0,
+        "stock_estimates": 0,
     }
     for tenant_id in list_target_tenants(db):
         summary["tenants"] += 1
@@ -271,6 +366,7 @@ def recompute_all_tenants(db: Client) -> dict[str, int]:
         summary["progress"] += result["progress"]
         summary["unallocated"] += result["unallocated"]
         summary["unmatched_entries"] += result["unmatched_entries"]
+        summary["stock_estimates"] += result["stock_estimates"]
 
     logger.info(f"daily_report_allocation complete: {summary}")
     return summary

@@ -8,6 +8,8 @@ Integration テスト: 日報の実績の受注への割り付けと進捗 (Issu
 - RPC の古い計算結果での置き換え拒否（'stale'）と、消えた受注・他テナントの ID を入れないこと
 - 進捗・未割当・計算履歴の RLS（所属テナントの行のみ SELECT 可・書き込み不可・RPC 実行不可）
 - GET /orders/{order_id}/progress と GET /daily-reports/order-progress がユーザー JWT で読めること
+- 作り置きの推定（#591）: 送品日時のトリガー、推定の保存、指摘の登録・取り消しと反映、RLS、
+  製品の統合での指摘の引き継ぎ
 
 実行:
   supabase start
@@ -28,6 +30,8 @@ from fastapi.testclient import TestClient
 from postgrest.exceptions import APIError
 
 SHEET = "2609製造"
+# 作り置きの推定は最後の増減から6か月で0になるので、計算時刻を固定する
+COMPUTED_AT = datetime(2026, 10, 29, 3, 0, tzinfo=UTC)
 HEADER = ["加工日", "顧客先", "商品名", "工程名", "加工数", "不適合合計数"]
 PROCESSES = ("プレス", "洗浄", "カシメ", "クグシ")
 
@@ -163,6 +167,8 @@ def tenants(admin_db, auth_user_id):
         for table in (
             "daily_report_allocation_runs",
             "daily_report_unallocated_actuals",
+            "daily_report_stock_estimates",
+            "daily_report_stock_feedback",
             "order_process_progress",
             "process_name_aliases",
             "daily_report_files",
@@ -222,7 +228,7 @@ class TestRecomputeAllocation:
         own = tenants["own"]
         _replace_entries(admin_db, own, ENTRY_ROWS, "2026-09-12T18:00:00+09:00")
 
-        summary = recompute_tenant_allocation(admin_db, own["id"])
+        summary = recompute_tenant_allocation(admin_db, own["id"], COMPUTED_AT)
 
         assert summary == {
             "status": "replaced",
@@ -231,6 +237,8 @@ class TestRecomputeAllocation:
             # 出荷済みの受注は候補外（確定済み・生産中の2件 × 4工程）
             "progress": 8,
             "unallocated": 1,
+            # 受注日より前のプレス 40 がプレスの後の作り置き（#591。詳細は TestStockEstimates）
+            "stock_estimates": 1,
         }
         progress = _progress(admin_db, own)
         assert set(progress) == {
@@ -518,7 +526,7 @@ class TestProgressApi:
     def test_progress_endpoints_with_user_jwt(self, admin_db, auth_token, tenants):
         own, other = tenants["own"], tenants["other"]
         _replace_entries(admin_db, own, ENTRY_ROWS, "2026-09-12T18:00:00+09:00")
-        recompute_tenant_allocation(admin_db, own["id"])
+        recompute_tenant_allocation(admin_db, own["id"], COMPUTED_AT)
         # プレスのスケジュール（2セグメント）。計画の終了日時は最後のセグメントの終了
         admin_db.table("production_schedules").insert(
             [
@@ -599,7 +607,8 @@ class TestProgressApi:
             "unmatched_rows": 1,
             "unmatched_qty": 20,
             "unallocated": [
-                {"category": "before_order_date", "row_count": 1, "qty": 40}
+                # 作り置きの推定（#591）が出ている製品なので「受注日より前」ではなく作り置き
+                {"category": "stocked", "row_count": 1, "qty": 40}
             ],
         }
         assert [
@@ -611,7 +620,7 @@ class TestProgressApi:
                 g["product_has_routings"],
             )
             for g in body["groups"]
-        ] == [("ピン", "プレス", "before_order_date", 40, True)]
+        ] == [("ピン", "プレス", "stocked", 40, True)]
 
         res = client.get(
             "/daily-reports/unallocated-actuals",
@@ -624,3 +633,339 @@ class TestProgressApi:
         )
         assert res.status_code == 200
         assert res.json() == []
+
+
+# ---------------------------------------------------------------------------
+# 作り置きの推定（Issue #591）
+# ---------------------------------------------------------------------------
+
+STOCK_ROWS = [
+    # 受注日（9/1）より前のプレス 40 は作り置き
+    ["2026.08.20", "サンプル工業", "ピン", "プレス", 40, 0],
+    # プレス 150 → 早い受注に 100、遅い受注に 50
+    ["2026.09.10", "サンプル工業", "ピン", "プレス", 150, 0],
+    # カシメ 30 → 早い受注に 30
+    ["2026.09.11", "サンプル工業", "ピン", "カシメ", 30, 0],
+]
+
+
+def _stock(admin_db, tenant: dict[str, Any]) -> list[tuple]:
+    rows = _rows(
+        admin_db.table("daily_report_stock_estimates")
+        .select("process_name, next_process_name, qty, last_movement_date")
+        .eq("tenant_id", tenant["id"])
+        .order("process_name")
+        .execute()
+    )
+    return [
+        (r["process_name"], r["next_process_name"], r["qty"], r["last_movement_date"])
+        for r in rows
+    ]
+
+
+@pytest.mark.integration
+class TestShippedAt:
+    def _order(self, admin_db, tenant, status, deadline, **extra) -> dict[str, Any]:
+        return _rows(
+            admin_db.table("orders")
+            .insert(
+                {
+                    "tenant_id": tenant["id"],
+                    "product_id": tenant["product_id"],
+                    "customer_id": tenant["customer_id"],
+                    "quantity": 10,
+                    "status": status,
+                    # 受注の重複キー（顧客・製品・納期）が衝突しないよう納期を変える
+                    "deadline_date": deadline,
+                    **extra,
+                }
+            )
+            .execute()
+        )[0]
+
+    def test_trigger_records_when_order_is_shipped(self, admin_db, tenants):
+        own = tenants["own"]
+        order_id = own["orders"]["early"]
+        before = _rows(
+            admin_db.table("orders").select("shipped_at").eq("id", order_id).execute()
+        )[0]
+        assert before["shipped_at"] is None
+
+        shipped = _rows(
+            admin_db.table("orders")
+            .update({"status": "shipped"})
+            .eq("id", order_id)
+            .execute()
+        )[0]
+        assert shipped["shipped_at"] is not None
+
+        # ステータス以外の更新・送品済みのままの更新では書き換えない
+        again = _rows(
+            admin_db.table("orders")
+            .update({"status": "shipped", "quantity": 99})
+            .eq("id", order_id)
+            .execute()
+        )[0]
+        assert again["shipped_at"] == shipped["shipped_at"]
+
+    def test_trigger_on_insert_keeps_explicit_value(self, admin_db, tenants):
+        own = tenants["own"]
+        created = self._order(admin_db, own, "shipped", "2026-11-10")
+        assert created["shipped_at"] is not None
+        explicit = self._order(
+            admin_db,
+            own,
+            "completed",
+            "2026-11-11",
+            shipped_at="2026-09-05T10:00:00+09:00",
+        )
+        assert datetime.fromisoformat(explicit["shipped_at"]) == datetime.fromisoformat(
+            "2026-09-05T10:00:00+09:00"
+        )
+        assert (
+            self._order(admin_db, own, "confirmed", "2026-11-12")["shipped_at"] is None
+        )
+
+
+@pytest.mark.integration
+class TestStockEstimates:
+    def _ship_on(self, admin_db, tenant, shipped_at: str) -> None:
+        # ステータスを変えない更新ではトリガーが動かないので、送品日時を直接書ける
+        admin_db.table("orders").update({"shipped_at": shipped_at}).eq(
+            "id", tenant["orders"]["shipped"]
+        ).execute()
+
+    def test_saves_stock_excluding_orders_work_in_progress(self, admin_db, tenants):
+        own = tenants["own"]
+        _replace_entries(admin_db, own, STOCK_ROWS, "2026-09-12T18:00:00+09:00")
+        # 出荷済みの受注（100）は 9/5 に送品
+        self._ship_on(admin_db, own, "2026-09-05T10:00:00+09:00")
+
+        summary = recompute_tenant_allocation(admin_db, own["id"], COMPUTED_AT)
+
+        assert summary["stock_estimates"] == 1
+        # プレスの後: 仕掛かり 40 + 150 − 30 = 160 から、受注に割り付いた
+        # 早い受注 100 − 30 と遅い受注 50 を除いた 40。
+        # カシメの後: 9/5 の送品 100 で 0 になってから 9/11 に 30。早い受注に割り付いているので 0
+        assert _stock(admin_db, own) == [("プレス", "カシメ", 40, "2026-09-11")]
+
+    def test_feedback_via_api_is_reflected_on_recompute(
+        self, admin_db, auth_token, auth_user_id, tenants
+    ):
+        own = tenants["own"]
+        _replace_entries(admin_db, own, STOCK_ROWS, "2026-09-12T18:00:00+09:00")
+        self._ship_on(admin_db, own, "2026-09-05T10:00:00+09:00")
+        recompute_tenant_allocation(admin_db, own["id"], COMPUTED_AT)
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+
+        res = client.get("/daily-reports/stock-estimates", headers=headers)
+        assert res.status_code == 200
+        assert [(i["product_name"], i["qty"]) for i in res.json()["items"]] == [
+            ("ピン", 40)
+        ]
+        assert res.json()["feedback"] == []
+
+        # 作り置きしているのはカシメの後で、基準日 9/30 の時点で 12 個
+        res = client.put(
+            f"/daily-reports/stock-feedback/{own['product_id']}",
+            json={
+                "kind": "stock_process",
+                "process_name": "カシメ",
+                "baseline_qty": 12,
+                "baseline_date": "2026-09-30",
+            },
+            headers=headers,
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["updated_by"] == auth_user_id
+        recompute_tenant_allocation(
+            admin_db, own["id"], COMPUTED_AT + timedelta(minutes=1)
+        )
+        assert _stock(admin_db, own) == [("カシメ", None, 12, "2026-09-30")]
+
+        # 作り置きしていない → 推定が消え、「受注日より前」が要確認に戻る
+        res = client.put(
+            f"/daily-reports/stock-feedback/{own['product_id']}",
+            json={"kind": "not_stocked", "note": "試作の残り"},
+            headers=headers,
+        )
+        assert res.status_code == 200, res.text
+        recompute_tenant_allocation(
+            admin_db, own["id"], COMPUTED_AT + timedelta(minutes=2)
+        )
+        assert _stock(admin_db, own) == []
+        res = client.get("/daily-reports/coverage", headers=headers)
+        assert [g["category"] for g in res.json()["groups"]] == ["before_order_date"]
+        res = client.get("/daily-reports/stock-estimates", headers=headers)
+        assert [(f["kind"], f["note"]) for f in res.json()["feedback"]] == [
+            ("not_stocked", "試作の残り")
+        ]
+
+        res = client.delete(
+            f"/daily-reports/stock-feedback/{own['product_id']}", headers=headers
+        )
+        assert res.status_code == 200
+        recompute_tenant_allocation(
+            admin_db, own["id"], COMPUTED_AT + timedelta(minutes=3)
+        )
+        assert _stock(admin_db, own) == [("プレス", "カシメ", 40, "2026-09-11")]
+
+    def test_feedback_for_other_tenant_product_is_rejected(
+        self, admin_db, auth_token, tenants
+    ):
+        own, other = tenants["own"], tenants["other"]
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+
+        res = client.put(
+            f"/daily-reports/stock-feedback/{other['product_id']}",
+            json={"kind": "not_stocked"},
+            headers=headers,
+        )
+
+        assert res.status_code == 404
+        assert (
+            _rows(
+                admin_db.table("daily_report_stock_feedback")
+                .select("id")
+                .eq("tenant_id", other["id"])
+                .execute()
+            )
+            == []
+        )
+
+
+@pytest.mark.integration
+class TestStockRls:
+    def test_member_reads_own_tenant_only(
+        self, admin_db, real_supabase_client, auth_token, auth_user_id, tenants
+    ):
+        own, other = tenants["own"], tenants["other"]
+        for tenant in (own, other):
+            _replace_entries(admin_db, tenant, STOCK_ROWS, "2026-09-12T18:00:00+09:00")
+            recompute_tenant_allocation(admin_db, tenant["id"], COMPUTED_AT)
+            admin_db.table("daily_report_stock_feedback").insert(
+                {
+                    "tenant_id": tenant["id"],
+                    "product_id": tenant["product_id"],
+                    "kind": "not_stocked",
+                    "updated_by": auth_user_id,
+                }
+            ).execute()
+
+        for table in ("daily_report_stock_estimates", "daily_report_stock_feedback"):
+            visible = _rows(
+                real_supabase_client.table(table)
+                .select("tenant_id")
+                .in_("tenant_id", [own["id"], other["id"]])
+                .execute()
+            )
+            assert {r["tenant_id"] for r in visible} == {own["id"]}
+
+        # 推定は cron の RPC だけが書く
+        with pytest.raises(APIError):
+            real_supabase_client.table("daily_report_stock_estimates").insert(
+                {
+                    "tenant_id": own["id"],
+                    "product_id": own["product_id"],
+                    "process_name": "クグシ",
+                    "qty": 1,
+                    "computed_at": datetime.now(UTC).isoformat(),
+                }
+            ).execute()
+
+        # 指摘の updated_by は自分のみ
+        admin_db.table("daily_report_stock_feedback").delete().eq(
+            "tenant_id", own["id"]
+        ).execute()
+        with pytest.raises(APIError):
+            real_supabase_client.table("daily_report_stock_feedback").insert(
+                {
+                    "tenant_id": own["id"],
+                    "product_id": own["product_id"],
+                    "kind": "not_stocked",
+                    "updated_by": str(uuid.uuid4()),
+                }
+            ).execute()
+        # 他テナントへは書けない
+        with pytest.raises(APIError):
+            real_supabase_client.table("daily_report_stock_feedback").insert(
+                {
+                    "tenant_id": other["id"],
+                    "product_id": other["product_id"],
+                    "kind": "not_stocked",
+                    "updated_by": auth_user_id,
+                }
+            ).execute()
+
+    def test_kind_fields_are_checked(self, admin_db, auth_user_id, tenants):
+        own = tenants["own"]
+        base = {
+            "tenant_id": own["id"],
+            "product_id": own["product_id"],
+            "updated_by": auth_user_id,
+        }
+        for row in (
+            {"kind": "not_stocked", "process_name": "プレス"},
+            {"kind": "stock_process"},
+            {"kind": "stock_process", "process_name": "プレス", "baseline_qty": 1},
+        ):
+            with pytest.raises(APIError) as exc:
+                admin_db.table("daily_report_stock_feedback").insert(
+                    {**base, **row}
+                ).execute()
+            assert exc.value.code == "23514"
+
+
+@pytest.mark.integration
+class TestMergeProductsKeepsStockFeedback:
+    def test_feedback_of_merged_product_moves_to_kept_product(
+        self, admin_db, real_supabase_client, auth_user_id, tenants
+    ):
+        own = tenants["own"]
+        duplicate_id = _rows(
+            admin_db.table("products")
+            .insert({"tenant_id": own["id"], "name": "ピン（重複）"})
+            .execute()
+        )[0]["id"]
+        admin_db.table("daily_report_stock_feedback").insert(
+            {
+                "tenant_id": own["id"],
+                "product_id": duplicate_id,
+                "kind": "not_stocked",
+                "note": "重複側の指摘",
+                "updated_by": auth_user_id,
+                "updated_at": "2026-10-01T00:00:00+00:00",
+            }
+        ).execute()
+        # 統合は社長のみ
+        admin_db.table("organization_members").update({"role": "president"}).eq(
+            "user_id", auth_user_id
+        ).eq("tenant_id", own["id"]).execute()
+
+        real_supabase_client.rpc(
+            "merge_products",
+            {
+                "p_tenant_id": own["id"],
+                "p_keep_product_id": own["product_id"],
+                "p_merge_product_ids": [duplicate_id],
+            },
+        ).execute()
+
+        rows = _rows(
+            admin_db.table("daily_report_stock_feedback")
+            .select("product_id, note, updated_by, updated_at")
+            .eq("tenant_id", own["id"])
+            .execute()
+        )
+        assert len(rows) == 1
+        assert (rows[0]["product_id"], rows[0]["note"], rows[0]["updated_by"]) == (
+            own["product_id"],
+            "重複側の指摘",
+            auth_user_id,
+        )
+        # 指摘した日時のまま
+        assert datetime.fromisoformat(rows[0]["updated_at"]) == datetime(
+            2026, 10, 1, tzinfo=UTC
+        )

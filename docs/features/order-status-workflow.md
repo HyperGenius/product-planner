@@ -93,6 +93,10 @@ draft ──────────▶ pending_approval ───────�
 [orders/[id]/page.tsx](../../frontend/src/app/orders/[id]/page.tsx)、フックは
 `useShipOrder`（[use-orders.ts](../../frontend/src/hooks/use-orders.ts)））。
 
+`shipped` / `completed` になった日時は `orders.shipped_at` にトリガー（`trg_set_order_shipped_at`）が記録する
+（どの経路で送品しても書かれる。既存の行は NULL のまま）。日報からの作り置きの推定で使う（Issue #591、
+[daily-report-agent.md](daily-report-agent.md#作り置き先行着手の推定issue-591)）。
+
 ### 納期超過の下書きの一括送品済み化 (`draft → shipped`、Issue #367)
 
 トライアル運用中に作成され、下書きのまま希望納期を過ぎて放置された受注を

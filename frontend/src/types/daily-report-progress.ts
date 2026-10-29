@@ -80,6 +80,8 @@ export type UnallocatedCategory =
   | "closed_order_only"
   | "no_order"
   | "before_order_date"
+  /** 受注日より前の実績のうち、作り置きの推定（Issue #591）が出ている製品のもの */
+  | "stocked"
   | "exceeds_order_qty"
   | "no_work_date"
 

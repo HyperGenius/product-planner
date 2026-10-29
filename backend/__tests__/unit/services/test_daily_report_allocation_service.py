@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from app.services import daily_report_allocation_service as service
+from app.services.daily_report_stock_estimator import ShippedOrderRef
 
 TENANT = "tenant-1"
 OTHER_TENANT = "tenant-2"
@@ -83,6 +84,8 @@ def _entry(entry_id, qty, process, product="ピン", customer="顧客A", **extra
         "customer_raw": customer,
         "product_raw": product,
         "process_raw": process,
+        # 不良なし（加工数＝良品数）。不良のある明細は extra で上書きする
+        "processed_qty": qty,
         "good_qty": qty,
         **extra,
     }
@@ -281,7 +284,10 @@ class TestRecomputeTenantAllocation:
             "unmatched_entries": 2,
             "progress": 6,
             "unallocated": 0,
+            "stock_estimates": 0,
         }
+        # 受注に割り付いた仕掛かりは作り置きにしない（120 のうち 100 が受注1、20 が受注2）
+        assert params["p_stock"] == []
 
     def test_alias_change_is_reflected_by_recomputation(self):
         tables = _tables()
@@ -380,6 +386,7 @@ class TestRecomputeAllTenants:
                 "unmatched_entries": 1,
                 "progress": 5,
                 "unallocated": 2,
+                "stock_estimates": 4,
             },
             "t3": {
                 "status": "stale",
@@ -387,6 +394,7 @@ class TestRecomputeAllTenants:
                 "unmatched_entries": 0,
                 "progress": 0,
                 "unallocated": 0,
+                "stock_estimates": 0,
             },
         }
 
@@ -405,7 +413,187 @@ class TestRecomputeAllTenants:
             "progress": 5,
             "unallocated": 2,
             "unmatched_entries": 1,
+            "stock_estimates": 4,
         }
+
+
+class TestStockEstimates:
+    """作り置きの推定（#591）を割り付けと同じ再計算で求め、同じ RPC で送る。"""
+
+    @staticmethod
+    def _without_shipped(tables):
+        """出荷済みの受注（受注3、納期 9/1）を外す。日報の最後の工程の後の作り置きをその数量で減らすため"""
+        tables["orders"] = [o for o in tables["orders"] if o["status"] != "shipped"]
+        return tables
+
+    def _stock(self, tables) -> list[dict[str, Any]]:
+        db = _fake_db(tables)
+        summary = service.recompute_tenant_allocation(db, TENANT, COMPUTED_AT)
+        params = _rpc_params(db)
+        assert summary["stock_estimates"] == len(params["p_stock"])
+        return params["p_stock"]
+
+    def test_actuals_before_order_date_are_sent_as_stock(self):
+        tables = self._without_shipped(
+            _tables(
+                daily_report_entries=[
+                    # 受注日（9/10・9/1）より前のプレス 80 は作り置き
+                    {**_entry(1, 80, "プレス"), "work_date": "2026-08-20"},
+                ]
+            )
+        )
+
+        assert self._stock(tables) == [
+            {
+                "product_id": 100,
+                "process_name": "プレス",
+                "next_process_name": None,
+                "qty": 80,
+                "last_movement_date": "2026-08-20",
+            }
+        ]
+
+    def test_entries_without_good_qty_still_consume_previous_process(self):
+        tables = _tables(
+            daily_report_entries=[
+                {**_entry(1, 80, "プレス"), "work_date": "2026-08-20"},
+                # カシメで 30 加工して全部不良。作り置きのプレス 30 を使っている
+                {
+                    **_entry(2, 0, "カシメ"),
+                    "work_date": "2026-08-21",
+                    "processed_qty": 30,
+                },
+            ]
+        )
+
+        stock = self._stock(tables)
+
+        assert [
+            (s["process_name"], s["next_process_name"], s["qty"]) for s in stock
+        ] == [("プレス", "カシメ", 50)]
+
+    def test_shipped_orders_reduce_last_process_by_shipped_date(self):
+        tables = _tables(
+            daily_report_entries=[
+                {**_entry(1, 150, "プレス"), "work_date": "2026-08-20"},
+            ]
+        )
+        # 受注3（出荷済み 100）: shipped_at の JST 暦日（8/22）に減る
+        tables["orders"][2] = {
+            **tables["orders"][2],
+            "shipped_at": "2026-08-21T16:00:00+00:00",
+        }
+
+        stock = self._stock(tables)
+
+        assert [(s["qty"], s["last_movement_date"]) for s in stock] == [
+            (50, "2026-08-22")
+        ]
+
+    def test_feedback_not_stocked_hides_estimate(self):
+        tables = _tables(
+            daily_report_entries=[
+                {**_entry(1, 80, "プレス"), "work_date": "2026-08-20"},
+            ],
+            daily_report_stock_feedback=[
+                {
+                    "id": "f1",
+                    "tenant_id": TENANT,
+                    "product_id": 100,
+                    "kind": "not_stocked",
+                    "process_name": None,
+                    "baseline_qty": None,
+                    "baseline_date": None,
+                },
+                # 他テナントの指摘は読まない
+                {
+                    "id": "f2",
+                    "tenant_id": OTHER_TENANT,
+                    "product_id": 100,
+                    "kind": "stock_process",
+                    "process_name": "プレス",
+                    "baseline_qty": 999,
+                    "baseline_date": "2026-09-01",
+                },
+            ],
+        )
+
+        assert self._stock(tables) == []
+
+    def test_feedback_baseline_is_used(self):
+        tables = self._without_shipped(
+            _tables(
+                daily_report_entries=[
+                    {**_entry(1, 80, "プレス"), "work_date": "2026-08-20"},
+                ],
+                daily_report_stock_feedback=[
+                    {
+                        "id": "f1",
+                        "tenant_id": TENANT,
+                        "product_id": 100,
+                        "kind": "stock_process",
+                        "process_name": "プレス",
+                        "baseline_qty": 30,
+                        "baseline_date": "2026-08-25",
+                    },
+                ],
+            )
+        )
+
+        assert [(s["qty"], s["last_movement_date"]) for s in self._stock(tables)] == [
+            (30, "2026-08-25")
+        ]
+
+    def test_load_shipped_orders_falls_back_to_deadline(self):
+        db = _fake_db(
+            {
+                "orders": [
+                    {
+                        "id": 1,
+                        "tenant_id": TENANT,
+                        "status": "shipped",
+                        "product_id": 100,
+                        "quantity": 10,
+                        "shipped_at": None,
+                        "deadline_date": None,
+                        "confirmed_deadline": "2026-09-30",
+                    },
+                    {
+                        "id": 2,
+                        "tenant_id": TENANT,
+                        "status": "completed",
+                        "product_id": 100,
+                        "quantity": 20,
+                        "shipped_at": "2026-09-01T01:00:00+00:00",
+                        "deadline_date": "2026-09-30",
+                    },
+                    # 候補外: 生産中・修理（製品なし）・他テナント
+                    {
+                        "id": 3,
+                        "tenant_id": TENANT,
+                        "status": "in_progress",
+                        "product_id": 100,
+                    },
+                    {
+                        "id": 4,
+                        "tenant_id": TENANT,
+                        "status": "shipped",
+                        "product_id": None,
+                    },
+                    {
+                        "id": 5,
+                        "tenant_id": OTHER_TENANT,
+                        "status": "shipped",
+                        "product_id": 100,
+                    },
+                ]
+            }
+        )
+
+        assert service.load_shipped_orders(db, TENANT) == [
+            ShippedOrderRef(product_id=100, quantity=10, shipped_on=date(2026, 9, 30)),
+            ShippedOrderRef(product_id=100, quantity=20, shipped_on=date(2026, 9, 1)),
+        ]
 
 
 class TestParsing:
