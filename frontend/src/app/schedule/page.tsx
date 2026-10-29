@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useMemo, useCallback, useEffect, useEffectEvent } from "react"
-import { format, addDays, addWeeks, addMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, parseISO, isValid } from "date-fns"
+import { format, addDays, addWeeks, addMonths, startOfWeek, endOfWeek, parseISO, isValid } from "date-fns"
 import { ja } from "date-fns/locale"
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, ChevronsUpDown, Info, RefreshCw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useSidebar } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
+import { scheduleViewRange } from "@/lib/schedule-view-range"
 import { GanttChart } from "@/components/schedule/gantt-chart"
 import { formatProgressComputedAt, ProgressLegend } from "@/components/schedule/progress-legend"
 import { ScheduleDetailSheet } from "@/components/schedule/schedule-detail-sheet"
@@ -158,26 +159,7 @@ export default function SchedulePage() {
 
   // 表示モードに応じた日付範囲の計算
   const dateRange = useMemo(() => {
-    let start: Date
-    let end: Date
-
-    switch (viewMode) {
-      case "Day":
-        // 前後1日を含む72時間分のデータをフェッチ
-        start = startOfDay(addDays(currentDate, -1))
-        end = endOfDay(addDays(currentDate, 1))
-        break
-      case "Week":
-        start = startOfWeek(currentDate, { locale: ja })
-        end = endOfWeek(currentDate, { locale: ja })
-        break
-      case "Month":
-        // 当日を軸として前後15日（計31日）分のデータをフェッチ
-        start = startOfDay(addDays(currentDate, -3))
-        end = endOfDay(addDays(currentDate, 31))
-        break
-    }
-
+    const { start, end } = scheduleViewRange(viewMode, currentDate)
     return {
       start_date: format(start, "yyyy-MM-dd"),
       end_date: format(end, "yyyy-MM-dd"),

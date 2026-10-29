@@ -2,15 +2,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import {
-  addDays,
-  parseISO,
-  startOfDay,
-  endOfDay,
-  startOfWeek,
-  endOfWeek,
-  format,
-} from 'date-fns'
+import { addDays, parseISO, format } from 'date-fns'
 import { ja } from 'date-fns/locale'
 import { GanttChart as GanttChartLib, getRowKey } from '@/gantt'
 import type { GanttBarAppearance, GanttMarker, GanttTask } from '@/gantt'
@@ -31,6 +23,7 @@ import {
 } from '@/lib/daily-report-progress-utils'
 import type { ProcessDisplayState } from '@/lib/daily-report-progress-utils'
 import { pickShippingDeadline } from '@/lib/shipping-candidate-utils'
+import { scheduleViewRange } from '@/lib/schedule-view-range'
 import {
   isDeadlineExceeded,
   scheduleCustomerLabel,
@@ -653,26 +646,8 @@ export function GanttChart({
 }: GanttChartProps) {
   // タイムライン表示範囲の計算（表示モードに応じた前後を含む期間）
   const { rangeStart, rangeEnd } = useMemo(() => {
-    const refDate = currentDate ?? new Date()
-    switch (viewMode) {
-      case 'Day':
-        // 前日0:00〜翌日23:59（計72時間）
-        return {
-          rangeStart: startOfDay(addDays(refDate, -1)),
-          rangeEnd: endOfDay(addDays(refDate, 1)),
-        }
-      case 'Week':
-        return {
-          rangeStart: startOfWeek(refDate, { locale: ja }),
-          rangeEnd: endOfWeek(refDate, { locale: ja }),
-        }
-      case 'Month':
-        // 当日を軸として前3日、後31日（計35日）を表示
-        return {
-          rangeStart: startOfDay(addDays(refDate, -3)),
-          rangeEnd: endOfDay(addDays(refDate, 31)),
-        }
-    }
+    const { start, end } = scheduleViewRange(viewMode, currentDate ?? new Date())
+    return { rangeStart: start, rangeEnd: end }
   }, [currentDate, viewMode])
 
   // GanttTask.id → Schedule の逆引きマップ
