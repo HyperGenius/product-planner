@@ -204,6 +204,27 @@ class TestGetCoverage:
         assert summary["allocated_qty"] == 230
         assert [g["qty"] for g in result["groups"]] == [40, 30, 10]
 
+    def test_before_order_date_of_stocked_product_is_stocked(self):
+        """作り置きの推定（#591）が出ている製品の「受注日より前」は作り置きに分ける。"""
+        tables = _tables(
+            daily_report_unallocated_actuals=[
+                _unallocated(1, 40, "before_order_date", "2026-09-10"),
+                _unallocated(2, 25, "before_order_date", "2026-09-11", product_id=200),
+            ],
+            daily_report_stock_estimates=[
+                {"tenant_id": TENANT, "product_id": 100, "process_name": "プレス"},
+                # 他テナントの推定は使わない
+                {"tenant_id": OTHER_TENANT, "product_id": 200, "process_name": "溶接"},
+            ],
+        )
+
+        result = service.get_coverage(_fake_db(tables), TENANT, None, TODAY)
+
+        assert [(g["product_id"], g["category"]) for g in result["groups"]] == [
+            (100, "stocked"),
+            (200, "before_order_date"),
+        ]
+
     def test_not_computed_yet(self):
         result = service.get_coverage(
             _fake_db(

@@ -34,5 +34,7 @@ class SupabaseTableName(Enum):
     DAILY_REPORT_SHEETS = "daily_report_sheets"
     DAILY_REPORT_ALLOCATION_RUNS = "daily_report_allocation_runs"
     DAILY_REPORT_UNALLOCATED_ACTUALS = "daily_report_unallocated_actuals"
+    DAILY_REPORT_STOCK_ESTIMATES = "daily_report_stock_estimates"
+    DAILY_REPORT_STOCK_FEEDBACK = "daily_report_stock_feedback"
     ORDER_PROCESS_PROGRESS = "order_process_progress"
     ORDER_SIMULATION_RESULTS = "order_simulation_results"

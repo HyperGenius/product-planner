@@ -12,7 +12,8 @@ DB の読み書きは `daily_report_allocation_service`。
 * 1つの日報の工程名が複数の工程に対応する場合（「カシメ、仕上げ加工」）は、各工程に同じ数量を計上する
 * 加工日が受注日（`order_date` の JST 暦日）より前の実績はその受注に充当しない。在庫の先行生産や、
   出荷済みで候補から外れた過去の受注の実績が、後から入った受注を完了に見せるのを避けるため
-  （充当できなかった分は未割当 `before_order_date` として残り、見込み生産の発見に使える）
+  （充当できなかった分は未割当 `before_order_date` として残る。作り置きの推定 `daily_report_stock_estimator`
+  （Issue #591）は、割り付けの結果の受注ごとの充当 `allocations` を使って受注の仕掛かりを除く）
 * どの受注にも充当できなかった数量は未割当として返す。製品の工程ルートにその工程名が無い実績は、
   受注の有無より先に `no_routing_process` にする（工程の棚卸しで聞くことが受注の有無と違うため。Issue #542）
 
@@ -50,6 +51,8 @@ class ActualEntry:
     # マスタの工程名（1:N）
     process_names: tuple[str, ...]
     good_qty: int
+    # 加工数（不良を含む）。作り置きの推定で、次の工程が前の工程の作り置きを使った数に使う（Issue #591）
+    processed_qty: int | None = None
 
 
 @dataclass(frozen=True)
@@ -96,10 +99,22 @@ class UnallocatedActual:
     reason: UnallocatedReason
 
 
+@dataclass(frozen=True)
+class Allocation:
+    """明細1行の1工程分のうち、受注1件に充当した数量（作り置きの推定で使う。Issue #591）。"""
+
+    order_id: int
+    product_id: int
+    process_name: str
+    work_date: date
+    qty: int
+
+
 @dataclass
 class AllocationResult:
     progress: list[ProcessProgress] = field(default_factory=list)
     unallocated: list[UnallocatedActual] = field(default_factory=list)
+    allocations: list[Allocation] = field(default_factory=list)
 
 
 @dataclass
@@ -157,7 +172,12 @@ def allocate_actuals(
             continue
         for process_name in dict.fromkeys(entry.process_names):
             reason, remaining = _allocate_one(
-                entry, process_name, routing_index, orders_by_product, allocated
+                entry,
+                process_name,
+                routing_index,
+                orders_by_product,
+                allocated,
+                result.allocations,
             )
             if reason is not None:
                 result.unallocated.append(
@@ -182,6 +202,7 @@ def _allocate_one(
     routing_index: dict[tuple[int, str], RoutingRef],
     orders_by_product: dict[int, list[OrderRef]],
     allocated: dict[tuple[int, int], _Allocated],
+    allocations: list[Allocation],
 ) -> tuple[UnallocatedReason | None, int]:
     """明細1行の1工程分を充当する。充当しきれなければ (理由, 残数) を返す。"""
     routing = routing_index.get((entry.product_id, process_name))
@@ -215,6 +236,15 @@ def _allocate_one(
             continue
         take = min(capacity, remaining)
         slot.add(take, work_date)
+        allocations.append(
+            Allocation(
+                order_id=order.id,
+                product_id=entry.product_id,
+                process_name=process_name,
+                work_date=work_date,
+                qty=take,
+            )
+        )
         remaining -= take
         if remaining == 0:
             return None, 0

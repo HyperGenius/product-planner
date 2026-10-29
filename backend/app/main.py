@@ -19,6 +19,7 @@ from app.routers.cron import (
 from app.routers.daily_reports import (
     daily_report_names_router,
     daily_report_progress_router,
+    daily_report_stock_router,
 )
 from app.routers.master import (
     calendar_router,
@@ -71,6 +72,7 @@ app.include_router(calendar_router)
 app.include_router(customer_router)
 app.include_router(daily_report_names_router)
 app.include_router(daily_report_progress_router)
+app.include_router(daily_report_stock_router)
 app.include_router(orders_router)
 app.include_router(notifications_router)
 app.include_router(production_schedules_router)

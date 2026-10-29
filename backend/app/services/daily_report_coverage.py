@@ -32,6 +32,8 @@ UnallocatedCategory = Literal[
     # 受注が1件も無い（見込み生産・受注の登録漏れ）
     "no_order",
     "before_order_date",
+    # 受注日より前の実績のうち、作り置きの推定（#591）が出ている製品のもの（作り置きから出す運用）
+    "stocked",
     "exceeds_order_qty",
     "no_work_date",
 ]
@@ -137,13 +139,19 @@ def in_period(work_date: date | None, since: date | None) -> bool:
 
 
 def unallocated_category(
-    reason: UnallocatedReason, other_order_statuses: Iterable[str]
+    reason: UnallocatedReason,
+    other_order_statuses: Iterable[str],
+    stocked: bool = False,
 ) -> UnallocatedCategory:
     """未割当の理由を画面の分類にする。
 
     `other_order_statuses` はその製品の割り付けの候補にならない受注のステータス。
     下書き・承認待ちがあれば出荷済みより優先する（今まさに作っている受注の可能性が高いため）。
+    `stocked` はその製品に作り置きの推定（#591）が出ているか。出ていれば受注日より前の実績は
+    作り置きとして要確認から外す（「作り置きしていない」と指摘された製品は推定が出ない）。
     """
+    if reason == "before_order_date" and stocked:
+        return "stocked"
     if reason != "no_candidate_order":
         return reason
     statuses = set(other_order_statuses)
@@ -191,8 +199,10 @@ class UnallocatedGroup:
 def group_unallocated(
     rows: Iterable[UnallocatedRow],
     order_statuses_by_product: dict[int, set[str]],
+    stocked_product_ids: Iterable[int] = (),
 ) -> list[UnallocatedGroup]:
     """未割当を (製品, 工程名, 理由) 単位にまとめ、数量の多い順に返す。"""
+    stocked = set(stocked_product_ids)
     groups: dict[tuple[int, str, str], UnallocatedGroup] = {}
     for row in rows:
         key = (row.product_id, row.process_name, row.reason)
@@ -203,7 +213,9 @@ def group_unallocated(
                 process_name=row.process_name,
                 reason=row.reason,
                 category=unallocated_category(
-                    row.reason, order_statuses_by_product.get(row.product_id, set())
+                    row.reason,
+                    order_statuses_by_product.get(row.product_id, set()),
+                    stocked=row.product_id in stocked,
                 ),
             )
         group.add(row)

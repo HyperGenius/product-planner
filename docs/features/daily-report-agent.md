@@ -10,7 +10,8 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 「[未照合キューの画面](#未照合キューの画面issue-489)」に、受注への割り付けと進捗（#490）は
 「[受注への割り付けと進捗の算出](#受注への割り付けと進捗の算出issue-490)」に、ガントチャート・受注詳細への進捗表示（#491）は
 「[ガントチャート・受注詳細への進捗表示](#ガントチャート受注詳細への進捗表示issue-491)」に、照合状況の画面（#542）は
-「[日報の照合状況の画面](#日報の照合状況の画面issue-542)」に記載する。
+「[日報の照合状況の画面](#日報の照合状況の画面issue-542)」に、作り置き（先行着手）の推定（#591）は
+「[作り置き（先行着手）の推定](#作り置き先行着手の推定issue-591)」に記載する。
 
 ## 実装の進め方（サブIssue）
 
@@ -27,6 +28,7 @@ Epic #485「日報進捗反映」で進めており、パースと明細の保�
 | #490 | 受注への割り付けと進捗の算出（Epic #485 の 5/6） | 本ドキュメントに記載 |
 | #491 | ガントチャート・受注詳細への進捗表示（Epic #485 の 6/6） | 本ドキュメントに記載 |
 | #542 | 日報の照合状況の画面（照合状況 1/2。2/2 の訪問時のヒアリング入力は #543） | 本ドキュメントに記載 |
+| #591 | 作り置き（先行着手）の推定と、現場の指摘による補正 | 本ドキュメントに記載 |
 
 ## 認証とテナント分離の方針
 
@@ -645,6 +647,7 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 | `unapproved_order` | 下書き・承認待ちの受注がある（出荷済みより優先） | ○ |
 | `closed_order_only` | 出荷済み・完了の受注だけがある（過去の受注の実績の可能性が高い） | × |
 | `no_order` | 上記の受注も無い（見込み生産・登録漏れ） | ○ |
+| `stocked` | `before_order_date` のうち、その製品に作り置きの推定（#591）が出ている | × |
 | `before_order_date` / `exceeds_order_qty` / `no_work_date` | reason のまま | ○ |
 
 - 受注の判定は製品単位（顧客で絞らない）。取消は数えない
@@ -667,6 +670,69 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 - 割り付けできなかった実績: 数量の多い順に50件ずつ。行を開くと元の日報の行（新しい順に最大100行）を出す
 - 名寄せ・工程の変更は次の cron（10〜15分ごと）で反映される（#490 の方針どおり、画面から再計算しない。
   訪問時にその場で反映させる「今すぐ再計算」は #544）
+
+## 作り置き（先行着手）の推定（Issue #591）
+
+現場は、よく注文される製品を先に作って置いておき、注文が来たらそこから出している（現場では「在庫」と呼んでいない。
+画面では仮に「作り置き」と呼び、`lib/daily-report-stock-utils.ts` の `STOCK_LABEL` 1か所で持つ。ヒアリングで現場の呼び名に合わせる）。
+在庫数の元になるデータは日報しか無く、現場がタブレットで在庫数を直すことも期待できないので、**正確な数は目指さず、推定を見せて
+違うところを指摘してもらって直す**。作り置きの仕方は製品ごとに違うと見込まれるので、指摘は製品単位。
+
+受注への引き当ては「日報で次の工程が始まってから」とみなし、**割り付けの規則（#490）は変えない**。作り置きを使った受注で
+次の工程が始まれば、後の工程の実績で前の工程は完了（`later_process`）になる。
+
+### 推定の規則（`services/daily_report_stock_estimator.py`）
+
+DB から切り離した純粋関数 `estimate_stock()`。割り付けと同じ明細・工程ルートに、割り付けの結果の受注ごとの充当
+（`AllocationResult.allocations`）・送品した受注・指摘を渡す。
+
+- 単位は (製品, 工程)。工程の並びは工程ルートのうち、**その製品の日報に実績が出てくる工程だけ**（洗浄・検査などは飛ばす）
+- 工程 k の後の仕掛かりを加工日の古い順に増減させる（同じ日は増を先に）
+  - 増: 工程 k の良品数（不良数はパース時に差し引き済み）
+  - 減: 次の工程の**加工数**（次の工程で不良になった分も前の工程の品物を使っている）。日報に出てくる最後の工程の後は、
+    送品済み・完了の受注の数量（送品日 `orders.shipped_at` の JST 暦日。記録の無い受注は納期）
+  - 0未満にしない（次の工程が上回ったら前の工程の日報が漏れていたとみなす）
+- **作り置き＝仕掛かり −「確定済み・生産中の受注に割り付いた分」**。受注ごとに工程 k に割り付いた数から次の工程に割り付いた数を
+  引いた残り（最後の工程は割り付いた数＝送品待ち）を合計して引く。受注どおりに流れている仕掛かり（今日プレスして明日カシメる分）を
+  作り置きに数えないため。次の工程で受注に割り付くのは良品数なので、受注の品物の不良の分だけ作り置きを少なめに見積もる（近似）
+- 最後の増減から 6 か月（`STOCK_EXPIRY_MONTHS`）動きが無ければ 0（不良・廃棄などで実際には無い分を残さない）。
+  「今日」は計算時刻の JST 暦日
+- 指摘: `not_stocked` は推定を出さない。`stock_process` はその工程の後だけを出し、基準値（`baseline_qty` / `baseline_date`）が
+  あれば、基準日（の作業を終えた時点）の作り置きをその数として、基準日より後の日報だけで増減させる（基準日時点の受注の仕掛かりを
+  足して仕掛かりに戻してから増減させる）
+- 推定数は保存して足し引きせず、毎回日報の全件から計算し直す（辞書・マスタの修正が過去の分まで反映される）
+
+加工数が1以上で良品数が0（すべて不良）の明細も、次の工程が前の工程の品物を使った数に数えるので、`load_actual_entries()` は
+`processed_qty > 0` で読む（割り付け・照合状況の集計は今までどおり良品数が1以上の明細だけを使う）。
+
+### データモデル（`20261029000000_add_daily_report_stock_estimates.sql`）
+
+| テーブル・列 | 内容 |
+|---|---|
+| `orders.shipped_at` | 送品済み・完了にした日時。トリガー `trg_set_order_shipped_at` が `status` が `shipped` / `completed` になったときに書く（送品の経路が `/ship`・`/ship-without-routing`・`/ship-overdue-drafts` と複数あり、将来 `completed` にする経路も足しうるため、アプリでは書かない）。既存の行は埋め戻さない |
+| `daily_report_stock_estimates` | 推定結果（推定数が1以上の行だけ）。PK (`tenant_id`, `product_id`, `process_name`)、`next_process_name`（NULL は日報の最後の工程）・`qty`・`last_movement_date`。書き込みは RPC のみ、RLS は SELECT だけ |
+| `daily_report_stock_feedback` | 指摘。UNIQUE (`tenant_id`, `product_id`)、`kind`（`not_stocked` / `stock_process`）・`process_name`・`baseline_qty`/`baseline_date`（両方か両方 NULL）・`note`・`updated_by`/`updated_at`。RLS は別名辞書と同じ（INSERT は `updated_by = auth.uid()`） |
+
+- 推定は RPC `replace_daily_report_allocation` の `p_stock`（DEFAULT 付き）で、進捗・未割当・照合状況と同じトランザクションで丸ごと置き換える
+- `daily_report_stock_feedback.updated_at` は API が書く（`set_updated_at()` のトリガーを付けない）。製品の統合（`merge_products`）で
+  統合される側の指摘を残す製品へ付け替えたときに、指摘した日時が書き換わらないようにするため。付け替えるのは残す製品に指摘が
+  無いときだけで、統合される側の最新の1件を引き継ぐ（指摘は製品単位で1件）。推定は製品の削除の CASCADE で消え、次回の再計算で戻る
+
+### API（`routers/daily_reports/stock.py`、ユーザー JWT）
+
+- `GET /daily-reports/stock-estimates`: `{computed_at, items: [推定（数の多い順）], feedback: [指摘（新しい順）]}`。製品名・図番を添える
+- `PUT /daily-reports/stock-feedback/{product_id}`: 指摘の登録・上書き（`{kind, process_name?, baseline_qty?, baseline_date?, note?}`）。
+  ロールは別名辞書と同じ（`_ALIAS_EDITOR_ROLES`）。製品が無ければ 404、製品の工程ルートに無い工程名・未来の基準日は 422
+- `DELETE /daily-reports/stock-feedback/{product_id}`: 指摘の取り消し（無ければ 404）
+- 指摘は次の cron（10〜15分ごと）で推定に反映される（画面から再計算しない。#490 の方針）
+
+### 画面（照合状況 `/master/daily-report-coverage`）
+
+- 「作り置き（推定）」の区画（`components/daily-report-coverage/stock-estimates.tsx`）: 製品・「○○の後」・推定数・何で減るか・最後の動き・
+  指摘の内容。推定も指摘も無ければ出さない。「違う」で指摘のダイアログ（`stock-feedback-dialog.tsx`）を開く。工程はタップしやすいよう
+  ボタンで選ぶ（製品の工程ルートの順）。推定が出ていない製品の指摘（「作り置きしていない」等）は別の一覧で直す・取り消す
+- 照合状況の未割当では、作り置きの推定が出ている製品の「受注日より前」を分類 `stocked`（作り置き、要確認から外す）にする。
+  「作り置きしていない」と指摘した製品は推定が出ないので「受注日より前」（要確認）に戻る
 
 ## テスト
 
@@ -726,6 +792,14 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
   API テスト（`/coverage`・未割当の絞り込みと 422）、integration（`coverage` の保存・`no_routing_process`・ユーザー JWT での `/coverage`）。
   Frontend: `lib/daily-report-coverage-utils.test.ts`、`components/daily-report-coverage/daily-report-coverage.test.tsx`
   （サマリ・要確認の絞り込み・内訳からの絞り込み・元の行のクエリ・期間・工程管理を開く・未計算）
+- #591: `backend/__tests__/unit/services/test_daily_report_stock_estimator.py`（良品数で増え次の工程の加工数で減る・日報に出ない工程を飛ばす・
+  0未満にしない・同じ日は増が先・1:N の工程・加工日なし・送品・期限切れ・受注の仕掛かりを除く・作り置きから出した受注・指摘の3種と基準値）、
+  `test_daily_report_allocator.py`（受注ごとの充当）、`test_daily_report_allocation_service.py`（`p_stock`・良品数0の明細・送品日の代用・指摘の読み込み）、
+  `test_daily_report_coverage*.py`（`stocked`）、`api/routers/daily_reports/test_daily_report_stock_router.py`（参照の並び・登録・入力の検証・
+  未来の基準日・工程ルートに無い工程・404・ロール・取り消し）、integration `test_daily_report_allocation.py`（`shipped_at` のトリガー・推定の保存・
+  ユーザー JWT での指摘の登録→再計算で反映→取り消し・他テナントの製品・RLS・CHECK・統合での指摘の引き継ぎ）。
+  Frontend: `lib/daily-report-stock-utils.test.ts`、`components/daily-report-coverage/stock-estimates.test.tsx`（表示・空なら出さない・ロール・
+  工程と数の指摘・入力の誤り・指摘の取り消し）
 
 ## スコープ外（PoC ではやらない）
 

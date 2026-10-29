@@ -183,6 +183,19 @@ cd backend && ruff check . && mypy .
     未割当と数字が合わなくなる）。未割当の reason は工程ルートに無い工程（`no_routing_process`）を受注の有無より先に判定する。
     `no_candidate_order` の「承認前の受注のみ／出荷済みの受注のみ／受注なし」は保存せず読み出し時に `orders` から分類する。
     加工日の無い明細は期間の絞り込みにかかわらず含める
+  - **作り置き（先行着手）の推定（Issue #591）**: 現場はよく出る製品を作り置きして受注に出している。受注への引き当ては
+    「次の工程が始まってから」とみなし、**割り付けの規則は変えず**、純粋関数 `daily_report_stock_estimator.estimate_stock()` で
+    (製品, 工程) ごとの数を推定する（正確さは求めず、現場の「違う」の指摘 `daily_report_stock_feedback` で補正する）。推定は
+    割り付けの再計算で求め、**同じ RPC `replace_daily_report_allocation`（`p_stock`）で置き換える**。仕掛かりから確定済み・生産中の
+    受注に割り付いた分（`AllocationResult.allocations`）を引かないと、通常の仕掛かりまで作り置きに見える。明細は良品数0（すべて不良）
+    でも次の工程の消費に数えるため `processed_qty > 0` で読むので、割り付け・照合状況の集計では良品数0の明細を飛ばすこと。
+    画面の呼び名は現場の呼び名に合わせる前提で `STOCK_LABEL`（`lib/daily-report-stock-utils.ts`）1か所に置く
+  - **送品日時 `orders.shipped_at`** は `status` が `shipped` / `completed` になったときにトリガー `trg_set_order_shipped_at` が書く。
+    送品の経路を足してもアプリから書かない
+  - **`merge_products` の最新の定義は `20261029000000_add_daily_report_stock_estimates.sql`**（作り置きの指摘の付け替えを追加）。
+    作り直すときはこの本文をベースにする
+  - `set_updated_at()` は `updated_at` を無条件に `now()` にするので、統合などで付け替えても「最後に書いた日時」を残したいテーブル
+    （`daily_report_stock_feedback`）には付けず、API で `updated_at` を書く
 - **マイグレーションの CHECK 制約名**: 列の CHECK（`status text CHECK (...)`）には Postgres が `<table>_<column>_check` という名前を
   自動で付けるので、表の制約に同じ形の名前（例: `CONSTRAINT order_process_progress_completed_by_check`）を付けると
   `already exists` で失敗する。ローカル DB へ手で適用するときは `psql --single-transaction -v ON_ERROR_STOP=1` で流す

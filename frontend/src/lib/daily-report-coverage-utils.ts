@@ -39,6 +39,11 @@ export const CATEGORY_META: Record<UnallocatedCategory, CategoryMeta> = {
     question: () => "受注日より前に作っています。見込み生産？",
     needsHearing: true,
   },
+  stocked: {
+    label: "作り置き",
+    question: () => "受注日より前に作った分です。作り置きの推定に数えています",
+    needsHearing: false,
+  },
   exceeds_order_qty: {
     label: "受注数を超過",
     question: () => "受注数より多く作っています。予備・不良の見越し？",
@@ -64,6 +69,7 @@ export const CATEGORY_ORDER: UnallocatedCategory[] = [
   "before_order_date",
   "exceeds_order_qty",
   "no_work_date",
+  "stocked",
   "closed_order_only",
 ]
 
