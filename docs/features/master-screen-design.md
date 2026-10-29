@@ -34,6 +34,21 @@ frontend/src/
 
 ---
 
+## ナビゲーション（サイドメニュー・マスタ間のタブ、Issue #592）
+
+各マスタへの入口は3か所あり、どれも `app/master/constants.ts` の `masterItems` 1か所から組む。**マスタ画面を足すときは `masterItems` に1件足すだけでよい**（サイドメニュー側に項目を書き足さない）。
+
+| 入口 | 実装 | 内容 |
+|---|---|---|
+| サイドメニュー「マスタデータ」 | `components/layout/app-sidebar.tsx` | 親は `/master` へのリンク、右端のシェブロンでサブメニュー（各マスタ）を開閉する。受注管理と同じツリー形式 |
+| マスタトップ（`/master`） | `app/master/page.tsx` | カード一覧（`description`・配色も `masterItems` から） |
+| マスタ間のタブ | `app/master/layout.tsx` | `/master` 以外のマスタ画面の上部に表示 |
+
+- サイドメニューのサブメニューは `/master` 配下を開いたときだけ初めから展開する（受注管理は常に展開）
+- サブメニューの選択中は「URL が一致、または `${url}/` で始まる」で判定するので、配下の画面（製品の統合 `/master/products/merge` 等）でも該当マスタが選択中になる
+
+---
+
 ## 共通コンポーネント
 
 ### `master/layout.tsx` — コンテンツ幅制限

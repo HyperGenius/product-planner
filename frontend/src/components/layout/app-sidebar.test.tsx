@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { http, HttpResponse } from "msw"
-import { render, screen, waitFor } from "@/test-utils/render"
+import { render, screen, userEvent, waitFor } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import { SidebarProvider } from "@/components/ui/sidebar"
@@ -8,8 +8,10 @@ import type { MemberRole } from "@/types/member"
 import type { Order } from "@/types/order"
 import { AppSidebar } from "./app-sidebar"
 
+const navigation = vi.hoisted(() => ({ pathname: "/" }))
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => navigation.pathname,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }))
 
@@ -137,5 +139,43 @@ describe("AppSidebar（Issue #555 / #556）", () => {
     expect(screen.queryByLabelText("3件")).toBeNull()
     expect(fetchedOrders).not.toHaveBeenCalled()
     expect(fetchedProgress).not.toHaveBeenCalled()
+  })
+})
+
+describe("AppSidebar のマスタデータ", () => {
+  afterEach(() => {
+    navigation.pathname = "/"
+  })
+
+  it("「マスタデータ」はマスタの一覧を開き、シェブロンで各マスタのサブメニューを開ける", async () => {
+    const user = userEvent.setup()
+    setup("order_handler")
+
+    expect(await screen.findByRole("link", { name: "マスタデータ" })).toHaveAttribute("href", "/master")
+    // マスタ配下以外では閉じている
+    expect(screen.queryByRole("link", { name: "製品マスタ" })).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "マスタデータのサブメニューを開閉" }))
+
+    expect(screen.getByRole("link", { name: "製品マスタ" })).toHaveAttribute("href", "/master/products")
+    expect(screen.getByRole("link", { name: "顧客マスタ" })).toHaveAttribute("href", "/master/customers")
+    expect(screen.getByRole("link", { name: "設備マスタ" })).toHaveAttribute("href", "/master/equipments")
+    expect(screen.getByRole("link", { name: "稼働カレンダー" })).toHaveAttribute("href", "/master/calendar")
+    expect(screen.getByRole("link", { name: "日報の名寄せ" })).toHaveAttribute(
+      "href",
+      "/master/daily-report-names",
+    )
+    expect(screen.getByRole("link", { name: "日報の照合状況" })).toHaveAttribute(
+      "href",
+      "/master/daily-report-coverage",
+    )
+  })
+
+  it("マスタ配下の画面では初めから展開し、その画面のマスタを選択中にする", async () => {
+    navigation.pathname = "/master/products/merge"
+    setup("order_handler")
+
+    expect(await screen.findByRole("link", { name: "製品マスタ" })).toHaveAttribute("data-active", "true")
+    expect(screen.getByRole("link", { name: "顧客マスタ" })).toHaveAttribute("data-active", "false")
   })
 })

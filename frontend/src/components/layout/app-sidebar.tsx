@@ -46,6 +46,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { masterItems } from "@/app/master/constants"
 import { logout } from "@/lib/auth-server-actions"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useSidebarBadgeCounts, type SidebarBadgeKey } from "@/hooks/use-sidebar-badge-counts"
@@ -129,10 +130,16 @@ const menuItems: MenuItem[] = [
     allowedRoles: ORDER_APPROVAL_LOG_VIEWER_ROLES,
   },
   {
+    // マスタの一覧はマスタ画面のカード・タブと同じ定義から組む
     title: "マスタデータ",
     url: "/master",
     icon: Database,
     activePrefix: "/master",
+    items: masterItems.map((master) => ({
+      title: master.title,
+      url: master.href,
+      icon: master.icon,
+    })),
   },
   {
     title: "設定",
@@ -267,7 +274,11 @@ export function AppSidebar({ user, ...props }: AppSidebarProps) {
                               <SidebarMenuSubItem key={subItem.title}>
                                 <SidebarMenuSubButton
                                   asChild
-                                  isActive={pathname === subItem.url}
+                                  // 配下の画面（製品マスタの統合 /master/products/merge 等）でも選択中にする
+                                  isActive={
+                                    pathname === subItem.url ||
+                                    pathname.startsWith(`${subItem.url}/`)
+                                  }
                                 >
                                   <Link href={subItem.url}>
                                     <subItem.icon className="h-4 w-4" />
