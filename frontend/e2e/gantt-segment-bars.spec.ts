@@ -190,7 +190,7 @@ test.describe("ガントチャート週次表示の工程バー（Issue #535）"
 })
 
 test.describe("ガントチャート月次表示の工程バー（Issue #537）", () => {
-  // 月次の表示範囲は基準日（9/16）の前3日〜後31日。9/13(日) が1列目なので、9/N の列は N-12
+  // 月次の表示範囲は基準日（9/16）の月の1日〜末日。9/1 が1列目なので、9/N の列は N
   async function openMonth(page: Page) {
     await openSchedule(page)
     await selectOption(page, "期間", "月")
@@ -202,12 +202,12 @@ test.describe("ガントチャート月次表示の工程バー（Issue #537）"
     await screenshot(page, "month-order")
 
     // 月〜木の内職（09:00〜17:00）はそれぞれの日の列。翌日の列にずれない
-    expect(await gridColumn(page, 101)).toBe("2 / 3")
-    expect(await gridColumn(page, 102)).toBe("3 / 4")
-    expect(await gridColumn(page, 103)).toBe("4 / 5")
-    expect(await gridColumn(page, 104)).toBe("5 / 6")
+    expect(await gridColumn(page, 101)).toBe("14 / 15")
+    expect(await gridColumn(page, 102)).toBe("15 / 16")
+    expect(await gridColumn(page, 103)).toBe("16 / 17")
+    expect(await gridColumn(page, 104)).toBe("17 / 18")
     // 金曜の検査は金曜の列（土曜の列ではない）
-    expect(await gridColumn(page, 107)).toBe("6 / 7")
+    expect(await gridColumn(page, 107)).toBe("18 / 19")
 
     // 内職の4セグメントは1行。同じ工程名でも別の工程（ルーティング）は別の行
     const row = await rowOf(page, 101)
@@ -215,8 +215,8 @@ test.describe("ガントチャート月次表示の工程バー（Issue #537）"
     expect(await rowOf(page, 301)).not.toBe(await rowOf(page, 303))
 
     // ケース1: 月曜と木曜の飛び飛びのセグメント。間（火・水）を塗らない
-    expect(await gridColumn(page, 201)).toBe("2 / 3")
-    expect(await gridColumn(page, 202)).toBe("5 / 6")
+    expect(await gridColumn(page, 201)).toBe("14 / 15")
+    expect(await gridColumn(page, 202)).toBe("17 / 18")
     expect(await rowOf(page, 201)).toBe(await rowOf(page, 202))
   })
 

@@ -354,9 +354,9 @@ describe("GanttChart（スケジュール）の月次表示のセグメント（
   it("セグメントをその日の列に描き、間の日を塗らない", () => {
     renderMonth()
     const bars = segmentBars()
-    // 9/15(火) は3列目、9/17(木) は5列目（翌日の列にずれない）
-    expect(bars[0].style.gridColumn).toBe("3 / 4")
-    expect(bars[1].style.gridColumn).toBe("5 / 6")
+    // 月次は9/1が1列目。9/15(火) は15列目、9/17(木) は17列目（翌日の列にずれない）
+    expect(bars[0].style.gridColumn).toBe("15 / 16")
+    expect(bars[1].style.gridColumn).toBe("17 / 18")
   })
 
   it("同じ工程のセグメントは1行に並べ、別の工程は別の行にする（フラット表示）", () => {
