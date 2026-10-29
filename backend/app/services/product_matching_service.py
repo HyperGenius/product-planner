@@ -1,7 +1,10 @@
 import os
+import re
+import unicodedata
 from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
+from app.services.daily_report_name_matching_service import fetch_all_rows
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -19,6 +22,11 @@ _AUTO_CONFIRM_THRESHOLD = float(
 # 僅差の候補が複数ある場合は自動確定せず、候補一覧として提示する。
 _AUTO_CONFIRM_MARGIN = float(
     os.environ.get("PRODUCT_MATCH_AUTO_CONFIRM_MARGIN", "0.15")
+)
+# 品名に埋もれた品番で照合するとき（Issue #599）に対象とする品番の最短の長さ。
+# 短い品番は品名・寸法の一部と誤一致しやすいため照合に使わない。
+_EMBEDDED_CODE_MIN_LENGTH = int(
+    os.environ.get("PRODUCT_MATCH_EMBEDDED_CODE_MIN_LENGTH", "4")
 )
 
 
@@ -116,3 +124,68 @@ def match_products(db: Client, tenant_id: str, product_name: str) -> dict[str, A
             product_id = rows[0]["id"]
 
     return {"product_id": product_id, "candidates": candidates}
+
+
+def _normalize_for_code_search(text: str) -> str:
+    """半角カナ・全角英数を揃え（NFKC）、大文字小文字を区別しないよう大文字にする。"""
+    return unicodedata.normalize("NFKC", text).strip().upper()
+
+
+def find_embedded_product_code(
+    raw_texts: list[str | None], code_by_product_id: dict[int, str]
+) -> int | None:
+    """
+    抽出した品名・品番の中に、候補の品番が語として含まれる製品を探す（Issue #599）。
+
+    画像PDF（FAX・スキャン）を読ませると、品番が単独の項目に入らず
+    `TEST01ﾌｨﾙﾀｰ QX5501A φ10.0×10L` のように品名に埋もれることがある。品番の前後が
+    英数字でない（語として現れる）ものだけを一致とみなし、`QX5501` が `QX5501A` に
+    当たらないようにする。当たった製品がちょうど1つのときだけ返す（0件・複数件は None）。
+    """
+    haystacks = [_normalize_for_code_search(t) for t in raw_texts if t and t.strip()]
+    if not haystacks:
+        return None
+
+    matched: set[int] = set()
+    for product_id, code in code_by_product_id.items():
+        normalized_code = _normalize_for_code_search(code)
+        if len(normalized_code) < _EMBEDDED_CODE_MIN_LENGTH:
+            continue
+        pattern = re.compile(rf"(?<![0-9A-Z]){re.escape(normalized_code)}(?![0-9A-Z])")
+        if any(pattern.search(haystack) for haystack in haystacks):
+            matched.add(product_id)
+    return next(iter(matched)) if len(matched) == 1 else None
+
+
+def match_product_by_embedded_code(
+    db: Client, tenant_id: str, customer_id: int, raw_texts: list[str | None]
+) -> int | None:
+    """
+    その顧客が過去に注文した製品の品番が、抽出した品名・品番に語として含まれれば
+    その製品を返す（Issue #599）。
+
+    候補を顧客の注文実績に絞るのは、テナント全体の品番だと短い品番・似た品番の
+    誤一致が増えるため。別名辞書・品番の完全一致・pg_trgm で決まらなかったときの
+    最後の手段として呼ぶ。
+    """
+    rows = fetch_all_rows(
+        lambda: db.table(SupabaseTableName.ORDERS.value)
+        .select("id, product_id, products(code)")
+        .eq("tenant_id", tenant_id)
+        .eq("customer_id", customer_id)
+        .not_.is_("product_id", "null")
+        .order("id")
+    )
+    code_by_product_id: dict[int, str] = {}
+    for row in rows:
+        product = row.get("products")
+        code = product.get("code") if isinstance(product, dict) else None
+        if isinstance(code, str) and code.strip():
+            code_by_product_id[int(row["product_id"])] = code
+    product_id = find_embedded_product_code(raw_texts, code_by_product_id)
+    if product_id is not None:
+        logger.info(
+            f"product match: embedded code matched product_id={product_id} "
+            f"(customer_id={customer_id}, candidates={len(code_by_product_id)})"
+        )
+    return product_id

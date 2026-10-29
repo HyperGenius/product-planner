@@ -69,6 +69,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
       2. `products.name` に対する品番文字列 (product_number_raw) でのpg_trgm検索
          （`code` 列が未整備で、`name` 列に品番文字列が入っているテナントに対応）
       3. `products.name` に対する品名文字列 (product_name_raw) でのpg_trgm検索
+      4. その顧客が過去に注文した製品の品番が、品名・品番に語として含まれるか
+         （画像PDFで品番が品名に埋もれた明細のため。Issue #599、後述）
       - `match_products` の自動確定条件は「候補が1件だけ」ではなく、
         「最上位候補のスコアが `PRODUCT_MATCH_AUTO_CONFIRM_THRESHOLD` 以上、かつ
         次点候補とのスコア差が `PRODUCT_MATCH_AUTO_CONFIRM_MARGIN` 以上」。
@@ -78,6 +80,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
    b. すべて失敗した場合: `order_parse_log` に `reason='no_product_match'` で記録した上で、
       明細をドロップせず `product_id=NULL`・`extracted_product_name=<抽出生テキスト>` で
       下書きを起票する（Issue #296、詳細後述）
+   b'. 顧客注文番号が一致する承認依頼以降の受注があれば「再送」とみなし、起票せず
+      既存の受注にPDFを添付する（`reason='resent_document'`。Issue #599、後述）
    c. certainty はそのまま orders.customer_certainty に保存する（confirmed/forecast/
       forecast_tentative）。orders.status には反映しない（Issue #267）。
       許容値外・未指定の場合は NULL（確度不明）で保存する（Issue #474、詳細後述）
@@ -587,6 +591,53 @@ CHECK 制約・型定義・RPC の変更は無い。
   `customer_order_no` を自動的に含む
 - フロント: 受注一覧（`orders/page.tsx` + `order-table-row.tsx`）に「顧客注文番号」列、
   受注詳細（`orders/[id]/page.tsx`）に「顧客注文番号」項目を追加（表示のみ）
+
+### 注文書の再送で重複起票しない（Issue #599）
+
+顧客によっては、注文時に送った注文書を納期近辺にもう一度送ってくる（顧客A社では、2ページ目に
+「庫入伝票（兼納品書）・現品票」を付けたスキャンの画像PDFで届く。現場は庫入伝票を印刷して送品に
+添付している）。読み取りのたびに品名・納期の読み方がぶれると dedupe キー
+`(顧客, 製品, 希望納期)` が一致せず、承認後の受注とは別の下書きが起票されていた。
+実際に起きたのは、(1) 画像として読んだ再送分で品番が品名に埋もれて製品が照合できず、
+`product_id IS NULL` の分岐（製品未照合の受注どうししか比べない）に回った、
+(2) 元の受注は #366 より前の起票で `customer_order_no` が NULL、の2つが重なったケース。
+ファイル名・ファイルのハッシュは、再送がスキャンし直したファイルなので使えない。
+
+**A. 品名に埋もれた品番での製品照合**（`product_matching_service.match_product_by_embedded_code()`）
+
+- `_resolve_product_id()` の別名辞書 → `products.code` 完全一致 → pg_trgm で決まらなかったときの
+  最後の手段。顧客不明（#521）の明細では行わない
+- 候補は**その顧客が過去に注文した製品**の `products.code`（`orders` → `products(code)` の埋め込みで
+  `fetch_all_rows()` でページングして読む）。テナント全体だと短い品番・似た品番の誤一致が増えるため
+- 判定は純粋関数 `find_embedded_product_code()`: 品名・品番と品番を NFKC ＋大文字で揃え、品番の
+  前後が英数字でない（語として現れる）ものだけ一致とみなす（`QX5501` は `QX5501A` に当たらない）。
+  当たった製品が**ちょうど1つ**のときだけ確定し、品番が `PRODUCT_MATCH_EMBEDDED_CODE_MIN_LENGTH`
+  （既定 4）文字未満なら使わない
+- 製品が決まれば既存の dedupe キーで承認後の受注と突き合わさり `skipped_downgrade` になる
+  （注文番号の無い #366 以前の受注の再送はこれで止まる）
+
+**B. 顧客注文番号での再送の判定**（`pdf_order_parsing_service._find_resent_order_id()`）
+
+- `_process_line_item()` で RPC を呼ぶ前に、同じテナント・顧客・`customer_order_no`（明細の
+  `line_order_no` → `document_order_no` → `AUTO-xxxx`）で、`order_type='production'` かつ
+  RPC が保護しているステータス（`pending_approval` 〜 `canceled`、`_PROTECTED_ORDER_STATUSES`）の
+  受注を探す
+- 同じ受注と言える条件（`_pick_resent_order_id()`）: 製品が照合できた明細は製品が一致、照合できなかった
+  明細は希望納期と数量が一致。当たる受注が**ちょうど1件**のときだけ再送とする（同じ製品の分納が
+  複数あるときは決めず、従来の dedupe キーに任せる）
+- 再送なら起票・更新せず、届いたPDFを既存の受注に添付し（同じ `storage_path` が既に添付済みなら
+  足さない）、`order_parse_log` に `reason='resent_document'`（detail に既存の受注 ID と読み取った値）を
+  残す。正常な運用なので通知は出さず、ログがあるので「起票0件」の通知も出ない。受信メール処理結果
+  一覧・Slack ではスキップ扱い（`EMAIL_INTAKE_SKIP_REASONS`）
+- 既存の受注が `draft` なら対象外（内示の数量改定・確度の昇格は従来どおり RPC に任せる）
+- 製品が一致すれば、読み取った希望納期・数量が違っても再送とみなす（納期変更はホワイトボードが正で、
+  注文書の再送で受注を変えない運用。読み取った値は detail に残る）
+- 送品の正は弥生なので、再送を理由に送品済みにはしない。添付は `orders.source_attachment_id` を
+  変えないので、処理結果一覧の起票件数にも数えない
+- 修理等は既存の部分 UNIQUE `orders_repair_customer_order_no_key` で再受信をスキップしている（#493）
+
+顧客ごとに2ページ目（庫入伝票）を読まないようにする抽出指示は、フォーマット変更に追随できない懸念から
+見送った（#600、backlog）。
 
 ---
 

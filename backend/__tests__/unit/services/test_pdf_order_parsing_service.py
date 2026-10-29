@@ -4,8 +4,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from app.services.pdf_order_extraction_service import PdfDocumentRejectedError
 from app.services.pdf_order_parsing_service import (
+    _find_resent_order_id,
     _generate_auto_customer_order_no,
     _normalize_order_no_digits,
+    _pick_resent_order_id,
     _process_line_item,
     _resolve_customer_order_no,
     parse_pending_order_pdfs,
@@ -37,6 +39,29 @@ def _no_alias_match():
         return_value=None,
     ) as mock_alias:
         yield mock_alias
+
+
+@pytest.fixture(autouse=True)
+def _no_embedded_code_match():
+    """品名に埋もれた品番での照合（Issue #599）を既定で無効化し、既存テストが
+    別名・品番一致・pg_trgm の経路だけを検証できるようにする。"""
+    with patch(
+        "app.services.pdf_order_parsing_service.match_product_by_embedded_code",
+        return_value=None,
+    ) as mock_embedded:
+        yield mock_embedded
+
+
+@pytest.fixture(autouse=True)
+def _no_resent_order():
+    """注文番号での再送の判定（Issue #599）を既定で無効化し、既存テストが
+    RPC による dedupe の経路を検証できるようにする。判定のクエリ自体は
+    TestResentDocument で検証する。"""
+    with patch(
+        "app.services.pdf_order_parsing_service._find_resent_order_id",
+        return_value=None,
+    ) as mock_resent:
+        yield mock_resent
 
 
 @pytest.fixture(autouse=True)
@@ -2112,3 +2137,267 @@ class TestRepairOrderIntake:
         (attachment_insert,) = [i for i in inserts if "order_id" in i]
         assert attachment_insert["parse_status"] == "success_image"
         assert [i["reason"] for i in inserts if "reason" in i] == ["image_extracted"]
+
+
+@pytest.mark.unit
+class TestEmbeddedCodeFallback:
+    """品名に埋もれた品番での照合を最後の手段として使う（Issue #599）。"""
+
+    _LINE = {
+        "product_name_raw": "TEST01ﾌｨﾙﾀｰ QX5501A φ10.0×10L",
+        "product_number_raw": None,
+        "quantity": 2000,
+        "delivery_date": "2026-10-21",
+        "certainty": "confirmed",
+    }
+
+    def _staging_row(self, **overrides):
+        row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "source_raw": "本文",
+            "storage_path": "tenant-1/inbox/msg-1/order.pdf",
+            "original_filename": "order.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 1234,
+        }
+        row.update(overrides)
+        return row
+
+    def test_embedded_code_is_used_when_other_matching_fails(
+        self, _no_embedded_code_match
+    ):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "skipped_downgrade"}]
+        )
+        _no_embedded_code_match.return_value = 321
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_products",
+            return_value={"product_id": None, "candidates": []},
+        ):
+            created = _process_line_item(mock_db, self._staging_row(), self._LINE)
+
+        assert created is False
+        assert _no_embedded_code_match.call_args.args == (
+            mock_db,
+            "tenant-1",
+            7,
+            ["TEST01ﾌｨﾙﾀｰ QX5501A φ10.0×10L", None],
+        )
+        # 製品が決まったので、製品付きの既存受注と同じ dedupe キーで RPC に渡る
+        rpc_params = mock_db.rpc.call_args_list[-1].args[1]
+        assert rpc_params["p_product_id"] == 321
+        reasons = [
+            c.args[0].get("reason") for c in mock_db.table().insert.call_args_list
+        ]
+        assert "no_product_match" not in reasons
+
+    def test_not_used_when_code_matches(self, _no_embedded_code_match):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "skipped_no_change"}]
+        )
+        line = {**self._LINE, "product_number_raw": "QX5501A"}
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_product_by_code",
+            return_value=321,
+        ):
+            _process_line_item(mock_db, self._staging_row(), line)
+
+        _no_embedded_code_match.assert_not_called()
+
+    def test_not_used_for_unknown_customer(self, _no_embedded_code_match):
+        mock_db = MagicMock()
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "inserted"}]
+        )
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_products",
+            return_value={"product_id": None, "candidates": []},
+        ):
+            _process_line_item(mock_db, self._staging_row(customer_id=None), self._LINE)
+
+        _no_embedded_code_match.assert_not_called()
+
+
+@pytest.mark.unit
+class TestPickResentOrderId:
+    _CANDIDATES = [
+        {"id": 1, "product_id": 10, "quantity": 2000, "deadline_date": "2026-10-21"},
+        {"id": 2, "product_id": 11, "quantity": 500, "deadline_date": "2026-10-21"},
+    ]
+
+    def test_matches_by_product(self):
+        assert _pick_resent_order_id(self._CANDIDATES, 11, 999, "2026-12-01") == 2
+
+    def test_unmatched_product_matches_by_deadline_and_quantity(self):
+        assert _pick_resent_order_id(self._CANDIDATES, None, 2000, "2026-10-21") == 1
+
+    def test_unmatched_product_without_deadline_returns_none(self):
+        assert _pick_resent_order_id(self._CANDIDATES, None, 2000, None) is None
+
+    def test_split_deliveries_of_same_product_return_none(self):
+        # 同じ製品の分納が複数あると、どの受注の再送か決められない
+        candidates = [
+            {
+                "id": 1,
+                "product_id": 10,
+                "quantity": 1000,
+                "deadline_date": "2026-10-21",
+            },
+            {
+                "id": 2,
+                "product_id": 10,
+                "quantity": 1000,
+                "deadline_date": "2026-11-21",
+            },
+        ]
+
+        assert _pick_resent_order_id(candidates, 10, 1000, "2026-10-21") is None
+
+    def test_different_product_is_not_resend(self):
+        assert _pick_resent_order_id(self._CANDIDATES, 99, 2000, "2026-10-21") is None
+
+
+@pytest.mark.unit
+class TestResentDocument:
+    """承認依頼以降に進んだ受注の注文書の再送（Issue #599）。"""
+
+    _LINE = {
+        "product_name_raw": "TEST01ﾌｨﾙﾀｰ QX5501A φ10.0×10L",
+        "product_number_raw": None,
+        "quantity": 2000,
+        "delivery_date": "2026-10-21",
+        "certainty": "confirmed",
+    }
+
+    def _staging_row(self, **overrides):
+        row = {
+            "id": "att-2",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "source_raw": "本文",
+            "storage_path": "tenant-1/inbox/msg-2/order.pdf",
+            "original_filename": "order.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 1234,
+        }
+        row.update(overrides)
+        return row
+
+    def test_resent_document_is_attached_to_existing_order_without_rpc(
+        self, _no_resent_order
+    ):
+        mock_db = MagicMock()
+        _no_resent_order.return_value = 500
+        # 既存の受注には、まだこのファイルが添付されていない
+        mock_db.table().select().eq().eq().eq().limit().execute.return_value = (
+            MagicMock(data=[])
+        )
+
+        with patch(
+            "app.services.pdf_order_parsing_service.match_products",
+            return_value={"product_id": None, "candidates": []},
+        ):
+            created = _process_line_item(
+                mock_db,
+                self._staging_row(),
+                self._LINE,
+                document_order_no="PO-1",
+                attachment_parse_status="success_image",
+            )
+
+        assert created is False
+        mock_db.rpc.assert_not_called()
+        assert _no_resent_order.call_args.args == (
+            mock_db,
+            "tenant-1",
+            7,
+            "PO-1",
+            None,
+            2000,
+            "2026-10-21",
+        )
+
+        inserts = [c.args[0] for c in mock_db.table().insert.call_args_list]
+        attachment = inserts[0]
+        assert attachment["order_id"] == 500
+        assert attachment["storage_path"] == "tenant-1/inbox/msg-2/order.pdf"
+        assert attachment["parse_status"] == "success_image"
+        log = inserts[1]
+        assert log["reason"] == "resent_document"
+        assert log["order_attachment_id"] == "att-2"
+        assert log["detail"]["order_id"] == 500
+        # 正常な運用なので、照合失敗・その他の通知は出さない
+        assert len(inserts) == 2
+
+    def test_already_attached_file_is_not_attached_twice(self, _no_resent_order):
+        mock_db = MagicMock()
+        _no_resent_order.return_value = 500
+        mock_db.table().select().eq().eq().eq().limit().execute.return_value = (
+            MagicMock(data=[{"id": "existing-attachment"}])
+        )
+
+        _process_line_item(
+            mock_db, self._staging_row(), self._LINE, document_order_no="PO-1"
+        )
+
+        inserts = [c.args[0] for c in mock_db.table().insert.call_args_list]
+        assert [i.get("reason") for i in inserts] == ["resent_document"]
+
+    def test_body_line_without_attachment_only_logs(self, _no_resent_order):
+        mock_db = MagicMock()
+        _no_resent_order.return_value = 500
+
+        _process_line_item(
+            mock_db,
+            self._staging_row(storage_path=""),
+            self._LINE,
+            document_order_no="PO-1",
+        )
+
+        inserts = [c.args[0] for c in mock_db.table().insert.call_args_list]
+        assert [i.get("reason") for i in inserts] == ["resent_document"]
+
+    def test_find_queries_protected_orders_with_same_order_no(self):
+        mock_db = MagicMock()
+        query = mock_db.table().select().eq().eq().eq().eq().in_()
+        query.execute.return_value = MagicMock(
+            data=[
+                {
+                    "id": 500,
+                    "product_id": 10,
+                    "quantity": 2000,
+                    "deadline_date": "2026-10-21",
+                }
+            ]
+        )
+
+        result = _find_resent_order_id(
+            mock_db, "tenant-1", 7, "PO-1", 10, 2000, "2026-10-21"
+        )
+
+        assert result == 500
+        status_filter = mock_db.table().select().eq().eq().eq().eq().in_.call_args
+        assert status_filter.args[0] == "status"
+        # 下書きは対象外（数量改定・確度昇格は RPC に任せる）
+        assert "draft" not in status_filter.args[1]
+        assert "in_progress" in status_filter.args[1]
+
+    @pytest.mark.parametrize(
+        ("customer_id", "order_no"), [(None, "PO-1"), (7, None), (7, "")]
+    )
+    def test_find_without_customer_or_order_no_skips_query(self, customer_id, order_no):
+        mock_db = MagicMock()
+
+        result = _find_resent_order_id(
+            mock_db, "tenant-1", customer_id, order_no, 10, 2000, "2026-10-21"
+        )
+
+        assert result is None
+        mock_db.table.assert_not_called()
