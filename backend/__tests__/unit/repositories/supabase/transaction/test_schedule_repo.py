@@ -27,6 +27,7 @@ def _schedule_row(**overrides: Any) -> dict[str, Any]:
         "orders": {
             "order_number": "ORD-001",
             "customer_order_no": "PO-1",
+            "customer_id": 5,
             "status": "confirmed",
             "quantity": 500,
             "deadline_date": "2026-10-31",
@@ -89,6 +90,7 @@ class TestScheduleRepositoryGetByPeriod:
         assert item["desired_deadline"] == "2026-10-31"
         assert item["confirmed_deadline"] == "2026-11-02"
         assert item["product_name"] == "製品A"
+        assert item["customer_id"] == 5
         assert item["customer_name"] == "顧客A社"
         assert item["customer_alias"] == "A社"
         assert item["process_name"] == "切削"
@@ -99,13 +101,14 @@ class TestScheduleRepositoryGetByPeriod:
     def test_unknown_customer_is_null(self, mock_client):
         """顧客不明（customer_id が NULL、#521）は customer_name を null で返す"""
         row = _schedule_row()
-        row["orders"] = {**row["orders"], "customers": None}
+        row["orders"] = {**row["orders"], "customer_id": None, "customers": None}
         self._setup(mock_client, [row], [], [])
 
         [item] = ScheduleRepository(mock_client).get_by_period(
             "2026-10-25", "2026-10-31"
         )
 
+        assert item["customer_id"] is None
         assert item["customer_name"] is None
         assert item["customer_alias"] is None
 

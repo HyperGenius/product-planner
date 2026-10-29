@@ -20,6 +20,8 @@ export interface Schedule {
   /** 完成見込み（承認確定時に算出。日付のみ YYYY-MM-DD） */
   confirmed_deadline?: string | null
   product_name?: string | null
+  /** 顧客ID。顧客不明（#521）は null。顧客の絞り込みに使う（Issue #597） */
+  customer_id?: number | null
   /** 顧客名。顧客不明（customer_id が NULL、#521）は null */
   customer_name?: string | null
   /** 顧客の通称（`customers.alias`）。ガントのラベルは通称を優先する（Issue #589） */
