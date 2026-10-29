@@ -64,6 +64,10 @@ class ProductionScheduleItem(BaseModel):
         None, description="完成見込み（承認確定時）"
     )
     product_name: str | None = None
+    customer_id: int | None = Field(
+        None,
+        description="顧客ID。顧客不明（#521）は null。画面の顧客の絞り込みに使う（#597）",
+    )
     customer_name: str | None = Field(
         None, description="顧客名。顧客不明（customer_id が NULL、#521）は null"
     )

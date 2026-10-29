@@ -31,6 +31,8 @@ import {
   parseScheduleViewPrefs,
   type ScheduleViewPrefs,
 } from "@/lib/schedule-view-prefs"
+import { filterSchedulesByCustomer, listScheduleCustomers, withSelectedCustomer } from "@/lib/schedule-customer-filter"
+import { CustomerFilter } from "@/components/schedule/customer-filter"
 import { SCHEDULE_EDITOR_ROLES } from "@/types/member"
 import type { GanttViewMode, GroupByMode, Schedule } from "@/types/schedule"
 import type { ProcessShiftTarget } from "@/types/schedule-shift"
@@ -82,7 +84,7 @@ function useCollapseSidebarOnTablet() {
 export default function SchedulePage() {
   useCollapseSidebarOnTablet()
 
-  // 状態管理。表示単位・期間・設備グループ・折りたたみは localStorage に覚える（Issue #581）
+  // 状態管理。表示単位・期間・設備グループ・顧客・折りたたみは localStorage に覚える（Issue #581）
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date())
   const [prefs, setPrefs] = useLocalStorageState<ScheduleViewPrefs>(
     SCHEDULE_VIEW_PREFS_STORAGE_KEY,
@@ -173,7 +175,18 @@ export default function SchedulePage() {
   )
   const { data: schedules, isLoading: schedulesLoading, error: schedulesError } = schedulesQuery
 
-  // 日報の実績による進捗（Issue #491）。表示中の受注をまとめて1リクエストで取得する
+  // 顧客の絞り込み（Issue #597）。選択肢は表示中の期間に予定がある顧客で、選んでいる顧客は予定が無くなっても残す
+  const customerOptions = useMemo(
+    () => withSelectedCustomer(listScheduleCustomers(schedules ?? []), prefs.customer),
+    [schedules, prefs.customer],
+  )
+  const visibleSchedules = useMemo(
+    () => filterSchedulesByCustomer(schedules ?? [], prefs.customer),
+    [schedules, prefs.customer],
+  )
+
+  // 日報の実績による進捗（Issue #491）。表示中の受注をまとめて1リクエストで取得する。
+  // 顧客の絞り込み前の受注で取り、絞り込みを変えるたびに取り直さない
   const scheduleOrderIds = useMemo(
     () => (schedules ?? []).map((s) => s.order_id),
     [schedules],
@@ -191,8 +204,8 @@ export default function SchedulePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- orderProgress は「今」を取り直す合図（値は使わない）
   const now = useMemo(() => new Date(), [orderProgress])
   const detail = useMemo(
-    () => buildScheduleDetail(selection, schedules, orderProgress?.items, now),
-    [selection, schedules, orderProgress, now],
+    () => buildScheduleDetail(selection, visibleSchedules, orderProgress?.items, now),
+    [selection, visibleSchedules, orderProgress, now],
   )
 
   // 週次表示用カレンダーデータ（月跨ぎ対応のため2ヶ月分を取得）
@@ -438,6 +451,16 @@ export default function SchedulePage() {
             </Popover>
           </div>
 
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">顧客</span>
+            <CustomerFilter
+              options={customerOptions}
+              value={prefs.customer}
+              onChange={(customer) => updatePrefs({ customer })}
+              disabled={schedulesLoading}
+            />
+          </div>
+
           {/* 凡例の開閉（Issue #589）。タブレットでホバーに頼らず1回のタップで開閉する */}
           <div className="ml-auto">
             <Button
@@ -501,9 +524,9 @@ export default function SchedulePage() {
                 <div className="text-lg text-muted-foreground">読み込み中...</div>
               </div>
             </div>
-          ) : schedules && schedules.length > 0 ? (
+          ) : visibleSchedules.length > 0 ? (
             <GanttChart
-              tasks={schedules}
+              tasks={visibleSchedules}
               viewMode={viewMode}
               colorMode="product"
               groupBy={groupBy}
@@ -521,13 +544,22 @@ export default function SchedulePage() {
           ) : (
             <div className="flex h-96 items-center justify-center">
               <div className="text-center text-muted-foreground">
-                <p>選択された期間のスケジュールがありません</p>
+                {prefs.customer ? (
+                  <>
+                    <p>この期間に{prefs.customer.label}の予定はありません</p>
+                    <Button variant="outline" className="mt-3 h-11" onClick={() => updatePrefs({ customer: null })}>
+                      絞り込みを解除
+                    </Button>
+                  </>
+                ) : (
+                  <p>選択された期間のスケジュールがありません</p>
+                )}
               </div>
             </div>
           )}
         </div>
 
-        {/* 詳細シート。開いている工程・注文が表示中の期間に無くなったら閉じる */}
+        {/* 詳細シート。開いている工程・注文が表示中の期間・顧客の絞り込みから外れたら閉じる */}
         {detail && (
           <ScheduleDetailSheet
             detail={detail}

@@ -201,6 +201,7 @@ def seeded(admin_db):
     )
 
     yield {
+        "customer_id": customer_id,
         "known_order_id": known_order_id,
         "unknown_order_id": unknown_order_id,
         "solo_group_id": solo_group_id,
@@ -245,6 +246,7 @@ class TestGetByPeriod:
         press, inspection, unknown = rows
 
         assert press["order_id"] == seeded["known_order_id"]
+        assert press["customer_id"] == seeded["customer_id"]
         assert press["customer_name"] == "顧客A社"
         assert press["customer_alias"] == "A社"
         assert press["product_name"] == "ピン"
@@ -263,6 +265,7 @@ class TestGetByPeriod:
         assert inspection["equipment_group_name"] == "検査機"
 
         assert unknown["order_id"] == seeded["unknown_order_id"]
+        assert unknown["customer_id"] is None
         assert unknown["customer_name"] is None
         assert unknown["customer_alias"] is None
 

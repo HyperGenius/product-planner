@@ -52,6 +52,7 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
 | `quantity` / `order_status` / `customer_order_no` | 受注の数量・ステータス・顧客の注文番号 |
 | `desired_deadline` | 希望納期。DB 列は `orders.deadline_date`（受注 API と同じく `desired_deadline` で返す） |
 | `confirmed_deadline` | 完成見込み（承認確定時） |
+| `customer_id` | 顧客ID。顧客不明（#521）は null。画面の顧客の絞り込み（#597）に使う |
 | `customer_name` | 顧客の正式名称。顧客不明（`customer_id` が NULL、#521）は null。表示側で「顧客不明」 |
 | `customer_alias` | 顧客の通称（`customers.alias`、#589）。ラベル列は通称を優先する |
 | `sequence_order` | 工程順。オーダー別の工程行の並び順 |
@@ -197,10 +198,21 @@ Epic #577。以降のサブ Issue はこのページに追記する。列位置�
 - 幅 1366px 以下で開くとサイドバーを閉じ、画面を離れるときに元へ戻す（`useCollapseSidebarOnTablet()`、`useEffectEvent`）
 - スケジュール・進捗は5分ごとに自動更新（`useSchedules` / `useOrderProgressList` の `refetchInterval`）し、最終更新時刻と「更新」ボタンを出す。
   再取得に失敗したら「取得に失敗しました（最終更新 …）」に切り替え、取得済みのガントは出したままにする
-- 表示単位・期間・設備グループ・折りたたみは localStorage（`schedule-view-prefs`）に覚える。読み書きは
+- 表示単位・期間・設備グループ・顧客・折りたたみは localStorage（`schedule-view-prefs`）に覚える。読み書きは
   `hooks/use-local-storage-state.ts`（`useSyncExternalStore` で SSR 中は既定値、ストレージが使えない端末では開いている間だけ保つ）、
   値の検証は `lib/schedule-view-prefs.ts`（外れた項目は既定値に戻す。削除された設備グループは「すべて」扱い）。折りたたみは新しい 300 件まで
 - E2E: `frontend/e2e/gantt-tablet-touch.spec.ts`（1180×820・`hasTouch`。スワイプは CDP の `Input.dispatchTouchEvent` で再現）
+
+### 顧客の絞り込み（Issue #597）
+
+- ツールバーの「顧客」（`components/schedule/customer-filter.tsx`、検索付きコンボボックス）で**1社**（または「すべて」）を選ぶ。設備グループの絞り込みと併用できる（AND）
+- 選択肢は**表示中の期間に予定がある顧客**（取得済みのスケジュールから `listScheduleCustomers()`）。表示名はラベル列と同じく通称優先
+  （`scheduleCustomerLabel()`）で、通称・正式名称の両方で検索できる。顧客不明の注文があれば「顧客不明」（`customerId: null`）も選べる
+- 絞り込みはフロントで行う（`filterSchedulesByCustomer()`）。API は期間・設備グループで取得した全顧客分を返し、`customer_id` で照合する。
+  日報の進捗は絞り込み前の注文で取得する（絞り込みを変えるたびに取り直さない）。詳細シートは絞り込み後のスケジュールから組み立てるので、
+  開いている注文・工程が絞り込みで隠れたら閉じる
+- 選んだ顧客は id と表示名を `schedule-view-prefs` の `customer` に覚える。期間を移して予定が無くなっても選択は外さず、選択肢にも残す
+  （`withSelectedCustomer()`）。絞り込んだ結果が0件なら「この期間に〇〇の予定はありません」と「絞り込みを解除」を出す
 
 ## 工程の前倒し・後ろ倒し（Issue #582）
 
