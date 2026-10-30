@@ -2,7 +2,6 @@
 from unittest.mock import MagicMock
 
 import anthropic
-import httpx
 import pytest
 from app.dependencies import (
     get_current_tenant_id,
@@ -372,9 +371,8 @@ class TestCustomerExtractionPromptRouter:
         set_role("platform_admin")
 
         def _fail(*_args):
-            raise anthropic.APIConnectionError(
-                request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-            )
+            # anthropic 2.x は httpx2 の Request を取るので、版に依存しないモックを渡す
+            raise anthropic.APIConnectionError(request=MagicMock())
 
         monkeypatch.setattr(router_module, "preview_extraction", _fail)
 
