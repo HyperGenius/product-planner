@@ -60,3 +60,10 @@ export const PRODUCT_MERGE_ROLES: MemberRole[] = ["president", "platform_admin"]
  * 承認系の操作と同じく platform_admin を含めない。生産管理者のロールができたらここに足す
  */
 export const SCHEDULE_EDITOR_ROLES: MemberRole[] = ["president"]
+
+/**
+ * 顧客ごとの抽出指示（取り込み設定）の編集・試し読み・履歴の閲覧ができるロール。
+ * Backend `routers/master/customer_extraction_prompt.py` の `_EXTRACTION_PROMPT_EDITOR_ROLES` と
+ * RPC `save_customer_extraction_prompt` と揃える（Issue #602）。当面は開発・運用者だけ
+ */
+export const EXTRACTION_PROMPT_EDITOR_ROLES: MemberRole[] = ["platform_admin"]

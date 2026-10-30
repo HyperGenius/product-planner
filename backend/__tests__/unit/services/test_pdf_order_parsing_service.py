@@ -5,11 +5,11 @@ import pytest
 from app.services.pdf_order_extraction_service import PdfDocumentRejectedError
 from app.services.pdf_order_parsing_service import (
     _find_resent_order_id,
-    _generate_auto_customer_order_no,
     _normalize_order_no_digits,
     _pick_resent_order_id,
     _process_line_item,
     _resolve_customer_order_no,
+    generate_auto_customer_order_no,
     parse_pending_order_pdfs,
 )
 from app.services.pdf_text_service import PdfTextResult
@@ -1174,25 +1174,25 @@ class TestCustomerOrderNoResolution:
 
     def test_auto_order_no_is_deterministic_for_same_document(self):
         text = "注文一覧表 2026年7月29日  FILTER COMP"
-        assert _generate_auto_customer_order_no(
+        assert generate_auto_customer_order_no(
             42, text
-        ) == _generate_auto_customer_order_no(
+        ) == generate_auto_customer_order_no(
             42, "  注文一覧表\n2026年7月29日\tFILTER COMP "
         )
 
     def test_auto_order_no_differs_by_customer_and_content(self):
         text = "注文一覧表"
-        assert _generate_auto_customer_order_no(
+        assert generate_auto_customer_order_no(
             1, text
-        ) != _generate_auto_customer_order_no(2, text)
-        assert _generate_auto_customer_order_no(
+        ) != generate_auto_customer_order_no(2, text)
+        assert generate_auto_customer_order_no(
             1, "A"
-        ) != _generate_auto_customer_order_no(1, "B")
+        ) != generate_auto_customer_order_no(1, "B")
 
     def test_auto_order_no_is_none_for_empty_text(self):
-        assert _generate_auto_customer_order_no(1, "") is None
-        assert _generate_auto_customer_order_no(1, "   ") is None
-        assert _generate_auto_customer_order_no(1, None) is None
+        assert generate_auto_customer_order_no(1, "") is None
+        assert generate_auto_customer_order_no(1, "   ") is None
+        assert generate_auto_customer_order_no(1, None) is None
 
     def test_process_line_item_passes_line_order_no_to_rpc(self):
         mock_db = MagicMock()
@@ -2013,7 +2013,7 @@ class TestRepairOrderIntake:
         (repair_insert,) = [i for i in self._inserts(mock_db) if "order_type" in i]
         assert repair_insert["customer_certainty"] is None
         # 文書に注文番号が無ければ、文書内容から決定的に採番した番号で重複を防ぐ
-        assert repair_insert["customer_order_no"] == _generate_auto_customer_order_no(
+        assert repair_insert["customer_order_no"] == generate_auto_customer_order_no(
             7, "件名 基板 はんだ補修"
         )
 

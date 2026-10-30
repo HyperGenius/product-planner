@@ -8,9 +8,11 @@ import { masterItems } from "./constants"
 export default function MasterLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isIndexPage = pathname === "/master"
+  // 抽出指示の試し読みは結果を左右に並べるので、マスタ共通の幅より広く取る（Issue #602）
+  const isWidePage = pathname.endsWith("/extraction-prompt")
 
   return (
-    <div className="max-w-[860px] w-full mx-auto px-6">
+    <div className={`${isWidePage ? "max-w-[1400px]" : "max-w-[860px]"} w-full mx-auto px-6`}>
       {!isIndexPage && (
         <nav className="flex flex-wrap gap-2 py-4">
           {masterItems.map((item) => {

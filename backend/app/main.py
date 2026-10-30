@@ -23,6 +23,7 @@ from app.routers.daily_reports import (
 )
 from app.routers.master import (
     calendar_router,
+    customer_extraction_prompt_router,
     customer_router,
     equipment_group_router,
     equipment_router,
@@ -70,6 +71,7 @@ app.include_router(equipment_group_router)
 app.include_router(process_routing_router)
 app.include_router(calendar_router)
 app.include_router(customer_router)
+app.include_router(customer_extraction_prompt_router)
 app.include_router(daily_report_names_router)
 app.include_router(daily_report_progress_router)
 app.include_router(daily_report_stock_router)

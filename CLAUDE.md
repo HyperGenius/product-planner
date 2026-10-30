@@ -225,6 +225,16 @@ cd backend && ruff check . && mypy .
   注文番号なしで (顧客, 製品, 数量) を重複扱いしない。品名に埋もれた品番での照合（`match_product_by_embedded_code()`）は
   候補を**その顧客の注文実績の品番**に絞り、一意のときだけ確定する。詳細は
   [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md#注文書の再送で重複起票しないissue-599)
+- **顧客ごとの抽出指示の編集・試し読み（Issue #602）**: 画面は `/master/customers/[id]/extraction-prompt`（`platform_admin` のみ。
+  Backend `_EXTRACTION_PROMPT_EDITOR_ROLES`・RPC `save_customer_extraction_prompt`・Frontend `EXTRACTION_PROMPT_EDITOR_ROLES` を揃える）。
+  試し読みは取り込みと**同じ関数**で読む（明細の解釈〜製品の照合は `pdf_order_parsing_service.read_line_item()`。取り込みの
+  `_process_line_item()` もこれを使う）ので、取り込みの読み方を変えるときは書き込みを伴う処理を `read_line_item()` に入れない。
+  顧客 API（`/customers`）は `order_extraction_prompt` を返さない（`_public_customer()`）。`order-attachments` バケットの読み取りは
+  `organization_members` の所属で判定するポリシーに張り直したので、ユーザー JWT でダウンロードできる（以前のポリシーは発行されていない
+  `auth.jwt() ->> 'tenant_id'` を見ていて読めなかった）。SQL の `btrim()` の既定は半角スペースだけで改行・全角空白を残すので、
+  Python の `str.strip()` と揃えるときは除く文字を明示する（`normalize_extraction_prompt()`）。`orders` に `created_at` 列は無い
+  （並べるなら `id`。モックの unit テストでは気づけず integration で 42703）。詳細は
+  [docs/features/customer-extraction-prompt.md](docs/features/customer-extraction-prompt.md)
 - **社内転送者と顧客不明（Issue #521）**: `tenant_internal_senders` に登録したアドレス（社長など）からのメールは、
   差出人での顧客の突合・下書き顧客の作成をせず、本文の候補でも決まらなければ**ステージング行・受注の
   `customer_id` を NULL（顧客不明）にする**。テナント共通の「顧客不明」レコードは作らない（重複判定の UNIQUE に

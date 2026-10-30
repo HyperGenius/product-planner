@@ -64,9 +64,13 @@ def upload_manual_email_attachment(
     return storage_path
 
 
-def download_attachment(admin_client: Client, storage_path: str) -> bytes:
-    """Supabase Storage から添付ファイルの内容をダウンロードする。"""
-    return bytes(admin_client.storage.from_(_BUCKET).download(storage_path))
+def download_attachment(client: Client, storage_path: str) -> bytes:
+    """Supabase Storage から添付ファイルの内容をダウンロードする。
+
+    cron は service role、抽出指示の試し読み（Issue #602）はユーザー JWT のクライアントで呼ぶ
+    （バケットの読み取りポリシーはテナントのメンバーに自テナントの先頭フォルダだけを許す）。
+    """
+    return bytes(client.storage.from_(_BUCKET).download(storage_path))
 
 
 def create_signed_url(
