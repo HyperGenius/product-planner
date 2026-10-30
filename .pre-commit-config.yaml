@@ -1,33 +1,37 @@
 # .pre-commit-config.yaml
+#
+# ruff / mypy は backend の venv に入っているもの（版は backend/requirements-dev.txt で固定）を呼ぶ。
+# フックごとに rev を持つと CI と版がずれ、mypy は独立した環境でアプリの依存の型を見ずに通ってしまうため（Issue #606）。
+# venv の版が requirements-dev.txt と違うときは scripts/run-backend-dev-tool.sh が失敗させる。
+minimum_pre_commit_version: "4.7.0"
+
 repos:
-- repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.14.10
+- repo: local
   hooks:
     # Linter (修正可能なものは自動修正)
+    # CI と同じくリポジトリルートから --config を明示して実行する（cwd で isort の first-party 判定が変わるため）
     - id: ruff
-      # 設定ファイルのパスを明示的に指定
+      name: ruff
+      language: unsupported_script
+      entry: scripts/run-backend-dev-tool.sh ruff check --force-exclude
       args: [--fix, --config=backend/pyproject.toml]
-      # backendディレクトリ配下のファイルのみを対象にする
+      types_or: [python, pyi]
       files: ^backend/
     # Formatter
     - id: ruff-format
+      name: ruff-format
+      language: unsupported_script
+      entry: scripts/run-backend-dev-tool.sh ruff format --force-exclude
       args: [--config=backend/pyproject.toml]
+      types_or: [python, pyi]
       files: ^backend/
-
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v1.19.0
-  hooks:
+    # 変更したファイルだけを渡すと、そのファイルを import している（渡していない）ファイルの型エラーを見落とすので、
+    # CI と同じく backend/ で `mypy .` を実行する
     - id: mypy
-      # 設定ファイルのパスを明示的に指定
-      args: [--config-file=backend/pyproject.toml]
-      files: ^backend/
-      exclude: ^backend/scripts/  # スクリプトディレクトリは型チェック対象外にする
-      # 依存関係の型情報を解決するために追加の依存が必要な場合はここに記述
-      additional_dependencies:
-        - pytest
-        - pytest-mock
-        - pydantic
-        - dotenv
-        - azure.functions
-        - fastapi
-        - supabase
+      name: mypy
+      language: unsupported_script
+      entry: scripts/run-backend-dev-tool.sh --in-backend mypy .
+      pass_filenames: false
+      require_serial: true
+      files: ^backend/(.*\.pyi?|pyproject\.toml|requirements(-dev)?\.txt)$
+      exclude: ^backend/scripts/  # スクリプトディレクトリは型チェック対象外にする（pyproject.toml の exclude と同じ）

@@ -49,6 +49,11 @@ jobs:
         working-directory: .
         run: ruff check --config=backend/pyproject.toml backend/
 
+      # pre-commit の ruff-format を通さずに（--no-verify 等で）入った未整形のコードを検出する（Issue #606）
+      - name: Format check (ruff)
+        working-directory: .
+        run: ruff format --check --config=backend/pyproject.toml backend/
+
       - name: Type check (mypy)
         run: mypy .
 
