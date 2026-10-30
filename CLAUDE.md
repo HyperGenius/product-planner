@@ -218,6 +218,13 @@ cd backend && ruff check . && mypy .
   なので値を足すときはマイグレーションで張り直す。ステージング行へ要確認のログ（`image_extracted`）を残すのは起票1件以上の
   ときだけにする（先に残すと `_notify_if_no_order_created()` が「ログあり」と判定して起票0件の通知が出ない）。
   詳細は [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md)
+- **注文書の再送（Issue #599）**: 顧客によっては注文時の注文書を納期近辺に（庫入伝票付きのスキャンで）送り直してくる。
+  読み取りのたびに品名・納期がぶれるので dedupe キー `(顧客, 製品, 希望納期)` だけでは止まらない。再送は
+  **顧客注文番号**で見分け、承認依頼以降の受注だけを対象にする（`_find_resent_order_id()`。下書きは RPC の数量改定に任せる）。
+  ファイル名・ファイルのハッシュはスキャンし直しで変わるので使わない。同じ顧客・製品・数量で納期違いの別注文が正当にあるので、
+  注文番号なしで (顧客, 製品, 数量) を重複扱いしない。品名に埋もれた品番での照合（`match_product_by_embedded_code()`）は
+  候補を**その顧客の注文実績の品番**に絞り、一意のときだけ確定する。詳細は
+  [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md#注文書の再送で重複起票しないissue-599)
 - **社内転送者と顧客不明（Issue #521）**: `tenant_internal_senders` に登録したアドレス（社長など）からのメールは、
   差出人での顧客の突合・下書き顧客の作成をせず、本文の候補でも決まらなければ**ステージング行・受注の
   `customer_id` を NULL（顧客不明）にする**。テナント共通の「顧客不明」レコードは作らない（重複判定の UNIQUE に

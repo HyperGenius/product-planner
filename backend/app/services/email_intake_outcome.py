@@ -27,6 +27,8 @@ EMAIL_INTAKE_SKIP_REASONS = frozenset(
         "no_order_created",
         # 同じ修理の注文書の再受信（既存の修理注文を上書きしない。Issue #493）
         "repair_duplicate_skipped",
+        # 承認依頼以降に進んだ受注の注文書の再送（既存の受注に添付だけする。Issue #599）
+        "resent_document",
     }
 )
 EMAIL_INTAKE_KNOWN_REASONS = (

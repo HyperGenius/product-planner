@@ -1,9 +1,11 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from app.services.product_matching_service import (
+    find_embedded_product_code,
     match_product_by_alias,
     match_product_by_code,
+    match_product_by_embedded_code,
     match_products,
 )
 
@@ -120,3 +122,90 @@ class TestMatchProducts:
 
         assert result["product_id"] is None
         assert result["candidates"] == []
+
+
+@pytest.mark.unit
+class TestFindEmbeddedProductCode:
+    """品名に埋もれた品番での照合（Issue #599）。"""
+
+    def test_code_embedded_in_halfwidth_kana_name_matches(self):
+        # 画像PDFから読んだ品名（半角カナ・全角記号を含む）に品番が埋もれているケース
+        result = find_embedded_product_code(
+            ["TEST01ﾌｨﾙﾀｰ QX5501A φ10.0×10L", None], {10: "QX5501A", 11: "QX6600B"}
+        )
+
+        assert result == 10
+
+    def test_fullwidth_and_lowercase_are_normalized(self):
+        result = find_embedded_product_code(
+            ["フィルター　ｑｘ５５０１ａ"], {10: "QX5501A"}
+        )
+
+        assert result == 10
+
+    def test_code_adjacent_to_kana_matches(self):
+        result = find_embedded_product_code(["ﾌｨﾙﾀｰQX5501A"], {10: "QX5501A"})
+
+        assert result == 10
+
+    def test_code_is_not_matched_inside_longer_alphanumeric(self):
+        # QX5501 は QX5501A の一部であって語としては現れない
+        result = find_embedded_product_code(["ﾌｨﾙﾀｰ QX5501A"], {10: "QX5501"})
+
+        assert result is None
+
+    def test_multiple_matching_products_returns_none(self):
+        result = find_embedded_product_code(
+            ["QX5501A / QX6600B セット"], {10: "QX5501A", 11: "QX6600B"}
+        )
+
+        assert result is None
+
+    def test_same_code_on_two_products_returns_none(self):
+        result = find_embedded_product_code(["QX5501A"], {10: "QX5501A", 11: "qx5501a"})
+
+        assert result is None
+
+    def test_short_code_is_ignored(self):
+        result = find_embedded_product_code(["SUS 11L"], {10: "11L"})
+
+        assert result is None
+
+    def test_matches_in_product_number_raw(self):
+        result = find_embedded_product_code([None, "品番: QX5501A"], {10: "QX5501A"})
+
+        assert result == 10
+
+    def test_empty_texts_return_none(self):
+        assert find_embedded_product_code([None, "  "], {10: "QX5501A"}) is None
+
+
+@pytest.mark.unit
+class TestMatchProductByEmbeddedCode:
+    def test_candidates_are_codes_of_products_ordered_by_customer(self):
+        rows = [
+            {"id": 1, "product_id": 10, "products": {"code": "QX5501A"}},
+            {"id": 2, "product_id": 10, "products": {"code": "QX5501A"}},
+            {"id": 3, "product_id": 11, "products": {"code": None}},
+            {"id": 4, "product_id": 12, "products": None},
+        ]
+        with patch(
+            "app.services.product_matching_service.fetch_all_rows",
+            return_value=rows,
+        ):
+            result = match_product_by_embedded_code(
+                MagicMock(), "tenant-1", 7, ["TEST01ﾌｨﾙﾀｰ QX5501A φ10.0×10L"]
+            )
+
+        assert result == 10
+
+    def test_no_ordered_products_returns_none(self):
+        with patch(
+            "app.services.product_matching_service.fetch_all_rows",
+            return_value=[],
+        ):
+            result = match_product_by_embedded_code(
+                MagicMock(), "tenant-1", 7, ["QX5501A"]
+            )
+
+        assert result is None

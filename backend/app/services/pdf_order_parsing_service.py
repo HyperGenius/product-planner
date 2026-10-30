@@ -20,6 +20,7 @@ from app.services.pdf_text_service import MAX_PDF_BYTES, PdfTooLargeError, extra
 from app.services.product_matching_service import (
     match_product_by_alias,
     match_product_by_code,
+    match_product_by_embedded_code,
     match_products,
 )
 from app.services.repair_order_service import (
@@ -40,6 +41,17 @@ _KNOWN_UPSERT_ACTIONS = {
     "skipped_downgrade",
     "skipped_draft_conflict",
 }
+
+# 承認依頼以降の受注。自動起票で上書きしない（upsert_order_by_dedupe_key が
+# skipped_downgrade で保護しているステータスと同じ）。同じ注文書の再送の判定に使う（Issue #599）
+_PROTECTED_ORDER_STATUSES = (
+    "pending_approval",
+    "confirmed",
+    "in_progress",
+    "shipped",
+    "completed",
+    "canceled",
+)
 
 # 自動抽出時に複数受注が1明細にマージされてしまった疑いを検知する粗いヒューリスティック。
 # まずは数量の異常値のみを対象とし、本番データの精度を見ながら閾値・条件を調整する前提
@@ -830,6 +842,8 @@ def _resolve_product_id(
     2. products.name に対する品番文字列でのpg_trgm検索
        （code列が未整備で、name列に品番文字列が入っているテナントに対応するため）
     3. products.name に対する品名文字列でのpg_trgm検索
+    4. その顧客が過去に注文した製品の品番が、品名・品番に語として含まれるか
+       （画像PDFで品番が品名に埋もれた明細のため。Issue #599）
     の順にフォールバックして product_id を解決する。
     """
     alias_raw_text = product_name_raw or product_number_raw
@@ -850,7 +864,110 @@ def _resolve_product_id(
     if product_id is None and product_name_raw:
         match = match_products(db, tenant_id, product_name_raw)
         product_id = match["product_id"]
+    if product_id is None and customer_id is not None:
+        product_id = match_product_by_embedded_code(
+            db, tenant_id, customer_id, [product_name_raw, product_number_raw]
+        )
     return product_id
+
+
+def _pick_resent_order_id(
+    candidates: list[dict[str, Any]],
+    product_id: int | None,
+    quantity: Any,
+    deadline_date: str | None,
+) -> int | None:
+    """
+    同じ注文番号の承認依頼以降の受注から、明細と同じ受注を1件選ぶ（Issue #599）。
+
+    製品が照合できた明細は製品で、照合できなかった明細は希望納期と数量で突き合わせる。
+    1つの注文書に同じ製品の分納が複数あるなど、当たる受注が1件に定まらなければ
+    再送と判定せず None を返す（従来の dedupe キーでの判定に任せる）。
+    """
+    if product_id is not None:
+        matched = [c for c in candidates if c.get("product_id") == product_id]
+    elif deadline_date is not None and quantity is not None:
+        matched = [
+            c
+            for c in candidates
+            if c.get("deadline_date") == deadline_date and c.get("quantity") == quantity
+        ]
+    else:
+        matched = []
+    return int(matched[0]["id"]) if len(matched) == 1 else None
+
+
+def _find_resent_order_id(
+    db: Client,
+    tenant_id: str,
+    customer_id: int | None,
+    customer_order_no: str | None,
+    product_id: int | None,
+    quantity: Any,
+    deadline_date: str | None,
+) -> int | None:
+    """
+    同じ注文書の再送なら、既に承認依頼以降に進んでいる受注の ID を返す（Issue #599）。
+
+    顧客によっては、注文時に送った注文書を納期近辺に（庫入伝票等を付けたスキャンで）
+    送り直してくる。読み取りのたびに品名・納期の読み方がぶれると dedupe キー
+    `(顧客, 製品, 希望納期)` が一致せず重複した下書きになるため、顧客注文番号で
+    見分ける。下書きは対象外（内示の数量改定・確度の昇格は従来どおり RPC に任せる）。
+    """
+    if customer_id is None or not customer_order_no:
+        return None
+    result = (
+        db.table(SupabaseTableName.ORDERS.value)
+        .select("id, product_id, quantity, deadline_date")
+        .eq("tenant_id", tenant_id)
+        .eq("customer_id", customer_id)
+        .eq("customer_order_no", customer_order_no)
+        .eq("order_type", "production")
+        .in_("status", list(_PROTECTED_ORDER_STATUSES))
+        .execute()
+    )
+    candidates = cast(list[dict[str, Any]], result.data or [])
+    return _pick_resent_order_id(candidates, product_id, quantity, deadline_date)
+
+
+def _attach_resent_document(
+    db: Client,
+    staging_row: dict[str, Any],
+    order_id: int,
+    attachment_parse_status: str,
+) -> None:
+    """再送されたPDFを既存の受注に添付する（受注詳細から庫入伝票等を開けるように）。
+
+    途中で失敗して cron が同じステージング行を処理し直しても、同じファイルを
+    二重に添付しない。
+    """
+    storage_path = staging_row.get("storage_path")
+    if not storage_path:
+        # 添付ファイルの無いメール本文由来の明細は、添付するものが無い
+        return
+    table = SupabaseTableName.ORDER_ATTACHMENTS.value
+    existing = (
+        db.table(table)
+        .select("id")
+        .eq("tenant_id", staging_row["tenant_id"])
+        .eq("order_id", order_id)
+        .eq("storage_path", storage_path)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return
+    db.table(table).insert(
+        {
+            "order_id": order_id,
+            "tenant_id": staging_row["tenant_id"],
+            "storage_path": storage_path,
+            "original_filename": staging_row.get("original_filename", ""),
+            "content_type": staging_row.get("content_type"),
+            "size_bytes": staging_row.get("size_bytes"),
+            "parse_status": attachment_parse_status,
+        }
+    ).execute()
 
 
 def _process_line_item(
@@ -884,6 +1001,39 @@ def _process_line_item(
     product_id = _resolve_product_id(
         db, tenant_id, customer_id, product_number_raw, product_name_raw
     )
+    deadline_date = line.get("delivery_date")
+
+    resent_order_id = _find_resent_order_id(
+        db,
+        tenant_id,
+        customer_id,
+        customer_order_no,
+        product_id,
+        line.get("quantity"),
+        deadline_date,
+    )
+    if resent_order_id is not None:
+        # 同じ注文書の再送は起票・更新せず、届いたPDFを既存の受注に添付するだけにする。
+        # 正常な運用なので通知は出さない（起票0件の通知も、このログがあるので出ない）。
+        # 送品の正は弥生なので、再送を理由に送品済みにはしない（Issue #599）
+        _attach_resent_document(
+            db, staging_row, resent_order_id, attachment_parse_status
+        )
+        _log_parse_event(
+            db,
+            tenant_id,
+            attachment_id,
+            "resent_document",
+            {
+                "order_id": resent_order_id,
+                "customer_order_no": customer_order_no,
+                "product_id": product_id,
+                "product_name_raw": product_name_raw,
+                "quantity": line.get("quantity"),
+                "deadline_date": deadline_date,
+            },
+        )
+        return False
 
     # 表記ゆれ対策はTRIM()のみ行い、全角/半角統一等の高度な正規化は
     # 実運用データを見てから要否を判断する（Issue #296 インクリメンタル方針）。
@@ -919,7 +1069,6 @@ def _process_line_item(
     # NULL は upsert_order_by_dedupe_key の優先度判定で既存の自動起票 draft を
     # 上書きしない（skipped_downgrade）ため、確度不明の情報で既存行を壊さない。
     certainty = certainty_raw if certainty_raw in _VALID_CUSTOMER_CERTAINTIES else None
-    deadline_date = line.get("delivery_date")
 
     # 抽出結果の揺れ・想定外の型（本来はツールスキーマで int|null に制約されるが、
     # スキーマ変更等で崩れた場合の防御）。不正な値のまま RPC に渡すと不整合な
