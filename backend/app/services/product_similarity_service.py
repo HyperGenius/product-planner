@@ -46,10 +46,12 @@ def find_similar_products(
         return SimilarProductsResponse(products=[])
 
     products = fetch_all_rows(
-        lambda: db.table(SupabaseTableName.PRODUCTS.value)
-        .select(_PRODUCT_COLUMNS)
-        .eq("tenant_id", tenant_id)
-        .order("id")
+        lambda: (
+            db.table(SupabaseTableName.PRODUCTS.value)
+            .select(_PRODUCT_COLUMNS)
+            .eq("tenant_id", tenant_id)
+            .order("id")
+        )
     )
     matched = select_similar_products(target, products, exclude_id)
     if not matched:
@@ -57,11 +59,13 @@ def find_similar_products(
 
     ids = [p["id"] for p, _ in matched]
     routings = fetch_all_rows(
-        lambda: db.table(SupabaseTableName.PROCESS_ROUTINGS.value)
-        .select("id, product_id, is_confirmed")
-        .eq("tenant_id", tenant_id)
-        .in_("product_id", ids)
-        .order("id")
+        lambda: (
+            db.table(SupabaseTableName.PROCESS_ROUTINGS.value)
+            .select("id, product_id, is_confirmed")
+            .eq("tenant_id", tenant_id)
+            .in_("product_id", ids)
+            .order("id")
+        )
     )
     routings_by_product: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for routing in routings:
