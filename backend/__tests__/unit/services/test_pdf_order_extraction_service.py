@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import anthropic
-import httpx
+import httpx2
 import pytest
 from app.services.pdf_order_extraction_service import (
     PdfDocumentRejectedError,
@@ -21,10 +21,11 @@ def _response(payload, stop_reason="end_turn"):
 
 
 def _status_error(cls, status_code):
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    # anthropic 2.x の HTTP クライアントは httpx ではなく httpx2
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     return cls(
         message="error",
-        response=httpx.Response(status_code, request=request),
+        response=httpx2.Response(status_code, request=request),
         body=None,
     )
 

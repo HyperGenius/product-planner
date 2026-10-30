@@ -1,7 +1,9 @@
 -r requirements.txt
-deptry
-ruff
-mypy
-pre-commit
-types-requests
-pytest
+# 開発用ツールも版を固定する（新しい版のルール・型チェックの追加で、コードを変えていないのに CI だけ落ちるのを防ぐ）。
+# 本番イメージには入らないので、推移的な依存までは固定しない（Issue #604）
+deptry==0.25.1
+ruff==0.17.3
+mypy==2.4.1
+pre-commit==4.7.0
+types-requests==2.33.0.20261030
+pytest==9.2.0

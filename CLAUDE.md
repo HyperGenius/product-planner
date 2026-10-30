@@ -100,6 +100,12 @@ cd backend && ruff check . && mypy .
     差し替える（2.26.0 / 2.31.0 とも。2.31.0 からは `auth` の admin API 呼び出しも同様）。同じクライアントで後から
     DB を書くと RLS が効き、ポリシーの無いテーブルでは 0件更新のまま黙って成功する。サインイン後に service role で
     書くときは `get_supabase_admin_client()` で別のクライアントを作る（Issue #430 の調査で判明）
+- **依存はすべて `==` で固定する（Issue #604）**: `backend/requirements.txt` は推移的な依存まで全行 `==` にする
+  （`>=` や版なしの行があると、イメージを作った日・venv を作った日で版が変わり、手元では通るのに CI だけ落ちる）。
+  依存を足す・上げるときは、クリーンな venv（`uv venv -p 3.14`）に `-r requirements.txt` を入れた `uv pip freeze` と
+  ファイルを突き合わせ、増えた推移的な依存も依存元のコメントの下に追加する。`requirements-dev.txt` の開発用ツールも
+  トップレベルは固定する（本番に入らないので推移的な依存は固定しない）。anthropic 2.x の HTTP クライアントは `httpx2`
+  なので、テストで anthropic の例外を作るときは `httpx2.Request` / `httpx2.Response` を渡す
 - **supabase-py のバージョンを上げるとき（Issue #430）**: `requirements.txt` は推移的依存まで固定しているので、
   一式（`supabase`/`postgrest`/`storage3`/`realtime`/`supabase-auth`/`supabase-functions`）と、それらが要求する
   下限（例: `supabase-auth` 2.31.0 → `PyJWT>=2.12.0`）をクリーンな venv（`uv venv -p 3.14`）で解決して確かめる。

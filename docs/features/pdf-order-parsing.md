@@ -940,6 +940,21 @@ Issue #430 での変更（supabase SDK 2.26.0 → 2.31.0、pyiceberg の除去�
   `pydantic`・`httpx` などアプリが元から読み込むモジュールも含まれていたため、アプリ全体で
   見た削減は約12MBにとどまった
 
+Issue #604 での変更（依存の版をすべて固定）:
+
+- `backend/requirements.txt`: 版が固定されていなかった `anthropic`（`>=1.0.0`）・`uvicorn[standard]`・
+  `pydantic-settings` を、CI・本番が使っていた版（`2.3.0` / `0.54.0` / `2.15.0`）に `==` で固定した。
+  あわせて固定されていなかった推移的な依存（anthropic の `httpx2` 等、`uvicorn[standard]` の `uvloop` 等、
+  google-api-python-client・pdfplumber・openpyxl・email-validator の依存）を、依存元ごとのコメントを付けて追加した。
+  クリーンな venv（Python 3.14）に `-r requirements.txt` を入れた `uv pip freeze` とファイルの内容が一致し、
+  `--no-build --python-platform x86_64-manylinux_2_28` で wheel だけで入ることを確認した
+- anthropic は 1.x 時代の下限指定のまま、インストールした時点の最新版（2.x）が入っていた。2.x は HTTP クライアントが
+  `httpx` から `httpx2` に替わったので、テストで anthropic の例外を組み立てるときは `httpx2.Request` /
+  `httpx2.Response` を渡す（`httpx` のものでも実行時は通るが、型が合わない）
+- `backend/requirements-dev.txt`: 開発用ツール（`ruff` / `mypy` / `pytest` 等）も、新しい版の追加ルール・型チェックで
+  コードを変えずに CI だけ落ちるのを防ぐため固定した。本番イメージには入らないので推移的な依存までは固定していない。
+  pre-commit のフック（`.pre-commit-config.yaml` の `rev`）は別に版を持っており、CI の版とは揃っていない
+
 ---
 
 ## 環境変数
