@@ -4,6 +4,7 @@ import { render, screen, userEvent, waitFor } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import type { Customer } from "@/types/customer"
+import type { MemberRole } from "@/types/member"
 import CustomersPage from "./page"
 
 /** 顧客マスタの編集で任意項目を空欄にすると消せる (Issue #517)。値はダミー */
@@ -21,9 +22,12 @@ const CUSTOMER: Customer = {
   updated_at: "2026-01-01T00:00:00Z",
 }
 
-function mockCustomers() {
+function mockCustomers(role: MemberRole = "president") {
   const patches: unknown[] = []
   server.use(
+    http.get(`${API_BASE}/tenant/members/me`, () =>
+      HttpResponse.json({ user_id: "u-1", email: "member@example.com", full_name: "テスト", role }),
+    ),
     http.get(`${API_BASE}/customers`, () => HttpResponse.json([CUSTOMER])),
     http.patch(`${API_BASE}/customers/:id`, async ({ request }) => {
       patches.push(await request.json())
@@ -91,5 +95,28 @@ describe("CustomersPage", () => {
 
     await waitFor(() => expect(patches).toHaveLength(1))
     expect(patches[0]).toMatchObject({ fax_number: "03-0000-0001" })
+  })
+
+  it("platform_admin には取り込み設定の入口を出す", async () => {
+    mockCustomers("platform_admin")
+    render(<CustomersPage />)
+
+    const link = await screen.findByRole("link", { name: "テスト顧客Aの取り込み設定" })
+    expect(link).toHaveAttribute("href", "/master/customers/1/extraction-prompt")
+  })
+
+  it("platform_admin 以外には取り込み設定の入口を出さない", async () => {
+    mockCustomers("president")
+    // ロールの取得が終わる前に「出ていない」と判定しないよう、応答したことを待つ
+    let memberAnswered = false
+    server.events.on("response:mocked", ({ request }) => {
+      if (request.url.endsWith("/tenant/members/me")) memberAnswered = true
+    })
+    render(<CustomersPage />)
+
+    await screen.findByRole("button", { name: "テスト顧客Aを編集" })
+    await waitFor(() => expect(memberAnswered).toBe(true))
+    server.events.removeAllListeners()
+    expect(screen.queryByRole("link", { name: "テスト顧客Aの取り込み設定" })).toBeNull()
   })
 })

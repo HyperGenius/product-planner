@@ -1,4 +1,6 @@
 # routers/master/customers.py
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_current_tenant_id, get_customer_repo
@@ -10,6 +12,15 @@ customer_router = APIRouter(prefix="/customers", tags=["Master (Customers)"])
 
 logger = get_logger(__name__)
 
+# 抽出指示の本文は platform_admin 専用の API（customer_extraction_prompt.py）だけが返す（Issue #602）
+_HIDDEN_COLUMNS = ("order_extraction_prompt",)
+
+
+def _public_customer(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {key: value for key, value in row.items() if key not in _HIDDEN_COLUMNS}
+
 
 @customer_router.post("")
 def create_customer(
@@ -19,14 +30,14 @@ def create_customer(
 ):
     """顧客を新規作成"""
     logger.info(f"Creating customer {customer_data}")
-    return repo.create(customer_data.with_tenant_id(tenant_id))
+    return _public_customer(repo.create(customer_data.with_tenant_id(tenant_id)))
 
 
 @customer_router.get("")
 def get_customers(repo: CustomerRepository = Depends(get_customer_repo)):
     """顧客を全件取得"""
     logger.info("Fetching all customers")
-    return repo.get_all()
+    return [_public_customer(row) for row in repo.get_all()]
 
 
 @customer_router.get("/{customer_id}")
@@ -35,7 +46,7 @@ def get_customer(
 ):
     """顧客を1件取得"""
     logger.info(f"Fetching customer {customer_id}")
-    return repo.get_by_id(customer_id)
+    return _public_customer(repo.get_by_id(customer_id))
 
 
 @customer_router.patch("/{customer_id}")
@@ -49,7 +60,7 @@ def update_customer(
     logger.info(f"Updating customer {customer_id}")
     update_data = customer_data.model_dump(exclude_unset=True)
     update_data["status"] = "active"
-    return repo.update(customer_id, update_data)
+    return _public_customer(repo.update(customer_id, update_data))
 
 
 @customer_router.delete("/{customer_id}")

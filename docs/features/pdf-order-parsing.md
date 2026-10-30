@@ -545,9 +545,10 @@ CHECK 制約・型定義・RPC の変更は無い。
   （`output_config.format` のフィールド定義）は変更せず、「どこを見てどう埋めるか」の自然言語指示のみ
 - 断片が NULL の顧客は従来どおり汎用プロンプトのみで処理し、挙動は変わらない
 - RLS は `customers` の既存 tenant isolation ポリシーで自動的にカバーされる
-- 断片の投入は tenant_id / customer_id 特定が必要なため、マイグレーションの seed では
-  行わず、本番で対象 customer を `SELECT` で確認 → ユーザー承認の上で個別 `UPDATE`
-  （`CLAUDE.md` の「本番 Supabase への接続」手順に従う）
+- 断片は顧客マスタの「取り込み設定」画面（`platform_admin` のみ）で編集する。過去のPDFで
+  今の指示と編集中の指示を試し読みして比べてから保存でき、変更履歴が残る（Issue #602。
+  詳細は [customer-extraction-prompt.md](./customer-extraction-prompt.md)）。以前は本番で対象
+  customer を `SELECT` で確認 → ユーザー承認の上で個別 `UPDATE` していた
 
 **抽出スキーマの注文番号フィールド（PDF・メール両方の `_EXTRACT_TOOL`）**
 

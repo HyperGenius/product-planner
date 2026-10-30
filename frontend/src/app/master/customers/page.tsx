@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Pencil, Trash2 } from "lucide-react"
+import Link from "next/link"
+import { FileCog, Plus, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ApiError } from "@/lib/api-client"
 import {
@@ -10,6 +11,8 @@ import {
   useUpdateCustomer,
   useDeleteCustomer,
 } from "@/hooks/use-customers"
+import { useCurrentMember } from "@/hooks/use-tenant-members"
+import { EXTRACTION_PROMPT_EDITOR_ROLES } from "@/types/member"
 import type { Customer } from "@/types/customer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -53,6 +56,10 @@ export default function CustomersPage() {
   const createMutation = useCreateCustomer()
   const updateMutation = useUpdateCustomer()
   const deleteMutation = useDeleteCustomer()
+  const { data: currentMember } = useCurrentMember()
+  // 抽出指示（取り込み設定）の画面は platform_admin だけに入口を出す（Issue #602）
+  const canEditExtractionPrompt =
+    currentMember != null && EXTRACTION_PROMPT_EDITOR_ROLES.includes(currentMember.role)
 
   // 作成ダイアログを開く
   const handleOpenCreateDialog = () => {
@@ -209,7 +216,11 @@ export default function CustomersPage() {
                 <TableHead className="w-[140px] whitespace-nowrap">電話番号</TableHead>
                 <TableHead className="w-[140px] whitespace-nowrap">FAX番号</TableHead>
                 <TableHead className="w-[220px]">Email</TableHead>
-                <TableHead className="w-[100px] whitespace-nowrap text-right">操作</TableHead>
+                <TableHead
+                  className={`${canEditExtractionPrompt ? "w-[132px]" : "w-[100px]"} whitespace-nowrap text-right`}
+                >
+                  操作
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -234,6 +245,17 @@ export default function CustomersPage() {
                     <TableCell className="truncate">{customer.email || "-"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        {canEditExtractionPrompt && (
+                          <Button variant="ghost" size="icon-sm" asChild>
+                            <Link
+                              href={`/master/customers/${customer.id}/extraction-prompt`}
+                              aria-label={`${customer.name}の取り込み設定`}
+                              title="取り込み設定（抽出指示）"
+                            >
+                              <FileCog className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon-sm"

@@ -85,6 +85,21 @@ class TestCustomerRouter:
         assert response.json() == expected_data
         mock_repo.get_by_id.assert_called_with(customer_id)
 
+    def test_extraction_prompt_is_not_returned(self, mock_repo):
+        """一覧・詳細・更新は抽出指示の本文を返さない（専用 API だけが返す。Issue #602）"""
+        row = {"id": 1, "name": "Customer A", "order_extraction_prompt": "指示"}
+        mock_repo.get_all.return_value = [row]
+        mock_repo.get_by_id.return_value = row
+        mock_repo.update.return_value = row
+
+        responses = [
+            client.get("/customers").json()[0],
+            client.get("/customers/1").json(),
+            client.patch("/customers/1", json={"name": "Customer A"}).json(),
+        ]
+
+        assert all("order_extraction_prompt" not in body for body in responses)
+
     def test_create_customer(self, mock_repo):
         """POST /: 新規作成のテスト"""
         tenant_id_str = str(uuid.uuid4())

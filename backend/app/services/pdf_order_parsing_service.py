@@ -1,5 +1,6 @@
 import hashlib
 import os
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, cast
 
@@ -142,7 +143,7 @@ def _get_customer_extraction_prompt(
     return prompt if isinstance(prompt, str) and prompt.strip() else None
 
 
-def _generate_auto_customer_order_no(
+def generate_auto_customer_order_no(
     customer_id: Any, source_text: str | None
 ) -> str | None:
     """
@@ -158,6 +159,18 @@ def _generate_auto_customer_order_no(
         return None
     digest = hashlib.sha256(f"{customer_id}\n{normalized}".encode()).hexdigest()
     return f"AUTO-{digest[:10]}"
+
+
+def generate_pdf_auto_customer_order_no(
+    customer_id: Any, pdf_text: str | None, content: bytes
+) -> str | None:
+    """PDFから起票する受注の採番。テキストPDFは文面から、画像PDFは文面テキストが
+    無いためファイルの中身のハッシュから採番する（同じファイルなら同じ番号になる）。"""
+    if pdf_text is not None:
+        return generate_auto_customer_order_no(customer_id, pdf_text)
+    return generate_auto_customer_order_no(
+        customer_id, hashlib.sha256(content).hexdigest()
+    )
 
 
 # 丸数字・全角数字 → 半角アラビア数字の変換表。
@@ -292,8 +305,8 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         )
         line_items = cast(list[dict[str, Any]], extraction["line_items"])
         document_order_no: str | None = extraction.get("document_order_no")
-        auto_order_no = _generate_auto_customer_order_no(
-            pdf_row.get("customer_id"), text_result.text
+        auto_order_no = generate_pdf_auto_customer_order_no(
+            pdf_row.get("customer_id"), text_result.text, content
         )
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "
@@ -301,7 +314,7 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
             f"(document_order_no={document_order_no!r})"
         )
 
-        if _is_repair_extraction(extraction):
+        if is_repair_extraction(extraction):
             # 修理の注文書は明細ごとに起票せず、件名と内訳をまとめて1件にする（Issue #493）
             created_count = _process_repair_order(
                 db, pdf_row, extraction, auto_order_no
@@ -408,7 +421,7 @@ def _process_email_body(
     extraction = extract_email_order_lines(body, customer_extraction_prompt)
     line_items = cast(list[dict[str, Any]], extraction["line_items"])
     document_order_no: str | None = extraction.get("document_order_no")
-    auto_order_no = _generate_auto_customer_order_no(row.get("customer_id"), body)
+    auto_order_no = generate_auto_customer_order_no(row.get("customer_id"), body)
 
     if not line_items:
         detail = {"body_snippet": body[:200]}
@@ -504,15 +517,13 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
         f"pdf_order_parsing: attachment {attachment_id} "
         f"extracted {len(line_items)} line items from image PDF"
     )
-    is_repair = _is_repair_extraction(extraction)
+    is_repair = is_repair_extraction(extraction)
     if not line_items and not is_repair:
         return _process_unreadable_pdf(db, row, "failed_image")
 
     document_order_no: str | None = extraction.get("document_order_no")
-    # 画像PDFは文面テキストが無いため、ファイルの中身のハッシュから採番する
-    # （同じファイルを再パースしても同じ番号になる）
-    auto_order_no = _generate_auto_customer_order_no(
-        pdf_row.get("customer_id"), hashlib.sha256(content).hexdigest()
+    auto_order_no = generate_pdf_auto_customer_order_no(
+        pdf_row.get("customer_id"), None, content
     )
     if is_repair:
         created_count = _process_repair_order(
@@ -550,7 +561,7 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
     return created_count
 
 
-def _is_repair_extraction(extraction: dict[str, Any]) -> bool:
+def is_repair_extraction(extraction: dict[str, Any]) -> bool:
     """抽出結果が修理の注文書か（Issue #493）。
 
     件名も明細も取れていない場合は作業内容を組み立てられないため、修理と判定されても
@@ -970,6 +981,78 @@ def _attach_resent_document(
     ).execute()
 
 
+@dataclass(frozen=True)
+class LineItemReading:
+    """抽出した1明細を、起票の直前まで解釈した結果（DB へは書き込まない）。
+
+    取り込み（`_process_line_item`）と抽出指示の試し読み（Issue #602）で共有し、
+    試し読みの結果が実際の起票とずれないようにする。
+    """
+
+    product_number_raw: str | None
+    product_name_raw: str | None
+    # 起票時に orders.extracted_product_name に入れる値（品名 → 無ければ品番、前後の空白を除く）
+    extracted_product_name: str | None
+    quantity: Any
+    deadline_date: str | None
+    # 許容値以外は NULL（確度不明）
+    certainty: str | None
+    line_order_no: str | None
+    customer_order_no: str | None
+    # 照合できなければ None（product_id=NULL の下書きになる）
+    product_id: int | None
+
+    @property
+    def has_valid_quantity(self) -> bool:
+        """数量が整数か未指定か（それ以外の明細は起票せずスキップする）。"""
+        return self.quantity is None or isinstance(self.quantity, int)
+
+
+def read_line_item(
+    db: Client,
+    tenant_id: str,
+    customer_id: int | None,
+    line: dict[str, Any],
+    document_order_no: str | None,
+    auto_order_no: str | None,
+) -> LineItemReading:
+    """抽出した1明細の注文番号・確度を解決し、製品を照合する（読み込みのみ）。"""
+    product_number_raw = line.get("product_number_raw")
+    product_name_raw = line.get("product_name_raw")
+
+    # 表記ゆれ対策はTRIM()のみ行い、全角/半角統一等の高度な正規化は
+    # 実運用データを見てから要否を判断する（Issue #296 インクリメンタル方針）。
+    extracted_product_name_raw = product_name_raw or product_number_raw
+    extracted_product_name = (
+        extracted_product_name_raw.strip() if extracted_product_name_raw else None
+    )
+
+    certainty_raw = cast(str | None, line.get("certainty"))
+    # Claude抽出結果の揺れ・想定外値・未指定でも orders.customer_certainty のCHECK
+    # 制約に違反してRPCが失敗しないよう、許容値以外は NULL（確度不明）にする。
+    # 内々示へのフォールバックは確度を誤認させるため行わない（Issue #474）。
+    # NULL は upsert_order_by_dedupe_key の優先度判定で既存の自動起票 draft を
+    # 上書きしない（skipped_downgrade）ため、確度不明の情報で既存行を壊さない。
+    certainty = certainty_raw if certainty_raw in _VALID_CUSTOMER_CERTAINTIES else None
+
+    line_order_no = line.get("line_order_no")
+    return LineItemReading(
+        product_number_raw=product_number_raw,
+        product_name_raw=product_name_raw,
+        extracted_product_name=extracted_product_name,
+        quantity=line.get("quantity"),
+        deadline_date=line.get("delivery_date"),
+        certainty=certainty,
+        line_order_no=line_order_no if isinstance(line_order_no, str) else None,
+        customer_order_no=_resolve_customer_order_no(
+            line, document_order_no, auto_order_no
+        ),
+        product_id=_resolve_product_id(
+            db, tenant_id, customer_id, product_number_raw, product_name_raw
+        ),
+    )
+
+
 def _process_line_item(
     db: Client,
     staging_row: dict[str, Any],
@@ -992,16 +1075,14 @@ def _process_line_item(
     tenant_id = staging_row["tenant_id"]
     attachment_id = staging_row["id"]
     customer_id = _staging_customer_id(staging_row)
-    customer_order_no = _resolve_customer_order_no(
-        line, document_order_no, auto_order_no
+    reading = read_line_item(
+        db, tenant_id, customer_id, line, document_order_no, auto_order_no
     )
-    product_number_raw = line.get("product_number_raw")
-    product_name_raw = line.get("product_name_raw")
-
-    product_id = _resolve_product_id(
-        db, tenant_id, customer_id, product_number_raw, product_name_raw
-    )
-    deadline_date = line.get("delivery_date")
+    customer_order_no = reading.customer_order_no
+    product_number_raw = reading.product_number_raw
+    product_name_raw = reading.product_name_raw
+    product_id = reading.product_id
+    deadline_date = reading.deadline_date
 
     resent_order_id = _find_resent_order_id(
         db,
@@ -1009,7 +1090,7 @@ def _process_line_item(
         customer_id,
         customer_order_no,
         product_id,
-        line.get("quantity"),
+        reading.quantity,
         deadline_date,
     )
     if resent_order_id is not None:
@@ -1029,24 +1110,19 @@ def _process_line_item(
                 "customer_order_no": customer_order_no,
                 "product_id": product_id,
                 "product_name_raw": product_name_raw,
-                "quantity": line.get("quantity"),
+                "quantity": reading.quantity,
                 "deadline_date": deadline_date,
             },
         )
         return False
 
-    # 表記ゆれ対策はTRIM()のみ行い、全角/半角統一等の高度な正規化は
-    # 実運用データを見てから要否を判断する（Issue #296 インクリメンタル方針）。
-    extracted_product_name_raw = product_name_raw or product_number_raw
-    extracted_product_name = (
-        extracted_product_name_raw.strip() if extracted_product_name_raw else None
-    )
+    extracted_product_name = reading.extracted_product_name
 
     if product_id is None:
         # 製品を自動識別できなかった明細も、情報を失わずproduct_id=NULLで
         # 下書きを起票する（Issue #296）。ログ・通知は従来どおり記録した上で
         # 処理を継続する（以前はここでFalseを返し明細を丸ごと破棄していた）。
-        detail = {
+        detail: dict[str, Any] = {
             "product_number_raw": product_number_raw,
             "product_name_raw": product_name_raw,
         }
@@ -1062,19 +1138,13 @@ def _process_line_item(
             detail,
         )
 
-    certainty_raw = cast(str | None, line.get("certainty"))
-    # Claude抽出結果の揺れ・想定外値・未指定でも orders.customer_certainty のCHECK
-    # 制約に違反してRPCが失敗しないよう、許容値以外は NULL（確度不明）にする。
-    # 内々示へのフォールバックは確度を誤認させるため行わない（Issue #474）。
-    # NULL は upsert_order_by_dedupe_key の優先度判定で既存の自動起票 draft を
-    # 上書きしない（skipped_downgrade）ため、確度不明の情報で既存行を壊さない。
-    certainty = certainty_raw if certainty_raw in _VALID_CUSTOMER_CERTAINTIES else None
+    certainty = reading.certainty
 
     # 抽出結果の揺れ・想定外の型（本来はツールスキーマで int|null に制約されるが、
     # スキーマ変更等で崩れた場合の防御）。不正な値のまま RPC に渡すと不整合な
     # order が作成されてしまうため、明細ごとスキップしてログのみ残す。
-    quantity = line.get("quantity")
-    if quantity is not None and not isinstance(quantity, int):
+    quantity = reading.quantity
+    if not reading.has_valid_quantity:
         detail = {
             "product_number_raw": product_number_raw,
             "product_name_raw": product_name_raw,

@@ -1,5 +1,6 @@
 # backend/app/routers/master/__init__.py
 from .calendars import calendar_router
+from .customer_extraction_prompt import customer_extraction_prompt_router
 from .customers import customer_router
 from .equipment_groups import equipment_group_router
 from .equipments import equipment_router
@@ -14,5 +15,6 @@ __all__ = [
     "process_routing_router",
     "calendar_router",
     "customer_router",
+    "customer_extraction_prompt_router",
     "scheduling_settings_router",
 ]
