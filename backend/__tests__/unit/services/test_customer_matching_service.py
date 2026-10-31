@@ -16,6 +16,11 @@ from app.services.customer_matching_service import (
 )
 
 
+def _first_insert_row(mock_db):
+    """最初の（顧客の）INSERT の行。続けて担当者の INSERT も呼ばれる（Issue #608）。"""
+    return next(c.args[0] for c in mock_db.table().insert.call_args_list if c.args)
+
+
 @pytest.mark.unit
 class TestExtractSenderEmailCandidates:
     def test_returns_all_unique_candidates_in_order(self):
@@ -197,7 +202,7 @@ class TestResolveOrCreateCustomer:
     def test_single_candidate_intersection_match_is_not_modified(self):
         mock_db = MagicMock()
         mock_db.table().select().eq().in_().execute.return_value = MagicMock(
-            data=[{"id": 1}]
+            data=[{"customer_id": 1}]
         )
         body = "From: known@example.com\n"
 
@@ -226,7 +231,7 @@ class TestResolveOrCreateCustomer:
 
         assert customer_id == 2
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["status"] == "draft"
         assert inserted_row["email"] == "new@example.com"
         assert inserted_row["name"] == "new@example.com"
@@ -257,7 +262,7 @@ class TestResolveOrCreateCustomer:
 
         assert customer_id == 6
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["name"] == "株式会社 飯野製作所 岡部宏美"
 
     def test_direct_forward_without_header_uses_body_signature_name_hint(self):
@@ -297,7 +302,7 @@ class TestResolveOrCreateCustomer:
 
         assert customer_id == 7
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["email"] == "hiromi_okabe@iinoseisakusho.co.jp"
         assert inserted_row["name"] == "株式会社 飯野製作所 岡部宏美"
 
@@ -305,10 +310,10 @@ class TestResolveOrCreateCustomer:
         mock_db = MagicMock()
         # 積集合が2件（相見積もり等で判定不能）→ 最後に出現した候補で単一検索にフォールバック
         mock_db.table().select().eq().in_().execute.return_value = MagicMock(
-            data=[{"id": 10}, {"id": 11}]
+            data=[{"customer_id": 10}, {"customer_id": 11}]
         )
         mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
-            data=[{"id": 11}]
+            data=[{"customer_id": 11}]
         )
         body = "From: a@example.com\n...\n差出人: b@example.com\n"
 
@@ -332,7 +337,7 @@ class TestResolveOrCreateCustomer:
         assert created_draft is True
         # 顧客検索は行われない（候補メールアドレスが無いので紐付けようがない）
         mock_db.table().select.assert_not_called()
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["status"] == "draft"
         assert "email" not in inserted_row
         assert inserted_row["name"].startswith("不明な顧客 (")
@@ -348,7 +353,7 @@ class TestResolveOrCreateCustomer:
             mock_db, "tenant-1", "こんにちは、注文をお願いします。", "1751511600000"
         )
 
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["name"] == "不明な顧客 (2025-07-03 12:00)"
 
     def test_no_candidates_and_no_received_at_falls_back_to_now(self):
@@ -361,7 +366,7 @@ class TestResolveOrCreateCustomer:
 
         assert customer_id == 4
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["name"].startswith("不明な顧客 (")
 
     def test_invalid_received_at_falls_back_to_now(self):
@@ -374,7 +379,7 @@ class TestResolveOrCreateCustomer:
 
         assert customer_id == 5
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["name"].startswith("不明な顧客 (")
 
 
@@ -386,7 +391,7 @@ class TestResolveOrCreateCustomerRealFromPriority:
     def test_real_from_email_matches_existing_customer_without_body_parsing(self):
         mock_db = MagicMock()
         mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
-            data=[{"id": 99}]
+            data=[{"customer_id": 99}]
         )
         body = "こんにちは、注文をお願いします。"  # 転送ヘッダー無し・本文中にメールアドレスも無い
 
@@ -404,7 +409,7 @@ class TestResolveOrCreateCustomerRealFromPriority:
         # 本文に転送ヘッダーがある場合は、実Fromヘッダーより従来の本文解析を優先する
         mock_db = MagicMock()
         mock_db.table().select().eq().in_().execute.return_value = MagicMock(
-            data=[{"id": 1}]
+            data=[{"customer_id": 1}]
         )
         body = "From: known@example.com\n"
 
@@ -428,7 +433,7 @@ class TestResolveOrCreateCustomerRealFromPriority:
             data=[]
         )
         mock_db.table().select().eq().in_().execute.return_value = MagicMock(
-            data=[{"id": 50}]
+            data=[{"customer_id": 50}]
         )
         body = (
             "いつもお世話になっております。\n"
@@ -464,7 +469,7 @@ class TestResolveOrCreateCustomerRealFromPriority:
 
         assert customer_id == 8
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["email"] == "new-customer@example.com"
         assert inserted_row["name"] == "new-customer@example.com"
 
@@ -489,7 +494,7 @@ class TestResolveOrCreateCustomerRealFromPriority:
 
         assert customer_id == 9
         assert created_draft is True
-        inserted_row = mock_db.table().insert.call_args.args[0]
+        inserted_row = _first_insert_row(mock_db)
         assert inserted_row["email"] == "signature@customer.example.com"
 
 
@@ -609,7 +614,7 @@ class TestResolveOrCreateCustomerInternalSender:
         # 社長が通常の転送機能で転送した場合は、従来どおり本文の転送ヘッダーで決める
         mock_db = MagicMock()
         mock_db.table().select().eq().in_().execute.return_value = MagicMock(
-            data=[{"id": 1}]
+            data=[{"customer_id": 1}]
         )
 
         customer_id, created_draft = resolve_or_create_customer(
@@ -642,7 +647,7 @@ class TestResolveOrCreateCustomerInternalSender:
     def test_non_internal_sender_keeps_existing_behavior(self):
         mock_db = MagicMock()
         mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
-            data=[{"id": 99}]
+            data=[{"customer_id": 99}]
         )
 
         customer_id, _ = resolve_or_create_customer(
@@ -946,3 +951,67 @@ class TestMatchCustomerByFaxNumber:
             )
             == 95
         )
+
+
+@pytest.mark.unit
+class TestResolveOrCreateCustomerMultipleContacts:
+    """Issue #608: 1社に複数の担当者がいても同じ顧客に解決される。"""
+
+    def test_candidates_hitting_two_contacts_of_same_customer_resolve_to_it(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(
+            data=[{"customer_id": 7}, {"customer_id": 7}]
+        )
+        body = "From: a@example.com\nFrom: b@example.com\n"
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db, "tenant-1", body
+        )
+
+        assert customer_id == 7
+        assert created_draft is False
+
+    def test_candidates_hitting_different_customers_are_not_confirmed(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(
+            data=[{"customer_id": 7}, {"customer_id": 8}]
+        )
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 20}])
+        body = "From: a@example.com\nFrom: b@example.com\n"
+
+        customer_id, created_draft = resolve_or_create_customer(
+            mock_db, "tenant-1", body
+        )
+
+        assert customer_id == 20
+        assert created_draft is True
+
+    def test_lookup_uses_normalized_address(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(
+            data=[{"customer_id": 3}]
+        )
+
+        resolve_or_create_customer(mock_db, "tenant-1", "From: Taro@Example.com\n")
+
+        assert mock_db.table().select().eq().in_.call_args.args == (
+            "email",
+            ["taro@example.com"],
+        )
+
+    def test_created_draft_customer_is_registered_as_contact(self):
+        mock_db = MagicMock()
+        mock_db.table().select().eq().in_().execute.return_value = MagicMock(data=[])
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        mock_db.table().insert().execute.return_value = MagicMock(data=[{"id": 30}])
+
+        resolve_or_create_customer(mock_db, "tenant-1", "From: new@example.com\n")
+
+        contact_row = mock_db.table().insert.call_args_list[-1].args[0]
+        assert contact_row["customer_id"] == 30
+        assert contact_row["email"] == "new@example.com"
