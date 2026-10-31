@@ -257,6 +257,14 @@ cd backend && ruff check . && mypy .
   `match_customer_by_pdf_text()` が会社名→番号（`customers.fax_number` / `phone_number`、数字だけで比較）の順で行い、
   両者が別の顧客に当たったら確定しない。テキスト PDF の番号は見出し（FAX / TEL）の有無を問わず電話番号の形で拾う
   （FAX 送信元が見出し無しで印字される・`0480(12)3456` のような市内局番の括弧がある。Issue #524）。詳細は [docs/features/internal-senders.md](docs/features/internal-senders.md)
+- **顧客の担当者（`customer_contacts`、Issue #608）**: Gmail 取り込みの顧客突合は `customers.email` ではなく
+  `customer_contacts.email`（小文字・前後空白なし、`(tenant_id, email)` UNIQUE）で行う。突合・登録するアドレスは必ず
+  `normalize_contact_email()` を通す。候補が複数の担当者に当たっても同じ顧客なら1件と数える（顧客 ID で重複排除）。
+  `customers.email` は互換のため残し、顧客 API で `email` を送ったときだけ `sync_primary_contact()` で担当者へ反映する。
+  別の顧客に登録済みのアドレスは付け替えない（取り込みの結果が黙って変わる）。新しく顧客を作る経路で email を入れるときは
+  `add_contact()` も呼ぶ。`resolve_or_create_customer()` のテストは `mock_db.table()` の連鎖が共通なので、
+  顧客の INSERT の次に担当者の INSERT も呼ばれる点に注意（`_first_insert_row()`）。詳細は
+  [docs/features/customer-contacts.md](docs/features/customer-contacts.md)
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する
