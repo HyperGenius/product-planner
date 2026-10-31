@@ -72,8 +72,8 @@ class TestProductRouter:
         app.dependency_overrides[get_product_repo] = lambda: mock_repo
         app.dependency_overrides[get_current_user_id] = lambda: "test-user-id"
         app.dependency_overrides[get_supabase_client] = lambda: mock_client
-        app.dependency_overrides[get_product_name_alias_history_repo] = (
-            lambda: mock_alias_history_repo
+        app.dependency_overrides[get_product_name_alias_history_repo] = lambda: (
+            mock_alias_history_repo
         )
         app.dependency_overrides[get_product_name_alias_repo] = lambda: mock_alias_repo
         yield

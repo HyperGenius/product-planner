@@ -953,7 +953,8 @@ Issue #604 での変更（依存の版をすべて固定）:
   `httpx2.Response` を渡す（`httpx` のものでも実行時は通るが、型が合わない）
 - `backend/requirements-dev.txt`: 開発用ツール（`ruff` / `mypy` / `pytest` 等）も、新しい版の追加ルール・型チェックで
   コードを変えずに CI だけ落ちるのを防ぐため固定した。本番イメージには入らないので推移的な依存までは固定していない。
-  pre-commit のフック（`.pre-commit-config.yaml` の `rev`）は別に版を持っており、CI の版とは揃っていない
+  pre-commit のフック（`.pre-commit-config.yaml` の `rev`）が別に版を持っていた件は Issue #606 で解消した
+  （pre-commit も venv の `requirements-dev.txt` の版を呼ぶ。[backend-dev-tools.md](backend-dev-tools.md)）
 
 ---
 

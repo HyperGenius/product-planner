@@ -169,12 +169,14 @@ def match_product_by_embedded_code(
     最後の手段として呼ぶ。
     """
     rows = fetch_all_rows(
-        lambda: db.table(SupabaseTableName.ORDERS.value)
-        .select("id, product_id, products(code)")
-        .eq("tenant_id", tenant_id)
-        .eq("customer_id", customer_id)
-        .not_.is_("product_id", "null")
-        .order("id")
+        lambda: (
+            db.table(SupabaseTableName.ORDERS.value)
+            .select("id, product_id, products(code)")
+            .eq("tenant_id", tenant_id)
+            .eq("customer_id", customer_id)
+            .not_.is_("product_id", "null")
+            .order("id")
+        )
     )
     code_by_product_id: dict[int, str] = {}
     for row in rows:

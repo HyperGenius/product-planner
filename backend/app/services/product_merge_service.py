@@ -339,21 +339,25 @@ def _select_in(
     if not values:
         return []
     return fetch_all_rows(
-        lambda: db.table(table.value)
-        .select(columns)
-        .eq("tenant_id", tenant_id)
-        .in_(column, values)
-        .order("id")
+        lambda: (
+            db.table(table.value)
+            .select(columns)
+            .eq("tenant_id", tenant_id)
+            .in_(column, values)
+            .order("id")
+        )
     )
 
 
 def _load_products(db: Client, tenant_id: str) -> list[dict[str, Any]]:
     """テナントの全製品（無効な製品を含む）。"""
     return fetch_all_rows(
-        lambda: db.table(SupabaseTableName.PRODUCTS.value)
-        .select(_PRODUCT_COLUMNS)
-        .eq("tenant_id", tenant_id)
-        .order("id")
+        lambda: (
+            db.table(SupabaseTableName.PRODUCTS.value)
+            .select(_PRODUCT_COLUMNS)
+            .eq("tenant_id", tenant_id)
+            .order("id")
+        )
     )
 
 

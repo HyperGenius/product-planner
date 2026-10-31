@@ -81,6 +81,13 @@ cd backend && ruff check . && mypy .
   Next.js 16 の `next build`（Turbopack）は `.next/cache` にコンパイル結果を残さないので、キャッシュしてもビルドは速くならない
 - コミット時に pre-commit（`ruff` / `ruff-format` / `mypy`）が走り、`ruff-format` は自動整形して
   コミットを一旦中断する。整形後に `git add` して再コミットする
+  - pre-commit のフックは `repo: local` で、`scripts/run-backend-dev-tool.sh` が `backend/.venv`（無ければ有効な venv）の
+    ruff / mypy を呼ぶ（Issue #606）。**版は `requirements-dev.txt` だけで持ち、フックに `rev` を足さない**（`rev` の版と
+    CI の版がずれ、mirrors-mypy は独立環境で anthropic 等の型を見ずに通っていた）。venv の版が `requirements-dev.txt` と
+    違うとフックが失敗するので、ツールの版を上げたら `cd backend && uv pip install -r requirements-dev.txt` で入れ直す。
+    新しい worktree では先に `backend/.venv` を作らないとコミットできない。mypy は CI と同じく `backend/` で `mypy .`
+    （変更ファイルだけを渡すと、それを import する別ファイルの型エラーを見落とす）。CI では `ruff format --check` も実行する。
+    詳細は [docs/features/backend-dev-tools.md](docs/features/backend-dev-tools.md)
 
 ---
 
