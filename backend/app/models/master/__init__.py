@@ -1,4 +1,8 @@
 # backend/app/models/master/__init__.py
+from .customer_contact_schemas import (
+    CustomerContactCreateSchema,
+    CustomerContactResponse,
+)
 from .customer_schemas import CustomerCreateSchema, CustomerUpdateSchema
 from .process_routings import (
     RoutingBulkItem,
@@ -22,6 +26,8 @@ __all__ = [
     "RoutingUpdate",
     "RoutingResponse",
     "RoutingBulkItem",
+    "CustomerContactCreateSchema",
+    "CustomerContactResponse",
     "CustomerCreateSchema",
     "CustomerUpdateSchema",
 ]

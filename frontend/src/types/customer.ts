@@ -42,3 +42,22 @@ export interface CustomerUpdate {
   fax_number?: string | null
   email?: string | null
 }
+
+/**
+ * 顧客の担当者（Issue #611）
+ *
+ * Gmail 取り込みはこのアドレスで顧客を突合する。`email` は小文字・前後空白なしで保存される
+ */
+export interface CustomerContact {
+  id: string
+  customer_id: number
+  email: string
+  /** 一覧での見分けに使う登録名（任意） */
+  contact_name: string | null
+  created_at: string
+}
+
+export interface CustomerContactCreate {
+  email: string
+  contact_name?: string | null
+}

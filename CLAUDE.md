@@ -274,6 +274,12 @@ cd backend && ruff check . && mypy .
   別の顧客に登録済みのアドレスは上書きせず 409。同じドメインの顧客は候補表示だけで自動確定しない。RPC のエラーに `P0001` を使うときは
   `23505`（注文の重複）と区別できるよう、担当者の衝突を `P0001`、`orders` の UNIQUE を `23505` に固定している。詳細は
   [docs/features/customer-contacts.md](docs/features/customer-contacts.md)
+- **顧客の担当者の管理画面（Issue #611）**: 画面は顧客マスタの行の「担当者」ダイアログ、API は `/customers/{id}/contacts`
+  （`routers/master/customer_contacts.py`）。書き込めるロールは Backend `_CONTACT_EDITOR_ROLES` と Frontend
+  `CUSTOMER_CONTACT_EDITOR_ROLES` を揃える。重複アドレスは 409 `duplicate_contact_email`（登録先の顧客名を `message` に含む）。
+  `customers.email` と同じ担当者を消すときは `customers.email` も空にする（残すと顧客の保存で `sync_primary_contact()` が復活させる）。
+  このルーターは `/customers/{customer_id}` と同じ prefix だが、セグメント数が違うので登録順の衝突はない
+
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する

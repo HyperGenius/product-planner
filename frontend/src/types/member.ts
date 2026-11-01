@@ -49,6 +49,17 @@ export const DAILY_REPORT_NAME_EDITOR_ROLES: MemberRole[] = [
 ]
 
 /**
+ * 顧客の担当者（メールアドレス）を追加・削除できるロール。
+ * Backend `routers/master/customer_contacts.py` の `_CONTACT_EDITOR_ROLES` と揃える（Issue #611）。
+ * 担当者は Gmail 取り込みの顧客突合を左右するので、別名辞書の編集者と同じ事務担当者に限る
+ */
+export const CUSTOMER_CONTACT_EDITOR_ROLES: MemberRole[] = [
+  "order_handler",
+  "president",
+  "platform_admin",
+]
+
+/**
  * 重複製品の統合（/master/products/merge）を操作できるロール。
  * Backend `services/product_merge_service.py` の `MERGE_EDITOR_ROLES` と揃える（Issue #515）。
  */
