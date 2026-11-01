@@ -57,7 +57,7 @@ CREATE TABLE notifications (
 | `failed_encrypted` | `pdf_order_parsing_service._parse_one` | `order_attachments` | `attachment_id` |
 | `failed_image` | 同上 | `order_attachments` | `attachment_id` |
 | `non_order_email` | `gmail_service._process_message` | `gmail_message` | Gmail `msg_id` |
-| `customer_draft_created` | `resolve_or_create_customer` 呼び出し元（`gmail_service._process_message`）| `gmail_message` | Gmail `msg_id` |
+| `customer_draft_created`（**新規には発行しない**。Issue #609 で下書き顧客の自動作成を止めた。過去の通知の表示用に残す） | （旧）`gmail_service._process_message` | `gmail_message` | Gmail `msg_id` |
 | `approval_requested` | `orders.request_order_approval`（`POST /orders/{id}/request-approval`）| `orders` | `order_id` |
 | `no_order_created` | `pdf_order_parsing_service._notify_if_no_order_created`（`_parse_one` 末尾）| `order_parse_log` | `order_parse_log.id` |
 

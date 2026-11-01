@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import app.repositories.supa_infra  # noqa: F401  既存の循環 import を避けるため先に読む
 import pytest
-from app.services.customer_matching_service import resolve_or_create_customer
+from app.services.customer_matching_service import resolve_customer
 from postgrest.exceptions import APIError
 
 
@@ -94,33 +94,36 @@ class TestCustomerContacts:
         _add(admin_db, f, "customer_a", "taro@example.com")
         _add(admin_db, f, "customer_a", "hanako@example.com")
 
-        via_taro = resolve_or_create_customer(
+        via_taro = resolve_customer(
             admin_db, f["tenant_id"], "", real_from_email="Taro@Example.com"
         )
-        via_hanako = resolve_or_create_customer(
+        via_hanako = resolve_customer(
             admin_db, f["tenant_id"], "", real_from_email="hanako@example.com"
         )
-        via_both = resolve_or_create_customer(
+        via_both = resolve_customer(
             admin_db,
             f["tenant_id"],
             "From: taro@example.com\nFrom: hanako@example.com\n",
         )
 
-        assert via_taro == (f["customer_a"], False)
-        assert via_hanako == (f["customer_a"], False)
-        assert via_both == (f["customer_a"], False)
+        assert via_taro == f["customer_a"]
+        assert via_hanako == f["customer_a"]
+        assert via_both == f["customer_a"]
 
-    def test_unknown_address_creates_draft_customer_with_contact(
+    def test_unknown_address_stays_unresolved_without_creating_customer(
         self, admin_db, contacts_fixture
     ):
         f = contacts_fixture
 
-        first_id, created = resolve_or_create_customer(
-            admin_db, f["tenant_id"], "", real_from_email="new@example.com"
-        )
-        second_id, created_again = resolve_or_create_customer(
+        resolved = resolve_customer(
             admin_db, f["tenant_id"], "", real_from_email="new@example.com"
         )
 
-        assert created is True
-        assert (second_id, created_again) == (first_id, False)
+        assert resolved is None
+        customers = (
+            admin_db.table("customers")
+            .select("id")
+            .eq("tenant_id", f["tenant_id"])
+            .execute()
+        )
+        assert len(customers.data) == 2  # fixture の2社のみ。下書き顧客は作られない

@@ -94,6 +94,36 @@ class OrderConvertToRepairRequest(BaseSchema):
     simulated_deadline: str | None = None
 
 
+class OrderLinkCustomerRequest(BaseSchema):
+    """顧客不明の注文を既存の顧客へ紐づけるリクエスト（Issue #609）。"""
+
+    customer_id: int
+    # 元メールの差出人アドレスをその顧客の担当者として登録する（既定は登録）
+    register_contact: bool = True
+    # 同じ差出人アドレスの、顧客不明の下書き注文・ステージング行もまとめて紐づける
+    apply_to_same_sender: bool = False
+
+
+class OrderCustomerLinkContext(BaseSchema):
+    """顧客不明の注文を紐づけるときに画面へ出す情報（Issue #609）。"""
+
+    sender_email: str | None = None
+    # 差出人が既に担当者として登録されている顧客（別の顧客を選ぶと 409 になる）
+    contact_owner_customer_id: int | None = None
+    # 差出人と同じドメインの担当者を持つ顧客。候補表示のみで自動確定しない
+    candidate_customer_ids: list[int] = []
+    same_sender_order_count: int = 0
+
+
+class OrderLinkCustomerResponse(BaseSchema):
+    contact_registered: bool
+    sender_email: str | None = None
+    linked_order_ids: list[int]
+    # 他の注文と重複するため紐づけなかった注文
+    skipped_order_ids: list[int]
+    linked_staging_count: int
+
+
 class OrderSplitLineItem(BaseSchema):
     """分割後の1受注を表すスキーマ"""
 

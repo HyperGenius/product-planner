@@ -694,7 +694,7 @@ def _staging_customer_id(staging_row: dict[str, Any]) -> int | None:
 
     None になるのは、社内転送者（社長など）が件名・本文なしで転送してきたメールで
     顧客が決まらず、添付の中身からも決まらなかった場合（顧客不明。Issue #521）。
-    以前は「resolve_or_create_customer は必ず customer_id を解決する」前提で None を
+    以前は「resolve_customer は必ず customer_id を解決する」前提で None を
     不整合として例外にしていたが、顧客不明は customer_id=NULL の受注として起票し、
     受注一覧の「顧客未設定」から担当者に顧客を選ばせる。
     """

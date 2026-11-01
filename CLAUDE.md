@@ -265,6 +265,15 @@ cd backend && ruff check . && mypy .
   `add_contact()` も呼ぶ。`resolve_or_create_customer()` のテストは `mock_db.table()` の連鎖が共通なので、
   顧客の INSERT の次に担当者の INSERT も呼ばれる点に注意（`_first_insert_row()`）。詳細は
   [docs/features/customer-contacts.md](docs/features/customer-contacts.md)
+- **顧客の担当者と顧客不明の紐づけ（Issue #608 / #609）**: Gmail 取り込みの顧客突合は `customer_contacts`（`(tenant_id, email)` UNIQUE、
+  小文字・前後空白なし）で行う。`customers.email` は互換のため残すだけで、突合には使わない。**未登録のアドレスは下書き顧客を作らず
+  `customer_id` NULL（顧客不明）で起票する**（`resolve_customer()` は `int | None`。`customer_draft_created` 通知も出さない）ので、
+  取り込み側の処理は `customer_id` が None になる前提で書く。差出人は `order_attachments.sender_email`（ステージング行）に
+  保存し、顧客不明の注文を編集ダイアログで紐づけるときだけ `POST /orders/{id}/link-customer`（RPC `link_customer_to_unknown_orders`）で
+  担当者へ登録する。**`PATCH /orders/{id}` の `customer_id` で顧客不明を紐づけない**（担当者が登録されず、次回も顧客不明のままになる）。
+  別の顧客に登録済みのアドレスは上書きせず 409。同じドメインの顧客は候補表示だけで自動確定しない。RPC のエラーに `P0001` を使うときは
+  `23505`（注文の重複）と区別できるよう、担当者の衝突を `P0001`、`orders` の UNIQUE を `23505` に固定している。詳細は
+  [docs/features/customer-contacts.md](docs/features/customer-contacts.md)
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する

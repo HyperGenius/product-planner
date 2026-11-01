@@ -159,4 +159,17 @@ describe("CustomerSelector", () => {
     expect(second).toHaveBeenCalledWith("1")
     expect(first).not.toHaveBeenCalled()
   })
+
+  it("priorityIds の顧客を先頭に「同じドメイン」付きで出す（Issue #609）", async () => {
+    mockCustomers(CUSTOMERS)
+
+    render(<CustomerSelector value="" onValueChange={vi.fn()} priorityIds={[2]} />)
+    await openSelector()
+
+    const names = optionNames()
+    expect(names[0]).toContain("テスト工業株式会社")
+    expect(names[0]).toContain("同じドメイン")
+    expect(names[1]).toContain("株式会社サンプル精工")
+    expect(names[1]).not.toContain("同じドメイン")
+  })
 })

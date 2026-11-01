@@ -8,13 +8,13 @@ from googleapiclient.discovery import build
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import upload_staged_attachment
+from app.services.customer_contact_service import normalize_contact_email
 from app.services.customer_matching_service import (
     extract_effective_sender_email,
     extract_email_address,
     load_internal_sender_emails,
-    resolve_or_create_customer,
+    resolve_customer,
 )
-from app.services.notification_service import create_notification
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -112,7 +112,7 @@ def _get_real_from_email(msg: dict) -> str | None:
 
     転送ヘッダー（"From:"/"差出人:"）が本文中に存在しない「顧客からの直接メール」の
     場合、このヘッダーこそが顧客のメールアドレスそのものであるため、顧客マッチングの
-    最優先シグナルとして使う（`customer_matching_service.resolve_or_create_customer`
+    最優先シグナルとして使う（`customer_matching_service.resolve_customer`
     参照）。転送メールの場合はこの値が社内の転送者アドレスになるため使用しない。
     """
     headers = msg.get("payload", {}).get("headers", [])
@@ -195,6 +195,7 @@ def _insert_staging_row(
     *,
     tenant_id: str,
     customer_id: int | None,
+    sender_email: str | None,
     msg_id: str,
     body: str,
     storage_path: str,
@@ -211,6 +212,9 @@ def _insert_staging_row(
             "order_id": None,
             "tenant_id": tenant_id,
             "customer_id": customer_id,
+            "sender_email": normalize_contact_email(sender_email)
+            if sender_email
+            else None,
             "gmail_message_id": msg_id,
             "source_raw": body,
             "storage_path": storage_path,
@@ -276,29 +280,21 @@ def _process_message(
         # 5. 顧客マッチング（メールの受注可否に関わらず、ソース単位で1回解決する）
         #    転送ヘッダーが本文に無い場合、実際のGmail Fromヘッダーを最優先シグナルとして使う。
         #    差出人が社内転送者（社長など）なら差出人では突合せず、決まらなければ
-        #    customer_id=None（顧客不明）のままパース時に添付の中身から決める（Issue #521）
+        #    customer_id=None（顧客不明）のままパース時に添付の中身から決める（Issue #521）。
+        #    担当者に当たらない未登録のアドレスも下書き顧客は作らず顧客不明で起票し、受注担当者が
+        #    既存の顧客へ紐づけるときにこの sender_email を担当者へ登録する（Issue #609）
         real_from_email = _get_real_from_email(msg)
         internal_senders = load_internal_sender_emails(db, tenant_id)
         sender_email = extract_effective_sender_email(
             body, real_from_email, internal_senders
         )
-        customer_id, created_draft = resolve_or_create_customer(
+        customer_id = resolve_customer(
             db,
             tenant_id,
             body,
-            msg.get("internalDate"),
             real_from_email,
             internal_senders,
         )
-        if created_draft:
-            create_notification(
-                db,
-                tenant_id,
-                "customer_draft_created",
-                "gmail_message",
-                msg_id,
-                {"customer_id": customer_id, "email": sender_email},
-            )
 
         # 6. 添付ファイル（あれば）をStorageにステージング保存し、
         #    order_attachments に order_id=NULL のステージング行として保存する。
@@ -321,6 +317,7 @@ def _process_message(
                     db,
                     tenant_id=tenant_id,
                     customer_id=customer_id,
+                    sender_email=sender_email,
                     msg_id=msg_id,
                     body=body,
                     storage_path=storage_path,
@@ -337,6 +334,7 @@ def _process_message(
                 db,
                 tenant_id=tenant_id,
                 customer_id=customer_id,
+                sender_email=sender_email,
                 msg_id=msg_id,
                 body=body,
                 storage_path="",

@@ -26,6 +26,8 @@ interface CustomerSelectorProps {
   value: string
   onValueChange: (value: string) => void
   disabled?: boolean
+  /** 先頭に「候補」として出す顧客 ID（例: 差出人と同じドメインの顧客。Issue #609）。選択は自動で確定しない */
+  priorityIds?: number[]
 }
 
 const CLEAR_SELECTION_VALUE = "__clear__"
@@ -38,6 +40,7 @@ export function CustomerSelector({
   value,
   onValueChange,
   disabled = false,
+  priorityIds,
 }: CustomerSelectorProps) {
   const { data: customers, isLoading } = useCustomers()
   const [open, setOpen] = React.useState(false)
@@ -46,6 +49,11 @@ export function CustomerSelector({
 
   const selectedCustomer = customers?.find((c) => c.id.toString() === value)
   const hasCustomers = (customers?.length ?? 0) > 0
+  // 候補を先頭に並べる（候補どうしは priorityIds の順）。それ以外は元の順序のまま
+  const candidateIds = priorityIds ?? []
+  const candidates = candidateIds.flatMap((id) => customers?.find((c) => c.id === id) ?? [])
+  const others = customers?.filter((c) => !candidateIds.includes(c.id)) ?? []
+  const orderedCustomers = [...candidates, ...others]
 
   const handleSelect = (customerId: string) => {
     onValueChange(customerId)
@@ -108,7 +116,7 @@ export function CustomerSelector({
                 </CommandGroup>
               )}
               <CommandGroup>
-                {customers?.map((customer) => (
+                {orderedCustomers.map((customer) => (
                   <CommandItem
                     key={customer.id}
                     value={customer.id.toString()}
@@ -127,8 +135,16 @@ export function CustomerSelector({
                         {customer.alias}
                       </span>
                     )}
+                    {candidateIds.includes(customer.id) && (
+                      <Badge variant="outline" className="ml-auto shrink-0">
+                        同じドメイン
+                      </Badge>
+                    )}
                     {customer.status === "draft" && (
-                      <Badge variant="secondary" className="ml-auto shrink-0">
+                      <Badge
+                        variant="secondary"
+                        className={cn("shrink-0", !candidateIds.includes(customer.id) && "ml-auto")}
+                      >
                         下書き
                       </Badge>
                     )}
