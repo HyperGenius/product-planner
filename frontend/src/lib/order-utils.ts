@@ -512,6 +512,19 @@ export function isDeadlineOverdue(
   return actual > desired
 }
 
+/**
+ * 一括承認の確認モーダル用（Issue #617）。シミュ納期が希望納期を超過する注文を先頭へ寄せ、
+ * 件数を数える。超過内・超過外のそれぞれの順序は入力のまま（安定）。
+ */
+export function partitionOverdueBySimulatedDeadline(orders: Order[]): {
+  sorted: Order[]
+  overdueCount: number
+} {
+  const overdue = orders.filter((o) => isDeadlineOverdue(o, o.simulated_deadline))
+  const rest = orders.filter((o) => !isDeadlineOverdue(o, o.simulated_deadline))
+  return { sorted: [...overdue, ...rest], overdueCount: overdue.length }
+}
+
 export type OrderUrgency = "today" | "this_week" | "next_week_or_later" | "unset"
 
 /**

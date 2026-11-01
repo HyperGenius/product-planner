@@ -19,6 +19,7 @@ import {
   getRepairSubject,
   isNoRoutingOrder,
   matchesOrderType,
+  partitionOverdueBySimulatedDeadline,
   jstTomorrowIso,
   matchesCustomerProductFilter,
   toValidMasterId,
@@ -464,5 +465,27 @@ describe("修理等の注文（Issue #494）", () => {
     const noRouting = { ...repair, has_no_routings: true }
     expect(isNoRoutingOrder(noRouting)).toBe(false)
     expect(canShipWithoutRouting(noRouting, "president")).toBe(false)
+  })
+})
+
+describe("partitionOverdueBySimulatedDeadline (Issue #617)", () => {
+  it("シミュ納期が希望納期を超える注文を先頭に寄せ、それぞれの順序は保つ", () => {
+    const orders = [
+      makeOrder({ id: 1, desired_deadline: "2026-12-03", simulated_deadline: "2026-10-13" }),
+      makeOrder({ id: 2, desired_deadline: "2026-10-01", simulated_deadline: "2026-10-05" }),
+      makeOrder({ id: 3, desired_deadline: undefined, simulated_deadline: "2026-10-05" }),
+      makeOrder({ id: 4, desired_deadline: "2026-10-01", simulated_deadline: "2026-10-09" }),
+    ]
+    const { sorted, overdueCount } = partitionOverdueBySimulatedDeadline(orders)
+    expect(sorted.map((o) => o.id)).toEqual([2, 4, 1, 3])
+    expect(overdueCount).toBe(2)
+    expect(orders.map((o) => o.id)).toEqual([1, 2, 3, 4])
+  })
+
+  it("超過が無ければ件数0で順序もそのまま", () => {
+    const orders = [makeOrder({ id: 1 }), makeOrder({ id: 2 })]
+    const { sorted, overdueCount } = partitionOverdueBySimulatedDeadline(orders)
+    expect(sorted.map((o) => o.id)).toEqual([1, 2])
+    expect(overdueCount).toBe(0)
   })
 })

@@ -399,6 +399,10 @@ cd backend && ruff check . && mypy .
   - 「送品の消し込み」（Issue #557）の納期の基準は**希望納期 → 無ければ完成見込み**（`getShippingDeadline()`）で、
     完成見込みを基準にする現場ダッシュボードとは意図的に違う。送品は弥生が正なので、候補を示すだけで自動では送品済みにせず、
     一括の送品も作らない。送品の権限は `canShipOrder()`（`order-utils.ts`）で注文一覧と共有する
+- **スクロールする表の見出しを `sticky` にするとき**: shadcn の `Table` は自前で `overflow-auto` の div を挟むので、その外側のスクロール
+  コンテナに対して `sticky top-0` が効かない。スクロール領域の中では素の `<table>`（`TableHeader` / `TableRow` 等は流用可）を使う。
+  ダイアログは `max-h-[85dvh] flex flex-col` ＋ 表の領域 `min-h-0 flex-1 overflow-y-auto` にすると低い画面でもフッターが重ならない
+  （`bulk-approve-confirm-dialog.tsx`、Issue #617）
 - **確認ダイアログで非同期処理の完了を待つとき**: `AlertDialogAction` はクリックした時点で閉じるので、ミューテーションの完了を待って
   閉じたい（失敗時は開いたまま残したい）場合は `AlertDialogFooter` に普通の `Button` を置き、成功時に `open` を false にする（Issue #503）
 - **マスタを選ぶ検索付きコンボボックス（`Popover` + `Command`）**: 件数が増えうるマスタの選択は `Select` を使わずこちらにする

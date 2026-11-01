@@ -9,14 +9,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { getOrderProductName, formatDeadlineDate, isDeadlineOverdue } from "@/lib/order-utils"
+import {
+  getOrderProductName,
+  formatDeadlineDate,
+  isDeadlineOverdue,
+  partitionOverdueBySimulatedDeadline,
+} from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
 
@@ -37,35 +41,52 @@ export function BulkApproveConfirmDialog({
   onConfirm,
   onCancel,
 }: BulkApproveConfirmDialogProps) {
+  const { sorted, overdueCount } = partitionOverdueBySimulatedDeadline(orders)
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[85dvh] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle>一括承認の確認</DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">
             以下の注文を承認します（{orders.length}件）。確定後はスケジュールが作成されます。
+            {overdueCount > 0 && (
+              <span className="ml-1 font-semibold text-destructive">
+                うち納期超過 {overdueCount}件（先頭に表示）
+              </span>
+            )}
           </p>
         </DialogHeader>
 
-        <div className="max-h-80 overflow-y-auto">
-          <Table>
-            <TableHeader>
+        {/* shadcn の Table は自前で overflow-auto の div を挟み sticky が効かないため、素の table を使う */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <table className="w-full caption-bottom text-sm">
+            <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
-                <TableHead>注文番号</TableHead>
+                <TableHead className="whitespace-nowrap">注文番号</TableHead>
                 <TableHead>品名</TableHead>
-                <TableHead>希望納期</TableHead>
-                <TableHead>シミュ納期</TableHead>
+                <TableHead className="whitespace-nowrap">希望納期</TableHead>
+                <TableHead className="whitespace-nowrap">シミュ納期</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell className="font-medium">{order.order_no ?? "未設定"}</TableCell>
+              {sorted.map((order) => (
+                <TableRow
+                  key={order.id}
+                  className={
+                    isDeadlineOverdue(order, order.simulated_deadline)
+                      ? "bg-destructive/10 hover:bg-destructive/15"
+                      : undefined
+                  }
+                >
+                  <TableCell className="whitespace-nowrap font-medium">
+                    {order.order_no ?? "未設定"}
+                  </TableCell>
                   <TableCell className="text-sm">{getOrderProductName(order, products)}</TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className="whitespace-nowrap text-sm">
                     {formatDeadlineDate(order.desired_deadline) ?? "未設定"}
                   </TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className="whitespace-nowrap text-sm">
                     <span
                       className={
                         isDeadlineOverdue(order, order.simulated_deadline)
@@ -79,7 +100,7 @@ export function BulkApproveConfirmDialog({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </table>
         </div>
 
         <DialogFooter>
