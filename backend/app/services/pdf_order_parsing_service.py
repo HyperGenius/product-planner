@@ -9,8 +9,18 @@ from postgrest.exceptions import APIError
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.attachment_service import download_attachment
 from app.services.customer_matching_service import match_customer_by_pdf_text
-from app.services.email_extraction_service import extract_email_order_lines
+from app.services.email_extraction_service import (
+    EMAIL_INTENT_DELIVERY_CHASE,
+    EMAIL_INTENT_SPLIT_DELIVERY,
+    extract_email_order_lines,
+)
 from app.services.notification_service import create_notification
+from app.services.order_delivery_request_service import (
+    DELIVERY_REQUEST_PARSE_LOG_REASON,
+    DeliveryRequestEntry,
+    parse_requested_date,
+    record_delivery_requests,
+)
 from app.services.order_simulation_service import auto_simulate_intake_order
 from app.services.pdf_order_extraction_service import (
     PdfDocumentRejectedError,
@@ -423,6 +433,14 @@ def _process_email_body(
     document_order_no: str | None = extraction.get("document_order_no")
     auto_order_no = generate_auto_customer_order_no(row.get("customer_id"), body)
 
+    email_intent = extraction.get("email_intent")
+    if email_intent in (EMAIL_INTENT_DELIVERY_CHASE, EMAIL_INTENT_SPLIT_DELIVERY):
+        # 督促・分納依頼は既に受けた注文についての連絡なので起票しない（Issue #619）
+        _process_delivery_request_email(
+            db, row, cast(str, email_intent), line_items, body
+        )
+        return 0
+
     if not line_items:
         detail = {"body_snippet": body[:200]}
         _log_parse_event(db, tenant_id, attachment_id, "non_order_email", detail)
@@ -454,6 +472,57 @@ def _process_email_body(
         f"created {created_count} orders"
     )
     return created_count
+
+
+def _process_delivery_request_email(
+    db: Client,
+    row: dict[str, Any],
+    kind: str,
+    line_items: list[dict[str, Any]],
+    body: str,
+) -> None:
+    """督促・分納依頼のメールを、起票せず既存の受注に紐づけて記録する（Issue #619）。
+
+    本文が言及している明細ごとに、顧客と製品で未出荷の受注を探す。一意に決まらなければ
+    未紐づけ（order_id=NULL）のまま残し、受信結果の一覧（スキップ）から確認できる。
+    """
+    tenant_id = row["tenant_id"]
+    attachment_id = row["id"]
+    customer_id = _staging_customer_id(row)
+    entries: list[DeliveryRequestEntry] = []
+    for index, line in enumerate(line_items):
+        quantity = line.get("quantity")
+        entries.append(
+            DeliveryRequestEntry(
+                line_index=index,
+                extracted_product_name=(
+                    line.get("product_name_raw") or line.get("product_number_raw")
+                ),
+                quantity=quantity if isinstance(quantity, int) else None,
+                requested_date=parse_requested_date(line.get("delivery_date")),
+                product_id=_resolve_product_id(
+                    db,
+                    tenant_id,
+                    customer_id,
+                    line.get("product_number_raw"),
+                    line.get("product_name_raw"),
+                ),
+            )
+        )
+    linked = record_delivery_requests(
+        db, tenant_id, attachment_id, customer_id, kind, entries, body
+    )
+    _log_parse_event(
+        db,
+        tenant_id,
+        attachment_id,
+        DELIVERY_REQUEST_PARSE_LOG_REASON,
+        {
+            "kind": kind,
+            "request_count": len(linked),
+            "linked_order_ids": sorted({o for o in linked if o is not None}),
+        },
+    )
 
 
 def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:

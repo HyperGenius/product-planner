@@ -29,6 +29,8 @@ EMAIL_INTAKE_SKIP_REASONS = frozenset(
         "repair_duplicate_skipped",
         # 承認依頼以降に進んだ受注の注文書の再送（既存の受注に添付だけする。Issue #599）
         "resent_document",
+        # 督促・分割納入の依頼メール（起票せず既存の受注に紐づけて記録。Issue #619）
+        "delivery_request",
     }
 )
 EMAIL_INTAKE_KNOWN_REASONS = (

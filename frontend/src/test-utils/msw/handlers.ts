@@ -56,4 +56,6 @@ export const handlers = [
   http.get(`${API_BASE}/products`, () => HttpResponse.json(sampleProducts)),
   http.get(`${API_BASE}/customers`, () => HttpResponse.json(sampleCustomers)),
   http.get(`${API_BASE}/production-schedules`, () => HttpResponse.json([])),
+  // 受注一覧の行が引く「未対応の督促」の件数（Issue #619）。既定は督促なし
+  http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => HttpResponse.json([])),
 ]

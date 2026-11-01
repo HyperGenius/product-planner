@@ -6,6 +6,17 @@ import anthropic
 
 _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
+# メールの趣旨（Issue #619）。督促・分納依頼は注文として起票しない。
+EMAIL_INTENT_NEW_ORDER = "new_order"
+EMAIL_INTENT_DELIVERY_CHASE = "delivery_chase"
+EMAIL_INTENT_SPLIT_DELIVERY = "split_delivery"
+EMAIL_INTENTS = (
+    EMAIL_INTENT_NEW_ORDER,
+    EMAIL_INTENT_DELIVERY_CHASE,
+    EMAIL_INTENT_SPLIT_DELIVERY,
+    "other",
+)
+
 # 構造化出力（output_config.format）用の JSON Schema。
 # 以前は強制ツール呼び出し（tool_choice={"type": "tool"}）で JSON を整形していたが、
 # 純粋な抽出用途なので構造化出力へ移行した（Issue #420）。
@@ -18,6 +29,17 @@ _EXTRACT_SCHEMA: Any = {
             "description": (
                 "文書レベルの注文番号／注文No.。メール全体に対して1つ振られている"
                 "番号（件名・本文の「注文番号」「注文No.」等）。無ければ null。"
+            ),
+        },
+        "email_intent": {
+            "type": "string",
+            "enum": list(EMAIL_INTENTS),
+            "description": (
+                "メールの趣旨。new_order=新規の注文・内示の連絡（督促とあわせて新規の"
+                "注文が含まれる場合もこちら）、delivery_chase=納期遅れの督促・納期の"
+                "確認・納入の催促、split_delivery=分割納入（分納）の依頼・調整、"
+                "other=上記以外。督促・分納依頼は既に受けた注文についての連絡であり、"
+                "新しい注文ではない。"
             ),
         },
         "line_items": {
@@ -80,7 +102,7 @@ _EXTRACT_SCHEMA: Any = {
             },
         },
     },
-    "required": ["document_order_no", "line_items"],
+    "required": ["document_order_no", "email_intent", "line_items"],
     "additionalProperties": False,
 }
 
@@ -95,10 +117,17 @@ def extract_email_order_lines(
     汎用プロンプトの末尾に「顧客固有の抽出指示」として追記する。抽出スキーマは
     変更せず、あくまで自然言語の指示のみ。
 
-    戻り値: {"document_order_no": str | None, "line_items": list[dict]}
+    戻り値: {"document_order_no": str | None, "email_intent": str,
+    "line_items": list[dict]}。督促・分納依頼のメール（Issue #619）では line_items に
+    本文が言及している品番・数量・納期（依頼の対象）が入る。
     """
     model = os.environ.get("EMAIL_EXTRACTION_MODEL", "claude-haiku-4-5-20251001")
-    prompt = "以下のメール本文から注文番号（文書レベル）と注文明細を抽出してください。"
+    prompt = (
+        "以下のメール本文から注文番号（文書レベル）と注文明細を抽出してください。"
+        "あわせてメールの趣旨（email_intent）を判定してください。納期遅れの督促・"
+        "分割納入の依頼は新しい注文ではないので new_order にせず、言及されている"
+        "品番・数量・納期は line_items に入れてください。"
+    )
     if customer_extraction_prompt and customer_extraction_prompt.strip():
         prompt += (
             f"\n\n【この顧客固有の抽出指示】\n{customer_extraction_prompt.strip()}"
@@ -127,7 +156,12 @@ def extract_email_order_lines(
     data: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
     line_items = data.get("line_items")
     document_order_no = data.get("document_order_no")
+    email_intent = data.get("email_intent")
     return {
+        # 不正値・未指定は new_order（従来どおり注文として扱う）
+        "email_intent": (
+            email_intent if email_intent in EMAIL_INTENTS else EMAIL_INTENT_NEW_ORDER
+        ),
         "document_order_no": (
             document_order_no if isinstance(document_order_no, str) else None
         ),
