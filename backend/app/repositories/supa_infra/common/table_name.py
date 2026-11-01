@@ -40,3 +40,4 @@ class SupabaseTableName(Enum):
     ORDER_PROCESS_PROGRESS = "order_process_progress"
     ORDER_SIMULATION_RESULTS = "order_simulation_results"
     CUSTOMER_EXTRACTION_PROMPT_HISTORY = "customer_extraction_prompt_history"
+    CUSTOMER_MERGE_LOG = "customer_merge_log"

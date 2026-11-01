@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { FileCog, Plus, Pencil, Trash2 } from "lucide-react"
+import { FileCog, History, Merge, Plus, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ApiError } from "@/lib/api-client"
 import {
@@ -12,7 +12,9 @@ import {
   useDeleteCustomer,
 } from "@/hooks/use-customers"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
-import { EXTRACTION_PROMPT_EDITOR_ROLES } from "@/types/member"
+import { CUSTOMER_MERGE_ROLES, EXTRACTION_PROMPT_EDITOR_ROLES } from "@/types/member"
+import { CustomerMergeDialog } from "@/components/customer-merge/customer-merge-dialog"
+import { CustomerMergeLogDialog } from "@/components/customer-merge/customer-merge-log-dialog"
 import type { Customer } from "@/types/customer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -43,6 +45,8 @@ export default function CustomersPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false)
+  const [isMergeLogOpen, setIsMergeLogOpen] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [customerName, setCustomerName] = useState("")
   const [customerAlias, setCustomerAlias] = useState("")
@@ -60,6 +64,10 @@ export default function CustomersPage() {
   // 抽出指示（取り込み設定）の画面は platform_admin だけに入口を出す（Issue #602）
   const canEditExtractionPrompt =
     currentMember != null && EXTRACTION_PROMPT_EDITOR_ROLES.includes(currentMember.role)
+
+  // 重複顧客の統合は社長・プラットフォーム管理者だけに入口を出す（Issue #610）
+  const canMergeCustomers =
+    currentMember != null && CUSTOMER_MERGE_ROLES.includes(currentMember.role)
 
   // 作成ダイアログを開く
   const handleOpenCreateDialog = () => {
@@ -196,10 +204,24 @@ export default function CustomersPage() {
             顧客の一覧表示、作成、編集、削除を行います
           </p>
         </div>
-        <Button onClick={handleOpenCreateDialog}>
-          <Plus className="mr-2 h-4 w-4" />
-          新規作成
-        </Button>
+        <div className="flex gap-2">
+          {canMergeCustomers && (
+            <>
+              <Button variant="outline" onClick={() => setIsMergeLogOpen(true)}>
+                <History className="mr-2 h-4 w-4" />
+                統合履歴
+              </Button>
+              <Button variant="outline" onClick={() => setIsMergeDialogOpen(true)}>
+                <Merge className="mr-2 h-4 w-4" />
+                顧客の統合
+              </Button>
+            </>
+          )}
+          <Button onClick={handleOpenCreateDialog}>
+            <Plus className="mr-2 h-4 w-4" />
+            新規作成
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -286,6 +308,13 @@ export default function CustomersPage() {
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {canMergeCustomers && (
+        <>
+          <CustomerMergeDialog open={isMergeDialogOpen} onOpenChange={setIsMergeDialogOpen} />
+          <CustomerMergeLogDialog open={isMergeLogOpen} onOpenChange={setIsMergeLogOpen} />
+        </>
       )}
 
       {/* 作成ダイアログ */}
