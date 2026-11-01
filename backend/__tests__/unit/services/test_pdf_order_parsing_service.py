@@ -2401,3 +2401,78 @@ class TestResentDocument:
 
         assert result is None
         mock_db.table.assert_not_called()
+
+
+@pytest.mark.unit
+class TestDeliveryRequestEmail:
+    """督促・分納依頼のメールは注文として起票せず、依頼として記録する（Issue #619）。"""
+
+    def _row(self):
+        return {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "source_raw": "10月分までの納期遅れ分の解消をお願いします",
+            "gmail_message_id": "msg-1",
+        }
+
+    def _extraction(self, intent):
+        return {
+            "document_order_no": None,
+            "email_intent": intent,
+            "line_items": [
+                {
+                    "product_name_raw": "フィルタ",
+                    "product_number_raw": "CODE-A",
+                    "quantity": 500,
+                    "delivery_date": "2026-11-03",
+                    "certainty": "confirmed",
+                }
+            ],
+        }
+
+    @pytest.mark.parametrize("intent", ["delivery_chase", "split_delivery"])
+    def test_request_is_recorded_without_creating_an_order(self, intent):
+        from app.services import pdf_order_parsing_service as svc
+
+        db = MagicMock()
+        with (
+            patch.object(
+                svc, "extract_email_order_lines", return_value=self._extraction(intent)
+            ),
+            patch.object(svc, "_resolve_product_id", return_value=3),
+            patch.object(svc, "record_delivery_requests", return_value=[42]) as record,
+            patch.object(svc, "_process_line_item") as process_line,
+            patch.object(svc, "create_notification") as notify,
+        ):
+            created = svc._process_email_body(db, self._row(), None)
+
+        assert created == 0
+        process_line.assert_not_called()
+        notify.assert_not_called()
+        args = record.call_args.args
+        assert args[2:5] == ("att-1", 7, intent)
+        entry = args[5][0]
+        assert (entry.product_id, entry.quantity) == (3, 500)
+        assert entry.requested_date.isoformat() == "2026-11-03"
+        log = db.table("order_parse_log").insert.call_args.args[0]
+        assert log["reason"] == "delivery_request"
+        assert log["detail"]["linked_order_ids"] == [42]
+
+    def test_new_order_intent_still_creates_orders(self):
+        from app.services import pdf_order_parsing_service as svc
+
+        db = MagicMock()
+        with (
+            patch.object(
+                svc,
+                "extract_email_order_lines",
+                return_value=self._extraction("new_order"),
+            ),
+            patch.object(svc, "record_delivery_requests") as record,
+            patch.object(svc, "_process_line_item", return_value=True),
+        ):
+            created = svc._process_email_body(db, self._row(), None)
+
+        assert created == 1
+        record.assert_not_called()

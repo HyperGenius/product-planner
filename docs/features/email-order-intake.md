@@ -377,7 +377,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 |---|---|---|
 | `failed` | `parse_status='pending'`（パース未実行 / 中断）／ `parse_log_reasons` に `failed_encrypted` `failed_image` `failed_no_attachment` を含む（空の下書きが起票されても `empty_draft=true` で失敗扱い）／ 起票0件かつ `invalid_quantity` を含む | 手動起票・再送など対応必須 |
 | `created` | `created_order_count >= 1` | レビューして確定（要確認理由を含めば `needs_attention=true`） |
-| `skipped` | 上記いずれにも該当しない（`non_order_email` / `draft_conflict_skipped` / `downgrade_skipped` / `no_order_created`、または理由ログなしで起票0件） | 基本対応不要 |
+| `skipped` | 上記いずれにも該当しない（`non_order_email` / `draft_conflict_skipped` / `downgrade_skipped` / `no_order_created` / `delivery_request`（[督促・分納依頼](#督促分割納入依頼メールの扱いissue-619)）、または理由ログなしで起票0件） | 基本対応不要 |
 
 理由文字列の分類集合（`_EMAIL_INTAKE_FAIL_REASONS` / `_EMAIL_INTAKE_ATTENTION_REASONS` /
 `_EMAIL_INTAKE_SKIP_REASONS`）は同ファイルに定数化。`order_parse_log.reason` は CHECK 制約の
@@ -568,3 +568,47 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | 注文書からの顧客照合で、番号の表記揺れ（市内局番の括弧等）・見出しの無い番号・電話番号（`customers.phone_number`）に対応（詳細は[internal-senders.md](internal-senders.md)） | ✅ #524 |
 | 自動起票時の作業開始日（JST 翌日）設定とシミュ納期の自動算出（詳細は[pdf-order-parsing.md](pdf-order-parsing.md#起票後の自動シミュレーションissue-477)） | ✅ #477 |
 | 処理結果をプラットフォーム管理者の Slack に件数で通知（`GET /api/cron/notify-email-intake-slack`、[処理結果の Slack 通知](#処理結果の-slack-通知issue-574)） | ✅ #574 |
+| 督促・分割納入の依頼メールを注文として起票せず、既存の受注に紐づけて記録・表示（[督促・分割納入依頼メールの扱い](#督促分割納入依頼メールの扱いissue-619)） | ✅ #619 |
+
+## 督促・分割納入依頼メールの扱い（Issue #619）
+
+納期超過の製品について、顧客から「督促」「分割納入（分納）の依頼」のメールが届く。本文に品番・数量・納期が
+書かれるため、従来は新規注文として下書き起票され、納期が元の受注と違うので重複判定
+（`(顧客, 製品, 希望納期)`）も止まらず二重受注になっていた。顧客注文番号も本文ハッシュの `AUTO-xxxx` で、
+#599 の再送判定も効かない。
+
+### 処理
+
+1. メール本文の抽出（`email_extraction_service.extract_email_order_lines`）が `email_intent` も返す:
+   `new_order` / `delivery_chase`（督促・納期確認）/ `split_delivery`（分納の依頼）/ `other`。
+   督促と新規注文が同居するメールは `new_order`（取りこぼさない）。不正値・未指定は `new_order`。
+2. `delivery_chase` / `split_delivery` のとき `_process_email_body()` は**起票せず**
+   `_process_delivery_request_email()` で依頼を記録し、`order_parse_log.reason='delivery_request'`
+   を残す（`email_intake_outcome` の `SKIP_REASONS`。受信結果の一覧では「スキップ」）。
+   本文が言及する明細ごとに、顧客＋製品（`_resolve_product_id()`）で対象の受注を探す。
+3. 対象の受注（`order_delivery_request_service.find_target_order_id()`）は `order_type='production'` かつ
+   `draft` / `pending_approval` / `confirmed` / `in_progress`（下書きのまま納期超過した受注への督促があるため
+   draft も含む）で `superseded_at IS NULL`。複数当たるときは希望納期が今日（JST）以前の受注が1件だけならそれ、
+   それでも決まらなければ**未紐づけ**（`order_id` NULL）。顧客不明・製品不明も未紐づけ。
+4. 記録先は `order_delivery_requests`（RLS: メンバーは参照・更新のみ、作成は取り込みの service role）。
+   同じメールの再処理で二重に記録しないよう `(order_attachment_id, line_index)` を UNIQUE にしている。
+   受注が削除されても依頼は残す（`ON DELETE SET NULL`）。**受注の納期・数量・ステータスは書き換えない**
+   （納期変更はホワイトボード、送品は弥生が正典）。
+
+### API / 画面
+
+| | |
+|---|---|
+| `GET /orders/{order_id}/delivery-requests` | 受注に紐づく依頼（新しい順） |
+| `GET /orders/delivery-requests/open-counts` | 受注ごとの未対応件数（一覧の印用。1リクエスト） |
+| `PATCH /orders/delivery-requests/{id}` | `{"resolved": true/false}` で対応済み／未対応に戻す |
+
+- 受注詳細: `OrderDeliveryRequests`（督促・分納の依頼と本文の抜粋、「対応済みにする」）。依頼が無ければ非表示
+- 受注一覧の行: 未対応があれば「督促あり」バッジ
+- 未紐づけの依頼は、受信メール処理結果（`/orders/email-intake`）の「督促・分納の依頼（起票せず記録）」から確認する
+
+### 制約・対象外
+
+- 分割納入の業務プロセス（出荷のみの分割）は現場判断のアドホック運用のため、記録・表示のみ。受注の分割や分納計画は扱わない
+- 添付の日程表は解析しない（PDF に明細として読める表が付く督促は PDF 側の経路で起票されうる。本文の趣旨判定は本文経路のみ）
+- 督促の新着を知らせる通知（ベル）は未実装（`notifications.notif_type` の CHECK 変更が要る）

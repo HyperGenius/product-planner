@@ -1,6 +1,9 @@
 import type React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { render, screen, userEvent } from "@/test-utils/render"
+import { http, HttpResponse } from "msw"
+import { render, screen, userEvent, waitFor } from "@/test-utils/render"
+import { server } from "@/test-utils/msw/server"
+import { API_BASE } from "@/test-utils/msw/handlers"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Table, TableBody } from "@/components/ui/table"
 import type { Order } from "@/types/order"
@@ -166,6 +169,35 @@ describe("OrderTableRow", () => {
       await openMenu()
 
       expect(screen.queryByText(LABEL)).not.toBeInTheDocument()
+    })
+  })
+
+  describe("督促の印（Issue #619）", () => {
+    it("未対応の督促・分納の依頼がある受注には「督促あり」を出す", async () => {
+      server.use(
+        http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () =>
+          HttpResponse.json([{ order_id: 1, count: 2 }]),
+        ),
+      )
+      renderRow(makeOrder({ id: 1 }))
+
+      expect(await screen.findByText("督促あり")).toBeInTheDocument()
+    })
+
+    it("別の受注の督促では出さない", async () => {
+      let responded = false
+      server.use(
+        http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => {
+          responded = true
+          return HttpResponse.json([{ order_id: 99, count: 1 }])
+        }),
+      )
+      renderRow(makeOrder({ id: 1 }))
+
+      await waitFor(() => expect(responded).toBe(true))
+      // 取得結果が描画に反映される時間を与えてから、印が出ていないことを確かめる
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(screen.queryByText("督促あり")).not.toBeInTheDocument()
     })
   })
 

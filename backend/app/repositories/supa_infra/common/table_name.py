@@ -21,6 +21,7 @@ class SupabaseTableName(Enum):
     GMAIL_LABEL_TENANTS = "gmail_label_tenants"
     ORDER_ATTACHMENTS = "order_attachments"
     ORDER_PARSE_LOG = "order_parse_log"
+    ORDER_DELIVERY_REQUESTS = "order_delivery_requests"
     NOTIFICATIONS = "notifications"
     ORDER_APPROVAL_LOG = "order_approval_log"
     ORDER_SCHEDULING_START_BACKDATE_LOG = "order_scheduling_start_backdate_log"

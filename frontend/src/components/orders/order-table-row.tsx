@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import type React from "react"
 import type { ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
+import { useOpenDeliveryRequestCounts } from "@/hooks/use-order-delivery-requests"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -168,6 +169,9 @@ export function OrderTableRow({
   showActionColumns = true,
 }: OrderTableRowProps) {
   const router = useRouter()
+  // 未対応の督促・分納の依頼がある受注に印を付ける（受注ごとには引かず、共有キャッシュの1リクエスト。Issue #619）
+  const { data: openRequestCounts } = useOpenDeliveryRequestCounts()
+  const openRequestCount = openRequestCounts?.find((c) => c.order_id === order.id)?.count ?? 0
   const isEmailOrder = order.source_type === "email"
   // 製品はマッチ済みだが工程が無く起票できない下書き（Issue #406）
   const noRouting = isNoRoutingOrder(order)
@@ -440,6 +444,16 @@ export function OrderTableRow({
               <Badge className={getCertaintyBadgeClass(order.customer_certainty)}>
                 {getCertaintyLabel(order.customer_certainty)}
               </Badge>
+            )}
+            {openRequestCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge className="bg-red-100 text-red-800 hover:bg-red-100">督促あり</Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  顧客から督促・分納の依頼メールが届いています（未対応 {openRequestCount} 件）。詳細で確認してください。
+                </TooltipContent>
+              </Tooltip>
             )}
             {noRouting && (
               <Tooltip>

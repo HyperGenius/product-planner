@@ -31,6 +31,7 @@ import { SplitOrderDialog } from "@/components/orders/split-order-dialog"
 import { CustomerCertaintyValue } from "@/components/orders/customer-certainty-value"
 import { RepairOrderDetail } from "@/components/orders/repair-order-detail"
 import { OrderProcessProgress } from "@/components/orders/order-process-progress"
+import { OrderDeliveryRequests } from "@/components/orders/order-delivery-requests"
 import {
   useOrder,
   useOrderAttachments,
@@ -375,6 +376,9 @@ export default function OrderDetailPage() {
               </div>
             </dl>
           </div>
+
+          {/* 顧客からの督促・分納の依頼（メール由来、Issue #619） */}
+          <OrderDeliveryRequests orderId={order.id} />
 
           {/* 工程の進捗（日報の実績の割り付け対象＝確定済み・生産中のみ。Issue #491） */}
           {(order.status === "confirmed" || order.status === "in_progress") && (

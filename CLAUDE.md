@@ -286,6 +286,14 @@ cd backend && ruff check . && mypy .
   製品の別名 `(顧客, 表記)` の衝突は統合先を優先。UPDATE ポリシーの無い追記のみ・参照専用のテーブルを付け替えるときは、`customer_id` 列だけの
   `GRANT UPDATE` ＋ president / platform_admin のポリシーを足す（ポリシーが無いと RLS で0件更新のまま黙って成功する）。統合は `customer_merge_log` に残る。
   `/customers/merge-log` のような静的パスは `/{customer_id}` より先に登録する。詳細は [docs/features/customer-contacts.md](docs/features/customer-contacts.md#重複顧客の統合issue-610)
+- **督促・分割納入の依頼メール（Issue #619）**: 本文の抽出結果の `email_intent` が `delivery_chase` / `split_delivery` のメールは
+  **起票せず** `order_delivery_requests` に記録する（`_process_email_body()` → `_process_delivery_request_email()`、理由 `delivery_request`
+  は `email_intake_outcome` の SKIP に登録済み）。対象の受注は顧客＋製品で未出荷の生産受注（**下書きも含む**。納期超過のまま下書きの受注に督促が来る）を探し、
+  一意に決まらなければ `order_id` NULL の未紐づけにする。受注の納期・数量・ステータスは自動で書き換えない。`email_intent` の判定が
+  外れて督促が起票されたときの手当ては抽出プロンプト（`email_extraction_service`）で直す。PDF 添付の経路には趣旨判定が無い。
+  受注一覧の行は `useOpenDeliveryRequestCounts()`（1リクエストの共有キャッシュ）で印を付けるため、`OrderTableRow` を描画するテストでは
+  MSW の既定ハンドラ（`test-utils/msw/handlers.ts`）が無いと `onUnhandledRequest: "error"` で落ちる。詳細は
+  [docs/features/email-order-intake.md](docs/features/email-order-intake.md#督促分割納入依頼メールの扱いissue-619)
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する
