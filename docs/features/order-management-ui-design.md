@@ -430,6 +430,14 @@ Epic #553 の2画面目。社長が承認待ちの注文を、希望納期とシ
 | 受注担当（`order_handler`） | 取り下げ |
 | それ以外（`iso_officer` / `platform_admin`） | 閲覧のみ（選択欄も出さない） |
 
+#### 一括承認の確認モーダルのレイアウト（Issue #617）
+
+`BulkApproveConfirmDialog`（`components/orders/bulk-approve-confirm-dialog.tsx`）は、15件程度でも1行1段で確認できるようにしている。
+
+- 幅は `max-w-3xl`。注文番号・納期の列は `whitespace-nowrap`、品名だけ折り返す（`max-w-lg` では注文番号が1文字ずつ縦に折り返していた）。
+- 高さは `max-h-[85dvh]` の flex 縦並びで、表の領域だけがスクロールする（ヘッダーとフッターのボタンは常に見える）。表の見出しは `sticky top-0`。
+- シミュ納期が希望納期を超える注文は先頭に寄せ、行を薄い赤にし、説明文に「うち納期超過 N件」を出す（`partitionOverdueBySimulatedDeadline()`、判定は `isDeadlineOverdue()`）。0件なら出さない。
+
 - 権限の判定は `canApproveOrder()` / `canRejectOrder()` / `canWithdrawApproval()`（`lib/order-utils.ts`）に切り出し、注文一覧の `OrderTableRow` と共有する。承認は `president` 限定で `platform_admin` を含めない（Issue #323）
 - 取り下げは注文一覧・バックエンド（`withdraw-approval`）と同じく受注担当なら依頼者本人かを問わない
 - 承認待ちだけを並べる画面なので、一括操作バーの「一括シミュレーション」は出さない（`OrderBulkActionDialogs` / `BulkActionBar` の `showBulkSimulate={false}`。省略時は従来どおり出す）
