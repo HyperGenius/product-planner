@@ -280,6 +280,12 @@ cd backend && ruff check . && mypy .
   `customers.email` と同じ担当者を消すときは `customers.email` も空にする（残すと顧客の保存で `sync_primary_contact()` が復活させる）。
   このルーターは `/customers/{customer_id}` と同じ prefix だが、セグメント数が違うので登録順の衝突はない
 
+- **重複顧客の統合（Issue #610）**: 事前チェックは純粋関数 `customer_merge_service.plan_merge()` で行いプレビュー API と実行 API で共有、
+  実行は RPC `merge_customers`（`SECURITY INVOKER`）。**顧客を参照する FK を新しく足すときは、RPC の付け替え対象に入れるか CASCADE にするかを決める**
+  （入れ忘れると CASCADE で消えるか統合が 409 になる）。受注の UNIQUE 衝突は製品の統合と違い出荷済みでも削除せず統合を止める。
+  製品の別名 `(顧客, 表記)` の衝突は統合先を優先。UPDATE ポリシーの無い追記のみ・参照専用のテーブルを付け替えるときは、`customer_id` 列だけの
+  `GRANT UPDATE` ＋ president / platform_admin のポリシーを足す（ポリシーが無いと RLS で0件更新のまま黙って成功する）。統合は `customer_merge_log` に残る。
+  `/customers/merge-log` のような静的パスは `/{customer_id}` より先に登録する。詳細は [docs/features/customer-contacts.md](docs/features/customer-contacts.md#重複顧客の統合issue-610)
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する
