@@ -72,9 +72,32 @@
 （`candidate_customer_ids`）・まとめ直しの対象件数を返す。同じドメインの顧客は顧客選択の先頭に「同じドメイン」として
 出すだけで、**自動では確定しない**（フリーメール・共有ドメインの誤確定を避ける）。
 
+## 重複顧客の統合（Issue #610）
+
+#608 以前に作られた「担当者名つきの下書き顧客」など、同じ会社の重複顧客を顧客マスタ画面（`/master/customers` の「顧客の統合」。
+president / platform_admin のみ）から1つにまとめる。製品の統合（#515、[product-master.md](product-master.md#重複製品の統合issue-515)）の顧客版で、構成も同じ。
+
+- **事前チェック**: `customer_merge_service.plan_merge()`（純粋関数）をプレビュー `POST /customers/merge/preview` と実行 `POST /customers/merge`
+  （実行直前に再検証。止める理由があれば 409 `merge_blocked`、RPC が競合で失敗したら 409 `merge_conflict`）で共有する。
+  止める理由は `order_conflict` のみ: 付け替えると受注の UNIQUE（`orders_dedupe_key` / `orders_dedupe_key_unmatched_product` /
+  `orders_repair_customer_order_no_key`）が衝突する統合される側の受注。残す顧客の受注（無ければ ID の若い受注）が枠を持つ。
+  製品の統合と違い、出荷済みでも自動では削除しない。
+- **実行**: RPC `merge_customers`（`SECURITY INVOKER`、1トランザクション）。付け替え対象は `orders` / `order_attachments`（ステージング行を含む）/
+  `product_name_aliases` / `product_name_alias_history` / `customer_name_aliases` / `daily_report_unallocated_actuals` /
+  `customer_extraction_prompt_history` / `customer_contacts`。統合される側の `customers.email` で担当者に無いものは担当者として足す。
+  `product_name_aliases` の `(顧客, 表記)` の UNIQUE が衝突する分は**統合先を優先して統合される側を捨てる**（`aliases_dropped`）。
+  プレビュー後に受注が変わった場合は 23505、顧客が消えていれば P0002、削除件数の不一致は P0001 で全体を失敗させる。
+- **権限**: UPDATE ポリシーの無かった `daily_report_unallocated_actuals` / `customer_extraction_prompt_history` は `customer_id` 列だけの
+  `GRANT UPDATE` ＋ president / platform_admin のポリシーを足し、`product_name_alias_history` の列 GRANT に `customer_id` を足した。
+- **履歴**: RPC が `customer_merge_log`（追記のみ）へ、統合先・統合された顧客の統合時点の内容（id / 名前 / 通称 / email）・付け替え件数・実行者を残す。
+  `GET /customers/merge-log` と画面の「統合履歴」で見られる。
+- **顧客を参照する FK を新しく足すとき**は、`merge_customers` の付け替え対象に入れるか CASCADE にするかを決める。
+- 日報の進捗（`order_process_progress`）は顧客を持たないので影響しない。未割当の結果は次回の cron の再計算でも整う。
+
 ## テスト
 
 - unit: `test_customer_contact_service.py` / `test_customer_matching_service.py`
 - api: `test_customers_router.py`
 - integration: `test_customer_contacts.py`（UNIQUE・CHECK・CASCADE・複数アドレスの解決）/ `test_link_customer_to_unknown_orders.py`（#609 の RPC）
 - #609: unit `test_customer_link_service.py`、api `test_order_customer_link.py`、frontend `edit-order-dialog.test.tsx`
+- #610: unit `test_customer_merge_service.py`、api `test_customer_merge_router.py`、integration `test_merge_customers.py`（付け替え・履歴・ロール・競合時のロールバック）、frontend `customer-merge-dialog.test.tsx`

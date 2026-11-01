@@ -42,3 +42,63 @@ export interface CustomerUpdate {
   fax_number?: string | null
   email?: string | null
 }
+
+/**
+ * 重複顧客の統合（Issue #610）。
+ * Backend `models/master/customer_merge_schemas.py` と一致させる。
+ */
+export interface CustomerMergeRequest {
+  keep_customer_id: number
+  merge_customer_ids: number[]
+}
+
+export interface CustomerMergeTarget {
+  id: number
+  name: string
+  alias: string | null
+  email: string | null
+}
+
+export interface CustomerMergeCounts {
+  orders_reassigned: number
+  attachments_reassigned: number
+  /** 製品の別名の付け替え件数 */
+  aliases_reassigned: number
+  /** 同じ表記が残す顧客にもあるため捨てる製品の別名の件数 */
+  aliases_dropped: number
+  alias_history_reassigned: number
+  customer_aliases_reassigned: number
+  unallocated_actuals_reassigned: number
+  prompt_history_reassigned: number
+  contacts_reassigned: number
+  customers_deleted: number
+}
+
+export interface CustomerMergeBlocker {
+  reason: "order_conflict"
+  customer_id: number
+  customer_name: string
+  order_id: number
+  order_number: string | null
+  order_status: string
+  conflicting_order_id: number
+  conflicting_order_number: string | null
+}
+
+export interface CustomerMergePreview {
+  keep_customer_id: number
+  merge_customer_ids: number[]
+  merge_customers: CustomerMergeTarget[]
+  counts: CustomerMergeCounts
+  blockers: CustomerMergeBlocker[]
+}
+
+export interface CustomerMergeLogEntry {
+  id: number
+  keep_customer_id: number | null
+  keep_customer_name: string
+  merged_customers: CustomerMergeTarget[]
+  counts: CustomerMergeCounts
+  merged_by: string | null
+  merged_at: string
+}
