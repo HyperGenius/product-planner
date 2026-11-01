@@ -13,6 +13,9 @@ import type {
   OrderBulkApproveResponse,
   OrderConvertToRepair,
   OrderCreate,
+  OrderCustomerLinkContext,
+  OrderLinkCustomerRequest,
+  OrderLinkCustomerResponse,
   OrderSimulateRequest,
   OrderSimulateResponse,
   OrderSplitRequest,
@@ -158,6 +161,39 @@ export function useUpdateOrder() {
     mutationFn: ({ id, data }: { id: number; data: OrderUpdate }) =>
       apiClient<Order>(`/orders/${id}`, {
         method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+    },
+  })
+}
+
+/**
+ * 顧客不明の注文を紐づけるときの情報（差出人・同じドメインの候補）を取得するフック（Issue #609）
+ *
+ * 編集ダイアログを開いている間だけ取得する（`enabled`）。キーは `["orders", ...]` 配下なので、
+ * 紐づけ後の `["orders"]` の無効化でまとめて取り直される。
+ */
+export function useOrderCustomerLinkContext(orderId: number | undefined, enabled: boolean) {
+  return useQuery<OrderCustomerLinkContext>({
+    queryKey: ["orders", "customer-link-context", orderId],
+    queryFn: () => apiClient<OrderCustomerLinkContext>(`/orders/${orderId}/customer-link-context`),
+    enabled: enabled && orderId !== undefined,
+  })
+}
+
+/**
+ * 顧客不明の注文に既存の顧客を紐づけるフック（Issue #609）
+ * 差出人アドレスを担当者として登録し、同じアドレスの注文をまとめて紐づけ直せる
+ */
+export function useLinkOrderCustomer() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ orderId, ...data }: OrderLinkCustomerRequest & { orderId: number }) =>
+      apiClient<OrderLinkCustomerResponse>(`/orders/${orderId}/link-customer`, {
+        method: "POST",
         body: JSON.stringify(data),
       }),
     onSuccess: () => {

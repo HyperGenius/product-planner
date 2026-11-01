@@ -194,17 +194,25 @@ def pdf_order_parsing_staging_row(
 
     yield するdict: ステージング行 + "_run_id" (このテスト実行を識別する文字列)
     """
-    from app.services.customer_matching_service import resolve_or_create_customer
+    from app.services.customer_contact_service import add_contact
+    from app.services.customer_matching_service import resolve_customer
 
     run_id = uuid.uuid4().hex[:8]
     # 実際のPDF送信元（飯野製作所）を模したE2Eテスト専用顧客。
-    # resolve_or_create_customer は既存顧客があれば再利用するため、
-    # 複数回のテスト実行で顧客レコードが増殖することはない。
-    customer_id, _ = resolve_or_create_customer(
-        admin_db,
-        e2e_tenant_id,
-        "From: e2e-pdf-parsing-test@example.com\n",
-    )
+    # 未登録のアドレスは顧客不明のままになる（Issue #609）ので、無ければ顧客と担当者を作る。
+    # 既存顧客は再利用するため、複数回のテスト実行で顧客レコードが増殖することはない。
+    sender_body = "From: e2e-pdf-parsing-test@example.com\n"
+    customer_id = resolve_customer(admin_db, e2e_tenant_id, sender_body)
+    if customer_id is None:
+        created = (
+            admin_db.table("customers")
+            .insert({"tenant_id": e2e_tenant_id, "name": "e2e-pdf-parsing-test"})
+            .execute()
+        )
+        customer_id = int(cast(list[dict[str, Any]], created.data)[0]["id"])
+        add_contact(
+            admin_db, e2e_tenant_id, customer_id, "e2e-pdf-parsing-test@example.com"
+        )
 
     inserted = (
         admin_db.table("order_attachments")

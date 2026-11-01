@@ -2,7 +2,7 @@
 
 社長（社内の共通メールアカウント）など、注文書を受注取り込み用アドレスへ転送してくる
 社内のアドレスを登録する。登録したアドレスからのメールは、Gmail 取り込みで差出人による
-顧客の突合・下書き顧客の作成を行わない（`customer_matching_service.resolve_or_create_customer`）。
+顧客の突合・下書き顧客の作成を行わない（`customer_matching_service.resolve_customer`）。
 """
 
 from typing import Any, cast

@@ -346,3 +346,34 @@ export interface OrderAttachment {
   signed_url: string
   created_at: string
 }
+
+/**
+ * 顧客不明（customer_id NULL）の注文を紐づけるときに出す情報（Issue #609）。
+ * `GET /orders/{id}/customer-link-context`
+ */
+export interface OrderCustomerLinkContext {
+  /** 元メールの差出人アドレス。取り込み時に保存していない注文（移行前）は null */
+  sender_email: string | null
+  /** 差出人が既に担当者として登録されている顧客。別の顧客を選ぶと 409 になる */
+  contact_owner_customer_id: number | null
+  /** 差出人と同じドメインの担当者を持つ顧客。候補の表示のみで自動では確定しない */
+  candidate_customer_ids: number[]
+  /** 同じ差出人の、顧客不明の下書き注文（この注文を除く） */
+  same_sender_order_count: number
+}
+
+/** `POST /orders/{id}/link-customer` のリクエスト */
+export interface OrderLinkCustomerRequest {
+  customer_id: number
+  register_contact: boolean
+  apply_to_same_sender: boolean
+}
+
+export interface OrderLinkCustomerResponse {
+  contact_registered: boolean
+  sender_email: string | null
+  linked_order_ids: number[]
+  /** 他の注文と重複するため紐づけなかった注文 */
+  skipped_order_ids: number[]
+  linked_staging_count: number
+}

@@ -18,6 +18,7 @@ from .approval_logs import router as approval_logs_router
 from .approval_workflow import router as approval_workflow_router
 from .attachments import router as attachments_router
 from .crud import router as crud_router
+from .customer_link import router as customer_link_router
 from .email_intake import router as email_intake_router
 from .progress import router as progress_router
 from .repair_conversion import router as repair_conversion_router
@@ -34,6 +35,7 @@ orders_router.include_router(routing_queue_router, prefix="/orders")
 orders_router.include_router(approval_logs_router, prefix="/orders")
 orders_router.include_router(email_intake_router, prefix="/orders")
 orders_router.include_router(crud_router, prefix="/orders")
+orders_router.include_router(customer_link_router, prefix="/orders")
 orders_router.include_router(attachments_router, prefix="/orders")
 orders_router.include_router(progress_router, prefix="/orders")
 orders_router.include_router(simulation_router, prefix="/orders")

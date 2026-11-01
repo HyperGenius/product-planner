@@ -313,8 +313,8 @@ class TestProcessMessagePdfStaging:
                 return_value="customer@example.com",
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer",
-                return_value=(42, False),
+                "app.services.gmail_service.resolve_customer",
+                return_value=42,
             ) as mock_resolve_customer,
             patch(
                 "app.services.gmail_service.upload_staged_attachment",
@@ -333,13 +333,14 @@ class TestProcessMessagePdfStaging:
             mock_db, "tenant-1", "msg-1", "order.pdf", b"%PDF-1.4", "application/pdf"
         )
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000", None, _INTERNAL_SENDERS
+            mock_db, "tenant-1", "", None, _INTERNAL_SENDERS
         )
 
         inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
         assert inserted_row["order_id"] is None
         assert inserted_row["tenant_id"] == "tenant-1"
         assert inserted_row["customer_id"] == 42
+        assert inserted_row["sender_email"] == "customer@example.com"
         assert inserted_row["gmail_message_id"] == "msg-1"
         assert inserted_row["storage_path"] == "tenant-1/inbox/msg-1/abc.pdf"
         assert inserted_row["parse_status"] == "pending"
@@ -370,8 +371,8 @@ class TestProcessMessagePdfStaging:
                 return_value=None,
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer",
-                return_value=(7, True),
+                "app.services.gmail_service.resolve_customer",
+                return_value=None,
             ) as mock_resolve_customer,
             patch(
                 "app.services.gmail_service.upload_staged_attachment",
@@ -384,19 +385,14 @@ class TestProcessMessagePdfStaging:
             mock_db, "tenant-1", "msg-2", "memo.txt", b"hello", "text/plain"
         )
 
-        # メールアドレスが取れない場合も customer_id は必ず設定され、下書き作成の通知が記録される
+        # 担当者に当たらないアドレスは下書き顧客を作らず顧客不明で保存し、作成通知も出さない（Issue #609）
         mock_resolve_customer.assert_called_once_with(
-            mock_db, "tenant-1", "", "1751500000000", None, _INTERNAL_SENDERS
+            mock_db, "tenant-1", "", None, _INTERNAL_SENDERS
         )
-        notif_inserts = [
-            call.args[0]
-            for call in mock_db.table("notifications").insert.call_args_list
-            if call.args and "notif_type" in call.args[0]
-        ]
-        assert len(notif_inserts) == 1
-        assert notif_inserts[0]["notif_type"] == "customer_draft_created"
-        assert notif_inserts[0]["source_id"] == "msg-2"
-        assert notif_inserts[0]["detail"]["customer_id"] == 7
+        assert not any(
+            isinstance(call.args[0], dict) and "notif_type" in call.args[0]
+            for call in mock_db.table().insert.call_args_list
+        )
         assert not any(
             call.args and call.args[0] == "orders"
             for call in mock_db.table.call_args_list
@@ -404,6 +400,8 @@ class TestProcessMessagePdfStaging:
 
         inserted_row = mock_db.table("order_attachments").insert.call_args.args[0]
         assert inserted_row["order_id"] is None
+        assert inserted_row["customer_id"] is None
+        assert inserted_row["sender_email"] is None
         assert inserted_row["storage_path"] == "tenant-1/inbox/msg-2/def.txt"
         assert inserted_row["parse_status"] == "pending"
 
@@ -427,8 +425,8 @@ class TestProcessMessagePdfStaging:
                 return_value="spam@example.com",
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer",
-                return_value=(3, False),
+                "app.services.gmail_service.resolve_customer",
+                return_value=3,
             ),
             patch(
                 "app.services.gmail_service.upload_staged_attachment"
@@ -485,8 +483,8 @@ class TestProcessMessagePdfStaging:
                 return_value="boss@example.com",
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer",
-                return_value=(42, False),
+                "app.services.gmail_service.resolve_customer",
+                return_value=42,
             ),
             patch(
                 "app.services.gmail_service.upload_staged_attachment",
@@ -556,8 +554,8 @@ class TestProcessMessagePdfStaging:
                 return_value=None,
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer",
-                return_value=(1, False),
+                "app.services.gmail_service.resolve_customer",
+                return_value=1,
             ),
             patch(
                 "app.services.gmail_service.upload_staged_attachment",
@@ -578,7 +576,7 @@ class TestProcessMessagePdfStaging:
         }
 
     def test_real_from_header_is_passed_to_customer_matching(self):
-        """実際のGmail `From` ヘッダーが resolve_or_create_customer に渡されること
+        """実際のGmail `From` ヘッダーが resolve_customer に渡されること
         （Issue #311: 転送ヘッダーが本文に無いメールの顧客マッチング精度向上）。"""
         mock_service = MagicMock()
         mock_service.users().messages().get().execute.return_value = {
@@ -602,8 +600,8 @@ class TestProcessMessagePdfStaging:
                 return_value=[],
             ),
             patch(
-                "app.services.gmail_service.resolve_or_create_customer",
-                return_value=(1, False),
+                "app.services.gmail_service.resolve_customer",
+                return_value=1,
             ) as mock_resolve_customer,
             patch("app.services.gmail_service.upload_staged_attachment"),
         ):
@@ -613,7 +611,6 @@ class TestProcessMessagePdfStaging:
             mock_db,
             "tenant-1",
             "",
-            "1751500000000",
             "customer@example.com",
             _INTERNAL_SENDERS,
         )
@@ -653,7 +650,7 @@ class TestProcessMessagePdfStaging:
                 return_value="tenant-1/inbox/msg-5/fax.pdf",
             ),
         ):
-            # resolve_or_create_customer は差し替えず、社内転送者の判定まで通す
+            # resolve_customer は差し替えず、社内転送者の判定まで通す
             mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
                 data=[]
             )

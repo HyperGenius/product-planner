@@ -1,12 +1,10 @@
 import re
 import unicodedata
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
-from app.services.customer_contact_service import add_contact, normalize_contact_email
-from app.utils.calendar import JST
+from app.services.customer_contact_service import normalize_contact_email
 from app.utils.logger import get_logger
 from supabase import Client
 
@@ -360,21 +358,6 @@ def extract_customer_name(body: str, email: str) -> str | None:
     return company_name
 
 
-def _placeholder_customer_name(received_at: str | int | None) -> str:
-    """メールの受信日時（Gmail internalDate、epoch millis）から仮の顧客名を組み立てる。
-
-    実行ホストのタイムゾーンに関わらず、表示はJST（日本のユーザー向け）で
-    統一するため、UTCとして解釈した上でJSTへ変換する。
-    """
-    dt = datetime.now(JST)
-    if received_at is not None:
-        try:
-            dt = datetime.fromtimestamp(int(received_at) / 1000, tz=UTC).astimezone(JST)
-        except (ValueError, TypeError, OSError):
-            pass
-    return f"不明な顧客 ({dt.strftime('%Y-%m-%d %H:%M')})"
-
-
 def _find_customer_id_by_contact_email(
     db: Client, tenant_id: str, email: str
 ) -> int | None:
@@ -412,61 +395,18 @@ def _find_customer_ids_by_contact_emails(
     return sorted({int(r["customer_id"]) for r in rows})
 
 
-def _resolve_or_create_by_single_email(
-    db: Client,
-    tenant_id: str,
-    email: str | None,
-    received_at: str | int | None,
-    name_hint: str | None,
-) -> tuple[int, bool]:
-    """
-    メールアドレス1件で顧客を検索し、存在すれば customer_id を返す（status は変更しない）。
-    存在しなければ status='draft' の下書き顧客を自動作成して返す。
-    email が None の場合は既存顧客と紐付けようがないため、常に新規の下書き顧客を作成する
-    （name は受信日時ベースのプレースホルダー）。
-    name_hint（署名ブロックから抽出した会社名/氏名）が渡された場合は、新規作成時の
-    name にそれを使う。渡されない場合は email をそのまま name とする。
-
-    Returns: (customer_id, 新規に下書き作成したかどうか)
-    """
-    table = SupabaseTableName.CUSTOMERS.value
-
-    if email:
-        found_id = _find_customer_id_by_contact_email(db, tenant_id, email)
-        if found_id is not None:
-            logger.info(f"customer found: id={found_id} email={email}")
-            return found_id, False
-
-    insert_row: dict[str, Any] = {
-        "tenant_id": tenant_id,
-        "name": name_hint
-        or (email if email else _placeholder_customer_name(received_at)),
-        "status": "draft",
-    }
-    if email:
-        insert_row["email"] = email
-
-    created = db.table(table).insert(insert_row).execute()
-    created_rows = cast(list[dict[str, Any]], created.data or [])
-    new_id = int(created_rows[0]["id"])
-    if email:
-        # 次回以降、このアドレスが同じ下書き顧客に解決されるよう担当者にも登録する
-        add_contact(db, tenant_id, new_id, email)
-    logger.info(f"draft customer auto-created: id={new_id} email={email}")
-    return new_id, True
-
-
-def resolve_or_create_customer(
+def resolve_customer(
     db: Client,
     tenant_id: str,
     body: str,
-    received_at: str | int | None = None,
     real_from_email: str | None = None,
     internal_senders: frozenset[str] = frozenset(),
-) -> tuple[int | None, bool]:
+) -> int | None:
     """
     本文から抽出した候補メールアドレス群と既存顧客の担当者（customer_contacts.email）を突合し、
-    customer_id を解決する。
+    customer_id を解決する。解決できなければ None（顧客不明）を返す。下書き顧客は作らない
+    （Issue #609。未登録のアドレスは顧客不明で起票し、受注担当者が既存の顧客へ紐づけて
+    担当者に登録する）。
 
     - "From:"/"差出人:" ヘッダー行が本文に存在しない場合（転送を介さず顧客から直接
       届いたメール等）は、実際のGmailメッセージの `From` ヘッダー（`real_from_email`）
@@ -475,26 +415,20 @@ def resolve_or_create_customer(
     - 上記で一致しない場合、候補メールアドレス群（ヘッダー行が本文にあればそれを、
       なければ本文全体から検出したものを）と既存顧客の担当者の積集合を取る（同じ顧客の別の担当者は1件と数える）
       - 積集合が1件 → その顧客にマッチ確定
-        （name抽出は行わない。status/nameも変更しない）
-      - 積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）の場合は、
-        メールアドレス単体の検索/下書き作成にフォールバックする。フォールバック先の
-        メールアドレスは候補集合のうち「最後に出現したもの」を優先し、候補が
-        1件も無い場合のみ `real_from_email` を使う。候補集合を優先するのは、
-        Issue #298 の「直接転送」（社内担当者が転送機能を介さずに送信し直したため
-        ヘッダー行が本文化されないケース）では実際の Gmail `From` ヘッダーが
-        社内担当者のアドレスになり、本文の署名欄の方が信頼できるため
-        （0件の場合のみ署名ブロックから customer_name を抽出し、下書きのnameに使う）
+      - 積集合が2件以上（相見積もり等で判定不能）の場合は、候補集合のうち「最後に出現した
+        もの」の担当者で再検索し、当たれば確定する。候補集合を優先するのは、Issue #298 の
+        「直接転送」（社内担当者が転送機能を介さずに送信し直したためヘッダー行が本文化されない
+        ケース）では実際の Gmail `From` ヘッダーが社内担当者のアドレスになり、本文の署名欄の
+        方が信頼できるため
+      - 積集合が0件（完全新規）→ 顧客不明
     - 実際の差出人が社内転送者（`internal_senders`。社長など、注文書を件名・本文なしで
-      転送してくる社内のアドレス）の場合は、差出人での突合・下書き顧客の作成を行わない。
-      本文の候補（転送ヘッダー・署名欄。社内転送者のアドレスは除く）で決まらなければ
-      `customer_id=None`（顧客不明）を返し、添付の中身から顧客を決める処理に委ねる
-      （Issue #521）
-
-    Returns: (customer_id, 新規に下書き作成したかどうか)。customer_id は社内転送者からの
-    メールで顧客が決まらない場合のみ None
+      転送してくる社内のアドレス）の場合は、差出人での突合を行わない。本文の候補
+      （転送ヘッダー・署名欄。社内転送者のアドレスは除く）で決まらなければ顧客不明とし、
+      添付の中身から顧客を決める処理に委ねる（Issue #521）
+    - ドメインが同じというだけでは確定しない（フリーメール・共有ドメインの誤確定を避ける）。
+      同じドメインの顧客は紐づけ画面の候補表示にだけ使う
     """
-    from_internal_sender = _is_internal_sender(real_from_email, internal_senders)
-    if from_internal_sender:
+    if _is_internal_sender(real_from_email, internal_senders):
         real_from_email = None
     header_candidates = _without_internal_senders(
         extract_sender_email_candidates(body), internal_senders
@@ -503,12 +437,11 @@ def resolve_or_create_customer(
     if not header_candidates and real_from_email:
         found_id = _find_customer_id_by_contact_email(db, tenant_id, real_from_email)
         if found_id is not None:
-            customer_id = found_id
             logger.info(
-                f"customer found via real From header match: id={customer_id} "
+                f"customer found via real From header match: id={found_id} "
                 f"email={real_from_email}"
             )
-            return customer_id, False
+            return found_id
 
     candidates = header_candidates or _without_internal_senders(
         extract_body_email_candidates(body), internal_senders
@@ -517,26 +450,17 @@ def resolve_or_create_customer(
     if candidates:
         matched_ids = _find_customer_ids_by_contact_emails(db, tenant_id, candidates)
         if len(matched_ids) == 1:
-            customer_id = matched_ids[0]
             logger.info(
-                f"customer found via candidate match: id={customer_id} "
+                f"customer found via candidate match: id={matched_ids[0]} "
                 f"candidates={candidates}"
             )
-            return customer_id, False
+            return matched_ids[0]
+        if len(matched_ids) > 1:
+            found_id = _find_customer_id_by_contact_email(db, tenant_id, candidates[-1])
+            if found_id is not None:
+                return found_id
 
-    if from_internal_sender and not candidates:
-        logger.info(
-            f"mail from internal sender has no customer candidates; "
-            f"leaving customer unresolved (tenant={tenant_id})"
-        )
-        return None, False
-
-    email: str | None
-    if candidates:
-        email = candidates[-1]
-    else:
-        email = real_from_email
-    name_hint = extract_customer_name(body, email) if email else None
-    return _resolve_or_create_by_single_email(
-        db, tenant_id, email, received_at, name_hint
+    logger.info(
+        f"no customer matched; leaving customer unresolved (tenant={tenant_id})"
     )
+    return None

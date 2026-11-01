@@ -6,13 +6,15 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ProductSelector } from "@/components/product-selector"
 import { CustomerSelector } from "@/components/customer-selector"
 import { ReadOnlyField } from "@/components/orders/read-only-field"
 import { OrderDialogLayout } from "@/components/orders/order-dialog-layout"
 import { DuplicateOrderDialog } from "@/components/orders/duplicate-order-dialog"
 import { ApiError } from "@/lib/api-client"
-import { useUpdateOrder } from "@/hooks/use-orders"
+import { useLinkOrderCustomer, useOrderCustomerLinkContext, useUpdateOrder } from "@/hooks/use-orders"
+import { useCustomers } from "@/hooks/use-customers"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { formatDeadlineDate, jstTodayIso, toDateInputValue } from "@/lib/order-utils"
 import type { ConflictingOrder, Order } from "@/types/order"
@@ -26,6 +28,8 @@ interface EditOrderDialogProps {
 export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogProps) {
   const idPrefix = useId()
   const updateOrder = useUpdateOrder()
+  const linkCustomer = useLinkOrderCustomer()
+  const { data: customers } = useCustomers()
   const { data: currentMember } = useCurrentMember()
 
   const [orderNo, setOrderNo] = useState(order?.order_no ?? "")
@@ -38,8 +42,15 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
     toDateInputValue(order?.scheduling_start_date)
   )
   // 重複起票（顧客×製品×希望納期）を検知した際の通知モーダル状態（Issue #415 PR3）
+  // 顧客不明の注文に顧客を選んだときの紐づけオプション（Issue #609）
+  const [registerContact, setRegisterContact] = useState(true)
+  const [applyToSameSender, setApplyToSameSender] = useState(true)
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [conflictingOrder, setConflictingOrder] = useState<ConflictingOrder | undefined>()
+
+  // 顧客不明（customer_id NULL）の注文は、顧客を選ぶと差出人アドレスを担当者として登録できる（Issue #609）
+  const isUnknownCustomer = order != null && order.customer_id == null
+  const { data: linkContext } = useOrderCustomerLinkContext(order?.id, open && isUnknownCustomer)
 
   if (!order) return null
 
@@ -62,6 +73,63 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
   const schedulingStartChanged =
     schedulingStartDate !== toDateInputValue(order.scheduling_start_date)
 
+  const selectedCustomerId = customerId ? parseInt(customerId, 10) : null
+  const selectedCustomer = customers?.find((c) => c.id === selectedCustomerId)
+  const senderEmail = linkContext?.sender_email ?? null
+  // 差出人が別の顧客の担当者として登録済みなら、上書きしないので登録の選択肢は出さない
+  const contactOwnedByOther =
+    selectedCustomerId !== null &&
+    linkContext?.contact_owner_customer_id != null &&
+    linkContext.contact_owner_customer_id !== selectedCustomerId
+  const contactAlreadyRegistered =
+    selectedCustomerId !== null && linkContext?.contact_owner_customer_id === selectedCustomerId
+  // 不明な注文に顧客を選んだとき（PATCH ではなく専用 API で紐づける）
+  const linking = isUnknownCustomer && selectedCustomerId !== null
+  const canRegisterContact = !!senderEmail && !contactOwnedByOther && !contactAlreadyRegistered
+  const sameSenderCount = linkContext?.same_sender_order_count ?? 0
+
+  const handleLinkError = (error: Error) => {
+    const errorCode = error instanceof ApiError ? error.errorCode : undefined
+    if (errorCode === "contact_owned_by_other_customer") {
+      toast.error("このメールアドレスは別の顧客の担当者として登録済みです")
+    } else if (errorCode === "duplicate_order") {
+      setConflictingOrder(error instanceof ApiError ? error.conflictingOrder : undefined)
+      setDuplicateDialogOpen(true)
+    } else if (errorCode === "customer_already_set") {
+      toast.error("この注文にはすでに顧客が設定されています")
+    } else {
+      toast.error(`顧客の紐づけに失敗しました: ${error.message}`)
+    }
+  }
+
+  const handleLink = (customerIdToLink: number) => {
+    linkCustomer.mutate(
+      {
+        orderId: order.id,
+        customer_id: customerIdToLink,
+        register_contact: canRegisterContact && registerContact,
+        apply_to_same_sender: sameSenderCount > 0 && applyToSameSender,
+      },
+      {
+        onSuccess: (result) => {
+          const extra = result.linked_order_ids.length - 1
+          toast.success(
+            extra > 0
+              ? `注文情報を更新しました（同じ差出人の注文${extra}件も顧客を紐づけました）`
+              : "注文情報を更新しました"
+          )
+          if (result.skipped_order_ids.length > 0) {
+            toast.warning(
+              `${result.skipped_order_ids.length}件は同じ顧客・製品・納期の注文があるため紐づけませんでした`
+            )
+          }
+          onOpenChange(false)
+        },
+        onError: handleLinkError,
+      }
+    )
+  }
+
   const handleSubmit = () => {
     const parsedQuantity = parseInt(quantity, 10)
     if (!productId || isNaN(parsedQuantity) || parsedQuantity <= 0) return
@@ -79,7 +147,8 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
         data: {
           order_no: orderNo.trim() || null,
           product_id: parseInt(productId, 10),
-          customer_id: customerId ? parseInt(customerId, 10) : null,
+          // 顧客不明の注文に顧客を選んだときは、保存後に専用 API で紐づける（担当者の登録と同じ transaction）
+          ...(linking ? {} : { customer_id: selectedCustomerId }),
           quantity: parsedQuantity,
           desired_deadline: desiredDeadline || null,
           // 変更時のみ送信。クリアした場合は null で解除する
@@ -90,6 +159,10 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
       },
       {
         onSuccess: () => {
+          if (selectedCustomerId !== null && linking) {
+            handleLink(selectedCustomerId)
+            return
+          }
           toast.success("注文情報を更新しました")
           onOpenChange(false)
         },
@@ -122,8 +195,8 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             キャンセル
           </Button>
-          <Button onClick={handleSubmit} disabled={updateOrder.isPending}>
-            {updateOrder.isPending ? "保存中..." : "保存"}
+          <Button onClick={handleSubmit} disabled={updateOrder.isPending || linkCustomer.isPending}>
+            {updateOrder.isPending || linkCustomer.isPending ? "保存中..." : "保存"}
           </Button>
         </>
       }
@@ -168,7 +241,57 @@ export function EditOrderDialog({ order, open, onOpenChange }: EditOrderDialogPr
 
       <ProductSelector value={productId} onValueChange={setProductId} />
 
-      <CustomerSelector value={customerId} onValueChange={setCustomerId} />
+      <CustomerSelector
+        value={customerId}
+        onValueChange={setCustomerId}
+        priorityIds={isUnknownCustomer ? linkContext?.candidate_customer_ids : undefined}
+      />
+
+      {isUnknownCustomer && senderEmail && (
+        <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-sm">
+          <p>
+            差出人: <span className="font-medium">{senderEmail}</span>
+          </p>
+          {selectedCustomerId === null && (
+            <p className="text-muted-foreground">
+              顧客を選ぶと、このアドレスを担当者として登録できます。次回から同じアドレスのメールは自動で同じ顧客になります。
+            </p>
+          )}
+          {contactOwnedByOther && (
+            <p className="text-destructive">
+              このアドレスは別の顧客の担当者として登録済みのため、{selectedCustomer?.name ?? "この顧客"}
+              には登録できません。登録済みの顧客を選ぶか、顧客マスタで担当者を整理してください。
+            </p>
+          )}
+          {contactAlreadyRegistered && (
+            <p className="text-muted-foreground">このアドレスは選んだ顧客の担当者として登録済みです。</p>
+          )}
+          {selectedCustomerId !== null && canRegisterContact && (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={fieldId("register-contact")}
+                checked={registerContact}
+                onCheckedChange={(checked) => setRegisterContact(checked === true)}
+              />
+              <Label htmlFor={fieldId("register-contact")} className="font-normal">
+                このアドレスを{selectedCustomer?.name ?? "選んだ顧客"}の担当者として登録する
+              </Label>
+            </div>
+          )}
+          {selectedCustomerId !== null && sameSenderCount > 0 && (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={fieldId("apply-same-sender")}
+                checked={applyToSameSender}
+                onCheckedChange={(checked) => setApplyToSameSender(checked === true)}
+              />
+              <Label htmlFor={fieldId("apply-same-sender")} className="font-normal">
+                同じ差出人の顧客不明の注文{sameSenderCount}件にも同じ顧客を紐づける
+              </Label>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="quantity">数量 *</Label>
