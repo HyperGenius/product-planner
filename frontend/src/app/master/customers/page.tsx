@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { FileCog, History, Merge, Plus, Pencil, Trash2 } from "lucide-react"
+import { FileCog, History, Merge, Plus, Pencil, Trash2, Users } from "lucide-react"
 import { toast } from "sonner"
 import { ApiError } from "@/lib/api-client"
 import {
@@ -16,6 +16,7 @@ import { CUSTOMER_MERGE_ROLES, EXTRACTION_PROMPT_EDITOR_ROLES } from "@/types/me
 import { CustomerMergeDialog } from "@/components/customer-merge/customer-merge-dialog"
 import { CustomerMergeLogDialog } from "@/components/customer-merge/customer-merge-log-dialog"
 import type { Customer } from "@/types/customer"
+import { CustomerContactsDialog } from "@/components/customer-contacts/customer-contacts-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -48,6 +49,7 @@ export default function CustomersPage() {
   const [isMergeDialogOpen, setIsMergeDialogOpen] = useState(false)
   const [isMergeLogOpen, setIsMergeLogOpen] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [contactsCustomer, setContactsCustomer] = useState<Customer | null>(null)
   const [customerName, setCustomerName] = useState("")
   const [customerAlias, setCustomerAlias] = useState("")
   const [representativeName, setRepresentativeName] = useState("")
@@ -239,7 +241,7 @@ export default function CustomersPage() {
                 <TableHead className="w-[140px] whitespace-nowrap">FAX番号</TableHead>
                 <TableHead className="w-[220px]">Email</TableHead>
                 <TableHead
-                  className={`${canEditExtractionPrompt ? "w-[132px]" : "w-[100px]"} whitespace-nowrap text-right`}
+                  className={`${canEditExtractionPrompt ? "w-[172px]" : "w-[140px]"} whitespace-nowrap text-right`}
                 >
                   操作
                 </TableHead>
@@ -278,6 +280,15 @@ export default function CustomersPage() {
                             </Link>
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setContactsCustomer(customer)}
+                          aria-label={`${customer.name}の担当者`}
+                          title="担当者（メールアドレス）"
+                        >
+                          <Users className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -488,6 +499,14 @@ export default function CustomersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 担当者ダイアログ（Issue #611） */}
+      <CustomerContactsDialog
+        customer={contactsCustomer}
+        onOpenChange={(open) => {
+          if (!open) setContactsCustomer(null)
+        }}
+      />
 
       {/* 削除確認ダイアログ */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

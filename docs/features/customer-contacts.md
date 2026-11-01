@@ -15,6 +15,24 @@
 - 初期移行で `customers.email` を担当者へ複製した。正規化後に重複するアドレスは `id` の小さい（先に登録された）顧客を優先。
   `customers.email` 列は互換のため残している
 
+## 管理画面と API（Issue #611）
+
+顧客マスタ（`/master/customers`）の各行の「担当者」ボタンで `CustomerContactsDialog`
+（`components/customer-contacts/`）を開き、担当者の一覧・追加・削除を行う。
+
+| API | 内容 |
+|---|---|
+| `GET /customers/{id}/contacts` | 一覧（テナントメンバー全員） |
+| `POST /customers/{id}/contacts` | 追加。`email` は `normalize_contact_email()` で正規化して保存、`contact_name` は任意（空白のみは NULL） |
+| `DELETE /customers/{id}/contacts/{contact_id}` | 削除 |
+
+- 追加・削除できるのは `order_handler` / `president` / `platform_admin`（Backend `_CONTACT_EDITOR_ROLES` と
+  Frontend `CUSTOMER_CONTACT_EDITOR_ROLES` を揃える）。それ以外のロールは一覧の閲覧のみで、画面にも操作を出さない
+- アドレスが登録済み（別の顧客・同じ顧客とも）なら 409 `duplicate_contact_email`。`message` に登録先の顧客名
+  （「…は「○○」に登録済みです」）、`conflicting_customer`（`{id, name}`）を付け、画面は入力欄の下に文言を出す
+- 他テナントの顧客 ID は 404。顧客の `email` と同じ担当者を削除したときは `customers.email` も空にする
+  （残すと、顧客を保存したときに `sync_primary_contact()` が担当者を登録し直してしまうため）
+
 ## 突合（`customer_matching_service.resolve_customer()`）
 
 `customers.email` の検索を `customer_contacts` の検索に置き換えた。会社名・FAX・電話での突合（#385 / #521）は変えない。
@@ -35,7 +53,7 @@
 
 - 新アドレスが**別の顧客に登録済み**のときは付け替えず、ログ（warning）だけ残す。保存は成功する
   （付け替えると取り込みの結果が黙って変わるため。管理画面での整理は後続の Issue）
-- 担当者を直接増減する API・画面は無い（後続の Issue）
+- 担当者を直接増減する API・画面は下記「管理画面と API」（Issue #611）
 
 ## 顧客不明の注文の紐づけ（Issue #609）
 
@@ -97,7 +115,8 @@ president / platform_admin のみ）から1つにまとめる。製品の統合�
 ## テスト
 
 - unit: `test_customer_contact_service.py` / `test_customer_matching_service.py`
-- api: `test_customers_router.py`
+- api: `test_customers_router.py` / `test_customer_contacts_router.py`（#611）
 - integration: `test_customer_contacts.py`（UNIQUE・CHECK・CASCADE・複数アドレスの解決）/ `test_link_customer_to_unknown_orders.py`（#609 の RPC）
 - #609: unit `test_customer_link_service.py`、api `test_order_customer_link.py`、frontend `edit-order-dialog.test.tsx`
+- #611: frontend `customer-contacts-dialog.test.tsx`
 - #610: unit `test_customer_merge_service.py`、api `test_customer_merge_router.py`、integration `test_merge_customers.py`（付け替え・履歴・ロール・競合時のロールバック）、frontend `customer-merge-dialog.test.tsx`

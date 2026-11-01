@@ -274,6 +274,12 @@ cd backend && ruff check . && mypy .
   別の顧客に登録済みのアドレスは上書きせず 409。同じドメインの顧客は候補表示だけで自動確定しない。RPC のエラーに `P0001` を使うときは
   `23505`（注文の重複）と区別できるよう、担当者の衝突を `P0001`、`orders` の UNIQUE を `23505` に固定している。詳細は
   [docs/features/customer-contacts.md](docs/features/customer-contacts.md)
+- **顧客の担当者の管理画面（Issue #611）**: 画面は顧客マスタの行の「担当者」ダイアログ、API は `/customers/{id}/contacts`
+  （`routers/master/customer_contacts.py`）。書き込めるロールは Backend `_CONTACT_EDITOR_ROLES` と Frontend
+  `CUSTOMER_CONTACT_EDITOR_ROLES` を揃える。重複アドレスは 409 `duplicate_contact_email`（登録先の顧客名を `message` に含む）。
+  `customers.email` と同じ担当者を消すときは `customers.email` も空にする（残すと顧客の保存で `sync_primary_contact()` が復活させる）。
+  このルーターは `/customers/{customer_id}` と同じ prefix だが、セグメント数が違うので登録順の衝突はない
+
 - **重複顧客の統合（Issue #610）**: 事前チェックは純粋関数 `customer_merge_service.plan_merge()` で行いプレビュー API と実行 API で共有、
   実行は RPC `merge_customers`（`SECURITY INVOKER`）。**顧客を参照する FK を新しく足すときは、RPC の付け替え対象に入れるか CASCADE にするかを決める**
   （入れ忘れると CASCADE で消えるか統合が 409 になる）。受注の UNIQUE 衝突は製品の統合と違い出荷済みでも削除せず統合を止める。
