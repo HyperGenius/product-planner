@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
+from app.services.customer_contact_service import add_contact, normalize_contact_email
 from app.utils.calendar import JST
 from app.utils.logger import get_logger
 from supabase import Client
@@ -374,6 +375,43 @@ def _placeholder_customer_name(received_at: str | int | None) -> str:
     return f"不明な顧客 ({dt.strftime('%Y-%m-%d %H:%M')})"
 
 
+def _find_customer_id_by_contact_email(
+    db: Client, tenant_id: str, email: str
+) -> int | None:
+    """担当者のアドレス1件に一致する顧客 ID を返す（(tenant_id, email) は UNIQUE）。"""
+    result = (
+        db.table(SupabaseTableName.CUSTOMER_CONTACTS.value)
+        .select("customer_id")
+        .eq("tenant_id", tenant_id)
+        .eq("email", normalize_contact_email(email))
+        .limit(1)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    return int(rows[0]["customer_id"]) if rows else None
+
+
+def _find_customer_ids_by_contact_emails(
+    db: Client, tenant_id: str, emails: list[str]
+) -> list[int]:
+    """担当者のアドレスに一致する顧客 ID を、重複なし・昇順で返す。
+
+    1社に複数の担当者がいるので、候補が同じ顧客の別の担当者に当たっても1件として数える。
+    """
+    normalized = list(dict.fromkeys(normalize_contact_email(e) for e in emails))
+    if not normalized:
+        return []
+    result = (
+        db.table(SupabaseTableName.CUSTOMER_CONTACTS.value)
+        .select("customer_id")
+        .eq("tenant_id", tenant_id)
+        .in_("email", normalized)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    return sorted({int(r["customer_id"]) for r in rows})
+
+
 def _resolve_or_create_by_single_email(
     db: Client,
     tenant_id: str,
@@ -394,18 +432,10 @@ def _resolve_or_create_by_single_email(
     table = SupabaseTableName.CUSTOMERS.value
 
     if email:
-        result = (
-            db.table(table)
-            .select("id")
-            .eq("tenant_id", tenant_id)
-            .eq("email", email)
-            .limit(1)
-            .execute()
-        )
-        rows = cast(list[dict[str, Any]], result.data or [])
-        if rows:
-            logger.info(f"customer found: id={rows[0]['id']} email={email}")
-            return int(rows[0]["id"]), False
+        found_id = _find_customer_id_by_contact_email(db, tenant_id, email)
+        if found_id is not None:
+            logger.info(f"customer found: id={found_id} email={email}")
+            return found_id, False
 
     insert_row: dict[str, Any] = {
         "tenant_id": tenant_id,
@@ -419,6 +449,9 @@ def _resolve_or_create_by_single_email(
     created = db.table(table).insert(insert_row).execute()
     created_rows = cast(list[dict[str, Any]], created.data or [])
     new_id = int(created_rows[0]["id"])
+    if email:
+        # 次回以降、このアドレスが同じ下書き顧客に解決されるよう担当者にも登録する
+        add_contact(db, tenant_id, new_id, email)
     logger.info(f"draft customer auto-created: id={new_id} email={email}")
     return new_id, True
 
@@ -432,15 +465,15 @@ def resolve_or_create_customer(
     internal_senders: frozenset[str] = frozenset(),
 ) -> tuple[int | None, bool]:
     """
-    本文から抽出した候補メールアドレス群と既存顧客（customers.email）を突合し、
+    本文から抽出した候補メールアドレス群と既存顧客の担当者（customer_contacts.email）を突合し、
     customer_id を解決する。
 
     - "From:"/"差出人:" ヘッダー行が本文に存在しない場合（転送を介さず顧客から直接
       届いたメール等）は、実際のGmailメッセージの `From` ヘッダー（`real_from_email`）
-      と `customers.email` の突合を最優先で試みる。一致すればそのまま確定する
+      と担当者（`customer_contacts`）の突合を最優先で試みる。一致すればそのまま確定する
       （本文解析は行わない）
     - 上記で一致しない場合、候補メールアドレス群（ヘッダー行が本文にあればそれを、
-      なければ本文全体から検出したものを）と既存顧客の積集合を取る
+      なければ本文全体から検出したものを）と既存顧客の担当者の積集合を取る（同じ顧客の別の担当者は1件と数える）
       - 積集合が1件 → その顧客にマッチ確定
         （name抽出は行わない。status/nameも変更しない）
       - 積集合が0件（完全新規）または2件以上（相見積もり等で判定不能）の場合は、
@@ -460,7 +493,6 @@ def resolve_or_create_customer(
     Returns: (customer_id, 新規に下書き作成したかどうか)。customer_id は社内転送者からの
     メールで顧客が決まらない場合のみ None
     """
-    table = SupabaseTableName.CUSTOMERS.value
     from_internal_sender = _is_internal_sender(real_from_email, internal_senders)
     if from_internal_sender:
         real_from_email = None
@@ -469,17 +501,9 @@ def resolve_or_create_customer(
     )
 
     if not header_candidates and real_from_email:
-        result = (
-            db.table(table)
-            .select("id")
-            .eq("tenant_id", tenant_id)
-            .eq("email", real_from_email)
-            .limit(1)
-            .execute()
-        )
-        rows = cast(list[dict[str, Any]], result.data or [])
-        if rows:
-            customer_id = int(rows[0]["id"])
+        found_id = _find_customer_id_by_contact_email(db, tenant_id, real_from_email)
+        if found_id is not None:
+            customer_id = found_id
             logger.info(
                 f"customer found via real From header match: id={customer_id} "
                 f"email={real_from_email}"
@@ -491,16 +515,9 @@ def resolve_or_create_customer(
     )
 
     if candidates:
-        result = (
-            db.table(table)
-            .select("id")
-            .eq("tenant_id", tenant_id)
-            .in_("email", candidates)
-            .execute()
-        )
-        rows = cast(list[dict[str, Any]], result.data or [])
-        if len(rows) == 1:
-            customer_id = int(rows[0]["id"])
+        matched_ids = _find_customer_ids_by_contact_emails(db, tenant_id, candidates)
+        if len(matched_ids) == 1:
+            customer_id = matched_ids[0]
             logger.info(
                 f"customer found via candidate match: id={customer_id} "
                 f"candidates={candidates}"

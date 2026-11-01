@@ -175,6 +175,11 @@ class TestCustomerRouter:
             "fax_number": None,
             "email": None,
         }
+        mock_repo.get_by_id.return_value = {
+            "id": customer_id,
+            "tenant_id": "uuid-1",
+            "email": "old@example.com",
+        }
         mock_repo.update.return_value = {"id": customer_id, **payload}
 
         response = client.patch(f"/customers/{customer_id}", json=payload)
@@ -184,6 +189,42 @@ class TestCustomerRouter:
         assert called_id == customer_id
         # 送られてきた null は exclude_unset で落とさずに更新対象へ含める
         assert called_data == {**payload, "status": "active"}
+
+    def test_update_customer_email_syncs_contact(self, mock_repo, monkeypatch):
+        """PATCH /{id}: email を送ると担当者へ反映する（Issue #608）"""
+        mock_sync = MagicMock()
+        monkeypatch.setattr(
+            "app.routers.master.customers.sync_primary_contact", mock_sync
+        )
+        mock_repo.get_by_id.return_value = {
+            "id": 1,
+            "tenant_id": "uuid-1",
+            "email": "old@example.com",
+        }
+        mock_repo.update.return_value = {"id": 1, "email": "new@example.com"}
+
+        response = client.patch("/customers/1", json={"email": "new@example.com"})
+
+        assert response.status_code == 200
+        mock_sync.assert_called_once_with(
+            mock_repo.client, "uuid-1", 1, "old@example.com", "new@example.com"
+        )
+
+    def test_update_customer_without_email_leaves_contacts(
+        self, mock_repo, monkeypatch
+    ):
+        """PATCH /{id}: email を送らない更新は担当者に触れない（Issue #608）"""
+        mock_sync = MagicMock()
+        monkeypatch.setattr(
+            "app.routers.master.customers.sync_primary_contact", mock_sync
+        )
+        mock_repo.update.return_value = {"id": 1, "name": "X"}
+
+        response = client.patch("/customers/1", json={"name": "X"})
+
+        assert response.status_code == 200
+        mock_sync.assert_not_called()
+        mock_repo.get_by_id.assert_not_called()
 
     def test_delete_customer_success(self, mock_repo):
         """DELETE /{id}: 削除成功時のテスト"""

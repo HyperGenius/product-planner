@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.dependencies import get_current_tenant_id, get_customer_repo
 from app.models.master import CustomerCreateSchema, CustomerUpdateSchema
 from app.repositories.supa_infra.master.customer_repo import CustomerRepository
+from app.services.customer_contact_service import sync_primary_contact
 from app.utils.logger import get_logger
 
 customer_router = APIRouter(prefix="/customers", tags=["Master (Customers)"])
@@ -30,7 +31,13 @@ def create_customer(
 ):
     """顧客を新規作成"""
     logger.info(f"Creating customer {customer_data}")
-    return _public_customer(repo.create(customer_data.with_tenant_id(tenant_id)))
+    created = repo.create(customer_data.with_tenant_id(tenant_id))
+    if created.get("email"):
+        # ユーザー JWT のクライアントで書く（customer_contacts も RLS で守られる）
+        sync_primary_contact(
+            repo.client, tenant_id, int(created["id"]), None, created["email"]
+        )
+    return _public_customer(created)
 
 
 @customer_router.get("")
@@ -60,7 +67,18 @@ def update_customer(
     logger.info(f"Updating customer {customer_id}")
     update_data = customer_data.model_dump(exclude_unset=True)
     update_data["status"] = "active"
-    return _public_customer(repo.update(customer_id, update_data))
+    # email を送ったときだけ担当者へ反映する（送らない更新では担当者に触れない）
+    before = repo.get_by_id(customer_id) if "email" in update_data else None
+    updated = repo.update(customer_id, update_data)
+    if before is not None:
+        sync_primary_contact(
+            repo.client,
+            before["tenant_id"],
+            customer_id,
+            before.get("email"),
+            updated.get("email"),
+        )
+    return _public_customer(updated)
 
 
 @customer_router.delete("/{customer_id}")
