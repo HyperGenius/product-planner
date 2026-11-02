@@ -31,7 +31,7 @@ def auth_session(real_supabase_client):
 
     ログイン後、real_supabase_client 自体もこのユーザーのセッションを保持する
     ため、以降 real_supabase_client.table(...) 経由のクエリはこのユーザーの
-    JWTでRLSを通る（notifications への直接INSERT/UPDATE拒否の検証等で利用）。
+    JWTでRLSを通る（ユーザーJWTからの直接INSERT/UPDATE拒否の検証等で利用）。
     """
     if not TEST_USER_EMAIL or not TEST_USER_PASS:
         pytest.skip("TEST_USER_EMAIL / TEST_USER_PASS not set")

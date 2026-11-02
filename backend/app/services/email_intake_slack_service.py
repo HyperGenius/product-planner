@@ -11,8 +11,7 @@ Gmail から受信したステージング行（`order_attachments`、`order_id 
   失敗したら書かず、次回の cron でまとめて再送する
 * 件数とリンクだけを載せ、顧客名・品名などの中身は載せない（詳細はアプリで確認する）
 
-ベルの通知（`notifications`）とは切り離している。送り先はプラットフォーム管理者の Slack だけなので、
-設定は環境変数 `SLACK_WEBHOOK_URL` / `APP_BASE_URL` に持ち、どちらか未設定なら何もしない。
+送り先はプラットフォーム管理者の Slack だけなので、設定は環境変数 `SLACK_WEBHOOK_URL` / `APP_BASE_URL` に持ち、どちらか未設定なら何もしない。
 """
 
 import os

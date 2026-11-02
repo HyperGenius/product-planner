@@ -156,10 +156,10 @@ class TestParsePendingOrderPdfs:
         assert attachment_insert["order_id"] == 99
         assert attachment_insert["parse_status"] == "failed_encrypted"
 
-        insert_calls = mock_db.table().insert.call_args_list
-        assert any(
-            c.args[0].get("notif_type") == "failed_encrypted" for c in insert_calls
-        )
+        insert_calls = [
+            c.args[0] for c in mock_db.table().insert.call_args_list if c.args
+        ]
+        assert any(c.get("reason") == "failed_encrypted" for c in insert_calls)
 
     def test_oversized_pdf_by_known_size_bytes_skips_download(self):
         """size_bytes が事前にMAX_PDF_BYTESを超えている場合、Storageダウンロード
@@ -370,9 +370,9 @@ class TestParsePendingOrderPdfs:
 
         assert result == {"processed": 1, "orders_created": 3, "errors": 0}
 
-    def test_pdf_and_body_both_yield_no_order_notifies_non_order_email(self):
+    def test_pdf_and_body_both_yield_no_order_logs_non_order_email(self):
         """PDFに明細がなく、メール本文からも注文情報が抽出できない場合、
-        orderは作成せず non_order_email として通知のみ記録すること。"""
+        orderは作成せず non_order_email として parse_log のみ記録すること。"""
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().order().limit().execute.return_value = (
             MagicMock(data=[self._staging_row()])
@@ -412,20 +412,14 @@ class TestParsePendingOrderPdfs:
         )
         assert log_insert["order_attachment_id"] == "att-1"
 
-        notif_insert = next(
-            c for c in insert_calls if c.get("notif_type") == "non_order_email"
-        )
-        assert notif_insert["source_table"] == "gmail_message"
-        assert notif_insert["source_id"] == "msg-1"
-
         # 既に non_order_email の parse_log があるため no_order_created は二重に
         # 記録しない（Issue #357）
         assert not any(c.get("reason") == "no_order_created" for c in insert_calls)
 
-    def test_all_lines_deduped_notifies_no_order_created(self):
+    def test_all_lines_deduped_logs_no_order_created(self):
         """自動抽出は成功したが全明細が既存注文と重複し upsert が
         skipped_no_change を返した場合、parse_status='success' だけで終わらず
-        no_order_created の parse_log と通知を記録すること（Issue #357）。"""
+        no_order_created の parse_log を記録すること（Issue #357）。"""
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().order().limit().execute.return_value = (
             MagicMock(data=[self._staging_row()])
@@ -433,7 +427,7 @@ class TestParsePendingOrderPdfs:
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": None, "action": "skipped_no_change"}]
         )
-        # _notify_if_no_order_created の「既存 parse_log あり?」チェックは空を返す
+        # _log_if_no_order_created の「既存 parse_log あり?」チェックは空を返す
         mock_db.table().select().eq().limit().execute.return_value = MagicMock(data=[])
 
         with (
@@ -476,11 +470,6 @@ class TestParsePendingOrderPdfs:
             c for c in insert_calls if c.get("reason") == "no_order_created"
         )
         assert log_insert["order_attachment_id"] == "att-1"
-
-        notif_insert = next(
-            c for c in insert_calls if c.get("notif_type") == "no_order_created"
-        )
-        assert notif_insert["source_table"] == "order_parse_log"
 
         # ステージング行は success に更新される（再処理ループには戻さない）
         update_calls = mock_db.table().update.call_args_list
@@ -607,9 +596,6 @@ class TestProcessLineItem:
         log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "no_product_match"
         assert log_insert["order_attachment_id"] == "att-1"
-        notif_insert = insert_calls[1].args[0]
-        assert notif_insert["notif_type"] == "no_product_match"
-        assert notif_insert["source_table"] == "order_parse_log"
 
         rpc_params = mock_db.rpc.call_args_list[-1].args[1]
         assert rpc_params["p_product_id"] is None
@@ -720,8 +706,6 @@ class TestProcessLineItem:
         insert_calls = mock_db.table().insert.call_args_list
         log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "downgrade_skipped"
-        notif_insert = insert_calls[1].args[0]
-        assert notif_insert["notif_type"] == "downgrade_skipped"
 
     def test_draft_conflict_logs_and_skips(self):
         mock_db = MagicMock()
@@ -746,8 +730,6 @@ class TestProcessLineItem:
         insert_calls = mock_db.table().insert.call_args_list
         log_insert = insert_calls[0].args[0]
         assert log_insert["reason"] == "draft_conflict_skipped"
-        notif_insert = insert_calls[1].args[0]
-        assert notif_insert["notif_type"] == "draft_conflict_skipped"
 
     def test_invalid_quantity_type_skips_without_calling_rpc(self):
         """quantityがint/None以外の想定外の型（スキーマ崩れ等）の場合、
@@ -991,10 +973,10 @@ class TestProcessLineItem:
         assert attachment_insert["order_id"] == 777
         assert not any("reason" in c.args[0] for c in insert_calls)
 
-    def test_quantity_above_threshold_notifies_multi_order_suspected(self):
+    def test_quantity_above_threshold_logs_multi_order_suspected(self):
         """1明細の数量が閾値を超える場合、複数受注が1明細にマージされた疑いを
-        検知して multi_order_suspected を通知すること（Issue #280）。
-        通知はあくまで情報提供であり、order作成自体はブロックしない。"""
+        検知して multi_order_suspected を記録すること（Issue #280）。
+        記録はあくまで情報提供であり、order作成自体はブロックしない。"""
         mock_db = MagicMock()
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 555, "action": "inserted"}]
@@ -1021,12 +1003,8 @@ class TestProcessLineItem:
             c for c in insert_calls if c.get("reason") == "multi_order_suspected"
         )
         assert log_insert["detail"]["quantity"] == 999_999
-        notif_insert = next(
-            c for c in insert_calls if c.get("notif_type") == "multi_order_suspected"
-        )
-        assert notif_insert["source_table"] == "order_parse_log"
 
-    def test_quantity_below_threshold_does_not_notify(self):
+    def test_quantity_below_threshold_does_not_log(self):
         mock_db = MagicMock()
         mock_db.rpc().execute.return_value = MagicMock(
             data=[{"order_id": 555, "action": "inserted"}]
@@ -1803,7 +1781,7 @@ class TestImagePdfExtraction:
         update_calls = mock_db.table().update.call_args_list
         assert not any(c.args[0] == {"parse_status": "success"} for c in update_calls)
 
-    def test_all_lines_skipped_notifies_no_order_created_without_image_log(self):
+    def test_all_lines_skipped_logs_no_order_created_without_image_log(self):
         mock_db = self._mock_db(action="skipped_no_change")
         p1, p2, p3, p4 = self._base_patches()
         with (
@@ -2443,13 +2421,11 @@ class TestDeliveryRequestEmail:
             patch.object(svc, "_resolve_product_id", return_value=3),
             patch.object(svc, "record_delivery_requests", return_value=[42]) as record,
             patch.object(svc, "_process_line_item") as process_line,
-            patch.object(svc, "create_notification") as notify,
         ):
             created = svc._process_email_body(db, self._row(), None)
 
         assert created == 0
         process_line.assert_not_called()
-        notify.assert_not_called()
         args = record.call_args.args
         assert args[2:5] == ("att-1", 7, intent)
         entry = args[5][0]

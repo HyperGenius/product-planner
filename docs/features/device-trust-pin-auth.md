@@ -40,7 +40,7 @@
 - `device_trust_registrations`: 端末信頼レコード（`tenant_id`, `device_id`, `registered_by`, `created_at`,
   `expires_at`＝登録から1年後, `revoked_at`）。RLSのSELECTポリシーは `president`/`platform_admin` の
   端末管理画面用のみで、INSERT/UPDATEポリシーは設定せず全て service role（`admin_client`）経由に限定
-  （`notifications` テーブルと同じ default-deny パターン）。
+  （default-deny パターン）。
 - `member_pins`: PINハッシュ（`tenant_id`, `user_id` 複合PK, `pin_hash`, `failed_attempts`,
   `locked_until`）。SELECTポリシーを一切設けず、PINハッシュはクライアントJWTから直接読めない。全アクセスは
   service role 経由のバックエンドロジックのみ。

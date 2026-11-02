@@ -122,7 +122,7 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
   複数の `orders` 行を正しく生成できる。製品照合・`upsert_order_by_dedupe_key` による
   dedupe・`order_attachments` 紐付けは PDF由来の明細処理と完全に同じ経路を通る
 - 明細が1件も抽出できなかった場合は、従来通り order を作成せず `non_order_email` として
-  `create_notification` のみ行う
+  `order_parse_log` に記録するだけにする（受信メール処理結果の「スキップ」）
 
 `_process_email_body()` は以下の2つのケースで呼ばれる共通経路になっている:
 
@@ -243,8 +243,8 @@ Issue #267 で `customer_certainty` カラムを新設して是正した。
 
 - 1明細の `quantity` が `MULTI_ORDER_SUSPECTED_QUANTITY_THRESHOLD`（デフォルト
   100,000）を超える場合、`order_parse_log` に `reason='multi_order_suspected'` で
-  記録し、`notifications` に `notif_type='multi_order_suspected'` で通知する
-- あくまで情報提供目的の通知であり、order自体の作成はブロックしない
+  記録する（受信メール処理結果の「要確認」と Slack 通知に出る。通知ベルは Issue #621 で廃止）
+- あくまで情報提供目的であり、order自体の作成はブロックしない
 - 閾値・条件は本番データの精度を見ながら調整する前提（Issue #280 未解決の論点）
 
 また、`quantity` が本来の抽出スキーマ（`int | null`）から外れた想定外の型で
@@ -300,19 +300,20 @@ dedupeキーに一致する既存orderが見つかった場合、以下のルー
 
 自動抽出は成功したのに、全明細が既存の内示注文と同一キー・同確度・同数量で
 `skipped_no_change` になると、`_process_line_item` が黙って `False` を返すだけで
-`order_parse_log` も `notifications` も残らず、`order_attachments.parse_status='success'`
+`order_parse_log` が残らず、`order_attachments.parse_status='success'`
 だけが記録されていた。運用側はメーラーとアプリを見比べない限り「起票0件」に
 気づけず、`parse_status='success'` のため cron の再処理対象からも外れる。
 
 対策として `_parse_one` の末尾（`parse_status='success'` 更新の直前）で
-`_notify_if_no_order_created(db, row, created_count)` を呼ぶ。
+`_log_if_no_order_created(db, row, created_count)` を呼ぶ（Issue #621 で通知ベルを廃止するまでは
+`_notify_if_no_order_created()` で、通知も記録していた）。
 
 - `created_count == 0` かつ、その attachment に紐づく `order_parse_log` が1件も無い場合のみ、
-  `reason='no_order_created'` の parse_log と `notif_type='no_order_created'` の通知を記録する
+  `reason='no_order_created'` の parse_log を記録する
 - `non_order_email` / `no_product_match` / `invalid_quantity` / `downgrade_skipped` /
   `draft_conflict_skipped` など、既に別の理由で parse_log が残っているケースは二重に
-  通知しない（既存 parse_log の有無で判定）
-- `parse_status` は `success` のまま（無限再処理を避ける）。可視化は通知と
+  記録しない（既存 parse_log の有無で判定）
+- `parse_status` は `success` のまま（無限再処理を避ける）。可視化は
   [受信メール処理結果一覧](email-order-intake.md#受信受注メールの処理結果一覧issue-357) で行う
 
 `deadline_date` はdedupeキーの一部のため、内示の納期が翌月にずれるようなケースは
@@ -366,8 +367,8 @@ supersede されない。確度が判定できていない行を「旧内示」�
 かっただけで当該明細の情報が失われる問題があったため、`product_id=NULL` の状態で
 下書きを起票するよう変更した。
 
-- `_process_line_item` は `product_id` が解決できなかった場合も `order_parse_log`/
-  `notifications` への記録は従来どおり行った上で、処理を継続して
+- `_process_line_item` は `product_id` が解決できなかった場合も `order_parse_log`
+  への記録は従来どおり行った上で、処理を継続して
   `upsert_order_by_dedupe_key` RPCを呼ぶ（以前はここで処理を打ち切っていた）
 - `extracted_product_name`（`orders.product_id` が NULL のときのフォールバック表示・
   重複判定に使う抽出済み生テキスト）は `TRIM()` のみ正規化する。全角/半角統一や
@@ -405,8 +406,7 @@ supersede されない。確度が判定できていない行を「旧内示」�
   引き継ぐ。ステージング行自体（`order_id IS NULL` の元の行）は処理完了として
   `parse_status='success'` に更新する（Claude抽出まで到達したかどうかに関わらず、
   パース処理自体は正常完了とみなす既存方針を踏襲）
-- `order_parse_log`・`notifications` への記録は従来どおり行う（`reason`/`notif_type` に
-  `failed_encrypted`/`failed_image` を使用。新しい値の追加やCHECK制約変更は不要）
+- `order_parse_log` への記録は従来どおり行う（`reason` に `failed_encrypted`/`failed_image` を使用）
 
 ### 画像PDF（FAX受信・スキャン）の読み取り（Issue #520）
 
@@ -440,7 +440,7 @@ pdfplumber ではテキストが1文字も取れず（`failed_image`）、本文
   ステージング行には `order_parse_log.reason='image_extracted'` を残し、受信結果一覧
   （`/orders/email-intake`）では「起票＋要確認」になる（`_EMAIL_INTAKE_ATTENTION_REASONS`）。
   `image_extracted` は起票が1件以上のときだけ残す（0件のときに残すと
-  `_notify_if_no_order_created()` の「既にログがある」判定を満たして `no_order_created` が出なくなる）
+  `_log_if_no_order_created()` の「既にログがある」判定を満たして `no_order_created` が出なくなる）
 - **失敗時の扱い**:
 
   | 状況 | 扱い |
@@ -819,7 +819,7 @@ Issue #280 での変更（1ソース:N受注モデル・メール本文/非PDF�
   `multi_order_suspected` を追加
 - `frontend/src/types/notification.ts` / `notification-bell.tsx`:
   `multi_order_suspected`（および従前抜けていた `customer_draft_created`）の
-  型・表示ラベルを追加
+  型・表示ラベルを追加（通知ベルは Issue #621 で廃止）
 
 Issue #296 での変更（製品未マッチ明細のNULL product_id下書き起票）:
 
@@ -893,10 +893,9 @@ Webインスタンス自身に高負荷を掛ける構造・`pdf_text_service` �
     .limit(N)` でバッチ化した後にこの種の確定的失敗を `pending` のまま残すと、常にバッチの
     先頭（最古）に選ばれ続けて後続の正常な添付の処理をブロックしてしまうため
   - 下書き order は起票しない（`_process_unreadable_pdf` の暗号化/画像PDFケースとは異なり、
-    最小対応として今回は見送った）。ユーザーへの通知（`notifications`）も今回は追加していない
-    （`notif_type` の CHECK 制約変更＝マイグレーションが必要になるため）。サイズ超過は
-    稀なケースという前提で、頻発するようであれば専用の `notifications`/`order_attachments.
-    parse_status` 値の追加を検討する
+    最小対応として今回は見送った）。`failed_too_large` は受信メール処理結果の分類
+    （`email_intake_outcome`）にも入っていない。サイズ超過は稀なケースという前提で、頻発するようで
+    あれば分類への登録・`order_attachments.parse_status` 値の追加を検討する
 - `backend/requirements.txt`: アプリコードから参照のない `azure-functions`（Azure Functions
   時代の残骸）・`pytest`／`pre_commit` とその専用依存（`virtualenv`/`distlib`/`filelock`/
   `platformdirs`/`cfgv`/`identify`/`nodeenv`/`iniconfig`/`pluggy`、azure-functions専用の
@@ -1123,7 +1122,7 @@ PDF_TEXT_MAX_PAGES=50                # extract_text() が処理するPDFのペ�
 - ~~束ね添付メールでのPDF単位の顧客解決（現状は全ステージング行がメール単位で解決した同じ `customer_id` を持つ）~~ → Issue #385 で対応（パース時に `match_customer_by_pdf_text` で企業名突合。上記「束ね添付での PDF 単位の顧客解決」参照）
 - PDF文面の顧客突合を **企業名の部分一致以外**（住所・電話番号・エイリアス辞書の拡充、Claude抽出による発注元名の構造化等）へ広げること。まずは企業名の正規化＋部分一致で運用し、精度を見て判断する
 - テキスト抽出に失敗したPDF（暗号化・画像）を束ね添付で受けた場合の顧客解決（文面が無いためメール単位の値のまま。OCR前提の別Issue）
-- 重複スキップ・照合失敗の通知UI（[notifications.md](notifications.md) Issue #254 で対応）
+- 重複スキップ・照合失敗の通知UI（[notifications.md](notifications.md) Issue #254 で対応、Issue #621 で通知ベルを廃止し受信メール処理結果に一本化）
 - ステージング行が長時間 `pending` のまま停滞した場合のリトライ・タイムアウト処理
 - `customer_certainty`（`forecast`/`forecast_tentative`）のUIフィルタータブ追加（別途検討）
 - `deadline_date` 変更を「同一注文の引き継ぎ」として明示的にUI上で提示する機能（Issue #252スコープ外）
@@ -1206,6 +1205,6 @@ order-attachments バケットに事前アップロード済みの実PDF（飯�
 
 - [order-attachments.md](order-attachments.md): PDFステージング保存基盤（Issue #248、前提）
 - Issue #252: 既存orderのupsert処理（内示→確定の昇格・数量更新対応）。本ドキュメントに統合
-- [notifications.md](notifications.md): 処理ログの通知UI（Issue #254、`order_parse_log` を利用）
+- [notifications.md](notifications.md): 処理ログの通知UI（Issue #254、Issue #621 で廃止）
 - [product-master.md](product-master.md#別名辞書-product_name_aliases): 製品名の表記ゆれ辞書・修正履歴管理（Issue #347）
 - [simulation-engine.md](simulation-engine.md): シミュ納期（`simulated_deadline`）・作業開始日の補完と承認時の繰り上げ（Issue #477）

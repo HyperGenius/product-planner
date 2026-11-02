@@ -14,7 +14,6 @@ from app.services.email_extraction_service import (
     EMAIL_INTENT_SPLIT_DELIVERY,
     extract_email_order_lines,
 )
-from app.services.notification_service import create_notification
 from app.services.order_delivery_request_service import (
     DELIVERY_REQUEST_PARSE_LOG_REASON,
     DeliveryRequestEntry,
@@ -357,19 +356,19 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
         )
         created_count = _process_email_body(db, row, customer_extraction_prompt)
 
-    _notify_if_no_order_created(db, row, created_count)
+    _log_if_no_order_created(db, row, created_count)
     db.table(table).update({"parse_status": "success"}).eq(
         "id", attachment_id
     ).execute()
     return created_count
 
 
-def _notify_if_no_order_created(
+def _log_if_no_order_created(
     db: Client, row: dict[str, Any], created_count: int
 ) -> None:
     """
-    パースは成功したのに order が1件も生成されず、parse_log も通知も残らない
-    ケースを可視化する（Issue #357）。
+    パースは成功したのに order が1件も生成されず、parse_log も残らない
+    ケースを可視化する（Issue #357。受信メール処理結果の「スキップ」に出る）。
 
     典型例は、自動抽出した全明細が既存の内示注文と同一キー・同数量・同確度で
     `upsert_order_by_dedupe_key` が `skipped_no_change` を返し、
@@ -377,7 +376,7 @@ def _notify_if_no_order_created(
     `parse_status='success'` だけが記録され、運用側から起票0件に気づけない。
 
     non_order_email / no_product_match / invalid_quantity など、既に別の理由で
-    parse_log が残っている場合は二重に通知しない。
+    parse_log が残っている場合は記録しない。
     """
     if created_count > 0:
         return
@@ -398,15 +397,7 @@ def _notify_if_no_order_created(
         "gmail_message_id": row.get("gmail_message_id"),
         "original_filename": row.get("original_filename"),
     }
-    log_id = _log_parse_event(db, tenant_id, attachment_id, "no_order_created", detail)
-    create_notification(
-        db,
-        tenant_id,
-        "no_order_created",
-        SupabaseTableName.ORDER_PARSE_LOG.value,
-        log_id,
-        detail,
-    )
+    _log_parse_event(db, tenant_id, attachment_id, "no_order_created", detail)
 
 
 def _process_email_body(
@@ -422,7 +413,7 @@ def _process_email_body(
     1通のメールに複数明細が含まれる場合も line_items 配列として抽出できる。
 
     本文からも注文情報が抽出できなかった場合は non_order_email として
-    通知のみ記録し0を返す。
+    parse_log のみ記録し0を返す。
     """
     tenant_id = row["tenant_id"]
     attachment_id = row["id"]
@@ -444,17 +435,6 @@ def _process_email_body(
     if not line_items:
         detail = {"body_snippet": body[:200]}
         _log_parse_event(db, tenant_id, attachment_id, "non_order_email", detail)
-        # non_order_email 通知は notifications router 側で source_id を
-        # Gmail メッセージIDとしてそのままリンク生成に使うため、
-        # order_attachments.id ではなく gmail_message_id を渡す必要がある
-        create_notification(
-            db,
-            tenant_id,
-            "non_order_email",
-            "gmail_message",
-            row.get("gmail_message_id"),
-            detail,
-        )
         logger.info(
             f"pdf_order_parsing: attachment {attachment_id} "
             "no order information found in email body"
@@ -616,9 +596,9 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
             )
         )
 
-    _notify_if_no_order_created(db, row, created_count)
+    _log_if_no_order_created(db, row, created_count)
     if created_count > 0:
-        # 起票0件のときに残すと _notify_if_no_order_created の「既にログがある」判定を
+        # 起票0件のときに残すと _log_if_no_order_created の「既にログがある」判定を
         # 先に満たしてしまうため、起票できたときだけ残す
         _log_parse_event(
             db,
@@ -813,19 +793,11 @@ def _process_unreadable_pdf(
             f"for attachment {attachment_id}: rows={rpc_rows}"
         )
 
-    log_id = _log_parse_event(db, tenant_id, attachment_id, failure_reason, {})
-    create_notification(
-        db,
-        tenant_id,
-        failure_reason,
-        SupabaseTableName.ORDER_PARSE_LOG.value,
-        log_id,
-        {},
-    )
+    _log_parse_event(db, tenant_id, attachment_id, failure_reason, {})
 
     if action != "inserted":
         # NULL/NULLの下書きは常に新規挿入される想定だが、念のため他アクションが
-        # 返った場合は order を紐付けずログ・通知のみで終える。
+        # 返った場合は order を紐付けずログのみで終える。
         return 0
 
     order_id = rpc_rows[0]["order_id"]
@@ -880,10 +852,10 @@ def _check_multi_order_suspected(
 ) -> None:
     """
     1メール/1PDFに複数受注が含まれるにもかかわらず1明細にマージされてしまった
-    疑いのあるケースを粗く検知し、通知する（Issue #280）。
+    疑いのあるケースを粗く検知し、parse_log に記録する（Issue #280）。
 
     現時点では数量が閾値を超える場合のみを対象とする単純なヒューリスティックであり、
-    受注の作成自体はブロックしない（情報提供目的の通知のみ）。
+    受注の作成自体はブロックしない（受信メール処理結果の「要確認」に出す情報提供のみ）。
     """
     quantity = line.get("quantity")
     if not isinstance(quantity, int) or quantity < _MULTI_ORDER_QUANTITY_THRESHOLD:
@@ -893,17 +865,7 @@ def _check_multi_order_suspected(
         "product_number_raw": line.get("product_number_raw"),
         "product_name_raw": line.get("product_name_raw"),
     }
-    log_id = _log_parse_event(
-        db, tenant_id, attachment_id, "multi_order_suspected", detail
-    )
-    create_notification(
-        db,
-        tenant_id,
-        "multi_order_suspected",
-        SupabaseTableName.ORDER_PARSE_LOG.value,
-        log_id,
-        detail,
-    )
+    _log_parse_event(db, tenant_id, attachment_id, "multi_order_suspected", detail)
 
 
 def _resolve_product_id(
@@ -1164,7 +1126,7 @@ def _process_line_item(
     )
     if resent_order_id is not None:
         # 同じ注文書の再送は起票・更新せず、届いたPDFを既存の受注に添付するだけにする。
-        # 正常な運用なので通知は出さない（起票0件の通知も、このログがあるので出ない）。
+        # 正常な運用なので要確認にはしない（起票0件のログも、このログがあるので残らない）。
         # 送品の正は弥生なので、再送を理由に送品済みにはしない（Issue #599）
         _attach_resent_document(
             db, staging_row, resent_order_id, attachment_parse_status
@@ -1189,23 +1151,13 @@ def _process_line_item(
 
     if product_id is None:
         # 製品を自動識別できなかった明細も、情報を失わずproduct_id=NULLで
-        # 下書きを起票する（Issue #296）。ログ・通知は従来どおり記録した上で
+        # 下書きを起票する（Issue #296）。ログは従来どおり記録した上で
         # 処理を継続する（以前はここでFalseを返し明細を丸ごと破棄していた）。
         detail: dict[str, Any] = {
             "product_number_raw": product_number_raw,
             "product_name_raw": product_name_raw,
         }
-        log_id = _log_parse_event(
-            db, tenant_id, attachment_id, "no_product_match", detail
-        )
-        create_notification(
-            db,
-            tenant_id,
-            "no_product_match",
-            SupabaseTableName.ORDER_PARSE_LOG.value,
-            log_id,
-            detail,
-        )
+        _log_parse_event(db, tenant_id, attachment_id, "no_product_match", detail)
 
     certainty = reading.certainty
 
@@ -1251,32 +1203,12 @@ def _process_line_item(
 
     if action == "skipped_downgrade":
         detail = {"product_id": product_id, "deadline_date": deadline_date}
-        log_id = _log_parse_event(
-            db, tenant_id, attachment_id, "downgrade_skipped", detail
-        )
-        create_notification(
-            db,
-            tenant_id,
-            "downgrade_skipped",
-            SupabaseTableName.ORDER_PARSE_LOG.value,
-            log_id,
-            detail,
-        )
+        _log_parse_event(db, tenant_id, attachment_id, "downgrade_skipped", detail)
         return False
 
     if action == "skipped_draft_conflict":
         detail = {"product_id": product_id, "deadline_date": deadline_date}
-        log_id = _log_parse_event(
-            db, tenant_id, attachment_id, "draft_conflict_skipped", detail
-        )
-        create_notification(
-            db,
-            tenant_id,
-            "draft_conflict_skipped",
-            SupabaseTableName.ORDER_PARSE_LOG.value,
-            log_id,
-            detail,
-        )
+        _log_parse_event(db, tenant_id, attachment_id, "draft_conflict_skipped", detail)
         return False
 
     if action == "skipped_no_change":
@@ -1362,22 +1294,16 @@ def _log_parse_event(
     attachment_id: str,
     reason: str,
     detail: dict[str, Any],
-) -> str | None:
-    """order_parse_log に1行記録し、挿入した行の id を返す。"""
-    result = (
-        db.table(SupabaseTableName.ORDER_PARSE_LOG.value)
-        .insert(
-            {
-                "tenant_id": tenant_id,
-                "order_attachment_id": attachment_id,
-                "reason": reason,
-                "detail": detail,
-            }
-        )
-        .execute()
-    )
-    rows = cast(list[dict[str, Any]], result.data or [])
+) -> None:
+    """order_parse_log に1行記録する。"""
+    db.table(SupabaseTableName.ORDER_PARSE_LOG.value).insert(
+        {
+            "tenant_id": tenant_id,
+            "order_attachment_id": attachment_id,
+            "reason": reason,
+            "detail": detail,
+        }
+    ).execute()
     logger.info(
         f"pdf_order_parsing: logged {reason} for attachment {attachment_id}: {detail}"
     )
-    return rows[0]["id"] if rows else None

@@ -229,7 +229,7 @@ cd backend && ruff check . && mypy .
   送出してステージング行を `pending` のまま次回の cron に回す（空の下書きを作ると再処理されない）。画像から起票した受注の
   添付行は `parse_status='success_image'`。`order_attachments.parse_status` は列の CHECK（`order_attachments_parse_status_check`）
   なので値を足すときはマイグレーションで張り直す。ステージング行へ要確認のログ（`image_extracted`）を残すのは起票1件以上の
-  ときだけにする（先に残すと `_notify_if_no_order_created()` が「ログあり」と判定して起票0件の通知が出ない）。
+  ときだけにする（先に残すと `_log_if_no_order_created()` が「ログあり」と判定して起票0件のログが残らない）。
   詳細は [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md)
 - **注文書の再送（Issue #599）**: 顧客によっては注文時の注文書を納期近辺に（庫入伝票付きのスキャンで）送り直してくる。
   読み取りのたびに品名・納期がぶれるので dedupe キー `(顧客, 製品, 希望納期)` だけでは止まらない。再送は
@@ -294,6 +294,10 @@ cd backend && ruff check . && mypy .
   受注一覧の行は `useOpenDeliveryRequestCounts()`（1リクエストの共有キャッシュ）で印を付けるため、`OrderTableRow` を描画するテストでは
   MSW の既定ハンドラ（`test-utils/msw/handlers.ts`）が無いと `onUnhandledRequest: "error"` で落ちる。詳細は
   [docs/features/email-order-intake.md](docs/features/email-order-intake.md#督促分割納入依頼メールの扱いissue-619)
+- **担当者に気づかせる手段（Issue #621）**: アプリ内の通知ベル（`notifications`）は廃止した（既読がテナント共通・ロールで
+  出し分けない・バッジと重複するため）。**今やるべき作業はサイドバーの件数バッジ（`useSidebarBadgeCounts()`）、出来事の通知は
+  Slack（`email_intake_slack_service`）、取り込みの結果は受信メール処理結果**に置き、ベルのような横断の通知テーブルを作り直さない。
+  取り込みで新しい結果を残すときは `order_parse_log.reason` に記録し、`email_intake_outcome` の分類集合に登録する
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する
