@@ -227,6 +227,10 @@ PostgRESTがINSERT結果を返す際にSELECT用RLSポリシー（`iso_officer`/
 
 ## 承認依頼のアプリ内通知 (Issue #327)
 
+> [!NOTE]
+> 通知ベル（`notifications`）は Issue #621 で廃止した。承認待ちは「承認」メニューの件数バッジ（社長、Issue #556）と
+> 社長ダッシュボードで気づける。以下は導入時の記録。
+
 `request-approval`（`draft → pending_approval`）成功時、president 向けに `notifications`
 テーブルへ `approval_requested` 通知を書き込む。メール確認依頼で発生していた「返信が来ない」
 問題の代替として、アプリ内で完結させる狙い。`approve-bulk` からの一括承認時は既存の通知に

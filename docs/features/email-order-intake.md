@@ -420,7 +420,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 - `frontend/src/components/layout/app-sidebar.tsx`: 「受信メール処理結果」メニュー項目
   （`/orders/email-intake`、全メンバーに表示）
 - `notification-bell.tsx` / `types/notification.ts`: `no_order_created`（「起票0件（全明細が重複）」）
-  を `NotificationType` / ラベルに追加
+  を `NotificationType` / ラベルに追加（通知ベルは Issue #621 で廃止。取り込みの結果はこの一覧と Slack 通知で見る）
 
 ---
 
@@ -428,7 +428,7 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 メール起票の処理結果を、**プラットフォーム管理者の Slack** に件数のサマリで通知する。詳細は
 アプリ（受信メール処理結果 `/orders/email-intake`）で確認する前提で、Slack には件数とリンクだけを載せる
-（顧客名・品名・本文は載せない）。ベルの通知（`notifications`）とは切り離している。
+（顧客名・品名・本文は載せない）。
 
 ```
 📨 メール起票（10/25 09:15）
@@ -611,4 +611,4 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 
 - 分割納入の業務プロセス（出荷のみの分割）は現場判断のアドホック運用のため、記録・表示のみ。受注の分割や分納計画は扱わない
 - 添付の日程表は解析しない（PDF に明細として読める表が付く督促は PDF 側の経路で起票されうる。本文の趣旨判定は本文経路のみ）
-- 督促の新着を知らせる通知（ベル）は未実装（`notifications.notif_type` の CHECK 変更が要る）
+- 未対応の依頼に気づく入口（サイドバーの件数バッジ等）は Issue #622 で扱う（通知ベルは Issue #621 で廃止）

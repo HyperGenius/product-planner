@@ -97,7 +97,6 @@ def resend_fixture(admin_db):
             "order": order,
         }
 
-    admin_db.table("notifications").delete().eq("tenant_id", tenant_id).execute()
     admin_db.table("order_parse_log").delete().eq("tenant_id", tenant_id).execute()
     admin_db.table("orders").delete().eq("tenant_id", tenant_id).execute()
     admin_db.table("order_attachments").delete().eq("tenant_id", tenant_id).execute()

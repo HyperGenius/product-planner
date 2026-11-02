@@ -13,8 +13,9 @@ Gmail 自動伝票起票フローで受信した注文書 PDF を Supabase Stora
 > Issue #254 により、非PDF添付メール（本文テキスト抽出ルート）で `product_name` /
 > `quantity` / `deadline_date` / `order_number` が全て抽出できなかった場合、
 > order 作成・添付保存・`order_attachments` INSERT を含む処理全体をスキップし、
-> 通知記録のみ行うよう変更された。詳細は本ドキュメント内の「対象外メール検知
-> （Issue #254）」および [notifications.md](notifications.md) を参照。
+> 通知記録のみ行うよう変更された（通知ベルは Issue #621 で廃止。現在は `order_parse_log` の
+> `non_order_email` だけが残り、受信メール処理結果の「スキップ」に出る）。詳細は本ドキュメント内の
+> 「対象外メール検知（Issue #254）」および [notifications.md](notifications.md) を参照。
 
 ---
 
@@ -109,9 +110,8 @@ RLS違反になっていた（`GET /orders/{id}/attachments` はこれを servic
 | `failed_no_attachment`   | 添付なし（本文のみで処理）      |
 
 `failed_encrypted` / `failed_image` は Issue #254 でアプリ内通知（`notifications` テーブル）
-にも記録されるようになった。`order_attachments.parse_status` が一次情報として残る点は変わらず、
-`notifications` は横断的な「担当者への通知」専用の薄いテーブルとして別途書き込まれる
-（詳細は [notifications.md](notifications.md) 参照）。
+にも記録されるようになったが、通知ベルは Issue #621 で廃止した。現在は `order_parse_log` の理由として
+受信メール処理結果の「失敗」と Slack 通知に出る（[notifications.md](notifications.md) 参照）。
 
 `failed_encrypted` / `failed_image` は Issue #304 より、判明している情報だけの下書き
 `orders` 行にも紐づけられるようになった（`order_id` が設定された `order_attachments` 行が
@@ -169,6 +169,7 @@ RLS違反になっていた（`GET /orders/{id}/attachments` はこれを servic
   （迷惑メール送信元で顧客テーブルを汚染しないため）
 - 代わりに `notification_service.create_notification()` で `notif_type='non_order_email'`
   （`source_table='gmail_message'`, `source_id=msg_id`）の通知を1件記録する
+  （Issue #621 で通知ベルを廃止。現在は `order_parse_log` の `non_order_email` のみ記録する）
 - 処理済みラベルへ移動して return する（エラー扱いにはしない）
 
 詳細は [notifications.md](notifications.md) を参照。
@@ -273,5 +274,4 @@ export interface OrderAttachment {
 - Issue B: PDF パース＋複数 order 生成
 - Issue C: 既存 order upsert（予定）
 - [email-order-intake.md](email-order-intake.md): メール起票基盤の設計
-- [notifications.md](notifications.md): 自動処理パイプラインの通知UI（Issue #254）。
-  `failed_encrypted` / `failed_image` / `non_order_email` の通知記録の詳細はこちらを参照
+- [notifications.md](notifications.md): 自動処理パイプラインの通知UI（Issue #254、Issue #621 で廃止）

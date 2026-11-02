@@ -35,7 +35,6 @@ from app.scheduler_logic import (
     RoutingUnconfirmedError,
     schedule_order,
 )
-from app.services.notification_service import create_notification
 from app.services.order_simulation_service import deadline_from_schedules
 from app.services.order_status_service import (
     InvalidOrderStatusTransitionError,
@@ -85,28 +84,6 @@ def _log_approval_action_safely(
     except Exception:
         logger.exception(
             f"Failed to record approval log: order_id={order_id}, action={action}"
-        )
-
-
-def _notify_approval_requested_safely(
-    client: Client, tenant_id: str, order_id: int, order_no: str | None
-) -> None:
-    """
-    承認依頼通知の書き込みはベストエフォートとする（Issue #327）。
-    通知の記録に失敗しても、承認依頼送信自体（既にDB更新済み）はエラー扱いにしない。
-    """
-    try:
-        create_notification(
-            client,
-            tenant_id,
-            "approval_requested",
-            "orders",
-            str(order_id),
-            detail={"order_no": order_no} if order_no else None,
-        )
-    except Exception:
-        logger.exception(
-            f"Failed to record approval_requested notification: order_id={order_id}"
         )
 
 
@@ -255,9 +232,6 @@ def request_order_approval(
     )
     _log_approval_action_safely(
         approval_log_repo, tenant_id, order_id, "request_approval", user_id
-    )
-    _notify_approval_requested_safely(
-        client, tenant_id, order_id, order.get("order_number")
     )
     record_auto_match_alias_if_applicable(client, tenant_id, order, user_id)
     return _map_order_response(result)

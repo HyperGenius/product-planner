@@ -5,7 +5,6 @@ import * as React from "react"
 import { usePathname } from "next/navigation"
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar"
 import { AppSidebar } from "./app-sidebar"
-import { NotificationBell } from "./notification-bell"
 import { Separator } from "@/components/ui/separator"
 
 const pageTitleMap: Record<string, string> = {
@@ -65,7 +64,6 @@ export function AuthenticatedLayout({ children, user }: AuthenticatedLayoutProps
 
         <header className="flex h-15 shrink-0 items-center justify-between gap-2 border-b px-4">
           <div className="font-semibold">{pageTitle}</div>
-          <NotificationBell />
         </header>
 
         <div className="flex flex-1 flex-col px-4 py-6 space-y-6">
