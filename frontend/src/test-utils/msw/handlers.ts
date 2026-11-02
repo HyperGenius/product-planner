@@ -58,4 +58,14 @@ export const handlers = [
   http.get(`${API_BASE}/production-schedules`, () => HttpResponse.json([])),
   // 受注一覧の行が引く「未対応の督促」の件数（Issue #619）。既定は督促なし
   http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => HttpResponse.json([])),
+  // 受注詳細の「作り置きからの引き当て」（Issue #624）。既定は引き当てなし
+  http.get(`${API_BASE}/daily-reports/orders/:orderId/stock-assignments`, () =>
+    HttpResponse.json({
+      computed_at: null,
+      assignable: true,
+      process_names: [],
+      stock_estimates: [],
+      assignments: [],
+    }),
+  ),
 ]

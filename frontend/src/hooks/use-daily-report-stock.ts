@@ -3,7 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { DAILY_REPORT_COVERAGE_QUERY_KEY } from "@/hooks/use-daily-report-coverage"
 import { apiClient } from "@/lib/api-client"
-import type { StockEstimates, StockFeedbackInput } from "@/types/daily-report-stock"
+import type {
+  OrderStockAssignments,
+  StockAssignmentInput,
+  StockEstimates,
+  StockFeedbackInput,
+} from "@/types/daily-report-stock"
 
 /**
  * 日報からの作り置き（先行着手）の推定と、現場の指摘のフック (Issue #591)。
@@ -49,5 +54,48 @@ export function useDeleteStockFeedback() {
     mutationFn: (productId: number) =>
       apiClient(`/daily-reports/stock-feedback/${productId}`, { method: "DELETE" }),
     onSuccess: invalidate,
+  })
+}
+
+/**
+ * 受注に引き当てた作り置き（Issue #624）。進捗・推定への反映は次の集計の後なので、登録・取り消しの後は
+ * この受注の引き当てだけを取り直す。
+ */
+function orderStockAssignmentsKey(orderId: number) {
+  return [...DAILY_REPORT_STOCK_QUERY_KEY, "order-assignments", orderId]
+}
+
+export function useOrderStockAssignments(orderId: number) {
+  return useQuery<OrderStockAssignments>({
+    queryKey: orderStockAssignmentsKey(orderId),
+    queryFn: () =>
+      apiClient<OrderStockAssignments>(`/daily-reports/orders/${orderId}/stock-assignments`),
+  })
+}
+
+/** 受注に作り置きを引き当てる（同じ工程の引き当てがあれば上書き） */
+export function useSaveStockAssignment(orderId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: StockAssignmentInput) =>
+      apiClient(`/daily-reports/orders/${orderId}/stock-assignments`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: orderStockAssignmentsKey(orderId) }),
+  })
+}
+
+/** 引き当てを取り消す */
+export function useDeleteStockAssignment(orderId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (assignmentId: string) =>
+      apiClient(`/daily-reports/orders/${orderId}/stock-assignments/${assignmentId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: orderStockAssignmentsKey(orderId) }),
   })
 }

@@ -8,6 +8,7 @@ from app.services.daily_report_allocator import (
     OrderRef,
     ProcessProgress,
     RoutingRef,
+    StockAssignment,
     UnallocatedActual,
     allocate_actuals,
 )
@@ -308,6 +309,228 @@ class TestAllocation:
         progress = {p.process_routing_id: p for p in result.progress}
         assert progress[21].good_qty == 40
         assert progress[22].good_qty == 0
+
+
+class TestStockAssignment:
+    """作り置きの引き当て（Issue #624）。"""
+
+    def test_assignment_uses_entries_of_other_customer_before_order_date(self):
+        # 日報の顧客先が別の顧客（誤記）で、受注日より前に作った作り置き
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [
+            _entry(1, 100, "クグシ", date(2026, 10, 14), customer_id=99),
+        ]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 11, 2),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        progress = _progress(result, 1)
+        assert progress["クグシ"].good_qty == 100
+        assert progress["クグシ"].status == "completed"
+        assert progress["クグシ"].first_actual_date == date(2026, 10, 14)
+        # 後の工程に実績があるので前の工程も完了
+        assert progress["カシメ"].status == "completed"
+        assert result.unallocated == []
+        assert result.allocations == [
+            Allocation(
+                order_id=1,
+                product_id=PRODUCT,
+                process_name="クグシ",
+                work_date=date(2026, 10, 14),
+                qty=100,
+            )
+        ]
+
+    def test_assignment_takes_newest_entries_first_and_leaves_the_rest(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [
+            _entry(1, 60, "クグシ", date(2026, 9, 1)),
+            _entry(2, 70, "クグシ", date(2026, 10, 9)),
+            _entry(3, 50, "クグシ", date(2026, 10, 14)),
+        ]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 11, 2),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        assert _progress(result, 1)["クグシ"].good_qty == 100
+        assert [(a.work_date, a.qty) for a in result.allocations] == [
+            (date(2026, 10, 14), 50),
+            (date(2026, 10, 9), 50),
+        ]
+        # 使わなかった分は通常どおり（受注日より前なので）未割当
+        assert [(u.entry_id, u.qty, u.reason) for u in result.unallocated] == [
+            (1, 60, "before_order_date"),
+            (2, 20, "before_order_date"),
+        ]
+
+    def test_assignment_ignores_entries_after_assigned_on(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [
+            _entry(1, 40, "クグシ", date(2026, 10, 14)),
+            # 引き当てた日より後の実績（別の顧客なので未割当）
+            _entry(2, 100, "クグシ", date(2026, 10, 30), customer_id=99),
+        ]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 10, 20),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        assert _progress(result, 1)["クグシ"].good_qty == 40
+        assert [(u.entry_id, u.qty, u.reason) for u in result.unallocated] == [
+            (2, 100, "no_candidate_order")
+        ]
+
+    def test_assignment_uses_only_actuals_left_unallocated(self):
+        # 他の受注に割り付いた実績は引き当てに使わない（同じ実績を二重に数えない）
+        orders = [
+            _order(1, 100, date(2026, 10, 10)),
+            _order(2, 100, date(2026, 10, 20)),
+        ]
+        entries = [
+            _entry(1, 30, "プレス", date(2026, 8, 20)),
+            _entry(2, 150, "プレス", date(2026, 9, 10)),
+        ]
+        assignments = [
+            StockAssignment(
+                order_id=2,
+                process_name="プレス",
+                qty=100,
+                assigned_on=date(2026, 9, 30),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        assert _progress(result, 1)["プレス"].good_qty == 100
+        # 通常の割り付けで 50、受注日より前の作り置きから 30
+        assert _progress(result, 2)["プレス"].good_qty == 80
+        assert result.unallocated == []
+        assert sum(a.qty for a in result.allocations) == 180
+
+    def test_assignment_is_limited_to_remaining_order_quantity(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [
+            _entry(1, 50, "クグシ", date(2026, 10, 14)),
+            _entry(2, 70, "クグシ", date(2026, 10, 25)),
+        ]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 11, 2),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        # 受注日より後の 70 が通常の割り付けで先に入り、残り 30 だけ作り置きから
+        assert _progress(result, 1)["クグシ"].good_qty == 100
+        assert [(u.entry_id, u.qty, u.reason) for u in result.unallocated] == [
+            (1, 20, "before_order_date")
+        ]
+
+    def test_assignment_is_capped_by_order_quantity(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [_entry(1, 300, "クグシ", date(2026, 10, 14))]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=500,
+                assigned_on=date(2026, 11, 2),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        assert _progress(result, 1)["クグシ"].good_qty == 100
+        assert [(u.qty, u.reason) for u in result.unallocated] == [
+            (200, "before_order_date")
+        ]
+
+    def test_assignment_with_insufficient_entries_assigns_what_exists(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [_entry(1, 30, "クグシ", date(2026, 10, 14))]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 11, 2),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        progress = _progress(result, 1)["クグシ"]
+        assert progress.good_qty == 30
+        assert progress.status == "in_progress"
+        assert result.unallocated == []
+
+    def test_assignment_to_non_candidate_order_or_unknown_process_is_ignored(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [_entry(1, 100, "クグシ", date(2026, 10, 14))]
+        assignments = [
+            # 割り付けの候補でない受注（出荷済み等）
+            StockAssignment(
+                order_id=9,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 11, 2),
+            ),
+            # 製品の工程ルートに無い工程
+            StockAssignment(
+                order_id=1, process_name="研磨", qty=100, assigned_on=date(2026, 11, 2)
+            ),
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        assert _progress(result, 1)["クグシ"].good_qty == 0
+        assert [(u.qty, u.reason) for u in result.unallocated] == [
+            (100, "before_order_date")
+        ]
+
+    def test_assignment_does_not_use_other_product_or_process(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [
+            _entry(1, 100, "クグシ", date(2026, 10, 14), product_id=OTHER_PRODUCT),
+            _entry(2, 100, "カシメ", date(2026, 10, 14)),
+        ]
+        assignments = [
+            StockAssignment(
+                order_id=1,
+                process_name="クグシ",
+                qty=100,
+                assigned_on=date(2026, 11, 2),
+            )
+        ]
+
+        result = allocate_actuals(entries, orders, ROUTINGS, assignments)
+
+        assert _progress(result, 1)["クグシ"].good_qty == 0
+        assert result.allocations == []
 
 
 class TestProgressStatus:

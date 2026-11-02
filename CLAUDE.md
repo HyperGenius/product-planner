@@ -203,6 +203,11 @@ cd backend && ruff check . && mypy .
     受注に割り付いた分（`AllocationResult.allocations`）を引かないと、通常の仕掛かりまで作り置きに見える。明細は良品数0（すべて不良）
     でも次の工程の消費に数えるため `processed_qty > 0` で読むので、割り付け・照合状況の集計では良品数0の明細を飛ばすこと。
     画面の呼び名は現場の呼び名に合わせる前提で `STOCK_LABEL`（`lib/daily-report-stock-utils.ts`）1か所に置く
+  - **作り置きの手動の引き当て（Issue #624）**: 受注詳細で登録した `daily_report_stock_assignments` は、割り付けで**通常の充当の後に
+    未割当に残った実績から**充当する（顧客・受注日・未割当の理由は問わない）。通常の割り付けより先に明細から充当すると、他の受注に
+    割り付くはずの新しい明細を取ってしまい作り置きが減らない。充当は `allocations` に入れるので推定から自動で引かれる。
+    日報の顧客先の誤記もこれで手当てする（明細の `customer_raw` を直す経路は作らない。シートを保存し直すと明細が丸ごと置き換わる）。
+    受注詳細を描画するテストは MSW の既定ハンドラ（`GET /daily-reports/orders/:orderId/stock-assignments`）に依存する
   - **送品日時 `orders.shipped_at`** は `status` が `shipped` / `completed` になったときにトリガー `trg_set_order_shipped_at` が書く。
     送品の経路を足してもアプリから書かない
   - **`merge_products` の最新の定義は `20261029000000_add_daily_report_stock_estimates.sql`**（作り置きの指摘の付け替えを追加）。

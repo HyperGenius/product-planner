@@ -14,6 +14,11 @@ DB の読み書きは `daily_report_allocation_service`。
   出荷済みで候補から外れた過去の受注の実績が、後から入った受注を完了に見せるのを避けるため
   （充当できなかった分は未割当 `before_order_date` として残る。作り置きの推定 `daily_report_stock_estimator`
   （Issue #591）は、割り付けの結果の受注ごとの充当 `allocations` を使って受注の仕掛かりを除く）
+* 作り置きの引き当て（`StockAssignment`、Issue #624）は通常の割り付けの後で、未割当に残った実績から充当する。
+  引き当てた受注の製品・工程の未割当を、**顧客と理由（受注なし・受注日より前・受注数を超過）を問わず**、
+  引き当てた日以前の加工日の新しい順に使う（作り置きのうち最も新しいロットを使ったとみなす割り切り）。
+  日報の顧客先の誤記や、受注日より前に作った作り置きを受注に充てるため。他の受注に割り付いた実績は使わない。
+  受注数量（通常の割り付けで充当した分を除く）と未割当の数を超えては充当しない
 * どの受注にも充当できなかった数量は未割当として返す。製品の工程ルートにその工程名が無い実績は、
   受注の有無より先に `no_routing_process` にする（工程の棚卸しで聞くことが受注の有無と違うため。Issue #542）
 
@@ -25,7 +30,7 @@ DB の読み書きは `daily_report_allocation_service`。
 """
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Literal
 
@@ -67,6 +72,18 @@ class OrderRef:
     deadline: date | None
     # order_date の JST 暦日
     order_date: date | None
+
+
+@dataclass(frozen=True)
+class StockAssignment:
+    """受注に手で引き当てた作り置き（Issue #624）。"""
+
+    order_id: int
+    # 受注の製品の工程ルートにある工程名。この工程まで済んだ作り置きを充てた
+    process_name: str
+    qty: int
+    # 引き当てた日（JST 暦日）。この日以前の加工日の明細だけを充てる
+    assigned_on: date
 
 
 @dataclass(frozen=True)
@@ -153,6 +170,7 @@ def allocate_actuals(
     entries: Iterable[ActualEntry],
     orders: Iterable[OrderRef],
     routings: Iterable[RoutingRef],
+    assignments: Iterable[StockAssignment] = (),
 ) -> AllocationResult:
     routing_list = list(routings)
     routing_index = _routing_by_process(routing_list)
@@ -192,8 +210,79 @@ def allocate_actuals(
                     )
                 )
 
+    result.unallocated = _apply_stock_assignments(
+        result.unallocated,
+        sorted_orders,
+        routing_index,
+        assignments,
+        allocated,
+        result.allocations,
+    )
     result.progress = _progress_rows(sorted_orders, routing_list, allocated)
     return result
+
+
+def _apply_stock_assignments(
+    unallocated: list[UnallocatedActual],
+    orders: list[OrderRef],
+    routing_index: dict[tuple[int, str], RoutingRef],
+    assignments: Iterable[StockAssignment],
+    allocated: dict[tuple[int, int], _Allocated],
+    allocations: list[Allocation],
+) -> list[UnallocatedActual]:
+    """作り置きの引き当てを未割当の実績から充当し、残った未割当を返す。
+
+    割り付けの候補でない受注（出荷済み・取り消し等）や、受注の製品の工程ルートに無い工程の引き当ては無視する。
+    """
+    remaining_qty = [u.qty for u in unallocated]
+    orders_by_id = {order.id: order for order in orders}
+    for assignment in sorted(
+        assignments, key=lambda a: (a.assigned_on, a.order_id, a.process_name)
+    ):
+        order = orders_by_id.get(assignment.order_id)
+        if order is None:
+            continue
+        routing = routing_index.get((order.product_id, assignment.process_name))
+        if routing is None:
+            continue
+        slot = allocated.setdefault((order.id, routing.id), _Allocated())
+        remaining = min(assignment.qty, order.quantity - slot.qty)
+        sources = sorted(
+            (
+                i
+                for i, u in enumerate(unallocated)
+                if u.product_id == order.product_id
+                and u.process_name == assignment.process_name
+                and u.work_date is not None
+                and u.work_date <= assignment.assigned_on
+            ),
+            key=lambda i: (unallocated[i].work_date, unallocated[i].entry_id),
+            reverse=True,
+        )
+        for i in sources:
+            if remaining <= 0:
+                break
+            work_date = unallocated[i].work_date
+            take = min(remaining_qty[i], remaining)
+            if take <= 0 or work_date is None:
+                continue
+            remaining_qty[i] -= take
+            slot.add(take, work_date)
+            allocations.append(
+                Allocation(
+                    order_id=order.id,
+                    product_id=order.product_id,
+                    process_name=assignment.process_name,
+                    work_date=work_date,
+                    qty=take,
+                )
+            )
+            remaining -= take
+    return [
+        replace(u, qty=qty)
+        for u, qty in zip(unallocated, remaining_qty, strict=True)
+        if qty > 0
+    ]
 
 
 def _allocate_one(

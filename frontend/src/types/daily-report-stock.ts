@@ -58,3 +58,46 @@ export type StockFeedbackInput =
       baseline_date: string | null
       note: string | null
     }
+
+/** 受注に手で引き当てた作り置き (Issue #624) */
+export interface StockAssignment {
+  id: string
+  order_id: number
+  /** 受注の製品の工程ルートにある工程名。この工程まで済んだ作り置きを充てた */
+  process_name: string
+  qty: number
+  /** 引き当てた日（日付のみ）。この日以前の加工日の日報だけを充てる */
+  assigned_on: string
+  note: string | null
+  updated_by: string
+  /** タイムスタンプ（ISO 8601） */
+  updated_at: string
+}
+
+export interface OrderStockEstimate {
+  process_name: string
+  next_process_name: string | null
+  qty: number
+  /** 日付のみ */
+  last_movement_date: string | null
+}
+
+/** GET /daily-reports/orders/{order_id}/stock-assignments */
+export interface OrderStockAssignments {
+  /** 割り付けの最終計算日時。引き当ての登録・取り消しはこれより後の計算で反映される */
+  computed_at: string | null
+  /** 引き当てられる受注か（確定済み・生産中の生産の受注） */
+  assignable: boolean
+  /** 受注の製品の工程名（工程ルートの順、重複なし） */
+  process_names: string[]
+  /** 受注の製品の作り置きの推定（この受注への引き当てを差し引いた後） */
+  stock_estimates: OrderStockEstimate[]
+  assignments: StockAssignment[]
+}
+
+/** PUT /daily-reports/orders/{order_id}/stock-assignments */
+export interface StockAssignmentInput {
+  process_name: string
+  qty: number
+  note: string | null
+}
