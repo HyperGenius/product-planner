@@ -88,6 +88,9 @@ cd backend && ruff check . && mypy .
     新しい worktree では先に `backend/.venv` を作らないとコミットできない。mypy は CI と同じく `backend/` で `mypy .`
     （変更ファイルだけを渡すと、それを import する別ファイルの型エラーを見落とす）。CI では `ruff format --check` も実行する。
     詳細は [docs/features/backend-dev-tools.md](docs/features/backend-dev-tools.md)
+  - `supabase/config.toml` を変えるとフック `supabase-config`（`scripts/check-supabase-config.sh`）が CLI に設定を読ませ、`WARN:` も失敗にする。
+    CI の `supabase db push` は最新の CLI で非推奨のセクション（`[inbucket]` → `[local_smtp]`）を拒否して Deploy Migrations が失敗するが、
+    手元の CLI は警告だけで通るため（#627）。CLI が無い・Docker が動いていない環境ではスキップする
 
 ---
 
