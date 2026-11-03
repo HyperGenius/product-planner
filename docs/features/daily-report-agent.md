@@ -641,18 +641,21 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 
 ### 未割当の分類（画面）
 
-`no_candidate_order` は、その製品の割り付けの候補にならない受注の有無で3つに分ける（読み出し時に `orders` から判定。保存はしない）。
+`no_candidate_order` は、その製品の受注の有無で4つに分ける（読み出し時に `orders` から判定。保存はしない）。
 
 | 分類 | 条件 | 要確認 |
 |---|---|---|
 | `no_routing_process` | reason のまま | ○ |
+| `other_customer_order` | 同じ製品の確定済み・生産中の受注がある（Issue #625。割り付けは顧客が照合できた明細を同じ顧客の受注にだけ充当するので、受注があるのに未割当なら**別の顧客の受注**。日報の顧客先の誤記の可能性） | ○ |
 | `unapproved_order` | 下書き・承認待ちの受注がある（出荷済みより優先） | ○ |
 | `closed_order_only` | 出荷済み・完了の受注だけがある（過去の受注の実績の可能性が高い） | × |
 | `no_order` | 上記の受注も無い（見込み生産・登録漏れ） | ○ |
 | `stocked` | `before_order_date` のうち、その製品に作り置きの推定（#591）が出ている | × |
 | `before_order_date` / `exceeds_order_qty` / `no_work_date` | reason のまま | ○ |
 
-- 受注の判定は製品単位（顧客で絞らない）。取消は数えない
+- 受注の判定は製品単位（顧客で絞らない）。取消は数えない。`other_customer_order` は他の2つより優先する
+- `other_customer_order` の行には該当の受注（`other_customer_orders`: `id` / `order_number` / 顧客の通称、無ければ名称）を付け、画面は受注詳細へのリンクを出す。
+  自動では割り付けない（誤記か、別の顧客にも作っているのかは人が判断する）。誤記だった場合は #624 の手動引き当て（顧客を問わず充当できる）で手当てする
 - 一覧の既定の絞り込みは「要確認」（`closed_order_only` を除く）。ラベルと現場への問いかけは `lib/daily-report-coverage-utils.ts` の `CATEGORY_META`
 
 ### API（`routers/daily_reports/progress.py`、参照のみ・ユーザー JWT）

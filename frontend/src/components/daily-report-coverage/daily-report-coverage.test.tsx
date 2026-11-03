@@ -29,6 +29,7 @@ function group(overrides: Partial<UnallocatedGroup>): UnallocatedGroup {
     first_work_date: "2026-09-01",
     last_work_date: "2026-09-10",
     customer_names: ["顧客A社"],
+    other_customer_orders: [],
     ...overrides,
   }
 }
@@ -130,6 +131,35 @@ describe("DailyReportCoverage", () => {
 
     expect(groupRows()).toHaveLength(3)
     expect(groupRows()[1]).toContain("テスト製品B")
+  })
+
+  it("別の顧客の受注あり: 問いかけと該当の受注（顧客の通称・注文）へのリンクを出し、要確認に含める", async () => {
+    mockCoverage({
+      ...COVERAGE,
+      summary: {
+        ...COVERAGE.summary,
+        unallocated: [{ category: "other_customer_order", row_count: 2, qty: 50 }],
+      },
+      groups: [
+        group({
+          category: "other_customer_order",
+          qty: 50,
+          other_customer_orders: [
+            { id: 77, order_number: "A-77", customer_name: "顧客B" },
+            { id: 78, order_number: null, customer_name: null },
+          ],
+        }),
+      ],
+    })
+    render(<DailyReportCoverage />)
+
+    await screen.findByText("600 / 1,000 個")
+    expect(groupRows()).toHaveLength(1)
+    expect(
+      screen.getByText(/日報の顧客先と別の顧客に同じ製品の受注があります。顧客先の書き間違い？/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "顧客B・A-77" })).toHaveAttribute("href", "/orders/77")
+    expect(screen.getByRole("link", { name: "顧客不明・#78" })).toHaveAttribute("href", "/orders/78")
   })
 
   it("サマリの内訳を押すと一覧をその分類に絞り込む", async () => {

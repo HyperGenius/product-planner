@@ -25,6 +25,8 @@ from app.services.daily_report_allocator import (
 # その製品の他のステータスの受注の有無で聞くことが変わるので3つに分ける
 UnallocatedCategory = Literal[
     "no_routing_process",
+    # 同じ製品の確定済み・生産中の受注が別の顧客にある（日報の顧客先の誤記の可能性。#625）
+    "other_customer_order",
     # 下書き・承認待ちの受注がある（承認前に作り始めている）
     "unapproved_order",
     # 出荷済み・完了の受注だけがある（過去の受注の実績の可能性が高い）
@@ -40,6 +42,17 @@ UnallocatedCategory = Literal[
 
 UNAPPROVED_ORDER_STATUSES = ("draft", "pending_approval")
 CLOSED_ORDER_STATUSES = ("shipped", "completed")
+# 割り付けの候補になる受注のステータス（#490）
+OPEN_ORDER_STATUSES = ("confirmed", "in_progress")
+
+
+@dataclass(frozen=True)
+class OpenOrder:
+    """同じ製品の確定済み・生産中の受注（別の顧客の受注の案内用）。"""
+
+    id: int
+    order_number: str | None
+    customer_name: str | None
 
 
 @dataclass(frozen=True)
@@ -142,6 +155,7 @@ def unallocated_category(
     reason: UnallocatedReason,
     other_order_statuses: Iterable[str],
     stocked: bool = False,
+    has_open_order: bool = False,
 ) -> UnallocatedCategory:
     """未割当の理由を画面の分類にする。
 
@@ -149,11 +163,15 @@ def unallocated_category(
     下書き・承認待ちがあれば出荷済みより優先する（今まさに作っている受注の可能性が高いため）。
     `stocked` はその製品に作り置きの推定（#591）が出ているか。出ていれば受注日より前の実績は
     作り置きとして要確認から外す（「作り置きしていない」と指摘された製品は推定が出ない）。
+    `has_open_order` はその製品に確定済み・生産中の受注があるか。割り付けは顧客が照合できた明細を
+    同じ顧客の受注にだけ充当するので、`no_candidate_order` なのに受注があれば別の顧客の受注である（#625）。
     """
     if reason == "before_order_date" and stocked:
         return "stocked"
     if reason != "no_candidate_order":
         return reason
+    if has_open_order:
+        return "other_customer_order"
     statuses = set(other_order_statuses)
     if statuses & set(UNAPPROVED_ORDER_STATUSES):
         return "unapproved_order"
@@ -183,6 +201,8 @@ class UnallocatedGroup:
     first_work_date: date | None = None
     last_work_date: date | None = None
     customer_ids: list[int] = field(default_factory=list)
+    # other_customer_order のとき、該当する別の顧客の受注
+    other_customer_orders: list[OpenOrder] = field(default_factory=list)
 
     def add(self, row: UnallocatedRow) -> None:
         self.row_count += 1
@@ -200,9 +220,11 @@ def group_unallocated(
     rows: Iterable[UnallocatedRow],
     order_statuses_by_product: dict[int, set[str]],
     stocked_product_ids: Iterable[int] = (),
+    open_orders_by_product: dict[int, list[OpenOrder]] | None = None,
 ) -> list[UnallocatedGroup]:
     """未割当を (製品, 工程名, 理由) 単位にまとめ、数量の多い順に返す。"""
     stocked = set(stocked_product_ids)
+    open_orders = open_orders_by_product or {}
     groups: dict[tuple[int, str, str], UnallocatedGroup] = {}
     for row in rows:
         key = (row.product_id, row.process_name, row.reason)
@@ -216,8 +238,11 @@ def group_unallocated(
                     row.reason,
                     order_statuses_by_product.get(row.product_id, set()),
                     stocked=row.product_id in stocked,
+                    has_open_order=bool(open_orders.get(row.product_id)),
                 ),
             )
+            if group.category == "other_customer_order":
+                group.other_customer_orders = list(open_orders[row.product_id])
         group.add(row)
     for group in groups.values():
         group.customer_ids.sort()

@@ -76,6 +76,8 @@ export interface UnallocatedActual {
  */
 export type UnallocatedCategory =
   | "no_routing_process"
+  /** 同じ製品の確定済み・生産中の受注が別の顧客にある (Issue #625) */
+  | "other_customer_order"
   | "unapproved_order"
   | "closed_order_only"
   | "no_order"
@@ -105,6 +107,14 @@ export interface CoverageSummary {
   unallocated: UnallocatedCategoryTotal[]
 }
 
+/** `other_customer_order` の該当の受注 */
+export interface OtherCustomerOrder {
+  id: number
+  order_number: string | null
+  /** 顧客の通称（無ければ名称） */
+  customer_name: string | null
+}
+
 /** 未割当の (製品, 工程名, 理由) ごとのまとめ */
 export interface UnallocatedGroup {
   product_id: number
@@ -122,6 +132,8 @@ export interface UnallocatedGroup {
   first_work_date: string | null
   last_work_date: string | null
   customer_names: string[]
+  /** `other_customer_order` のときの該当の受注（それ以外は空） */
+  other_customer_orders: OtherCustomerOrder[]
 }
 
 /** GET /daily-reports/coverage */

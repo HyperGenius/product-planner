@@ -24,6 +24,12 @@ export const CATEGORY_META: Record<UnallocatedCategory, CategoryMeta> = {
     question: (g) => `この製品の工程に「${g.process_name}」がありません。実際の工程順は？`,
     needsHearing: true,
   },
+  other_customer_order: {
+    label: "別の顧客の受注あり",
+    question: () =>
+      "日報の顧客先と別の顧客に同じ製品の受注があります。顧客先の書き間違い？（書き間違いなら受注詳細の「作り置きからの引き当て」で充てられます）",
+    needsHearing: true,
+  },
   unapproved_order: {
     label: "承認前の受注のみ",
     question: () => "承認前（下書き・承認待ち）の受注しかありません。承認前に作り始めていますか？",
@@ -64,6 +70,7 @@ export const CATEGORY_META: Record<UnallocatedCategory, CategoryMeta> = {
 /** 分類の表示順（ヒアリングで聞く分類を先に） */
 export const CATEGORY_ORDER: UnallocatedCategory[] = [
   "no_routing_process",
+  "other_customer_order",
   "no_order",
   "unapproved_order",
   "before_order_date",

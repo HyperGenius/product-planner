@@ -22,6 +22,7 @@ function group(overrides: Partial<UnallocatedGroup>): UnallocatedGroup {
     first_work_date: "2026-09-01",
     last_work_date: "2026-09-01",
     customer_names: [],
+    other_customer_orders: [],
     ...overrides,
   }
 }
