@@ -1,5 +1,5 @@
 # repositories/supa_infra/common/base_repo.py
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, cast
 
 from postgrest.exceptions import APIError
 
@@ -7,8 +7,6 @@ from app.utils.logger import get_logger
 from supabase import Client  # type: ignore
 
 logger = get_logger(__name__)
-
-T = TypeVar("T", bound=dict[str, Any])  # 型変数を定義
 
 
 class DuplicateRecordError(Exception):
@@ -23,7 +21,7 @@ class DuplicateRecordError(Exception):
         self.constraint = constraint
 
 
-class BaseRepository(Generic[T]):
+class BaseRepository[T: dict[str, Any]]:
     """基本的なCRUD操作を共通化するための抽象クラス。"""
 
     def __init__(self, client: Client, table_name: str):

@@ -15,7 +15,7 @@ class CustomerMergeRequest(BaseModel):
     merge_customer_ids: list[int] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
-    def _validate_ids(self) -> "CustomerMergeRequest":
+    def _validate_ids(self) -> CustomerMergeRequest:
         self.merge_customer_ids = list(dict.fromkeys(self.merge_customer_ids))
         if self.keep_customer_id in self.merge_customer_ids:
             raise ValueError("残す顧客を統合される顧客に含めることはできません")

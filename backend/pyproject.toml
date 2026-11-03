@@ -1,6 +1,6 @@
 [tool.ruff]
 # 対象のPythonバージョン
-target-version = "py311"
+target-version = "py314"
 line-length = 88
 
 [tool.ruff.lint]

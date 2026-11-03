@@ -22,7 +22,7 @@ class _Extent:
         self.start = start
         self.end = end
 
-    def union(self, other: "_Extent | None") -> "_Extent":
+    def union(self, other: _Extent | None) -> _Extent:
         if other is None:
             return self
         start = min(self.start, other.start, key=_parse_datetime)

@@ -84,7 +84,7 @@ class MonthlyCoverage:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "MonthlyCoverage":
+    def from_json(cls, value: dict[str, Any]) -> MonthlyCoverage:
         month = value.get("work_month")
         return cls(
             work_month=date.fromisoformat(month) if month else None,

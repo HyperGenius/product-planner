@@ -24,7 +24,7 @@ class ScheduleUpdate(BaseModel):
     equipment_id: int | None = Field(None, description="変更後の設備ID")
 
     @model_validator(mode="after")
-    def validate_datetime_order(self) -> "ScheduleUpdate":
+    def validate_datetime_order(self) -> ScheduleUpdate:
         """開始日時と終了日時が両方指定されている場合、開始日時が終了日時より前であることを確認"""
         if self.start_datetime is not None and self.end_datetime is not None:
             try:
