@@ -134,7 +134,7 @@ def _tables(**overrides) -> dict[str, list[dict[str, Any]]]:
         ],
         "orders": [
             {"tenant_id": TENANT, "id": 1, "product_id": 100, "status": "shipped"},
-            {"tenant_id": TENANT, "id": 2, "product_id": 100, "status": "confirmed"},
+            {"tenant_id": TENANT, "id": 2, "product_id": 100, "status": "canceled"},
             {"tenant_id": TENANT, "id": 3, "product_id": None, "status": "draft"},
             {"tenant_id": OTHER_TENANT, "id": 9, "product_id": 100, "status": "draft"},
         ],
@@ -184,6 +184,7 @@ class TestGetCoverage:
         assert press["product_code"] == "P-1"
         assert press["product_has_routings"] is True
         assert press["customer_names"] == ["顧客A"]
+        assert press["other_customer_orders"] == []
         assert (press["first_work_date"], press["last_work_date"]) == (
             "2026-07-10",
             "2026-09-10",
@@ -192,6 +193,47 @@ class TestGetCoverage:
         welding = result["groups"][1]
         assert welding["product_has_routings"] is False
         assert welding["customer_names"] == []
+
+    def test_open_order_of_another_customer_is_reported(self):
+        """no_candidate_order なのに確定済み・生産中の受注があれば、別の顧客の受注として案内する（#625）。"""
+        tables = _tables()
+        tables["orders"] += [
+            {
+                "tenant_id": TENANT,
+                "id": 20,
+                "product_id": 300,
+                "status": "in_progress",
+                "order_number": "A-20",
+                "customer_id": 20,
+            },
+            # 取消・他テナントの受注は案内しない
+            {"tenant_id": TENANT, "id": 21, "product_id": 300, "status": "canceled"},
+            {
+                "tenant_id": OTHER_TENANT,
+                "id": 22,
+                "product_id": 300,
+                "status": "confirmed",
+            },
+        ]
+        tables["customers"] += [
+            {"tenant_id": TENANT, "id": 20, "name": "株式会社顧客B", "alias": "顧客B"}
+        ]
+        tables["daily_report_unallocated_actuals"].append(
+            _unallocated(5, 25, "no_candidate_order", "2026-09-12", product_id=300)
+        )
+
+        result = service.get_coverage(_fake_db(tables), TENANT, None, TODAY)
+
+        group = next(g for g in result["groups"] if g["product_id"] == 300)
+        assert group["category"] == "other_customer_order"
+        assert group["other_customer_orders"] == [
+            {"id": 20, "order_number": "A-20", "customer_name": "顧客B"}
+        ]
+        assert {
+            "category": "other_customer_order",
+            "row_count": 1,
+            "qty": 25,
+        } in result["summary"]["unallocated"]
 
     def test_recent_months_keep_undated_rows(self):
         result = service.get_coverage(_fake_db(_tables()), TENANT, 3, TODAY)

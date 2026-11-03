@@ -12,8 +12,10 @@ from typing import Any, cast
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.daily_report_coverage import (
     CLOSED_ORDER_STATUSES,
+    OPEN_ORDER_STATUSES,
     UNAPPROVED_ORDER_STATUSES,
     MonthlyCoverage,
+    OpenOrder,
     UnallocatedRow,
     build_summary,
     group_unallocated,
@@ -86,6 +88,35 @@ def _fetch_other_order_statuses(db: Client, tenant_id: str) -> dict[int, set[str
     return statuses
 
 
+def _fetch_open_orders_by_product(
+    db: Client, tenant_id: str, customer_names: dict[int, str]
+) -> dict[int, list[OpenOrder]]:
+    """製品ごとの確定済み・生産中の受注（顧客は通称、無ければ名称）。"""
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.ORDERS.value)
+            .select("id, product_id, order_number, customer_id")
+            .eq("tenant_id", tenant_id)
+            .in_("status", list(OPEN_ORDER_STATUSES))
+            .not_.is_("product_id", "null")
+            .order("id")
+        )
+    )
+    orders: dict[int, list[OpenOrder]] = {}
+    for row in rows:
+        customer_id = row.get("customer_id")
+        orders.setdefault(int(row["product_id"]), []).append(
+            OpenOrder(
+                id=int(row["id"]),
+                order_number=row.get("order_number"),
+                customer_name=customer_names.get(int(customer_id))
+                if customer_id is not None
+                else None,
+            )
+        )
+    return orders
+
+
 def _fetch_stocked_product_ids(db: Client, tenant_id: str) -> set[int]:
     """作り置きの推定（#591）が出ている製品。割り付けと同じ再計算で保存されるので時点がそろう。"""
     rows = fetch_all_rows(
@@ -129,11 +160,17 @@ def get_coverage(
     """
     since = period_start(today or datetime.now(JST).date(), months)
     computed_at, coverage = _fetch_run(db, tenant_id)
+    customer_rows = _fetch_by_id(
+        db, SupabaseTableName.CUSTOMERS.value, "id, name, alias", tenant_id
+    )
+    customers = {int(c["id"]): c["name"] for c in customer_rows}
+    customer_labels = {int(c["id"]): c.get("alias") or c["name"] for c in customer_rows}
     rows = _fetch_unallocated_rows(db, tenant_id, since)
     groups = group_unallocated(
         rows,
         _fetch_other_order_statuses(db, tenant_id),
         _fetch_stocked_product_ids(db, tenant_id),
+        _fetch_open_orders_by_product(db, tenant_id, customer_labels),
     )
     summary = build_summary(
         [m for m in coverage if in_period(m.work_month, since)], groups
@@ -143,12 +180,6 @@ def get_coverage(
         int(p["id"]): p
         for p in _fetch_by_id(
             db, SupabaseTableName.PRODUCTS.value, "id, name, code", tenant_id
-        )
-    }
-    customers = {
-        int(c["id"]): c["name"]
-        for c in _fetch_by_id(
-            db, SupabaseTableName.CUSTOMERS.value, "id, name", tenant_id
         )
     }
     routed = _fetch_routed_product_ids(db, tenant_id)
@@ -182,6 +213,14 @@ def get_coverage(
                 "last_work_date": _iso(g.last_work_date),
                 "customer_names": [
                     customers[c] for c in g.customer_ids if c in customers
+                ],
+                "other_customer_orders": [
+                    {
+                        "id": o.id,
+                        "order_number": o.order_number,
+                        "customer_name": o.customer_name,
+                    }
+                    for o in g.other_customer_orders
                 ],
             }
             for g in groups

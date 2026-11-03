@@ -73,6 +73,8 @@ class UnallocatedActualResponse(BaseModel):
 # unapproved_order（下書き・承認待ちあり）/ closed_order_only（出荷済み・完了だけ）/ no_order に分ける
 UnallocatedCategory = Literal[
     "no_routing_process",
+    # 同じ製品の確定済み・生産中の受注が別の顧客にある（Issue #625）
+    "other_customer_order",
     "unapproved_order",
     "closed_order_only",
     "no_order",
@@ -101,6 +103,13 @@ class CoverageSummaryResponse(BaseModel):
     unallocated: list[UnallocatedCategoryTotal]
 
 
+class OtherCustomerOrder(BaseModel):
+    id: int
+    order_number: str | None
+    # 顧客の通称（無ければ名称）
+    customer_name: str | None
+
+
 class UnallocatedGroupResponse(BaseModel):
     product_id: int
     product_name: str | None
@@ -116,6 +125,8 @@ class UnallocatedGroupResponse(BaseModel):
     first_work_date: date | None
     last_work_date: date | None
     customer_names: list[str]
+    # other_customer_order のときの該当の受注（それ以外は空）
+    other_customer_orders: list[OtherCustomerOrder]
 
 
 class DailyReportCoverageResponse(BaseModel):

@@ -190,6 +190,7 @@ class TestDailyReportProgressRouter:
                     "first_work_date": "2026-09-01",
                     "last_work_date": "2026-09-03",
                     "customer_names": ["顧客A"],
+                    "other_customer_orders": [],
                 }
             ],
         }

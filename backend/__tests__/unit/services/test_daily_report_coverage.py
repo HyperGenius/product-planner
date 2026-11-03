@@ -134,6 +134,20 @@ class TestUnallocatedCategory:
     def test_no_candidate_order_is_split_by_other_orders(self, statuses, expected):
         assert unallocated_category("no_candidate_order", statuses) == expected
 
+    def test_open_order_means_other_customer_order(self):
+        """割り付けは同じ顧客の受注にだけ充当するので、受注があるのに未割当なら別の顧客の受注（#625）。"""
+        assert (
+            unallocated_category(
+                "no_candidate_order", {"draft", "shipped"}, has_open_order=True
+            )
+            == "other_customer_order"
+        )
+        # 他の理由は変えない
+        assert (
+            unallocated_category("exceeds_order_qty", set(), has_open_order=True)
+            == "exceeds_order_qty"
+        )
+
     @pytest.mark.parametrize(
         "reason",
         [

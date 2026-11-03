@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { ChevronDown, ChevronRight, ListPlus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -160,6 +161,23 @@ function UnallocatedGroupRow({
             >
               {meta.question(group)}
             </span>
+            {group.other_customer_orders.length > 0 && (
+              <span className="block text-xs">
+                該当の受注：
+                {group.other_customer_orders.map((order, i) => (
+                  <React.Fragment key={order.id}>
+                    {i > 0 && "、"}
+                    <Link
+                      href={`/orders/${order.id}`}
+                      className="text-primary underline underline-offset-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {order.customer_name ?? "顧客不明"}・{order.order_number ?? `#${order.id}`}
+                    </Link>
+                  </React.Fragment>
+                ))}
+              </span>
+            )}
             <span className="block text-xs text-muted-foreground">
               {formatRange(group)}
               {group.customer_names.length > 0 && `・${group.customer_names.join("、")}`}
