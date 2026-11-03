@@ -63,9 +63,12 @@ export const handlers = [
     HttpResponse.json({
       computed_at: null,
       assignable: true,
+      product_name: null,
+      product_code: null,
       process_names: [],
       stock_estimates: [],
       assignments: [],
+      candidates: {},
     }),
   ),
 ]

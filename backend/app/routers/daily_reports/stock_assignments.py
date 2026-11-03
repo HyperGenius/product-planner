@@ -96,6 +96,121 @@ def _load_assignments(
     return cast(list[dict[str, Any]], result.data or [])
 
 
+# 引き当て元の候補として工程ごとに返す明細の上限（加工日の新しい順）
+_CANDIDATES_PER_PROCESS = 30
+_ENTRY_COLUMNS = "id, work_date, product_raw, customer_raw, equipment_raw"
+_ENTRY_ID_CHUNK = 200
+
+
+def _load_product(client: Client, tenant_id: str, product_id: int) -> dict[str, Any]:
+    result = (
+        client.table(SupabaseTableName.PRODUCTS.value)
+        .select("name, code")
+        .eq("tenant_id", tenant_id)
+        .eq("id", product_id)
+        .limit(1)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    return rows[0] if rows else {}
+
+
+def _load_entries(
+    client: Client, tenant_id: str, entry_ids: list[int]
+) -> dict[int, dict[str, Any]]:
+    """日報の明細（日報に書かれた表記）を ID で引く。"""
+    entries: dict[int, dict[str, Any]] = {}
+    for start in range(0, len(entry_ids), _ENTRY_ID_CHUNK):
+        result = (
+            client.table(SupabaseTableName.DAILY_REPORT_ENTRIES.value)
+            .select(_ENTRY_COLUMNS)
+            .eq("tenant_id", tenant_id)
+            .in_("id", entry_ids[start : start + _ENTRY_ID_CHUNK])
+            .execute()
+        )
+        for row in cast(list[dict[str, Any]], result.data or []):
+            entries[int(row["id"])] = row
+    return entries
+
+
+def _source_entry(
+    entry_id: int, qty: int, work_date: str | None, entry: dict[str, Any] | None
+) -> dict[str, Any]:
+    entry = entry or {}
+    return {
+        "entry_id": entry_id,
+        "work_date": work_date,
+        "product_raw": entry.get("product_raw"),
+        "customer_raw": entry.get("customer_raw"),
+        "equipment_raw": entry.get("equipment_raw"),
+        "qty": qty,
+    }
+
+
+def _load_sources(
+    client: Client, tenant_id: str, order_id: int
+) -> dict[str, list[dict[str, Any]]]:
+    """前回の集計で引き当てに充当した明細を、工程名ごとに加工日の新しい順で返す。"""
+    result = (
+        client.table(SupabaseTableName.DAILY_REPORT_STOCK_ASSIGNMENT_SOURCES.value)
+        .select("process_name, entry_id, work_date, qty")
+        .eq("tenant_id", tenant_id)
+        .eq("order_id", order_id)
+        .order("work_date", desc=True)
+        .order("entry_id", desc=True)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    entries = _load_entries(client, tenant_id, [int(r["entry_id"]) for r in rows])
+    sources: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        entry_id = int(row["entry_id"])
+        sources.setdefault(row["process_name"], []).append(
+            _source_entry(
+                entry_id, int(row["qty"]), row["work_date"], entries.get(entry_id)
+            )
+        )
+    return sources
+
+
+def _load_candidates(
+    client: Client, tenant_id: str, product_id: int, process_names: list[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """引き当て元の候補: 受注の製品の、前回の集計で未割当に残った明細（工程名ごと）。"""
+    if not process_names:
+        return {}
+    result = (
+        client.table(SupabaseTableName.DAILY_REPORT_UNALLOCATED_ACTUALS.value)
+        .select("entry_id, process_name, work_date, qty")
+        .eq("tenant_id", tenant_id)
+        .eq("product_id", product_id)
+        .in_("process_name", process_names)
+        .not_.is_("work_date", "null")
+        .order("work_date", desc=True)
+        .order("entry_id", desc=True)
+        .execute()
+    )
+    rows = cast(list[dict[str, Any]], result.data or [])
+    kept: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    for row in rows:
+        name = row["process_name"]
+        if counts.get(name, 0) >= _CANDIDATES_PER_PROCESS:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+        kept.append(row)
+    entries = _load_entries(client, tenant_id, [int(r["entry_id"]) for r in kept])
+    candidates: dict[str, list[dict[str, Any]]] = {}
+    for row in kept:
+        entry_id = int(row["entry_id"])
+        candidates.setdefault(row["process_name"], []).append(
+            _source_entry(
+                entry_id, int(row["qty"]), row["work_date"], entries.get(entry_id)
+            )
+        )
+    return candidates
+
+
 @daily_report_stock_assignment_router.get(
     "/orders/{order_id}/stock-assignments",
     response_model=OrderStockAssignmentsResponse,
@@ -110,7 +225,10 @@ def get_order_stock_assignments(
     product_id = order.get("product_id")
     process_names: list[str] = []
     estimates: list[dict[str, Any]] = []
+    product: dict[str, Any] = {}
+    candidates: dict[str, list[dict[str, Any]]] = {}
     if product_id is not None:
+        product = _load_product(client, tenant_id, int(product_id))
         process_names = _process_names(client, tenant_id, int(product_id))
         estimates_result = (
             client.table(SupabaseTableName.DAILY_REPORT_STOCK_ESTIMATES.value)
@@ -121,6 +239,7 @@ def get_order_stock_assignments(
         )
         estimates = cast(list[dict[str, Any]], estimates_result.data or [])
         # 工程ルートの順に並べる（工程ルートに無い工程は最後）
+        candidates = _load_candidates(client, tenant_id, int(product_id), process_names)
         position = {name: i for i, name in enumerate(process_names)}
         estimates.sort(
             key=lambda r: (
@@ -128,12 +247,19 @@ def get_order_stock_assignments(
                 r["process_name"],
             )
         )
+    assignments = _load_assignments(client, tenant_id, order_id)
+    sources = _load_sources(client, tenant_id, order_id) if assignments else {}
     return {
         "computed_at": fetch_last_computed_at(client, tenant_id),
         "assignable": _is_assignable(order),
+        "product_name": product.get("name"),
+        "product_code": product.get("code"),
         "process_names": process_names,
         "stock_estimates": estimates,
-        "assignments": _load_assignments(client, tenant_id, order_id),
+        "assignments": [
+            {**a, "sources": sources.get(a["process_name"], [])} for a in assignments
+        ],
+        "candidates": candidates,
     }
 
 

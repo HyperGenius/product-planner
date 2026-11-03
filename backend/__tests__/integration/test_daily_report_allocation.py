@@ -170,6 +170,7 @@ def tenants(admin_db, auth_user_id):
             "daily_report_unallocated_actuals",
             "daily_report_stock_estimates",
             "daily_report_stock_feedback",
+            "daily_report_stock_assignment_sources",
             "daily_report_stock_assignments",
             "order_process_progress",
             "process_name_aliases",
@@ -878,6 +879,11 @@ class TestStockAssignments:
         assert progress["first_actual_date"] == "2026-08-20"
         assert _unallocated(admin_db, own) == []
         assert _stock(admin_db, own) == []
+        # 引き当て元の日報の明細（日報の表記）が、引き当てごとに返る
+        body = client.get(url, headers=headers).json()
+        sources = body["assignments"][0]["sources"]
+        assert [(s["work_date"], s["qty"]) for s in sources] == [("2026-08-20", 40)]
+        assert sources[0]["product_raw"]
 
         # 上書き（1受注1工程で1件）
         res = client.put(

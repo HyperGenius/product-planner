@@ -4,7 +4,7 @@ import { render, screen, userEvent, waitFor } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import type { MemberRole } from "@/types/member"
-import type { OrderStockAssignments as Data, StockAssignment } from "@/types/daily-report-stock"
+import type { OrderStockAssignments as Data, StockAssignment, StockSourceEntry } from "@/types/daily-report-stock"
 import { OrderStockAssignments } from "./order-stock-assignments"
 
 /** 受注詳細の「作り置きからの引き当て」(Issue #624)。工程・数はダミー値 */
@@ -20,17 +20,30 @@ const ASSIGNMENT: StockAssignment = {
   note: "棚の分",
   updated_by: "u-1",
   updated_at: "2026-11-02T01:00:00Z",
+  sources: [],
+}
+
+const SOURCE: StockSourceEntry = {
+  entry_id: 11,
+  work_date: "2026-10-20",
+  product_raw: "ボルトM6 作り置き",
+  customer_raw: "A社",
+  equipment_raw: "50t 3号機",
+  qty: 30,
 }
 
 const DATA: Data = {
   computed_at: "2026-11-02T03:00:00Z",
   assignable: true,
+  product_name: "ボルトM6",
+  product_code: "B-06",
   process_names: ["プレス", "カシメ", "クグシ"],
   stock_estimates: [
     { process_name: "カシメ", next_process_name: "クグシ", qty: 28, last_movement_date: "2026-10-13" },
     { process_name: "クグシ", next_process_name: null, qty: 8222, last_movement_date: "2026-10-14" },
   ],
   assignments: [],
+  candidates: {},
 }
 
 function setup({ data = DATA, role = "order_handler" }: { data?: Data; role?: MemberRole } = {}) {
@@ -63,6 +76,36 @@ describe("OrderStockAssignments", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("棚の分")).toBeInTheDocument()
     expect(screen.getByText("2026/11/02")).toBeInTheDocument()
+  })
+
+  it("引き当て先の製品と、充当した日報の明細（日報の表記）を表示する", async () => {
+    setup({
+      data: {
+        ...DATA,
+        assignments: [
+          { ...ASSIGNMENT, sources: [SOURCE] },
+          { ...ASSIGNMENT, id: "a-2", process_name: "クグシ" },
+        ],
+      },
+    })
+    render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
+
+    expect(await screen.findByText("ボルトM6（B-06）")).toBeInTheDocument()
+    expect(screen.getByText("ボルトM6 作り置き")).toBeInTheDocument()
+    expect(screen.getByText("A社 / 50t 3号機")).toBeInTheDocument()
+    // 集計前の引き当ては、元の明細がまだ無いことを示す
+    expect(screen.getByText("次の集計で表示されます")).toBeInTheDocument()
+  })
+
+  it("ダイアログで選んだ工程の引き当て元の候補を表示する", async () => {
+    setup({ data: { ...DATA, candidates: { クグシ: [SOURCE] } } })
+    render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
+
+    await userEvent.click(await screen.findByRole("button", { name: "作り置きから引き当てる" }))
+    expect(screen.getByText("ボルトM6 作り置き")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "カシメ" }))
+    expect(screen.getByText("この工程で未割当の日報の明細はありません")).toBeInTheDocument()
   })
 
   it("最も後の工程の推定を初期値にして引き当てを登録する", async () => {

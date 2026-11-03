@@ -50,6 +50,16 @@ def _tables(mock_client: MagicMock) -> defaultdict[str, MagicMock]:
     return tables
 
 
+SOURCE = {
+    "entry_id": 11,
+    "work_date": "2026-10-20",
+    "product_raw": "ボルトM6 (作り置き)",
+    "customer_raw": "A社",
+    "equipment_raw": "50t 3号機",
+    "qty": 3000,
+}
+
+
 @pytest.mark.api
 class TestDailyReportStockAssignmentRouter:
     @pytest.fixture
@@ -99,6 +109,12 @@ class TestDailyReportStockAssignmentRouter:
         with (
             patch(f"{ROUTER}._load_order", return_value=ORDER),
             patch(f"{ROUTER}._load_assignments", return_value=[ASSIGNMENT_ROW]),
+            patch(f"{ROUTER}._load_sources", return_value={"クグシ": [SOURCE]}),
+            patch(f"{ROUTER}._load_candidates", return_value={"カシメ": [SOURCE]}),
+            patch(
+                f"{ROUTER}._load_product",
+                return_value={"name": "ボルトM6", "code": "B-06"},
+            ),
             patch(f"{ROUTER}.fetch_last_computed_at", return_value=COMPUTED_AT),
         ):
             response = client.get("/daily-reports/orders/1/stock-assignments")
@@ -106,6 +122,12 @@ class TestDailyReportStockAssignmentRouter:
         assert response.status_code == 200
         body = response.json()
         assert body["assignable"] is True
+        # 引き当て先（マスタ）と引き当て元（日報の表記）が見分けられる
+        assert body["product_name"] == "ボルトM6"
+        assert (
+            body["assignments"][0]["sources"][0]["product_raw"] == "ボルトM6 (作り置き)"
+        )
+        assert body["candidates"]["カシメ"][0]["entry_id"] == 11
         assert body["process_names"] == PROCESS_NAMES
         # 工程ルートの順
         assert [e["process_name"] for e in body["stock_estimates"]] == [
@@ -127,6 +149,8 @@ class TestDailyReportStockAssignmentRouter:
         with (
             patch(f"{ROUTER}._load_order", return_value=order),
             patch(f"{ROUTER}._load_assignments", return_value=[]),
+            patch(f"{ROUTER}._load_candidates", return_value={}),
+            patch(f"{ROUTER}._load_product", return_value={}),
             patch(f"{ROUTER}.fetch_last_computed_at", return_value=None),
         ):
             response = client.get("/daily-reports/orders/1/stock-assignments")
