@@ -7,6 +7,10 @@ on:
     paths:
       # SQLに変更があった時だけ動く
       - 'supabase/migrations/**'
+      # `supabase db push` は config.toml を読む（非推奨のセクションがあると失敗する）ので、直したときも流して確かめる
+      - 'supabase/config.toml'
+  # 失敗したデプロイの再実行など、手動でも流せるようにする
+  workflow_dispatch:
 
 jobs:
   deploy:
