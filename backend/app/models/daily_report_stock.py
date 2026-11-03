@@ -83,3 +83,52 @@ class StockFeedbackUpsert(BaseModel):
         if (self.baseline_qty is None) != (self.baseline_date is None):
             raise ValueError("baseline_qty と baseline_date は両方指定する")
         return self
+
+
+class StockAssignmentResponse(BaseModel):
+    """受注に手で引き当てた作り置き（Issue #624）。"""
+
+    id: str
+    order_id: int
+    # 受注の製品の工程ルートにある工程名。この工程まで済んだ作り置きを充てた
+    process_name: str
+    qty: int
+    # 引き当てた日（JST 暦日）。この日以前の加工日の日報だけを充てる
+    assigned_on: date
+    note: str | None
+    updated_by: str
+    updated_at: datetime
+
+
+class OrderStockEstimateResponse(BaseModel):
+    process_name: str
+    next_process_name: str | None
+    qty: int
+    last_movement_date: date | None
+
+
+class OrderStockAssignmentsResponse(BaseModel):
+    """受注詳細の「作り置きから引き当て」に出すもの。"""
+
+    # 割り付けの最終計算日時。引き当ての登録・取り消しはこれより後の計算で反映される
+    computed_at: datetime | None
+    # 引き当てられる受注か（確定済み・生産中の生産の受注）
+    assignable: bool
+    # 受注の製品の工程名（工程ルートの順、重複なし）
+    process_names: list[str]
+    # 受注の製品の作り置きの推定（この受注への引き当てを差し引いた後）
+    stock_estimates: list[OrderStockEstimateResponse]
+    assignments: list[StockAssignmentResponse]
+
+
+class StockAssignmentUpsert(BaseModel):
+    process_name: str = Field(min_length=1, max_length=200)
+    qty: int = Field(gt=0)
+    note: str | None = Field(default=None, max_length=_NOTE_MAX_LENGTH)
+
+    @field_validator("process_name", "note", mode="before")
+    @classmethod
+    def _strip_blank(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value

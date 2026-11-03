@@ -3,9 +3,12 @@ import type { StockEstimates, StockFeedback } from "@/types/daily-report-stock"
 import {
   feedbackSummary,
   feedbackWithoutEstimates,
+  initialStockAssignmentForm,
   initialStockFeedbackForm,
   stockConsumedByLabel,
+  toStockAssignmentInput,
   toStockFeedbackInput,
+  type StockAssignmentForm,
   type StockFeedbackForm,
 } from "./daily-report-stock-utils"
 
@@ -126,6 +129,54 @@ describe("daily-report-stock-utils", () => {
       [{ baselineQty: "3", baselineDate: "" }, "いつの時点の数かを入力してください"],
     ])("入力の誤り %o", (patch, error) => {
       expect(toStockFeedbackInput({ ...FORM, ...patch })).toEqual({ error })
+    })
+  })
+})
+
+describe("作り置きの引き当て (Issue #624)", () => {
+  describe("initialStockAssignmentForm", () => {
+    it("工程ルートで最も後の工程の推定を選び、数は推定数と受注数量の小さい方", () => {
+      const data = {
+        stock_estimates: [
+          { process_name: "カシメ", next_process_name: "クグシ", qty: 28, last_movement_date: null },
+          { process_name: "クグシ", next_process_name: null, qty: 8222, last_movement_date: null },
+        ],
+      }
+      expect(initialStockAssignmentForm(data, 5000)).toEqual({
+        processName: "クグシ",
+        qty: "5000",
+        note: "",
+      })
+      expect(initialStockAssignmentForm(data, 10000).qty).toBe("8222")
+    })
+
+    it("推定が無ければ空欄", () => {
+      expect(initialStockAssignmentForm({ stock_estimates: [] }, 100)).toEqual({
+        processName: "",
+        qty: "",
+        note: "",
+      })
+    })
+  })
+
+  describe("toStockAssignmentInput", () => {
+    const FORM: StockAssignmentForm = { processName: "クグシ", qty: "5000", note: " 棚の分 " }
+
+    it("工程・数・メモを API の入力にする", () => {
+      expect(toStockAssignmentInput(FORM, 5000)).toEqual({
+        input: { process_name: "クグシ", qty: 5000, note: "棚の分" },
+      })
+      expect(toStockAssignmentInput({ ...FORM, note: " " }, 5000).input?.note).toBeNull()
+    })
+
+    it.each<[Partial<StockAssignmentForm>, string]>([
+      [{ processName: " " }, "工程を選んでください"],
+      [{ qty: "" }, "数は1以上の整数で入力してください"],
+      [{ qty: "0" }, "数は1以上の整数で入力してください"],
+      [{ qty: "1.5" }, "数は1以上の整数で入力してください"],
+      [{ qty: "5001" }, "数は受注数量（5,000）以下にしてください"],
+    ])("入力の誤り %o", (patch, error) => {
+      expect(toStockAssignmentInput({ ...FORM, ...patch }, 5000)).toEqual({ error })
     })
   })
 })

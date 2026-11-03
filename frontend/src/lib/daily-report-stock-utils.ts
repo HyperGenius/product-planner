@@ -1,5 +1,7 @@
 import { formatWorkDate } from "@/lib/daily-report-name-utils"
 import type {
+  OrderStockAssignments,
+  StockAssignmentInput,
   StockEstimate,
   StockEstimates,
   StockFeedback,
@@ -97,4 +99,45 @@ export function toStockFeedbackInput(
       note,
     },
   }
+}
+
+/** 作り置きの引き当て（Issue #624）の入力 */
+export interface StockAssignmentForm {
+  processName: string
+  qty: string
+  note: string
+}
+
+/**
+ * 引き当ての初期値。推定の出ている工程のうち工程ルートで最も後の工程（最も先まで済んだ作り置き）を選び、
+ * 数は min(推定数, 受注数量)。推定が無ければ空欄にして選ばせる。
+ */
+export function initialStockAssignmentForm(
+  data: Pick<OrderStockAssignments, "stock_estimates">,
+  orderQuantity: number,
+): StockAssignmentForm {
+  const estimate = data.stock_estimates.filter((e) => e.qty > 0).at(-1)
+  return {
+    processName: estimate?.process_name ?? "",
+    qty: estimate ? String(Math.min(estimate.qty, orderQuantity)) : "",
+    note: "",
+  }
+}
+
+/** フォームの値を API の入力にする。入力に誤りがあればその理由を返す */
+export function toStockAssignmentInput(
+  form: StockAssignmentForm,
+  orderQuantity: number,
+): { input: StockAssignmentInput; error?: undefined } | { input?: undefined; error: string } {
+  const processName = form.processName.trim()
+  if (!processName) return { error: "工程を選んでください" }
+  const qtyText = form.qty.trim()
+  if (!/^\d+$/.test(qtyText) || Number(qtyText) <= 0) {
+    return { error: "数は1以上の整数で入力してください" }
+  }
+  const qty = Number(qtyText)
+  if (qty > orderQuantity) {
+    return { error: `数は受注数量（${orderQuantity.toLocaleString()}）以下にしてください` }
+  }
+  return { input: { process_name: processName, qty, note: form.note.trim() || null } }
 }

@@ -514,6 +514,8 @@ DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings
 - 同じ製品に同じ工程名の行が複数ある場合は、日報からはどの行か区別できないので `sequence_order` の最も小さい行に計上する
 - 良品数が 0・空の明細、製品か工程が照合できない明細（未照合キュー #489 で解消するもの）は割り付けに使わない。
   後者は未割当にも含めない（cron のサマリの `unmatched_entries` に件数だけ出す）
+- 作り置きの手動の引き当て（`StockAssignment`、#624）は、通常の割り付けの**後で**未割当に残った実績から充当する
+  （詳細は「[作り置きを受注へ手で引き当てる](#作り置きを受注へ手で引き当てるissue-624)」）
 
 ### 進捗の状態
 
@@ -734,6 +736,52 @@ DB から切り離した純粋関数 `estimate_stock()`。割り付けと同じ�
 - 照合状況の未割当では、作り置きの推定が出ている製品の「受注日より前」を分類 `stocked`（作り置き、要確認から外す）にする。
   「作り置きしていない」と指摘した製品は推定が出ないので「受注日より前」（要確認）に戻る
 
+## 作り置きを受注へ手で引き当てる（Issue #624）
+
+割り付け（#490）は加工日が受注日より前の実績を充当しないので、作り置きから出した受注は日報の上で進捗が付かない。
+#591 は「次の工程が始まったら後の工程の実績で前の工程も完了になる」とみなしているが、日報に後の工程（洗浄・検査など）が
+出てこない製品では、いつまでも作り置きのまま残る。また日報の顧客先が誤記されていると、同じ製品の受注があっても「受注なし」になる
+（割り付けは顧客が照合できた明細を同じ顧客の受注にだけ充当するため）。現場の Excel の修正は期待できない。
+そこで受注詳細から「この工程まで済んだ作り置きを何個この受注に充てた」を登録し、次の割り付けの再計算で反映する。
+
+### 充当の規則（`daily_report_allocator._apply_stock_assignments()`）
+
+- 通常の割り付けの**後で**、未割当に残った実績から充当する。他の受注に割り付いた実績は使わない（二重に数えない・
+  通常の割り付けの結果を変えない）
+- 使う未割当: 引き当てた受注と**同じ製品・同じ工程**で、加工日が**引き当てた日（`assigned_on`）以前**のもの。
+  **顧客と理由（受注なし・受注日より前・受注数を超過）は問わない**。**加工日の新しい順**に使う（作り置きのうち最も新しいロットを
+  使ったとみなす割り切り。違えば取り消して数を直す）。加工日の無い明細は使わない
+- 数は min(引き当ての数, 受注数量 − 通常の割り付けで充当した数, 使える未割当の合計)。足りなければ足りる分だけ
+- 割り付けの候補でない受注（出荷済み・取り消し等）や、受注の製品の工程ルートに無い工程の引き当ては無視する
+- 充当した分は `AllocationResult.allocations` にも入れるので、作り置きの推定（#591）から自動で差し引かれる。前の工程は既存の
+  「後の工程に実績がある」規則で完了になる
+- 複数の引き当てが同じ未割当を取り合うときは、引き当てた日 → 受注 ID → 工程名の順に充当する
+
+### データモデル（`20261105000000_add_daily_report_stock_assignments.sql`）
+
+`daily_report_stock_assignments`: `order_id`（`ON DELETE CASCADE`）・`process_name`・`qty`（1以上）・`assigned_on`（JST 暦日）・
+`note`・`updated_by`/`updated_at`。UNIQUE (`order_id`, `process_name`)＝1受注1工程につき1件（登録し直すと上書き）。
+RLS は作り置きの指摘と同じ（参照はテナントメンバー、INSERT / UPDATE は `updated_by = auth.uid()`、ロールの制限は API）。
+`updated_at` は API が書く。割り付けの再計算（service role）が読む。
+
+### API（`routers/daily_reports/stock_assignments.py`、ユーザー JWT）
+
+- `GET /daily-reports/orders/{order_id}/stock-assignments`: `{computed_at, assignable, process_names, stock_estimates, assignments}`。
+  `assignable` は確定済み・生産中の、製品のある生産の受注か。`process_names` は製品の工程ルートの順、`stock_estimates` はその製品の
+  作り置きの推定（工程ルートの順）。受注が無ければ 404
+- `PUT /daily-reports/orders/{order_id}/stock-assignments`: `{process_name, qty, note?}` で登録・上書き。`assigned_on` は登録した日
+  （上書きでも更新）。ロールは別名辞書と同じ（`_ALIAS_EDITOR_ROLES`）。引き当てられない受注・工程ルートに無い工程・受注数量を
+  超える数は 422
+- `DELETE /daily-reports/orders/{order_id}/stock-assignments/{id}`: 取り消し（無ければ 404）
+- 反映は次の cron（10〜15分ごと）。画面から再計算しない（#490 の方針）
+
+### 画面（受注詳細 `components/orders/order-stock-assignments.tsx`）
+
+確定済み・生産中の受注で「工程の進捗」の下に出す。製品の作り置きの推定・登録済みの引き当て（工程・数・引き当てた日・メモ）を並べ、
+編集できるロールには「作り置きから引き当てる」（ダイアログ）と「取り消す」を出す。ダイアログの初期値は推定の出ている工程のうち
+工程ルートで最も後の工程と min(推定数, 受注数量)（`initialStockAssignmentForm()`）。工程は作り置きの指摘と同じくボタンで選ぶ。
+同じ工程の引き当てがあれば上書きする旨を出す。
+
 ## テスト
 
 - `backend/__tests__/unit/services/test_agent_token_service.py`: トークン生成・ハッシュ形式
@@ -800,6 +848,12 @@ DB から切り離した純粋関数 `estimate_stock()`。割り付けと同じ�
   ユーザー JWT での指摘の登録→再計算で反映→取り消し・他テナントの製品・RLS・CHECK・統合での指摘の引き継ぎ）。
   Frontend: `lib/daily-report-stock-utils.test.ts`、`components/daily-report-coverage/stock-estimates.test.tsx`（表示・空なら出さない・ロール・
   工程と数の指摘・入力の誤り・指摘の取り消し）
+- #624: `test_daily_report_allocator.py` の `TestStockAssignment`（別の顧客・受注日より前の実績を充てる・新しい順・引き当てた日より後は使わない・
+  他の受注に割り付いた実績は使わない・受注数量の残りまで・足りない分・対象外の受注と工程・別の製品と工程）、
+  `api/routers/daily_reports/test_daily_report_stock_assignment_router.py`（参照・引き当てられない受注・404・登録・422・ロール・取り消し）、
+  integration `test_daily_report_allocation.py` の `TestStockAssignments`（ユーザー JWT での登録→再計算で進捗・未割当・作り置きに反映→
+  上書き→取り消しで戻る・出荷済み・他テナントの受注）。Frontend: `lib/daily-report-stock-utils.test.ts`、
+  `components/orders/order-stock-assignments.test.tsx`（表示・初期値での登録・受注数量の超過・取り消し・ロール・対象外の受注）
 
 ## スコープ外（PoC ではやらない）
 

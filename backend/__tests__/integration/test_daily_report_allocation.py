@@ -10,6 +10,7 @@ Integration テスト: 日報の実績の受注への割り付けと進捗 (Issu
 - GET /orders/{order_id}/progress と GET /daily-reports/order-progress がユーザー JWT で読めること
 - 作り置きの推定（#591）: 送品日時のトリガー、推定の保存、指摘の登録・取り消しと反映、RLS、
   製品の統合での指摘の引き継ぎ
+- 作り置きの引き当て（#624）: API での登録・取り消しと、再計算での進捗・未割当・作り置きへの反映
 
 実行:
   supabase start
@@ -169,6 +170,7 @@ def tenants(admin_db, auth_user_id):
             "daily_report_unallocated_actuals",
             "daily_report_stock_estimates",
             "daily_report_stock_feedback",
+            "daily_report_stock_assignments",
             "order_process_progress",
             "process_name_aliases",
             "daily_report_files",
@@ -830,6 +832,101 @@ class TestStockEstimates:
                 admin_db.table("daily_report_stock_feedback")
                 .select("id")
                 .eq("tenant_id", other["id"])
+                .execute()
+            )
+            == []
+        )
+
+
+@pytest.mark.integration
+class TestStockAssignments:
+    def test_assignment_via_api_is_reflected_on_recompute(
+        self, admin_db, auth_token, auth_user_id, tenants
+    ):
+        own = tenants["own"]
+        late = own["orders"]["late"]
+        _replace_entries(admin_db, own, STOCK_ROWS, "2026-09-12T18:00:00+09:00")
+        recompute_tenant_allocation(admin_db, own["id"], COMPUTED_AT)
+        assert _progress(admin_db, own)[("late", "プレス")]["good_qty"] == 50
+        assert _unallocated(admin_db, own) == [
+            ("プレス", "2026-08-20", 40, "before_order_date")
+        ]
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+        url = f"/daily-reports/orders/{late}/stock-assignments"
+
+        res = client.get(url, headers=headers)
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["assignable"] is True
+        assert body["process_names"] == list(PROCESSES)
+        assert [(e["process_name"], e["qty"]) for e in body["stock_estimates"]] == [
+            ("プレス", 40)
+        ]
+
+        # 受注日より前に作ったプレスの作り置き 40 を遅い受注に充てる
+        res = client.put(
+            url, json={"process_name": "プレス", "qty": 40}, headers=headers
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["updated_by"] == auth_user_id
+        recompute_tenant_allocation(
+            admin_db, own["id"], COMPUTED_AT + timedelta(minutes=1)
+        )
+        progress = _progress(admin_db, own)[("late", "プレス")]
+        assert progress["good_qty"] == 90
+        assert progress["first_actual_date"] == "2026-08-20"
+        assert _unallocated(admin_db, own) == []
+        assert _stock(admin_db, own) == []
+
+        # 上書き（1受注1工程で1件）
+        res = client.put(
+            url, json={"process_name": "プレス", "qty": 10}, headers=headers
+        )
+        assert res.status_code == 200, res.text
+        assignments = client.get(url, headers=headers).json()["assignments"]
+        assert [(a["process_name"], a["qty"]) for a in assignments] == [("プレス", 10)]
+
+        res = client.delete(f"{url}/{assignments[0]['id']}", headers=headers)
+        assert res.status_code == 200
+        recompute_tenant_allocation(
+            admin_db, own["id"], COMPUTED_AT + timedelta(minutes=2)
+        )
+        assert _progress(admin_db, own)[("late", "プレス")]["good_qty"] == 50
+        assert _stock(admin_db, own) == [("プレス", "カシメ", 40, "2026-09-11")]
+
+    def test_rejects_non_candidate_and_other_tenant_orders(
+        self, admin_db, auth_token, tenants
+    ):
+        own, other = tenants["own"], tenants["other"]
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+        payload = {"process_name": "プレス", "qty": 10}
+
+        shipped = own["orders"]["shipped"]
+        res = client.put(
+            f"/daily-reports/orders/{shipped}/stock-assignments",
+            json=payload,
+            headers=headers,
+        )
+        assert res.status_code == 422
+        res = client.get(
+            f"/daily-reports/orders/{shipped}/stock-assignments", headers=headers
+        )
+        assert res.json()["assignable"] is False
+
+        other_order = other["orders"]["late"]
+        res = client.put(
+            f"/daily-reports/orders/{other_order}/stock-assignments",
+            json=payload,
+            headers=headers,
+        )
+        assert res.status_code == 404
+        assert (
+            _rows(
+                admin_db.table("daily_report_stock_assignments")
+                .select("id")
+                .in_("tenant_id", [own["id"], other["id"]])
                 .execute()
             )
             == []

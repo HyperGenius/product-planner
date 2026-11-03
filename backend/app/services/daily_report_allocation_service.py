@@ -20,6 +20,7 @@ from app.services.daily_report_allocator import (
     AllocationResult,
     OrderRef,
     RoutingRef,
+    StockAssignment,
     allocate_actuals,
 )
 from app.services.daily_report_coverage import (
@@ -201,6 +202,32 @@ def load_stock_feedback(db: Client, tenant_id: str) -> list[StockFeedback]:
     ]
 
 
+def load_stock_assignments(db: Client, tenant_id: str) -> list[StockAssignment]:
+    """受注に手で引き当てた作り置き（Issue #624）。"""
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.DAILY_REPORT_STOCK_ASSIGNMENTS.value)
+            .select("id, order_id, process_name, qty, assigned_on")
+            .eq("tenant_id", tenant_id)
+            .order("id")
+        )
+    )
+    assignments: list[StockAssignment] = []
+    for row in rows:
+        assigned_on = _parse_date(row.get("assigned_on"))
+        if assigned_on is None:
+            continue
+        assignments.append(
+            StockAssignment(
+                order_id=int(row["order_id"]),
+                process_name=str(row["process_name"]).strip(),
+                qty=int(row["qty"]),
+                assigned_on=assigned_on,
+            )
+        )
+    return assignments
+
+
 def load_routings(db: Client, tenant_id: str) -> list[RoutingRef]:
     rows = fetch_all_rows(
         lambda: (
@@ -280,7 +307,9 @@ def recompute_tenant_allocation(
     orders = load_candidate_orders(db, tenant_id)
     routings = load_routings(db, tenant_id)
 
-    result = allocate_actuals(entries, orders, routings)
+    result = allocate_actuals(
+        entries, orders, routings, load_stock_assignments(db, tenant_id)
+    )
     progress, unallocated = _rpc_payload(result)
     # 照合状況の画面（#542）用に、照合済み・未照合の数量を加工月ごとに残す
     coverage = [m.to_json() for m in summarize_coverage(entries, unmatched)]
