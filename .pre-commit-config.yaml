@@ -35,3 +35,11 @@ repos:
       require_serial: true
       files: ^backend/(.*\.pyi?|pyproject\.toml|requirements(-dev)?\.txt)$
       exclude: ^backend/scripts/  # スクリプトディレクトリは型チェック対象外にする（pyproject.toml の exclude と同じ）
+    # supabase/config.toml を CLI に読ませる。CI の `supabase db push` は非推奨のセクション（[inbucket] 等）を拒否して
+    # Deploy Migrations が失敗するが、手元の CLI は警告だけで通るので、警告も失敗にする（#627 の再発防止）
+    - id: supabase-config
+      name: supabase-config
+      language: unsupported_script
+      entry: scripts/check-supabase-config.sh
+      pass_filenames: false
+      files: ^supabase/config\.toml$
