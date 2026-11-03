@@ -59,6 +59,18 @@ export type StockFeedbackInput =
       note: string | null
     }
 
+/** 引き当て元の日報の明細（日報に書かれた表記のまま。Issue #624） */
+export interface StockSourceEntry {
+  entry_id: number
+  /** 日付のみ */
+  work_date: string | null
+  product_raw: string | null
+  customer_raw: string | null
+  equipment_raw: string | null
+  /** 充てた数（候補では未割当に残っている数） */
+  qty: number
+}
+
 /** 受注に手で引き当てた作り置き (Issue #624) */
 export interface StockAssignment {
   id: string
@@ -72,6 +84,8 @@ export interface StockAssignment {
   updated_by: string
   /** タイムスタンプ（ISO 8601） */
   updated_at: string
+  /** 前回の集計で充当した日報の明細（加工日の新しい順）。登録後、次の集計までは空 */
+  sources: StockSourceEntry[]
 }
 
 export interface OrderStockEstimate {
@@ -88,11 +102,16 @@ export interface OrderStockAssignments {
   computed_at: string | null
   /** 引き当てられる受注か（確定済み・生産中の生産の受注） */
   assignable: boolean
+  /** 引き当て先（受注の製品のマスタ上の名前） */
+  product_name: string | null
+  product_code: string | null
   /** 受注の製品の工程名（工程ルートの順、重複なし） */
   process_names: string[]
   /** 受注の製品の作り置きの推定（この受注への引き当てを差し引いた後） */
   stock_estimates: OrderStockEstimate[]
   assignments: StockAssignment[]
+  /** 引き当て元の候補: 受注の製品の未割当の日報の明細（工程名ごと、加工日の新しい順） */
+  candidates: Record<string, StockSourceEntry[]>
 }
 
 /** PUT /daily-reports/orders/{order_id}/stock-assignments */

@@ -281,6 +281,19 @@ def _rpc_payload(result: AllocationResult) -> tuple[list[dict], list[dict]]:
     return progress, unallocated
 
 
+def _stock_sources_payload(result: AllocationResult) -> list[dict]:
+    return [
+        {
+            "order_id": s.order_id,
+            "process_name": s.process_name,
+            "entry_id": s.entry_id,
+            "work_date": _iso(s.work_date),
+            "qty": s.qty,
+        }
+        for s in result.stock_sources
+    ]
+
+
 def _stock_payload(estimates: list[StockEstimate]) -> list[dict]:
     return [
         {
@@ -331,6 +344,7 @@ def recompute_tenant_allocation(
             "p_unallocated": unallocated,
             "p_coverage": coverage,
             "p_stock": _stock_payload(stock),
+            "p_stock_sources": _stock_sources_payload(result),
         },
     ).execute()
     return {

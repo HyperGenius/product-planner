@@ -426,6 +426,10 @@ class TestStockAssignment:
         assert _progress(result, 2)["プレス"].good_qty == 80
         assert result.unallocated == []
         assert sum(a.qty for a in result.allocations) == 180
+        # 引き当て元は、通常の割り付けの後に残った実績（entry 1 の30個）だけ
+        assert [(s.order_id, s.entry_id, s.qty) for s in result.stock_sources] == [
+            (2, 1, 30)
+        ]
 
     def test_assignment_is_limited_to_remaining_order_quantity(self):
         orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]

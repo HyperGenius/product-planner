@@ -757,6 +757,19 @@ DB から切り離した純粋関数 `estimate_stock()`。割り付けと同じ�
   「後の工程に実績がある」規則で完了になる
 - 複数の引き当てが同じ未割当を取り合うときは、引き当てた日 → 受注 ID → 工程名の順に充当する
 
+### 引き当て元の表示（`20261106000000_add_daily_report_stock_assignment_sources.sql`）
+
+引き当ての From / To が正しいか判断できるよう、受注詳細に次を出す。
+
+- **引き当て先**: 受注の製品のマスタ上の名前（`product_name` / `product_code`）
+- **引き当て元の候補**（登録前・ダイアログ）: その製品の未割当の日報の明細（`daily_report_unallocated_actuals` を工程ごとに
+  加工日の新しい順で最大30件）。日報に書かれた表記（`product_raw` / `customer_raw` / `equipment_raw`）と加工日・数を出す。
+  マスタ側は同じ製品だが、日報の商品名の別名・顧客先の誤記を目で確かめられる
+- **充当した明細**（登録後・一覧）: 再計算で `StockAssignmentSource`（受注・工程・明細・加工日・数）を求め、RPC
+  `replace_daily_report_allocation` の `p_stock_sources` で `daily_report_stock_assignment_sources` に**テナント単位で置き換える**。
+  API は現存する引き当ての (受注, 工程) に合う行だけを `assignments[].sources` に付ける。登録し直し・取り消しの後は次の再計算まで
+  古い内訳が残る（登録直後は空で「次の集計で表示されます」）。充当の規則そのものは変えていない
+
 ### データモデル（`20261105000000_add_daily_report_stock_assignments.sql`）
 
 `daily_report_stock_assignments`: `order_id`（`ON DELETE CASCADE`）・`process_name`・`qty`（1以上）・`assigned_on`（JST 暦日）・

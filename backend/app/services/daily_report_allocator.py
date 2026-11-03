@@ -127,11 +127,23 @@ class Allocation:
     qty: int
 
 
+@dataclass(frozen=True)
+class StockAssignmentSource:
+    """作り置きの引き当て（受注・工程）に充当した日報の明細と数量（引き当て元の表示用。Issue #624）。"""
+
+    order_id: int
+    process_name: str
+    entry_id: int
+    work_date: date
+    qty: int
+
+
 @dataclass
 class AllocationResult:
     progress: list[ProcessProgress] = field(default_factory=list)
     unallocated: list[UnallocatedActual] = field(default_factory=list)
     allocations: list[Allocation] = field(default_factory=list)
+    stock_sources: list[StockAssignmentSource] = field(default_factory=list)
 
 
 @dataclass
@@ -217,6 +229,7 @@ def allocate_actuals(
         assignments,
         allocated,
         result.allocations,
+        result.stock_sources,
     )
     result.progress = _progress_rows(sorted_orders, routing_list, allocated)
     return result
@@ -229,6 +242,7 @@ def _apply_stock_assignments(
     assignments: Iterable[StockAssignment],
     allocated: dict[tuple[int, int], _Allocated],
     allocations: list[Allocation],
+    stock_sources: list[StockAssignmentSource],
 ) -> list[UnallocatedActual]:
     """作り置きの引き当てを未割当の実績から充当し、残った未割当を返す。
 
@@ -273,6 +287,15 @@ def _apply_stock_assignments(
                     order_id=order.id,
                     product_id=order.product_id,
                     process_name=assignment.process_name,
+                    work_date=work_date,
+                    qty=take,
+                )
+            )
+            stock_sources.append(
+                StockAssignmentSource(
+                    order_id=order.id,
+                    process_name=assignment.process_name,
+                    entry_id=unallocated[i].entry_id,
                     work_date=work_date,
                     qty=take,
                 )

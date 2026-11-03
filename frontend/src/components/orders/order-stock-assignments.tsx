@@ -28,7 +28,34 @@ import {
   type StockAssignmentForm,
 } from "@/lib/daily-report-stock-utils"
 import { DAILY_REPORT_NAME_EDITOR_ROLES } from "@/types/member"
-import type { OrderStockAssignments as OrderStockAssignmentsData } from "@/types/daily-report-stock"
+import type {
+  OrderStockAssignments as OrderStockAssignmentsData,
+  StockSourceEntry,
+} from "@/types/daily-report-stock"
+
+/** 日報の明細の表記（日報の商品名・顧客先・設備）。引き当て元が正しいかを見分ける材料 */
+function SourceEntries({ entries, empty }: { entries: StockSourceEntry[]; empty: string }) {
+  if (entries.length === 0) return <p className="text-xs text-muted-foreground">{empty}</p>
+  return (
+    <ul className="space-y-0.5 text-xs">
+      {entries.map((e) => (
+        <li key={e.entry_id} className="flex flex-wrap gap-x-3">
+          <span className="tabular-nums">{formatWorkDate(e.work_date)}</span>
+          <span className="break-all font-medium">{e.product_raw ?? "（商品名なし）"}</span>
+          <span className="text-muted-foreground">
+            {[e.customer_raw, e.equipment_raw].filter(Boolean).join(" / ") || "－"}
+          </span>
+          <span className="tabular-nums">{e.qty.toLocaleString()} 個</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function productLabel(data: Pick<OrderStockAssignmentsData, "product_name" | "product_code">) {
+  if (!data.product_name) return "－"
+  return data.product_code ? `${data.product_name}（${data.product_code}）` : data.product_name
+}
 
 /**
  * 受注詳細の「作り置きからの引き当て」(Issue #624)。
@@ -82,6 +109,10 @@ export function OrderStockAssignments({
       ) : (
         <div className="space-y-3">
           <p className="text-sm">
+            <span className="text-muted-foreground">引き当て先（この受注の製品）: </span>
+            {productLabel(data)}
+          </p>
+          <p className="text-sm">
             <span className="text-muted-foreground">この製品の{STOCK_LABEL}（推定）: </span>
             {data.stock_estimates.length === 0
               ? "なし"
@@ -104,24 +135,32 @@ export function OrderStockAssignments({
               </thead>
               <tbody>
                 {data.assignments.map((a) => (
-                  <tr key={a.id} className="border-b last:border-0">
-                    <td className="py-2 pr-2">{stockPlaceLabel(a)}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums">{a.qty.toLocaleString()}</td>
-                    <td className="py-2 pr-2">{formatWorkDate(a.assigned_on)}</td>
-                    <td className="py-2 pr-2 break-all">{a.note ?? "－"}</td>
-                    {canEdit && (
-                      <td className="py-2 text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={remove.isPending}
-                          onClick={() => handleDelete(a.id)}
-                        >
-                          取り消す
-                        </Button>
+                  <React.Fragment key={a.id}>
+                    <tr>
+                      <td className="py-2 pr-2">{stockPlaceLabel(a)}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums">{a.qty.toLocaleString()}</td>
+                      <td className="py-2 pr-2">{formatWorkDate(a.assigned_on)}</td>
+                      <td className="py-2 pr-2 break-all">{a.note ?? "－"}</td>
+                      {canEdit && (
+                        <td className="py-2 text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={remove.isPending}
+                            onClick={() => handleDelete(a.id)}
+                          >
+                            取り消す
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                    <tr className="border-b last:border-0">
+                      <td colSpan={canEdit ? 5 : 4} className="pb-2">
+                        <p className="mb-0.5 text-xs text-muted-foreground">引き当て元（日報の明細）</p>
+                        <SourceEntries entries={a.sources} empty="次の集計で表示されます" />
                       </td>
-                    )}
-                  </tr>
+                    </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -161,6 +200,7 @@ function StockAssignmentDialogForm({
   const save = useSaveStockAssignment(orderId)
   const ids = { qty: React.useId(), note: React.useId() }
   const estimate = data.stock_estimates.find((e) => e.process_name === form.processName)
+  const candidates = data.candidates[form.processName] ?? []
   const existing = data.assignments.find((a) => a.process_name === form.processName)
 
   const update = (patch: Partial<StockAssignmentForm>) => {
@@ -217,6 +257,21 @@ function StockAssignmentDialogForm({
                 : `${stockPlaceLabel({ process_name: form.processName })}の${STOCK_LABEL}の推定はありません`}
               {existing && `。登録済みの引き当て（${existing.qty.toLocaleString()} 個）を上書きします`}
             </p>
+          )}
+          {form.processName && (
+            <div className="space-y-1 rounded-md border bg-muted/30 p-2">
+              <p className="text-xs">
+                <span className="text-muted-foreground">引き当て先: </span>
+                {productLabel(data)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                引き当て元の候補（日報の明細。新しい順に充てます）
+              </p>
+              <SourceEntries
+                entries={candidates}
+                empty="この工程で未割当の日報の明細はありません"
+              />
+            </div>
           )}
         </div>
         <div className="flex flex-wrap gap-3">

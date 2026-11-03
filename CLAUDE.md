@@ -211,6 +211,10 @@ cd backend && ruff check . && mypy .
     割り付くはずの新しい明細を取ってしまい作り置きが減らない。充当は `allocations` に入れるので推定から自動で引かれる。
     日報の顧客先の誤記もこれで手当てする（明細の `customer_raw` を直す経路は作らない。シートを保存し直すと明細が丸ごと置き換わる）。
     受注詳細を描画するテストは MSW の既定ハンドラ（`GET /daily-reports/orders/:orderId/stock-assignments`）に依存する
+  - **引き当て元の表示**: 引き当ては製品・工程・数しか持たないので、充当した明細（日報の表記）は再計算で
+    `daily_report_stock_assignment_sources` に残す（`replace_daily_report_allocation` の `p_stock_sources`。この RPC の最新の定義は
+    `20261106000000_add_daily_report_stock_assignment_sources.sql`）。登録前の候補は未割当テーブル＋明細から読み出し時に引く。
+    表示は日報の表記（`product_raw` 等）で、マスタ名と並べて From/To を見比べさせる
   - **送品日時 `orders.shipped_at`** は `status` が `shipped` / `completed` になったときにトリガー `trg_set_order_shipped_at` が書く。
     送品の経路を足してもアプリから書かない
   - **`merge_products` の最新の定義は `20261029000000_add_daily_report_stock_estimates.sql`**（作り置きの指摘の付け替えを追加）。
