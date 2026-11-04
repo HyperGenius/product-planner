@@ -13,6 +13,7 @@ def _query(data):
     for name in ("select", "eq", "is_", "order", "update"):
         getattr(q, name).return_value = q
     q.not_ = q
+    q.in_.return_value = q
     q.execute.return_value = MagicMock(data=data)
     return q
 
@@ -39,6 +40,40 @@ class TestOrderDeliveryRequestsRouter:
             {"order_id": 1, "count": 2},
             {"order_id": 4, "count": 1},
         ]
+
+    def test_list_open_includes_unlinked_with_customer(self, headers):
+        base = {
+            "kind": "delivery_chase",
+            "created_at": "2026-11-01T00:00:00+00:00",
+        }
+        requests = [
+            {**base, "id": "r1", "order_id": 5, "order_attachment_id": "a1"},
+            {**base, "id": "r2", "order_id": None, "order_attachment_id": "a2"},
+        ]
+        by_table = {
+            "order_delivery_requests": _query(requests),
+            "orders": _query([{"id": 5, "order_number": "O-5", "customer_id": 1}]),
+            "order_attachments": _query([{"id": "a2", "customer_id": 2}]),
+            "customers": _query(
+                [{"id": 1, "name": "顧客A"}, {"id": 2, "name": "顧客B"}]
+            ),
+        }
+        db = MagicMock()
+        db.table.side_effect = lambda name: by_table.get(name, _query([]))
+        app.dependency_overrides[get_supabase_client] = lambda: db
+        res = client.get("/orders/delivery-requests?status=open", headers=headers)
+        assert res.status_code == 200
+        body = res.json()
+        assert [(r["id"], r["order_number"], r["customer_name"]) for r in body] == [
+            ("r1", "O-5", "顧客A"),
+            ("r2", None, "顧客B"),
+        ]
+
+    def test_list_open_empty(self, headers):
+        self._use(_query([]))
+        res = client.get("/orders/delivery-requests", headers=headers)
+        assert res.status_code == 200
+        assert res.json() == []
 
     def test_list_for_order(self, headers):
         row = {

@@ -22,6 +22,7 @@ import {
   FileCheck,
   Stamp,
   Truck,
+  BellRing,
 } from "lucide-react"
 
 import {
@@ -110,6 +111,13 @@ const menuItems: MenuItem[] = [
         url: "/orders/shipping",
         icon: Truck,
         badge: { key: "shipping_candidates", roles: ["president", "order_handler"] },
+      },
+      {
+        // 督促は社長宛に届き電話で対応する想定なので、社長・受注担当にだけ件数を出す（Issue #622）
+        title: "督促・分納の依頼",
+        url: "/orders/delivery-requests",
+        icon: BellRing,
+        badge: { key: "delivery_requests", roles: ["president", "order_handler"] },
       },
       {
         title: "受信メール処理結果",
