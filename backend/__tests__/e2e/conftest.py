@@ -186,7 +186,7 @@ _PDF_ORDER_PARSING_SAMPLE_STORAGE_PATH = os.environ.get(
 @pytest.fixture()
 def pdf_order_parsing_staging_row(
     admin_db: Client, e2e_tenant_id: str
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[dict[str, Any]]:
     """
     order-attachments バケットに既にアップロード済みの実PDFを指す
     order_attachments ステージング行 (order_id=NULL, parse_status='pending') を
@@ -300,7 +300,7 @@ def inject_email_with_pdf(
     pending_label_id: str,
     e2e_config: dict[str, str],
     admin_db: Client,
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[dict[str, Any]]:
     """
     PDF 添付付きテストメールを Gmail に注入し、テスト後にクリーンアップする。
 
@@ -356,7 +356,7 @@ def inject_email_with_multiple_pdfs(
     pending_label_id: str,
     e2e_config: dict[str, str],
     admin_db: Client,
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[dict[str, Any]]:
     """
     PDFを2つ添付したテストメールを Gmail に注入し、テスト後にクリーンアップする
     （Issue #384: 社長が複数顧客の注文書PDFを1通にまとめて転送する運用）。
@@ -412,7 +412,7 @@ def inject_email_without_attachment(
     pending_label_id: str,
     e2e_config: dict[str, str],
     admin_db: Client,
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[dict[str, Any]]:
     """
     添付なしテストメールを Gmail に注入し、テスト後にクリーンアップする。
     """

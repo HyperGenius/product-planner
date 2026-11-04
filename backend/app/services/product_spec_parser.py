@@ -61,7 +61,7 @@ class ProductSpec:
     material: str
     material_key: str
 
-    def same_size_and_material(self, other: "ProductSpec") -> bool:
+    def same_size_and_material(self, other: ProductSpec) -> bool:
         return (
             self.diameter == other.diameter
             and self.length == other.length

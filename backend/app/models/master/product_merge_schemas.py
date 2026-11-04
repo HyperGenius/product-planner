@@ -69,7 +69,7 @@ class ProductMergeRequest(BaseModel):
     merge_product_ids: list[int] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
-    def _validate_ids(self) -> "ProductMergeRequest":
+    def _validate_ids(self) -> ProductMergeRequest:
         self.merge_product_ids = list(dict.fromkeys(self.merge_product_ids))
         if self.keep_product_id in self.merge_product_ids:
             raise ValueError("残す製品を統合される製品に含めることはできません")
