@@ -310,6 +310,10 @@ cd backend && ruff check . && mypy .
   出し分けない・バッジと重複するため）。**今やるべき作業はサイドバーの件数バッジ（`useSidebarBadgeCounts()`）、出来事の通知は
   Slack（`email_intake_slack_service`）、取り込みの結果は受信メール処理結果**に置き、ベルのような横断の通知テーブルを作り直さない。
   取り込みで新しい結果を残すときは `order_parse_log.reason` に記録し、`email_intake_outcome` の分類集合に登録する
+  - **督促・分納の依頼のバッジ（Issue #622）**: 画面は `/orders/delivery-requests`、バッジは `SidebarBadgeKey` の `delivery_requests`
+    （`president` / `order_handler`）。件数は一覧と同じ `useOpenDeliveryRequests()` で取り、注文は取得しない
+    （`useSidebarBadgeCounts()` は注文系のキーがあるときだけ `useOrders` を有効にする）。未紐づけの依頼の顧客は依頼元の
+    `order_attachments.customer_id` から引く。`GET /orders/delivery-requests` は `/{order_id}` 系より先に登録済みのルーターに置く
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する
