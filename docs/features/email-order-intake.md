@@ -600,15 +600,26 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
 | | |
 |---|---|
 | `GET /orders/{order_id}/delivery-requests` | 受注に紐づく依頼（新しい順） |
+| `GET /orders/delivery-requests?status=open` | 未対応の依頼の一覧（紐づけ済み・未紐づけの両方。受注番号・顧客名付き。Issue #622） |
 | `GET /orders/delivery-requests/open-counts` | 受注ごとの未対応件数（一覧の印用。1リクエスト） |
 | `PATCH /orders/delivery-requests/{id}` | `{"resolved": true/false}` で対応済み／未対応に戻す |
 
 - 受注詳細: `OrderDeliveryRequests`（督促・分納の依頼と本文の抜粋、「対応済みにする」）。依頼が無ければ非表示
 - 受注一覧の行: 未対応があれば「督促あり」バッジ
-- 未紐づけの依頼は、受信メール処理結果（`/orders/email-intake`）の「督促・分納の依頼（起票せず記録）」から確認する
+- 未紐づけの依頼は、受信メール処理結果（`/orders/email-intake`）の「督促・分納の依頼（起票せず記録）」からも確認できる
+
+### 未対応の依頼に気づく入口（Issue #622）
+
+- サイドバー「受注管理」の「督促・分納の依頼」（`/orders/delivery-requests`）に、未対応の件数バッジを `president` / `order_handler` にだけ出す
+  （`SidebarBadgeKey` の `delivery_requests`）。バッジを出さないロールでは依頼を取得しない。注文は取得しない（注文系のバッジが無いロールでは `useOrders` も走らない）
+- 一覧は紐づけ済み・未紐づけの両方を並べ、受注があれば受注詳細へのリンク、未紐づけは「未紐づけ」と表示する。
+  未紐づけの顧客は依頼元の受信メール（`order_attachments.customer_id`）から引く。ここから「対応済みにする」ができる
+- バッジと一覧は同じクエリ（`useOpenDeliveryRequests()`）。対応済みの切り替えは `["order-delivery-requests"]` 配下をまとめて無効化するので、
+  バッジ・一覧・受注一覧の「督促あり」が更新される
+- 未紐づけの依頼を受注へ手動で紐づける操作・Slack 等の通知は対象外
 
 ### 制約・対象外
 
 - 分割納入の業務プロセス（出荷のみの分割）は現場判断のアドホック運用のため、記録・表示のみ。受注の分割や分納計画は扱わない
 - 添付の日程表は解析しない（PDF に明細として読める表が付く督促は PDF 側の経路で起票されうる。本文の趣旨判定は本文経路のみ）
-- 未対応の依頼に気づく入口（サイドバーの件数バッジ等）は Issue #622 で扱う（通知ベルは Issue #621 で廃止）
+- 通知ベルは Issue #621 で廃止済み。気づく入口はサイドバーのバッジ（Issue #622）

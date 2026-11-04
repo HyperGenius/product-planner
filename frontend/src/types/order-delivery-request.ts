@@ -22,3 +22,9 @@ export interface OpenDeliveryRequestCount {
   order_id: number
   count: number
 }
+
+/** 未対応の依頼の一覧の1行（Issue #622）。未紐づけは order_id が null */
+export interface OpenDeliveryRequestListItem extends OrderDeliveryRequest {
+  order_number: string | null
+  customer_name: string | null
+}

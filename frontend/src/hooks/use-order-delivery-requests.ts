@@ -2,7 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
-import type { OpenDeliveryRequestCount, OrderDeliveryRequest } from "@/types/order-delivery-request"
+import type {
+  OpenDeliveryRequestCount,
+  OpenDeliveryRequestListItem,
+  OrderDeliveryRequest,
+} from "@/types/order-delivery-request"
 
 /**
  * 顧客からの督促・分割納入の依頼のフック (Issue #619)。
@@ -17,6 +21,18 @@ export function useOpenDeliveryRequestCounts() {
   return useQuery<OpenDeliveryRequestCount[]>({
     queryKey: [...DELIVERY_REQUESTS_QUERY_KEY, "open-counts"],
     queryFn: () => apiClient<OpenDeliveryRequestCount[]>("/orders/delivery-requests/open-counts"),
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+}
+
+/** 未対応の依頼の一覧（紐づけ済み・未紐づけの両方。サイドバーのバッジと同じクエリ。Issue #622） */
+export function useOpenDeliveryRequests({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery<OpenDeliveryRequestListItem[]>({
+    queryKey: [...DELIVERY_REQUESTS_QUERY_KEY, "open"],
+    queryFn: () =>
+      apiClient<OpenDeliveryRequestListItem[]>("/orders/delivery-requests?status=open"),
+    enabled,
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
   })

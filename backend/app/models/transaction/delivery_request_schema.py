@@ -19,6 +19,13 @@ class OrderDeliveryRequestResponse(BaseModel):
     created_at: str
 
 
+class OpenDeliveryRequestListItem(OrderDeliveryRequestResponse):
+    """未対応の依頼の一覧の1行（受注・顧客名付き。未紐づけは order_id が None）。"""
+
+    order_number: str | None = None
+    customer_name: str | None = None
+
+
 class OpenDeliveryRequestCount(BaseModel):
     """受注ごとの未対応の依頼件数（一覧の印用）。"""
 
