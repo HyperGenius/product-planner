@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from app.dependencies import get_supabase_admin_client
+from app.routers.cron._alert import alert_cron_failure, alert_cron_success
 from app.routers.cron._auth import validate_cron_secret
 from app.services.order_auto_transition_service import advance_order_statuses
 from app.utils.logger import get_logger
@@ -22,8 +23,11 @@ def advance_order_status(request: Request):
     validate_cron_secret(request)
     try:
         db_client = get_supabase_admin_client()
-        return advance_order_statuses(db_client)
+        result = advance_order_statuses(db_client)
+        alert_cron_success("advance-order-status")
+        return result
     except Exception as exc:
+        alert_cron_failure("advance-order-status")
         # 例外の詳細はログにのみ残し、レスポンスは固定文言にする（内部情報の露出防止）。
         logger.error(f"advance-order-status failed: {exc}", exc_info=True)
         raise HTTPException(

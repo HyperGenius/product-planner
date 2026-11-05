@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from app.dependencies import get_supabase_admin_client
+from app.routers.cron._alert import alert_cron_failure, alert_cron_success
 from app.routers.cron._auth import validate_cron_secret
 from app.services.daily_report_parsing_service import parse_pending_daily_reports
 from app.utils.logger import get_logger
@@ -20,8 +21,11 @@ def parse_daily_reports(request: Request):
     validate_cron_secret(request)
     try:
         db_client = get_supabase_admin_client()
-        return parse_pending_daily_reports(db_client)
+        result = parse_pending_daily_reports(db_client)
+        alert_cron_success("parse-daily-reports")
+        return result
     except Exception as exc:
+        alert_cron_failure("parse-daily-reports")
         # 例外の詳細はログにのみ残し、レスポンスは固定文言にする（内部情報の露出防止）。
         logger.error(f"parse-daily-reports failed: {exc}", exc_info=True)
         raise HTTPException(

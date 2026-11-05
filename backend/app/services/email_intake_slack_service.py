@@ -19,10 +19,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-import httpx
-
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.email_intake_outcome import derive_email_intake_outcome
+from app.services.slack_notify_service import escape_slack_text, post_to_slack
 from app.utils.calendar import JST
 from app.utils.logger import get_logger
 from supabase import Client
@@ -33,16 +32,8 @@ logger = get_logger(__name__)
 STALLED_AFTER = timedelta(hours=1)
 # 1回の cron で集計する行数の上限（残りは次回に回る）
 _BATCH_LIMIT = 500
-_SLACK_TIMEOUT_SECONDS = 5.0
 # リンク先（受信メール処理結果）
 EMAIL_INTAKE_RESULTS_PATH = "/orders/email-intake"
-
-
-class SlackNotifyError(Exception):
-    """Slack への送信に失敗した。
-
-    httpx の例外文言には webhook URL が含まれるため、元の例外は連鎖させない。
-    """
 
 
 @dataclass
@@ -87,11 +78,6 @@ def summarize_email_intakes(
     return {tenant_id: c for tenant_id, c in counts.items() if c.has_any()}
 
 
-def _escape_slack_text(text: str) -> str:
-    """Slack の mrkdwn で制御文字として扱われる & < > をエスケープする。"""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
 def build_slack_message(
     counts_by_tenant: dict[str, TenantIntakeCounts],
     tenant_names: dict[str, str],
@@ -113,7 +99,7 @@ def build_slack_message(
             parts.append(f"失敗 {c.failed}通")
         if c.stalled:
             parts.append(f"処理待ちの滞留 {c.stalled}通")
-        name = _escape_slack_text(tenant_names.get(tenant_id) or tenant_id)
+        name = escape_slack_text(tenant_names.get(tenant_id) or tenant_id)
         lines.append(f"・{name}：" + "／".join(parts))
     lines.append(f"詳細 → {app_base_url.rstrip('/')}{EMAIL_INTAKE_RESULTS_PATH}")
     return "\n".join(lines)
@@ -205,25 +191,6 @@ def _fetch_tenant_names(db: Client, tenant_ids: list[str]) -> dict[str, str]:
     }
 
 
-def _post_to_slack(webhook_url: str, text: str) -> None:
-    try:
-        response = httpx.post(
-            webhook_url, json={"text": text}, timeout=_SLACK_TIMEOUT_SECONDS
-        )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "email_intake_slack: webhook returned status %s",
-            exc.response.status_code,
-        )
-        raise SlackNotifyError("Slack webhook request failed") from None
-    except httpx.HTTPError as exc:
-        logger.error(
-            "email_intake_slack: webhook request failed (%s)", type(exc).__name__
-        )
-        raise SlackNotifyError("Slack webhook request failed") from None
-
-
 def _mark_notified(
     db: Client, column: str, attachment_ids: list[str], now: datetime
 ) -> None:
@@ -261,7 +228,7 @@ def notify_email_intake_slack(
     # 載せる件数が無い（スキップだけ等）ときは送らずに通知済みにする
     if counts:
         tenant_names = _fetch_tenant_names(db, list(counts))
-        _post_to_slack(
+        post_to_slack(
             webhook_url, build_slack_message(counts, tenant_names, app_base_url, now)
         )
 

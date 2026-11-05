@@ -9,6 +9,8 @@ on:
       - 'supabase/migrations/**'
       # `supabase db push` は config.toml を読む（非推奨のセクションがあると失敗する）ので、直したときも流して確かめる
       - 'supabase/config.toml'
+      # このワークフロー自体を直したときも流して確かめる
+      - '.github/workflows/supabase-deploy.yml'
   # 失敗したデプロイの再実行など、手動でも流せるようにする
   workflow_dispatch:
 
@@ -18,17 +20,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # latest にすると、最新の CLI で `db push` の既定の向き先がローカル DB に変わって
+      # 本番に当たらなくなった（Issue #633 / #636）。固定し、上げるときは手元（ローカルの
+      # `supabase --version`）と dry-run で確かめてからここを書き換える。
       - uses: supabase/setup-cli@v2
         with:
-          version: latest
+          version: 2.113.0
 
-      - name: Link to Supabase Project
-        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+      # 本番は direct connection が名前解決できず、`--linked` も一時ロールの作成で失敗することがあるので、
+      # 手元の手順（scripts/supabase-db-push-prod.sh）と同じセッションプーラーへ `--db-url` でつなぐ。
+      # パスワードは記号を含みうるので percent-encode する。
+      - name: Build DB URL
+        run: |
+          encoded_password="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["SUPABASE_DB_PASSWORD"], safe=""))')"
+          echo "::add-mask::${encoded_password}"
+          echo "SUPABASE_DB_URL=postgresql://postgres.${SUPABASE_PROJECT_ID}:${encoded_password}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" >> "$GITHUB_ENV"
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+      # 本番へ流す前に、対象の版・接続先が通ることを先に確かめる（ログにも残る）
+      - name: Dry run
+        run: supabase db push --dry-run --db-url "$SUPABASE_DB_URL"
 
       - name: Push Migrations
-        run: supabase db push
+        run: supabase db push --db-url "$SUPABASE_DB_URL"
+
+      # 失敗に誰も気づかず本番だけ壊れた（Issue #633）ので、Slack に知らせる。
+      # webhook はリポジトリの Secret `SLACK_WEBHOOK_URL`（Render の同名の環境変数と同じ値でも別チャンネルでもよい）。
+      # 未設定なら何もしない。載せるのは実行 URL とコミットだけ。
+      - name: Notify Slack on failure
+        if: failure()
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "SLACK_WEBHOOK_URL が未設定のため通知しません"
+            exit 0
+          fi
+          text="🚨 本番マイグレーションの適用に失敗しました"$'\n'"・実行: ${RUN_URL}"$'\n'"・コミット: ${COMMIT_URL}"
+          jq -n --arg text "$text" '{text: $text}' \
+            | curl -sS --fail -X POST -H 'Content-Type: application/json' --data @- "${SLACK_WEBHOOK_URL}" >/dev/null \
+            || echo "Slack への通知に失敗しました"
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from app.dependencies import get_supabase_admin_client
+from app.routers.cron._alert import alert_cron_failure, alert_cron_success
 from app.routers.cron._auth import validate_cron_secret
 from app.services.daily_report_allocation_service import recompute_all_tenants
 from app.utils.logger import get_logger
@@ -21,10 +22,22 @@ def compute_daily_report_progress(request: Request):
     validate_cron_secret(request)
     try:
         db_client = get_supabase_admin_client()
-        return recompute_all_tenants(db_client)
+        summary = recompute_all_tenants(db_client)
     except Exception as exc:
+        alert_cron_failure("compute-daily-report-progress")
         # 例外の詳細はログにのみ残し、レスポンスは固定文言にする（内部情報の露出防止）。
         logger.error(f"compute-daily-report-progress failed: {exc}", exc_info=True)
         raise HTTPException(
             status_code=502, detail="compute-daily-report-progress failed"
         ) from exc
+
+    # テナント単位の失敗は他のテナントへ波及させず握りつぶす設計だが、HTTP 200 で返すと
+    # Edge Function からも成功に見えて誰も気づけない（Issue #636）。1件でも失敗したら 502 にして通知する。
+    failed = summary.get("failed", 0)
+    if failed > 0:
+        alert_cron_failure("compute-daily-report-progress", failed)
+        raise HTTPException(
+            status_code=502, detail="compute-daily-report-progress failed"
+        )
+    alert_cron_success("compute-daily-report-progress")
+    return summary
