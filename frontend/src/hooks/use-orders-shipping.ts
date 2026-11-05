@@ -15,7 +15,8 @@ import type { Order } from "@/types/order"
 
 /**
  * 送品の消し込みの行（Issue #557）。対象（確定済・生産中）の注文の進捗をまとめて引いて判定する。
- * 「送品の消し込み」画面とサイドバーの件数バッジで共有し、進捗を同じクエリキーで取って二重に取得しない
+ * 「送品の消し込み」画面とサイドバーの件数バッジで共有し、進捗を同じクエリキーで取って二重に取得しない。
+ * 送品で対象の ID が変わっても表が読み込み中に戻らないよう、直前の進捗を残す（Issue #649）
  *
  * @param orders 注文の一覧。undefined の間は進捗を取得しない
  */
@@ -24,7 +25,7 @@ export function useShippingRows(orders: Order[] | undefined) {
     () => (orders ?? []).filter(isShippingTarget).map((o) => o.id),
     [orders]
   )
-  const progress = useOrderProgressList(targetOrderIds)
+  const progress = useOrderProgressList(targetOrderIds, { keepPrevious: true })
 
   const rows = useMemo(
     () => (orders ? buildShippingRows(orders, progress.data?.items) : []),

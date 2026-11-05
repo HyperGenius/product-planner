@@ -722,6 +722,14 @@ const bulk = useOrderBulkActions({ orders, pageOrders, selectionResetKey })
 - 一括選択は `selectionResetKey` が変わると解除される（一覧ページはページ・タブ・顧客・製品の絞り込みを連結した値を渡す）
 - 行操作と一括操作は別々の mutation インスタンスを持つ。一括処理中の行のボタンは `isBulkOperationInProgress` で無効化する
 
+### 送品の消し込みで送品しても表を読み込み中に戻さない (#649)
+
+- 送品すると対象の注文が減り、進捗クエリ（`useOrderProgressList(targetOrderIds)`）のキー（ID 配列）が変わる。
+  そのままだと新規クエリの `isLoading` が true になり、表全体がスケルトンに戻っていた。
+  `useShippingRows()` は `keepPrevious: true`（`placeholderData: keepPreviousData`）を渡し、取得し直す間は直前の進捗を表示する。
+  オプション指定なので、ガントなど他の呼び出し元の挙動は変えない
+- 送品の成功トーストの注文番号は、一覧の表示に合わせて `order_no ?? id`（`order_no` が NULL のメール起票の注文でも空にならない）
+
 ---
 
 ## 設計上の決定事項

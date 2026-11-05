@@ -179,6 +179,20 @@ describe("useOrderActions（Issue #554）", () => {
     expect(toast.success).toHaveBeenCalledWith("注文「O-6」を送品済みにしました")
   })
 
+  it("注文番号が無い注文の送品トーストは ID を表示する（Issue #649）", async () => {
+    const order = makeOrder({ id: 7, order_no: null })
+    server.use(
+      http.post(`${API_BASE}/orders/7/ship`, () => HttpResponse.json({ ...order, status: "shipped" })),
+    )
+    const { result } = renderHook(() => useOrderActions([order]))
+
+    act(() => result.current.handleShipFromRow(order.id, String(order.order_no ?? order.id)))
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("注文「7」を送品済みにしました"),
+    )
+  })
+
   it("修理等への変更はダイアログの対象を行の注文にする（Issue #568）", () => {
     const order = makeOrder({ id: 9 })
     const { result } = renderHook(() => useOrderActions([order]))

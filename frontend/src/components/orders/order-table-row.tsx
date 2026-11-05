@@ -587,7 +587,7 @@ export function OrderTableRow({
                     )}
                     {canShip && (
                       <DropdownMenuItem
-                        onClick={() => onShip(order.id, order.order_no ?? "")}
+                        onClick={() => onShip(order.id, String(order.order_no ?? order.id))}
                         disabled={shipIsPending || isBulkOperationInProgress}
                       >
                         <Truck className="mr-2 h-3.5 w-3.5" />

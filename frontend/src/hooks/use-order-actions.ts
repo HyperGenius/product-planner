@@ -152,7 +152,7 @@ export function useOrderActions(orders: Order[] | undefined) {
 
   const handleShipWithoutRoutingConfirm = () => {
     if (!shipWithoutRoutingTarget) return
-    const orderNo = shipWithoutRoutingTarget.order_no ?? ""
+    const orderNo = shipWithoutRoutingTarget.order_no ?? String(shipWithoutRoutingTarget.id)
     shipWithoutRouting.mutate(shipWithoutRoutingTarget.id, {
       onSuccess: () => {
         toast.success(`注文「${orderNo}」を送品済みにしました`)

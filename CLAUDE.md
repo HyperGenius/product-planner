@@ -456,6 +456,10 @@ cd backend && ruff check . && mypy .
   - 「送品の消し込み」（Issue #557）の納期の基準は**希望納期 → 無ければ完成見込み**（`getShippingDeadline()`）で、
     完成見込みを基準にする現場ダッシュボードとは意図的に違う。送品は弥生が正なので、候補を示すだけで自動では送品済みにせず、
     一括の送品も作らない。送品の権限は `canShipOrder()`（`order-utils.ts`）で注文一覧と共有する
+  - 送品などで対象の集合が変わる一覧は、集合（ID 配列）をキーに持つ補助クエリが新規クエリ扱いになって `isLoading` が true に戻り、
+    表全体がスケルトンになる（Issue #649）。画面全体の `isLoading` に含めるクエリは `placeholderData: keepPreviousData`
+    （`useOrderProgressList(ids, { keepPrevious: true })`）で直前の結果を残す。行操作のトーストに出す注文番号は
+    `order.order_no ?? order.id`（一覧の表示と同じ。`?? ""` だと `order_no` が NULL の注文で「」が空になる）
 - **スクロールする表の見出しを `sticky` にするとき**: shadcn の `Table` は自前で `overflow-auto` の div を挟むので、その外側のスクロール
   コンテナに対して `sticky top-0` が効かない。スクロール領域の中では素の `<table>`（`TableHeader` / `TableRow` 等は流用可）を使う。
   ダイアログは `max-h-[85dvh] flex flex-col` ＋ 表の領域 `min-h-0 flex-1 overflow-y-auto` にすると低い画面でもフッターが重ならない
