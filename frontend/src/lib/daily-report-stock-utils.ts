@@ -29,6 +29,30 @@ export function stockConsumedByLabel(
     : "日報の最後の工程なので、送品で減ります"
 }
 
+export interface StockConsumerGroup {
+  /** 推定数が何の工程で減るか。null は日報の最後の工程（送品で減る） */
+  nextProcessName: string | null
+  items: StockEstimate[]
+}
+
+/**
+ * 推定を、何で減るか（消費先の工程）ごとにまとめる (Issue #639)。同じ「…で使うと減ります」を
+ * 行ごとに繰り返さず、グループの見出しに1回だけ出すため。グループは最も推定数の多い行の順、
+ * グループ内は入力（推定数の多い順）のまま。
+ */
+export function groupStockByConsumer(items: readonly StockEstimate[]): StockConsumerGroup[] {
+  const groups = new Map<string | null, StockConsumerGroup>()
+  for (const item of items) {
+    const group = groups.get(item.next_process_name) ?? {
+      nextProcessName: item.next_process_name,
+      items: [],
+    }
+    group.items.push(item)
+    groups.set(item.next_process_name, group)
+  }
+  return [...groups.values()]
+}
+
 /** 指摘の内容の要約 */
 export function feedbackSummary(
   feedback: Pick<StockFeedback, "kind" | "process_name" | "baseline_qty" | "baseline_date">,

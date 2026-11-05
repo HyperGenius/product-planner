@@ -75,10 +75,31 @@ describe("StockEstimates", () => {
 
     expect(await screen.findByText("1,200 個")).toBeInTheDocument()
     expect(within(section()).getByText("「プレス」の後")).toBeInTheDocument()
-    expect(within(section()).getByText(/「カシメ」で使うと減ります・最後の動き 2026\/10\/20/)).toBeInTheDocument()
+    expect(within(section()).getByText("「カシメ」で使うと減ります")).toBeInTheDocument()
+    expect(within(section()).getByText("最後の動き 2026/10/20")).toBeInTheDocument()
     expect(within(section()).getByText("テスト製品B")).toBeInTheDocument()
     expect(within(section()).getByText("作り置きしていない")).toBeInTheDocument()
     expect(within(section()).getByText("（試作の残り）")).toBeInTheDocument()
+  })
+
+  it("同じ消費先の推定は見出しに1回だけ出し、行では繰り返さない", async () => {
+    const base = DATA.items[0]
+    mockStock({
+      ...DATA,
+      items: [
+        { ...base, product_id: 1, qty: 500, next_process_name: null },
+        { ...base, product_id: 3, product_name: "テスト製品C", qty: 300, next_process_name: null },
+        { ...base, product_id: 4, product_name: "テスト製品D", qty: 100, next_process_name: "検査" },
+      ],
+      feedback: [],
+    })
+    render(<StockEstimates canEdit />)
+
+    await screen.findByText("500 個")
+    expect(within(section()).getAllByText("日報の最後の工程なので、送品で減ります")).toHaveLength(1)
+    expect(within(section()).getAllByText("「検査」で使うと減ります")).toHaveLength(1)
+    expect(within(section()).getByText("2 製品")).toBeInTheDocument()
+    expect(within(section()).getByText("1 製品")).toBeInTheDocument()
   })
 
   it("推定も指摘も無ければ出さない", async () => {
