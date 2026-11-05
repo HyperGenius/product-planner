@@ -1,7 +1,8 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
 import { toast } from "sonner";
 import { Info } from "lucide-react";
@@ -20,6 +21,84 @@ import {
   useOpenDeliveryRequests,
   useResolveDeliveryRequest,
 } from "@/hooks/use-order-delivery-requests";
+import { useOrderProgressList } from "@/hooks/use-daily-report-progress";
+import {
+  elapsedSince,
+  expectedCompletion,
+  finalProcessProgress,
+  overdueDays,
+  sortDeliveryRequests,
+  type DeliveryRequestSort,
+} from "@/lib/delivery-request-utils";
+import type { OpenDeliveryRequestListItem } from "@/types/order-delivery-request";
+import type { ProcessProgress } from "@/types/daily-report-progress";
+
+const formatDate = (value: string) => format(parseISO(value), "M月d日", { locale: ja });
+
+/** 依頼の中身（何を・何個・いつまでに）。本文の抜粋は詳細（クリックで開く）に置く */
+function RequestContent({ request }: { request: OpenDeliveryRequestListItem }) {
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="truncate font-medium">
+        {request.extracted_product_name ?? "（品名の記載なし）"}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        数量: {request.quantity !== null ? request.quantity.toLocaleString() : "－"}
+        {" / "}要望日:{" "}
+        {request.requested_date ? formatDate(request.requested_date) : "－"}
+      </p>
+      {request.body_snippet && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer">本文の抜粋</summary>
+          <p className="mt-1 whitespace-pre-wrap">{request.body_snippet}</p>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** 受注の現状。未紐づけ（order_id なし）は空表示。進捗の行が無い工程は遅れ・未着手にしない */
+function OrderStatus({
+  request,
+  progress,
+}: {
+  request: OpenDeliveryRequestListItem;
+  progress: ProcessProgress | undefined;
+}) {
+  if (request.order_id === null) {
+    return <span className="text-muted-foreground">－</span>;
+  }
+  const overdue = overdueDays(request.desired_deadline);
+  const completion = expectedCompletion(request);
+  const quantity = request.order_quantity;
+  return (
+    <div className="space-y-1 text-xs">
+      <p>
+        希望納期:{" "}
+        {request.desired_deadline ? formatDate(request.desired_deadline) : "－"}
+        {overdue !== null && (
+          <span className="ml-1 font-medium text-red-600">（{overdue}日超過）</span>
+        )}
+      </p>
+      <p>
+        完成見込み: {completion ? formatDate(completion) : "－"}
+      </p>
+      <p>
+        受注数量: {quantity !== null ? quantity.toLocaleString() : "－"}
+        {progress && (
+          <span className="ml-1">
+            （{progress.process_name ?? "最終工程"}{" "}
+            {progress.good_qty.toLocaleString()}
+            {progress.order_quantity !== null
+              ? ` / ${progress.order_quantity.toLocaleString()}`
+              : ""}
+            ）
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}
 
 /**
  * 督促・分納の依頼（Issue #622）
@@ -31,6 +110,28 @@ import {
 export default function DeliveryRequestsPage() {
   const { data, isLoading, isError } = useOpenDeliveryRequests();
   const resolve = useResolveDeliveryRequest();
+  const [sort, setSort] = useState<DeliveryRequestSort>("received");
+
+  const requests = useMemo(
+    () => sortDeliveryRequests(data ?? [], sort),
+    [data, sort],
+  );
+  // 進捗は表示中の受注をまとめて1リクエストで取る（行ごとに引かない）
+  const orderIds = useMemo(
+    () =>
+      (data ?? [])
+        .map((r) => r.order_id)
+        .filter((id): id is number => id !== null),
+    [data],
+  );
+  const { data: progressList } = useOrderProgressList(orderIds);
+  const progressByOrder = useMemo(() => {
+    const byOrder = new Map<number, ProcessProgress[]>();
+    progressList?.items.forEach((p) => {
+      byOrder.set(p.order_id, [...(byOrder.get(p.order_id) ?? []), p]);
+    });
+    return byOrder;
+  }, [progressList]);
 
   const handleResolve = (id: string) => {
     resolve.mutate(
@@ -59,6 +160,26 @@ export default function DeliveryRequestsPage() {
         </p>
       </div>
 
+      {data && data.length > 1 && (
+        <div className="mb-3 flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">並び順:</span>
+          <Button
+            size="sm"
+            variant={sort === "received" ? "default" : "outline"}
+            onClick={() => setSort("received")}
+          >
+            受信の新しい順
+          </Button>
+          <Button
+            size="sm"
+            variant={sort === "overdue" ? "default" : "outline"}
+            onClick={() => setSort("overdue")}
+          >
+            超過日数の多い順
+          </Button>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-muted-foreground">読み込み中...</p>
       ) : isError ? (
@@ -70,15 +191,16 @@ export default function DeliveryRequestsPage() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[110px]">種別</TableHead>
-              <TableHead className="w-[160px]">顧客</TableHead>
-              <TableHead className="w-[140px]">受注</TableHead>
-              <TableHead className="w-[130px]">受信日</TableHead>
+              <TableHead className="w-[140px]">顧客</TableHead>
+              <TableHead className="w-[120px]">受注</TableHead>
               <TableHead>内容</TableHead>
+              <TableHead className="w-[240px]">受注の現状</TableHead>
+              <TableHead className="w-[120px]">受信</TableHead>
               <TableHead className="w-[140px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((request) => (
+            {requests.map((request) => (
               <TableRow key={request.id}>
                 <TableCell>
                   <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
@@ -100,22 +222,28 @@ export default function DeliveryRequestsPage() {
                     <span className="text-muted-foreground">未紐づけ</span>
                   )}
                 </TableCell>
-                <TableCell className="text-sm">
-                  {format(new Date(request.created_at), "M月d日 HH:mm", {
-                    locale: ja,
-                  })}
+                <TableCell>
+                  <RequestContent request={request} />
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {request.extracted_product_name && (
-                    <p className="truncate text-sm text-foreground">
-                      {request.extracted_product_name}
-                    </p>
-                  )}
-                  {request.body_snippet && (
-                    <p className="line-clamp-2 whitespace-pre-wrap">
-                      {request.body_snippet}
-                    </p>
-                  )}
+                <TableCell>
+                  <OrderStatus
+                    request={request}
+                    progress={
+                      request.order_id !== null
+                        ? finalProcessProgress(progressByOrder.get(request.order_id))
+                        : undefined
+                    }
+                  />
+                </TableCell>
+                <TableCell className="text-sm">
+                  <p>
+                    {format(new Date(request.created_at), "M月d日 HH:mm", {
+                      locale: ja,
+                    })}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {elapsedSince(request.created_at)}前
+                  </p>
                 </TableCell>
                 <TableCell>
                   <Button

@@ -616,6 +616,20 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
   未紐づけの顧客は依頼元の受信メール（`order_attachments.customer_id`）から引く。ここから「対応済みにする」ができる
 - バッジと一覧は同じクエリ（`useOpenDeliveryRequests()`）。対応済みの切り替えは `["order-delivery-requests"]` 配下をまとめて無効化するので、
   バッジ・一覧・受注一覧の「督促あり」が更新される
+### 一覧に出す依頼の中身と受注の現状（Issue #635）
+
+- 「内容」欄は保存済みの `extracted_product_name` / `quantity` / `requested_date`（品名・数量・要望日）を構造化して出し、
+  本文の抜粋（`body_snippet`）は行内の「本文の抜粋」（`<details>`、クリックで開く）に回す
+- `GET /orders/delivery-requests` は紐づけ済みの依頼に受注の `order_quantity` / `desired_deadline`（DB 列は `orders.deadline_date`）/
+  `confirmed_deadline` / `simulated_deadline` を付ける（受注は依頼の `order_id` をまとめて1クエリで引く。未紐づけは null。スキーマ変更なし）
+- 「受注の現状」列: 希望納期と超過日数（JST の今日基準）・完成見込み（希望納期とは別に併記し基準を混ぜない）・受注数量と最終工程
+  （`sequence_order` 最大）の日報の進捗。進捗は表示中の受注をまとめて `GET /daily-reports/order-progress` の1リクエストで取り
+  （`useOrderProgressList()`）、進捗の行が無い受注は進捗を出さない（遅れにしない）。表示規則は `lib/delivery-request-utils.ts`
+- 受信は日時に経過時間を添える。並び順は「受信の新しい順」（既定）と「超過日数の多い順」を切り替えられる（緊急度の自動判定はしない）
+- **同じ顧客・受注・受信日時の行が2つ並ぶ件**: `(order_attachment_id, line_index)` の UNIQUE をすり抜ける二重記録ではなく、
+  1通のメールの複数明細（明細ごとに1行）が、同じ受注に紐づき本文の抜粋も共通なので同じ行に見えていた。内容欄の品名・数量・要望日で
+  見分けられる。LLM が同じ内容の明細を重複して読み取った場合は `record_delivery_requests()` が1行にまとめる
+
 - 未紐づけの依頼を受注へ手動で紐づける操作・Slack 等の通知は対象外
 
 ### 制約・対象外
