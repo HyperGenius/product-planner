@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from app.dependencies import get_supabase_admin_client
+from app.routers.cron._alert import alert_cron_failure, alert_cron_success
 from app.routers.cron._auth import validate_cron_secret
 from app.services.pdf_order_parsing_service import parse_pending_order_pdfs
 from app.utils.logger import get_logger
@@ -14,8 +15,11 @@ def parse_order_pdfs(request: Request):
     validate_cron_secret(request)
     try:
         db_client = get_supabase_admin_client()
-        return parse_pending_order_pdfs(db_client)
+        result = parse_pending_order_pdfs(db_client)
+        alert_cron_success("parse-order-pdfs")
+        return result
     except Exception as exc:
+        alert_cron_failure("parse-order-pdfs")
         logger.error(f"PDF order parsing failed: {exc}", exc_info=True)
         raise HTTPException(
             status_code=502, detail=f"PDF order parsing error: {exc}"

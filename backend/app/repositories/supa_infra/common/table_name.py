@@ -43,3 +43,4 @@ class SupabaseTableName(Enum):
     ORDER_SIMULATION_RESULTS = "order_simulation_results"
     CUSTOMER_EXTRACTION_PROMPT_HISTORY = "customer_extraction_prompt_history"
     CUSTOMER_MERGE_LOG = "customer_merge_log"
+    CRON_ALERT_STATE = "cron_alert_state"

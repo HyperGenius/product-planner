@@ -58,3 +58,36 @@ class TestComputeDailyReportProgressRouter:
             )
         assert response.status_code == 502
         assert response.json() == {"detail": "compute-daily-report-progress failed"}
+
+    def test_tenant_failure_returns_502_and_alerts(self, monkeypatch):
+        """テナント単位の失敗は HTTP 200 で握りつぶさず 502 にして通知する（Issue #636）"""
+        monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
+        summary = {"tenants": 3, "replaced": 2, "stale": 0, "failed": 1}
+        with (
+            patch(f"{ROUTER}.get_supabase_admin_client"),
+            patch(f"{ROUTER}.recompute_all_tenants", return_value=summary),
+            patch(f"{ROUTER}.alert_cron_failure") as alert_failure,
+            patch(f"{ROUTER}.alert_cron_success") as alert_success,
+        ):
+            response = client.get(
+                PATH, headers={"Authorization": f"Bearer {VALID_SECRET}"}
+            )
+        assert response.status_code == 502
+        assert response.json() == {"detail": "compute-daily-report-progress failed"}
+        alert_failure.assert_called_once_with("compute-daily-report-progress", 1)
+        alert_success.assert_not_called()
+
+    def test_success_reports_recovery(self, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", VALID_SECRET)
+        with (
+            patch(f"{ROUTER}.get_supabase_admin_client"),
+            patch(f"{ROUTER}.recompute_all_tenants", return_value={"failed": 0}),
+            patch(f"{ROUTER}.alert_cron_failure") as alert_failure,
+            patch(f"{ROUTER}.alert_cron_success") as alert_success,
+        ):
+            response = client.get(
+                PATH, headers={"Authorization": f"Bearer {VALID_SECRET}"}
+            )
+        assert response.status_code == 200
+        alert_success.assert_called_once_with("compute-daily-report-progress")
+        alert_failure.assert_not_called()

@@ -212,6 +212,21 @@ pg_cron 経由の実行結果は `cron.job_run_details` で確認する（Step 4
 
 ---
 
+## 失敗の通知（Issue #636）
+
+cron の結果は Edge Function が 502 にまとめるだけで通知しないため、バックエンドが Slack（`SLACK_WEBHOOK_URL`、Render の環境変数）へ通知する。
+
+- 対象: `gmail-poll` / `parse-order-pdfs` / `advance-order-status` / `parse-daily-reports` / `compute-daily-report-progress`
+  （`routers/cron/_alert.py` → `services/cron_alert_service.py`）。`notify-email-intake-slack` は Slack 自体の失敗なので対象外
+- `compute-daily-report-progress` は、テナント単位の失敗が1件でもあれば（`recompute_all_tenants()` の `failed > 0`）HTTP 502 にして通知する
+- 重複の抑止: `cron_alert_state`（cron 名ごとの失敗中フラグ）で、失敗し始めた回に1回・復旧した回に1回だけ通知する。送信に成功してから状態を書くので、
+  送れなかったら次回に再送する
+- 載せるのは cron 名と失敗件数のみ。`SLACK_WEBHOOK_URL` 未設定なら何もしない（DB にも触れない）
+- 限界: バックエンド自体が落ちている／Edge Function が動いていないときは通知できない
+
+デプロイ（`Deploy Migrations to Supabase`）の失敗は GitHub Actions の `if: failure()` ステップが、リポジトリ Secret `SLACK_WEBHOOK_URL` へ
+実行 URL とコミットを通知する。
+
 ## 完了条件チェック
 
 - [x] pg_cronのTerraform管理可否を調査し、方針をドキュメント化（本ドキュメントの「pg_cron の Terraform 管理可否の調査結果」）

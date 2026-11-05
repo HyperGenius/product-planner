@@ -582,14 +582,27 @@ cd backend && ruff check . && mypy .
   `--include-all` 付きのタスクは、古い日付の版が後から入ったときだけ使う（履歴に無い版を順序を問わず流す）
 - 本番への `db push` / 直接SQL実行は不可逆な操作のため、必ず `--dry-run`（push の場合）や `SELECT` での事前確認を行い、ユーザーの明示的な承認を得てから実行すること
 
-- **本番のマイグレーション未適用に気づく（Issue #633）**: `Deploy Migrations to Supabase`（`.github/workflows/supabase-deploy.yml`）は
-  `supabase/setup-cli` の `version: latest` で `supabase db push` を流すが、最新の CLI は既定でローカルの DB を向き、CI では
-  `connect ECONNREFUSED 127.0.0.1:54322` で失敗する（2026-11-02 から連続で失敗。本番には `--db-url` で手で当てていた）。
+- **本番のマイグレーション未適用に気づく（Issue #633 / #636）**: `Deploy Migrations to Supabase`（`.github/workflows/supabase-deploy.yml`）は
+  以前 `supabase/setup-cli` の `version: latest` で `supabase db push` を流していたが、最新の CLI は既定でローカルの DB を向き、
+  CI では `connect ECONNREFUSED 127.0.0.1:54322` で失敗した（2026-11-02 から連続で失敗。本番には手で当てていた）。
   症状は「特定の操作の後だけ API が 500 になる」形で出る（引き当てを登録すると、引き当て元の新テーブルが無く GET が失敗し
   「引き当てを取得できませんでした」。同じ RPC を呼ぶ cron も、引数が増えた新しい RPC が無く失敗しうる）。
-  **DB を変える PR をマージしたら Actions の `Deploy Migrations` が成功したかを見る**。バックエンドの unit / API テストは
-  Supabase をモックするので未適用では気づけない。疑うときは `supabase db push --dry-run --db-url ...` で未適用の版を確認する
-  （読み取りのみ）
+  - 修正後は **CLI を固定**（`version: 2.113.0`）し、手元の手順と同じセッションプーラーへ `--db-url` でつなぎ（パスワードは percent-encode）、
+    `--dry-run` を先に流してから本番へ push する。**CLI の版を上げるときは、手元の `supabase --version` と dry-run で確かめてから
+    `supabase-deploy.yml` を書き換える**（`latest` に戻さない。向き先のような既定値の変更で再び壊れる。ワークフロー自体の変更でも走る）。
+    `--include-all` は付けない（古い日付の版が後から入ったときだけ手で流す）
+  - 失敗したら `if: failure()` で Slack に通知する（リポジトリ Secret `SLACK_WEBHOOK_URL`。未設定なら何もしない。実行 URL とコミットだけ載せる）
+  - それでも **DB を変える PR をマージしたら Actions の `Deploy Migrations` が成功したかを見る**。バックエンドの unit / API テストは
+    Supabase をモックするので未適用では気づけない。疑うときは `supabase db push --dry-run --db-url ...` で未適用の版を確認する
+    （読み取りのみ）
+- **cron の失敗の Slack 通知（Issue #636）**: バックエンドの cron ルーター（`gmail-poll` / `parse-order-pdfs` / `advance-order-status` /
+  `parse-daily-reports` / `compute-daily-report-progress`）は失敗時に `routers/cron/_alert.py` の `alert_cron_failure()`、成功時に
+  `alert_cron_success()` を呼ぶ。状態は `cron_alert_state`（cron 名ごと、service role のみ）で、**失敗し始めた回に1回・復旧した回に1回**だけ
+  `SLACK_WEBHOOK_URL`（`services/cron_alert_service.py`）へ送る。連続失敗の間は繰り返さない。送信に成功してから状態を書く。通知の失敗は握り、
+  cron 本体を壊さない。載せるのは cron 名と件数だけ（例外文言・顧客名・URL は載せない）。新しい cron ルーターを足すときは同じ2つを呼ぶ。
+  Slack 送信は `services/slack_notify_service.post_to_slack()`（#574 と共通。例外は `from None`）。`recompute_all_tenants()` はテナント単位の失敗を
+  握りつぶす設計のままだが、ルーターが `failed > 0` を 502 にして通知する。**バックエンド自体が落ちているときは通知できない**
+  （Edge Function からの通知は未実装。必要なら `parse-order-pdfs-trigger` に追加し `terraform apply` で再デプロイ）
 
 ## 定期実行（cron）
 
