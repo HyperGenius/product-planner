@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
-import type { StockEstimates, StockFeedback } from "@/types/daily-report-stock"
+import type { StockEstimate, StockEstimates, StockFeedback } from "@/types/daily-report-stock"
 import {
   feedbackSummary,
   feedbackWithoutEstimates,
   initialStockAssignmentForm,
+  groupStockByConsumer,
   initialStockFeedbackForm,
   stockConsumedByLabel,
   toStockAssignmentInput,
@@ -44,6 +45,29 @@ describe("daily-report-stock-utils", () => {
     expect(stockConsumedByLabel({ next_process_name: null })).toBe(
       "日報の最後の工程なので、送品で減ります",
     )
+  })
+
+  it("推定を消費先の工程ごとにまとめる（グループは推定数の多い行の順、行は入力の順）", () => {
+    const item = (product_id: number, next: string | null, qty: number): StockEstimate => ({
+      product_id,
+      product_name: null,
+      product_code: null,
+      process_name: "プレス",
+      next_process_name: next,
+      qty,
+      last_movement_date: null,
+    })
+    const groups = groupStockByConsumer([
+      item(1, null, 500),
+      item(2, "検査", 300),
+      item(3, null, 200),
+      item(4, "検査", 100),
+    ])
+    expect(groups.map((g) => [g.nextProcessName, g.items.map((i) => i.product_id)])).toEqual([
+      [null, [1, 3]],
+      ["検査", [2, 4]],
+    ])
+    expect(groupStockByConsumer([])).toEqual([])
   })
 
   it("指摘の内容を要約する", () => {

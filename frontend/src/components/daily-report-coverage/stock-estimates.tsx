@@ -12,6 +12,7 @@ import {
   STOCK_LABEL,
   feedbackSummary,
   feedbackWithoutEstimates,
+  groupStockByConsumer,
   stockConsumedByLabel,
   stockPlaceLabel,
 } from "@/lib/daily-report-stock-utils"
@@ -72,37 +73,51 @@ export function StockEstimates({ canEdit }: { canEdit: boolean }) {
           </Badge>
         </h2>
         <p className="text-sm text-muted-foreground">
-          日報からの推定です。受注に割り付いていない、作っておいた品物の数を工程ごとに出しています。
-          現場の実態と違うところは「違う」で直してください（次の集計で反映されます）。
+          受注に割り付いていない、作っておいた品物の推定数です。現場の実態と違うところは「違う」で直してください（次の集計で反映されます）。
         </p>
+        <details className="text-sm text-muted-foreground">
+          <summary className="cursor-pointer text-primary">推定の見方</summary>
+          日報からの推定で、正確な数は目指していません。工程ごとに、次の工程で使われたら減り、最後の工程なら送品で減るとみなしています。
+        </details>
       </div>
 
       {data.items.length > 0 && (
-        <ul className={`divide-y rounded-lg border bg-card ${COVERAGE_LIST_SCROLL_CLASS}`}>
-          {data.items.map((item) => {
-            const feedback = feedbackByProduct.get(item.product_id)
-            return (
-              <li
-                key={`${item.product_id}-${item.process_name}`}
-                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5"
-              >
-                <div className="min-w-[min(100%,16rem)] flex-1 space-y-1">
-                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="break-all font-medium">{productLabel(item)}</span>
-                    <Badge variant="outline">{stockPlaceLabel(item)}</Badge>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {stockConsumedByLabel(item)}・最後の動き{" "}
-                    {formatWorkDate(item.last_movement_date)}
-                  </p>
-                  {feedback && <FeedbackNote feedback={feedback} />}
-                </div>
-                <span className="text-sm tabular-nums">{item.qty.toLocaleString()} 個</span>
-                {feedbackButton(item, item.process_name, "違う")}
-              </li>
-            )
-          })}
-        </ul>
+        <div className={`space-y-3 ${COVERAGE_LIST_SCROLL_CLASS}`}>
+          {groupStockByConsumer(data.items).map((group) => (
+            <div key={group.nextProcessName ?? ""} className="rounded-lg border bg-card">
+              <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-1.5 text-sm font-semibold">
+                {stockConsumedByLabel({ next_process_name: group.nextProcessName })}
+                <span className="font-normal text-muted-foreground">
+                  {group.items.length.toLocaleString()} 製品
+                </span>
+              </div>
+              <ul className="divide-y">
+                {group.items.map((item) => {
+                  const feedback = feedbackByProduct.get(item.product_id)
+                  return (
+                    <li
+                      key={`${item.product_id}-${item.process_name}`}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2"
+                    >
+                      <div className="min-w-[min(100%,16rem)] flex-1 space-y-0.5">
+                        <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="break-all font-medium">{productLabel(item)}</span>
+                          <Badge variant="outline">{stockPlaceLabel(item)}</Badge>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          最後の動き {formatWorkDate(item.last_movement_date)}
+                        </p>
+                        {feedback && <FeedbackNote feedback={feedback} />}
+                      </div>
+                      <span className="text-sm tabular-nums">{item.qty.toLocaleString()} 個</span>
+                      {feedbackButton(item, item.process_name, "違う")}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
 
       {feedbackOnly.length > 0 && (
