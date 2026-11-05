@@ -63,6 +63,8 @@ export const handlers = [
   http.get(`${API_BASE}/daily-reports/order-progress`, () =>
     HttpResponse.json({ computed_at: null, items: [] }),
   ),
+  // 日報の名寄せ（製品）の確認ダイアログ・行の展開部が引く顧客の未出荷受注（Issue #646）。既定は受注なし
+  http.get(`${API_BASE}/daily-reports/customer-open-orders`, () => HttpResponse.json([])),
   // 受注詳細の「作り置きからの引き当て」（Issue #624）。既定は引き当てなし
   http.get(`${API_BASE}/daily-reports/orders/:orderId/stock-assignments`, () =>
     HttpResponse.json({

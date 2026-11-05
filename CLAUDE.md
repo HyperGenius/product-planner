@@ -186,6 +186,12 @@ cd backend && ruff check . && mypy .
     共通の `ConfirmMappingDialog` を開く（行ごとに `AlertDialog` を持たせない）。確定ボタンは `AlertDialogAction` ではなく通常の `Button`で、成功時に保留を消して閉じ、
     失敗時は開いたままトーストを出す。ピッカー（`target-pickers.tsx`）の `onSelect` は `(id, label)` を返す（ダイアログに登録先の表示名を出すため）。
     新しい登録経路を足すときも `register` を直接呼ばず保留 state を経由させる
+  - **製品の受注状況の表示（Issue #646）**: 候補のバッジ・確認ダイアログの受注表・展開部の一覧は**表示専用**（類似度や受注の有無で自動確定・並べ替えしない）。
+    数える受注は割り付けの候補と同じ `CANDIDATE_ORDER_STATUSES`、一覧は未出荷（下書き・承認待ちも）で `allocatable` を併記する。
+    希望納期の DB 列は `orders.deadline_date`（integration テスト `TestProductOrderStatus` で確認）。顧客の受注は `useCustomerOpenOrders()` で
+    顧客単位に1リクエストにしてダイアログと展開部で共有し、キーは `["daily-report-names"]` の外に置く。`/product-candidates` は
+    `response_model_exclude_none=True` で、`customer_id` 省略時は新しいフィールドを返さない。名寄せ画面の MSW 既定ハンドラに
+    `GET /daily-reports/customer-open-orders` がある（無いと確認ダイアログ・展開部のテストが `onUnhandledRequest: "error"` になる）
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は

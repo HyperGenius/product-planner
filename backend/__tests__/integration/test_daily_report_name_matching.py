@@ -142,6 +142,7 @@ def tenants(admin_db, auth_user_id):
             "product_name_aliases",
             "daily_report_files",
             "agent_tokens",
+            "orders",
             "process_routings",
             "products",
             "customers",
@@ -499,3 +500,65 @@ class TestIgnoredNames:
         )
         assert res.status_code == 200
         assert ("product", "短いピン", "未登録の顧客") in unmatched()
+
+
+@pytest.mark.integration
+class TestProductOrderStatus:
+    """候補の受注状況と顧客の未出荷受注 (Issue #646)。
+
+    希望納期の DB 列は `orders.deadline_date`（モックの unit では列名の誤りに気づけない）。
+    """
+
+    def test_candidate_order_counts_and_open_orders(
+        self, admin_db, auth_token, tenants
+    ):
+        own, other = tenants["own"], tenants["other"]
+
+        def order(tenant, status, deadline, **extra):
+            admin_db.table("orders").insert(
+                {
+                    "tenant_id": tenant["id"],
+                    "customer_id": tenant["customer_id"],
+                    "product_id": tenant["product_id"],
+                    "quantity": 10,
+                    "status": status,
+                    "deadline_date": deadline,
+                    **extra,
+                }
+            ).execute()
+
+        order(own, "confirmed", "2026-12-20")
+        order(own, "in_progress", "2026-12-05")
+        order(own, "draft", "2026-11-30")
+        order(own, "shipped", "2026-10-01")
+        order(other, "confirmed", "2026-11-01")
+
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+
+        res = client.get(
+            "/daily-reports/product-candidates",
+            params={"raw_text": "ピン φ6×20", "customer_id": own["customer_id"]},
+            headers=headers,
+        )
+        assert res.status_code == 200, res.text
+        mine = [c for c in res.json() if c["product_id"] == own["product_id"]]
+        assert mine, res.json()
+        # 数えるのは confirmed / in_progress のみ（draft・shipped は除く）
+        assert mine[0]["open_order_count"] == 2
+        assert mine[0]["nearest_deadline"] == "2026-12-05"
+
+        res = client.get(
+            "/daily-reports/customer-open-orders",
+            params={"customer_id": own["customer_id"]},
+            headers=headers,
+        )
+        assert res.status_code == 200, res.text
+        assert [
+            (o["desired_deadline"], o["status"], o["allocatable"]) for o in res.json()
+        ] == [
+            ("2026-11-30", "draft", False),
+            ("2026-12-05", "in_progress", True),
+            ("2026-12-20", "confirmed", True),
+        ]
+        assert res.json()[0]["product_name"] == "ピン φ6×20"

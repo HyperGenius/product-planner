@@ -8,6 +8,7 @@ import type {
   NameAliasByKind,
   NameAliasCreateByKind,
   NameEntry,
+  CustomerOpenOrder,
   NameKind,
   ProductCandidate,
   UnmatchedName,
@@ -73,14 +74,35 @@ const PRODUCT_CANDIDATES_STALE_TIME_MS = 5 * 60 * 1000
  * 日報の商品名に似た製品の候補（pg_trgm）。提示専用。
  * 未照合の製品の行ごとに呼ばれる（候補を行内に出して押すだけで対応付けるため）。
  */
-export function useProductCandidates(rawText: string) {
+export function useProductCandidates(rawText: string, customerId?: number) {
   return useQuery<ProductCandidate[]>({
-    queryKey: [...PRODUCT_CANDIDATES_QUERY_KEY, rawText],
-    queryFn: () =>
-      apiClient<ProductCandidate[]>(
-        `${BASE}/product-candidates?${new URLSearchParams({ raw_text: rawText })}`,
-      ),
+    queryKey: [...PRODUCT_CANDIDATES_QUERY_KEY, rawText, customerId ?? null],
+    queryFn: () => {
+      const params = new URLSearchParams({ raw_text: rawText })
+      // 顧客を渡すと候補ごとに受注の有無が付く (Issue #646)
+      if (customerId !== undefined) params.set("customer_id", String(customerId))
+      return apiClient<ProductCandidate[]>(`${BASE}/product-candidates?${params}`)
+    },
     staleTime: PRODUCT_CANDIDATES_STALE_TIME_MS,
+  })
+}
+
+/**
+ * 顧客の未出荷の受注 (Issue #646)。確認ダイアログと行の展開部で共有する（顧客単位で1リクエスト、
+ * 同じ顧客の行はキャッシュを共有）。別名の登録では変わらないので `DAILY_REPORT_NAMES_QUERY_KEY` の
+ * 配下に置かない（PR #498）。受注の承認などで変わるため短めに古くする。
+ */
+export const CUSTOMER_OPEN_ORDERS_QUERY_KEY = ["daily-report-customer-open-orders"]
+
+export function useCustomerOpenOrders(customerId: number | null, enabled = true) {
+  return useQuery<CustomerOpenOrder[]>({
+    queryKey: [...CUSTOMER_OPEN_ORDERS_QUERY_KEY, customerId],
+    queryFn: () =>
+      apiClient<CustomerOpenOrder[]>(
+        `${BASE}/customer-open-orders?${new URLSearchParams({ customer_id: String(customerId) })}`,
+      ),
+    enabled: enabled && customerId !== null,
+    staleTime: 60 * 1000,
   })
 }
 

@@ -91,6 +91,65 @@ class TestDailyReportNameMatchingRouter:
         assert response.json() == result["candidates"]
         match.assert_called_once_with(mock_client, TENANT, "ピン6x20")
 
+    def test_product_candidates_with_customer_adds_order_status(self, mock_client):
+        result = {
+            "product_id": None,
+            "candidates": [
+                {"product_id": 100, "name": "ピン φ6×20", "score": 0.5},
+                {"product_id": 101, "name": "ピン φ6×25", "score": 0.4},
+            ],
+        }
+        summary = {100: {"open_order_count": 2, "nearest_deadline": "2026-12-05"}}
+        with (
+            patch(f"{ROUTER}.match_products", return_value=result),
+            patch(f"{ROUTER}.summarize_candidate_orders", return_value=summary) as s,
+        ):
+            response = client.get(
+                "/daily-reports/product-candidates?raw_text=ピン&customer_id=7"
+            )
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "product_id": 100,
+                "name": "ピン φ6×20",
+                "score": 0.5,
+                "open_order_count": 2,
+                "nearest_deadline": "2026-12-05",
+            },
+            {
+                "product_id": 101,
+                "name": "ピン φ6×25",
+                "score": 0.4,
+                "open_order_count": 0,
+            },
+        ]
+        s.assert_called_once_with(mock_client, TENANT, 7, [100, 101])
+
+    def test_customer_open_orders(self, mock_client):
+        orders = [
+            {
+                "order_id": 1,
+                "order_number": "A-1",
+                "customer_order_no": None,
+                "product_id": 100,
+                "product_name": "ピン",
+                "quantity": 10,
+                "desired_deadline": "2026-12-05",
+                "status": "confirmed",
+                "allocatable": True,
+            }
+        ]
+        with patch(f"{ROUTER}.list_customer_open_orders", return_value=orders) as s:
+            response = client.get("/daily-reports/customer-open-orders?customer_id=7")
+
+        assert response.status_code == 200
+        assert response.json() == orders
+        s.assert_called_once_with(mock_client, TENANT, 7)
+
+    def test_customer_open_orders_requires_customer_id(self):
+        assert client.get("/daily-reports/customer-open-orders").status_code == 422
+
     # --- 設備の別名 -----------------------------------------------------------
 
     def test_create_equipment_alias(self, mock_client):
