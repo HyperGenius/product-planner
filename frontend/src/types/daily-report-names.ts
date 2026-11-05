@@ -2,6 +2,7 @@
  * 日報の名寄せ（未照合キュー・別名辞書）の型 (Issue #488 / #489)。
  * Backend `app/models/daily_report_names.py` と揃える。
  */
+import type { Order } from "@/types/order"
 import type { ProductNameAliasHistoryEntry } from "@/types/product"
 
 /** 照合する表記の種別 */
@@ -52,6 +53,25 @@ export interface ProductCandidate {
   product_id: number
   name: string
   score: number
+  /** その顧客の割り付け対象（確定済み・生産中）の受注件数。顧客を指定したときだけ入る (Issue #646) */
+  open_order_count?: number
+  /** 上記の受注のうち最寄りの希望納期（日付のみ "YYYY-MM-DD"）。受注が無ければ無い */
+  nearest_deadline?: string
+}
+
+/** 顧客の未出荷の受注（名寄せ画面の表示専用、Issue #646） */
+export interface CustomerOpenOrder {
+  order_id: number
+  order_number: string | null
+  customer_order_no: string | null
+  product_id: number
+  product_name: string
+  quantity: number | null
+  /** 日付のみ ("YYYY-MM-DD") */
+  desired_deadline: string | null
+  status: Order["status"]
+  /** 割り付けの候補（確定済み・生産中）か。違う受注には実績は充当されない */
+  allocatable: boolean
 }
 
 interface NameAliasBase {

@@ -322,6 +322,181 @@ describe("UnmatchedNameQueue", () => {
     )
   })
 
+  describe("製品の受注状況 (Issue #646)", () => {
+    const ORDERS = [
+      {
+        order_id: 1,
+        order_number: "A-001",
+        customer_order_no: null,
+        product_id: 100,
+        product_name: "ピン φ6×20",
+        quantity: 500,
+        desired_deadline: "2026-12-05",
+        status: "confirmed",
+        allocatable: true,
+      },
+      {
+        order_id: 2,
+        order_number: null,
+        customer_order_no: "PO-9",
+        product_id: 101,
+        product_name: "ピン φ6×25",
+        quantity: 20,
+        desired_deadline: null,
+        status: "draft",
+        allocatable: false,
+      },
+    ]
+    const PRODUCT_ROW = unmatched({
+      kind: "product",
+      raw_text: "ピン6x20",
+      customer_raw: "顧客A",
+      customer_id: 10,
+    })
+
+    function mockOrderApis() {
+      let candidateCustomerId: string | null = null
+      server.use(
+        http.get(`${API_BASE}/daily-reports/product-candidates`, ({ request }) => {
+          candidateCustomerId = new URL(request.url).searchParams.get("customer_id")
+          return HttpResponse.json([
+            {
+              product_id: 100,
+              name: "ピン φ6×20",
+              score: 0.82,
+              open_order_count: 2,
+              nearest_deadline: "2026-12-05",
+            },
+            { product_id: 101, name: "ピン φ6×25", score: 0.6, open_order_count: 0 },
+          ])
+        }),
+        http.get(`${API_BASE}/daily-reports/customer-open-orders`, () =>
+          HttpResponse.json(ORDERS),
+        ),
+      )
+      return () => candidateCustomerId
+    }
+
+    it("候補に受注の有無を出し、受注なしでも選べる", async () => {
+      mockQueue([PRODUCT_ROW])
+      const customerId = mockOrderApis()
+
+      render(<UnmatchedNameQueue canEdit />)
+      await openTab(/製品/)
+
+      const withOrders = await screen.findByRole("button", {
+        name: "「ピン6x20」を「ピン φ6×20」に対応付ける",
+      })
+      const withoutOrders = screen.getByRole("button", {
+        name: "「ピン6x20」を「ピン φ6×25」に対応付ける",
+      })
+      expect(customerId()).toBe("10")
+      expect(within(withOrders).getByText("受注あり 2件")).toBeInTheDocument()
+      expect(withOrders).toHaveAttribute("title", expect.stringContaining("2026/12/05"))
+      expect(within(withoutOrders).getByText("受注なし")).toBeInTheDocument()
+      expect(withoutOrders).toBeEnabled()
+    })
+
+    it("確認ダイアログに割り付け先の受注を出す", async () => {
+      mockQueue([PRODUCT_ROW])
+      mockOrderApis()
+
+      render(<UnmatchedNameQueue canEdit />)
+      await openTab(/製品/)
+      await userEvent.click(
+        await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×20」に対応付ける" }),
+      )
+
+      const dialog = await screen.findByRole("alertdialog")
+      expect(await within(dialog).findByText("A-001")).toBeInTheDocument()
+      expect(within(dialog).getByText("500")).toBeInTheDocument()
+      expect(within(dialog).getByText("2026/12/05")).toBeInTheDocument()
+      expect(within(dialog).getByText("確定")).toBeInTheDocument()
+      // 別の製品の受注や割り付け対象外の受注は出さない
+      expect(within(dialog).queryByText("PO-9")).not.toBeInTheDocument()
+      expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument()
+    })
+
+    it("割り付け先が無い製品は警告するが、登録はできる", async () => {
+      const posts = mockQueue([PRODUCT_ROW])
+      mockOrderApis()
+
+      render(<UnmatchedNameQueue canEdit />)
+      await openTab(/製品/)
+      // 製品101 の受注は下書きのみ（割り付け対象外）
+      await userEvent.click(
+        await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×25」に対応付ける" }),
+      )
+
+      const dialog = await screen.findByRole("alertdialog")
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "割り付け先がないため、実績は未割当に残ります",
+      )
+      await confirmDialog("登録する")
+      await waitFor(() => expect(posts).toHaveLength(1))
+      expect(posts[0].body).toEqual({ raw_text: "ピン6x20", customer_id: 10, product_id: 101 })
+    })
+
+    it("受注の取得に失敗したら警告は出さず、登録は続けられる", async () => {
+      mockQueue([PRODUCT_ROW])
+      mockOrderApis()
+      server.use(
+        http.get(`${API_BASE}/daily-reports/customer-open-orders`, () =>
+          HttpResponse.json({ detail: "error" }, { status: 500 }),
+        ),
+      )
+
+      render(<UnmatchedNameQueue canEdit />)
+      await openTab(/製品/)
+      await userEvent.click(
+        await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×20」に対応付ける" }),
+      )
+
+      const dialog = await screen.findByRole("alertdialog")
+      expect(await within(dialog).findByText("受注の状況を取得できませんでした")).toBeInTheDocument()
+      expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument()
+      expect(within(dialog).getByRole("button", { name: "登録する" })).toBeEnabled()
+    })
+
+    it("行の展開部に顧客の未出荷の受注を一覧で出す", async () => {
+      mockQueue([PRODUCT_ROW])
+      mockOrderApis()
+      server.use(
+        http.get(`${API_BASE}/daily-reports/name-entries`, () => HttpResponse.json([])),
+      )
+
+      render(<UnmatchedNameQueue canEdit />)
+      await openTab(/製品/)
+      await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
+
+      expect(await screen.findByText("この顧客の未出荷の受注（2 件）")).toBeInTheDocument()
+      expect(screen.getByText("A-001")).toBeInTheDocument()
+      // 注文番号が無い受注は顧客の注文番号を出し、割り付け対象外は印を付ける
+      expect(screen.getByText("PO-9")).toBeInTheDocument()
+      expect(screen.getByText("割り付け対象外")).toBeInTheDocument()
+    })
+
+    it("顧客先が未照合の行の展開部では受注を取得しない", async () => {
+      mockQueue([{ ...PRODUCT_ROW, customer_id: null, customer_raw: "未登録の顧客" }])
+      let requested = false
+      server.use(
+        http.get(`${API_BASE}/daily-reports/name-entries`, () => HttpResponse.json([])),
+        http.get(`${API_BASE}/daily-reports/customer-open-orders`, () => {
+          requested = true
+          return HttpResponse.json([])
+        }),
+      )
+
+      render(<UnmatchedNameQueue canEdit />)
+      await openTab(/製品/)
+      await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
+
+      await waitFor(() => expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument())
+      expect(screen.queryByText(/この顧客の未出荷の受注/)).not.toBeInTheDocument()
+      expect(requested).toBe(false)
+    })
+  })
+
   it("編集できないロールには操作を出さない", async () => {
     mockQueue([unmatched({ raw_text: "組立機B" })])
 

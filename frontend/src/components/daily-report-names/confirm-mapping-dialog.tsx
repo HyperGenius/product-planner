@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { NAME_KIND_LABELS, type NameKind } from "@/types/daily-report-names"
+import { ProductOrderStatus } from "./customer-open-orders"
 
 /** 確認待ちの操作。行ごとに1つだけ持つ (Issue #645) */
 export type PendingNameAction =
@@ -23,6 +24,8 @@ export type PendingNameAction =
       targetLabel: string
       /** 類似候補から選んだときだけ（0〜1） */
       score?: number
+      /** 製品のときだけ。選んだ製品の、その顧客の受注状況を見せる (Issue #646) */
+      productRef?: { customerId: number; productId: number }
     }
   | { type: "ignore"; kind: NameKind; rawText: string; customerRaw?: string | null }
 
@@ -83,6 +86,12 @@ export function ConfirmMappingDialog({
                     )}
                   </div>
                 </div>
+              )}
+              {pending?.type === "map" && pending.productRef && (
+                <ProductOrderStatus
+                  customerId={pending.productRef.customerId}
+                  productId={pending.productRef.productId}
+                />
               )}
               <p>
                 {isMap

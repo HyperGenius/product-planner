@@ -29,6 +29,7 @@ from app.dependencies import (
 from app.models.daily_report_names import (
     CustomerNameAliasCreate,
     CustomerNameAliasUpdate,
+    CustomerOpenOrderResponse,
     DailyReportProductAliasCreate,
     EquipmentNameAliasCreate,
     EquipmentNameAliasUpdate,
@@ -47,6 +48,10 @@ from app.services.daily_report_name_matching_service import (
     list_master_process_names,
     list_name_entries,
     list_unmatched_names,
+)
+from app.services.daily_report_open_order_service import (
+    list_customer_open_orders,
+    summarize_candidate_orders,
 )
 from app.services.product_alias_service import register_daily_report_alias
 from app.services.product_matching_service import match_products
@@ -246,10 +251,13 @@ def get_unmatched_names(
 
 
 @daily_report_names_router.get(
-    "/product-candidates", response_model=list[ProductCandidateResponse]
+    "/product-candidates",
+    response_model=list[ProductCandidateResponse],
+    response_model_exclude_none=True,
 )
 def get_product_candidates(
     raw_text: str = Query(min_length=1),
+    customer_id: int | None = Query(default=None),
     tenant_id: str = Depends(get_current_tenant_id),
     client: Client = Depends(get_supabase_client),
 ):
@@ -257,8 +265,46 @@ def get_product_candidates(
 
     候補の提示専用。名寄せでは類似候補で自動確定しない（誤った照合で他の受注に実績が
     付くのを避けるため）ので、`match_products()` の自動確定結果は使わない。
+
+    `customer_id` を指定すると、候補ごとにその顧客の割り付け対象（confirmed / in_progress）の
+    受注件数 `open_order_count` と最寄りの希望納期 `nearest_deadline` を付ける (Issue #646)。
+    表示だけで、候補の並び・採否には使わない。
     """
-    return match_products(client, tenant_id, raw_text.strip())["candidates"]
+    candidates = match_products(client, tenant_id, raw_text.strip())["candidates"]
+    if customer_id is None:
+        return candidates
+    summary = summarize_candidate_orders(
+        client, tenant_id, customer_id, [c["product_id"] for c in candidates]
+    )
+    return [
+        {
+            **c,
+            "open_order_count": summary.get(c["product_id"], {}).get(
+                "open_order_count", 0
+            ),
+            "nearest_deadline": summary.get(c["product_id"], {}).get(
+                "nearest_deadline"
+            ),
+        }
+        for c in candidates
+    ]
+
+
+@daily_report_names_router.get(
+    "/customer-open-orders", response_model=list[CustomerOpenOrderResponse]
+)
+def get_customer_open_orders(
+    customer_id: int = Query(),
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """顧客の未出荷の受注の一覧（希望納期の近い順）を1リクエストで返す (Issue #646)。
+
+    製品の対応付けの確認ダイアログ（選んだ製品の割り付け先）と、行の展開部
+    （類似度の低い候補しかないときに人が見て選ぶ）で共有する。割り付けの候補かどうかは
+    `allocatable`。表示専用。
+    """
+    return list_customer_open_orders(client, tenant_id, customer_id)
 
 
 @daily_report_names_router.get("/name-entries", response_model=list[NameEntryResponse])

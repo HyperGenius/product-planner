@@ -429,7 +429,8 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
 | メソッド・パス | 内容 |
 |---|---|
 | `GET /daily-reports/unmatched-names?kind=` | 照合できなかった表記の一覧（`kind` / `raw_text` / `entry_count` / `last_work_date`。製品は `customer_raw` と、その照合結果 `customer_id`）。出現件数の多い順（同数は最終出現日の新しい順） |
-| `GET /daily-reports/product-candidates?raw_text=` | pg_trgm の類似候補（`product_id` / `name` / `score`）。自動確定の結果は返さない |
+| `GET /daily-reports/product-candidates?raw_text=&customer_id=` | pg_trgm の類似候補（`product_id` / `name` / `score`）。自動確定の結果は返さない。`customer_id` を渡すと候補ごとにその顧客の割り付け対象（`confirmed` / `in_progress`）の受注件数 `open_order_count` と最寄りの希望納期 `nearest_deadline` を付ける（Issue #646。表示だけで並び・採否には使わない。省略時は両方とも返さない） |
+| `GET /daily-reports/customer-open-orders?customer_id=` | 顧客の未出荷の受注（`draft` / `pending_approval` / `confirmed` / `in_progress`、製品ありのみ）を希望納期の近い順に返す（Issue #646）。`order_number` / `customer_order_no` / `product_name` / `quantity` / `desired_deadline`（DB 列は `orders.deadline_date`、無ければ `confirmed_deadline`）/ `status` / `allocatable`（割り付けの候補か） |
 | `GET` / `POST /daily-reports/name-aliases/equipment`、`PATCH` / `DELETE .../{alias_id}` | 設備の別名。body は `raw_text` / `equipment_id` |
 | `GET` / `POST /daily-reports/name-aliases/process`、`PATCH` / `DELETE .../{alias_id}` | 工程の別名。body は `raw_text` / `process_names`（重複・空白は除去。マスタに無い工程名は 422） |
 | `GET` / `POST /daily-reports/name-aliases/customer`、`PATCH` / `DELETE .../{alias_id}` | 顧客の別名。body は `raw_text` / `customer_id` |
@@ -461,6 +462,15 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
   それ以外は「他の製品から選択」（類似候補＋有効な製品すべて）。候補での自動確定はしない（#488 の方針）。
   顧客先が未照合の行は候補を取得せず「先に顧客を対応付けてください」、顧客先が空欄の行は「登録できません」を出す
   （どちらも「対象外」にはできる）
+- **製品の受注状況の表示（Issue #646）**: 受注の無い製品に対応付けても割り付けの候補が無く実績は未割当に残るので、登録前に気づけるようにする。
+  数える受注は割り付けの候補と同じ条件（`CANDIDATE_ORDER_STATUSES`）。**表示専用で、類似度や受注の有無で自動確定・並べ替えはしない**（#488）。
+  - 候補ボタンに「受注あり N件」「受注なし」のバッジ（受注なしでも選べる）。ツールチップに最寄りの希望納期
+  - 確認ダイアログ（`ProductOrderStatus`）に、選んだ製品の、その顧客の割り付け対象の受注表（注文番号・数量・希望納期・状態）。
+    0件なら「割り付け先がないため、実績は未割当に残ります」と警告する（登録は止めない）。受注の取得に失敗したときは警告を出さない
+  - 行の展開部（`CustomerOpenOrdersPanel`）に、顧客先が照合済みの行だけ、その顧客の未出荷の受注を一覧で出す（割り付け対象外には印）。
+    類似度の低い候補しかないときに人が見て選ぶための材料
+  - 顧客の受注は `useCustomerOpenOrders(customerId)` で顧客単位に1リクエスト取り、ダイアログと展開部と同じ顧客の行で共有する。
+    クエリキーは `["daily-report-customer-open-orders", customerId]` で `["daily-report-names"]` の外（登録のたびに行数分再取得しない。PR #498）
 - 操作できるのは `order_handler` / `president` / `platform_admin`（`DAILY_REPORT_NAME_EDITOR_ROLES`、Backend の
   `_ALIAS_EDITOR_ROLES` と揃える）。それ以外のロールには閲覧のみで操作ボタンを出さない
 - 登録・変更・削除・対象外の後は `["daily-report-names"]` 配下のクエリ（未照合一覧・登録済みの一覧・対象外の一覧）を

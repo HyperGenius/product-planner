@@ -87,6 +87,25 @@ class ProductCandidateResponse(BaseModel):
     product_id: int
     name: str
     score: float
+    # 顧客（customer_id）を指定したときだけ値が入る (Issue #646)。数えるのは割り付けの候補と
+    # 同じ confirmed / in_progress の受注。受注が無ければ 0 / None
+    open_order_count: int | None = None
+    nearest_deadline: str | None = None
+
+
+class CustomerOpenOrderResponse(BaseModel):
+    """顧客の未出荷の受注 (Issue #646)。`desired_deadline` の DB 列は `orders.deadline_date`。"""
+
+    order_id: int
+    order_number: str | None = None
+    customer_order_no: str | None = None
+    product_id: int
+    product_name: str
+    quantity: int | None = None
+    desired_deadline: str | None = None
+    status: str
+    # 割り付けの候補（confirmed / in_progress）か
+    allocatable: bool
 
 
 class IgnoredNameCreate(_RawTextSchema):

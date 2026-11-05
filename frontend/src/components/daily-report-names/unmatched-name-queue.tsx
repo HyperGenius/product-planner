@@ -3,6 +3,7 @@
 import * as React from "react"
 import { ChevronDown, ChevronRight, EyeOff } from "lucide-react"
 import { toast } from "sonner"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
@@ -21,8 +22,10 @@ import {
   NAME_KIND_LABELS,
   NAME_KINDS,
   type NameKind,
+  type ProductCandidate,
   type UnmatchedName,
 } from "@/types/daily-report-names"
+import { CustomerOpenOrdersPanel } from "./customer-open-orders"
 import { ConfirmMappingDialog, type PendingNameAction } from "./confirm-mapping-dialog"
 import { KIND_PANEL_CLASS, KindTabsList, kindColorStyle } from "./kind-tabs"
 import { NameEntriesTable } from "./name-entries-table"
@@ -101,7 +104,12 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
   const onError = (fallback: string) => (error: unknown) =>
     toast.error(nameMutationErrorMessage(error, fallback))
   // 選んだ時点では登録せず、確認ダイアログを開く (Issue #645)
-  const requestMap = (variables: AliasVariables, targetLabel: string, score?: number) =>
+  const requestMap = (
+    variables: AliasVariables,
+    targetLabel: string,
+    score?: number,
+    productRef?: { customerId: number; productId: number },
+  ) =>
     setPending({
       view: {
         type: "map",
@@ -110,6 +118,7 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
         customerRaw: item.customer_raw,
         targetLabel,
         score,
+        productRef,
       },
       variables,
     })
@@ -231,6 +240,7 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
                     },
                     label,
                     score,
+                    { customerId, productId },
                   )
                 }
               />
@@ -251,6 +261,9 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
       {expanded && (
         <div className="rounded-md border bg-muted/30">
           <NameEntriesTable item={item} />
+          {item.kind === "product" && item.customer_id !== null && (
+            <CustomerOpenOrdersPanel customerId={item.customer_id} />
+          )}
         </div>
       )}
     </li>
@@ -292,7 +305,7 @@ function ProductCandidates({
   disabled: boolean
   onSelect: (productId: number, customerId: number, label: string, score?: number) => void
 }) {
-  const { data: candidates } = useProductCandidates(item.raw_text)
+  const { data: candidates } = useProductCandidates(item.raw_text, customerId)
   return (
     <>
       {(candidates ?? []).slice(0, INLINE_CANDIDATE_COUNT).map((candidate) => (
@@ -301,13 +314,14 @@ function ProductCandidates({
           variant="secondary"
           size="sm"
           disabled={disabled}
-          title={`類似度 ${Math.round(candidate.score * 100)}%`}
+          title={candidateTitle(candidate)}
           aria-label={`「${item.raw_text}」を「${candidate.name}」に対応付ける`}
           onClick={() =>
             onSelect(candidate.product_id, customerId, candidate.name, candidate.score)
           }
         >
           <span className="max-w-[10rem] truncate">{candidate.name}</span>
+          <OrderBadge candidate={candidate} />
         </Button>
       ))}
       <ProductPicker
@@ -317,5 +331,30 @@ function ProductCandidates({
         onSelect={(id, label) => onSelect(id, customerId, label)}
       />
     </>
+  )
+}
+
+function candidateTitle(candidate: ProductCandidate): string {
+  const parts = [`類似度 ${Math.round(candidate.score * 100)}%`]
+  if (candidate.nearest_deadline) {
+    parts.push(`最寄りの希望納期 ${formatWorkDate(candidate.nearest_deadline)}`)
+  }
+  return parts.join("・")
+}
+
+/**
+ * 候補に、その顧客の割り付け対象の受注の有無を出す (Issue #646)。受注なしでも選べる
+ * （登録しても実績は未割当に残るので、確認ダイアログで警告する）。
+ */
+function OrderBadge({ candidate }: { candidate: ProductCandidate }) {
+  if (candidate.open_order_count === undefined) return null
+  return candidate.open_order_count > 0 ? (
+    <Badge variant="secondary" className="bg-emerald-100 text-xs font-normal text-emerald-800">
+      受注あり {candidate.open_order_count}件
+    </Badge>
+  ) : (
+    <Badge variant="outline" className="text-xs font-normal text-amber-700">
+      受注なし
+    </Badge>
   )
 }
