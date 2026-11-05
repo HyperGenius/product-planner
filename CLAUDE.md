@@ -215,6 +215,9 @@ cd backend && ruff check . && mypy .
     `daily_report_stock_assignment_sources` に残す（`replace_daily_report_allocation` の `p_stock_sources`。この RPC の最新の定義は
     `20261106000000_add_daily_report_stock_assignment_sources.sql`）。登録前の候補は未割当テーブル＋明細から読み出し時に引く。
     表示は日報の表記（`product_raw` 等）で、マスタ名と並べて From/To を見比べさせる
+  - **工程などで中身が切り替わるダイアログ（Issue #633）**: 切り替えで件数が変わるリスト（引き当て元の候補）は、`DialogContent` が
+    中央寄せのため高さの変化で上下とも動く。リストは固定高＋`overflow-y-auto` の枠に入れ、0件でも枠を消さずに空表示を枠内に出す。
+    見出しに件数を出して隠れた分に気づけるようにする。折り返す説明文には `min-h-*` を付ける
   - **送品日時 `orders.shipped_at`** は `status` が `shipped` / `completed` になったときにトリガー `trg_set_order_shipped_at` が書く。
     送品の経路を足してもアプリから書かない
   - **`merge_products` の最新の定義は `20261029000000_add_daily_report_stock_estimates.sql`**（作り置きの指摘の付け替えを追加）。
