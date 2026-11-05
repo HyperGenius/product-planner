@@ -92,6 +92,39 @@ export function matchesCategoryFilter(
   return group.category === filter
 }
 
+/**
+ * 照合状況の関心事カード (Issue #639)。カードを選ぶと、その関心事の詳細パネルだけを出す。
+ * 並びは3色バー（未割当 → 未照合）に合わせ、要対応の工程マスタ未登録、参考の作り置きの順。
+ */
+export type CoverageCard = "unallocated" | "unmatched" | "routing" | "stock"
+
+export const COVERAGE_CARDS: readonly CoverageCard[] = [
+  "unallocated",
+  "unmatched",
+  "routing",
+  "stock",
+]
+
+export const DEFAULT_COVERAGE_CARD: CoverageCard = "unallocated"
+
+/**
+ * URL のハッシュ（`#routing` 等）からカードを求める。ハッシュは外部入力なので、
+ * 既知のカード以外（空・未知の値）は既定のカードへ寄せる。
+ */
+export function toValidCoverageCard(hash: string): CoverageCard {
+  const value = hash.replace(/^#/, "")
+  return COVERAGE_CARDS.find((card) => card === value) ?? DEFAULT_COVERAGE_CARD
+}
+
+/** 工程マスタ未登録の製品の合計（カードの表示用） */
+export function sumProductsWithoutRoutings(products: readonly ProductWithoutRoutings[]) {
+  return {
+    productCount: products.length,
+    qty: products.reduce((sum, p) => sum + p.qty, 0),
+    rowCount: products.reduce((sum, p) => sum + p.row_count, 0),
+  }
+}
+
 /** 期間（直近 N か月、今月を含む）。null はすべての期間 */
 export const PERIOD_OPTIONS: { months: number | null; label: string }[] = [
   { months: 1, label: "今月" },

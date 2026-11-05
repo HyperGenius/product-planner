@@ -83,37 +83,87 @@ function mockCoverage(coverage: Coverage = COVERAGE) {
 }
 
 const groupRows = () =>
-  within(screen.getByRole("region", { name: "割り付けできなかった実績" }))
+  within(screen.getByRole("region", { name: "未割当の実績" }))
     .getAllByRole("button", { expanded: false })
     .map((b) => b.textContent)
 
 describe("DailyReportCoverage", () => {
   beforeEach(() => {
+    window.location.hash = ""
     // 作り置きの推定（#591）は stock-estimates.test.tsx で見るので、ここでは空にする
     server.use(
       http.get(`${API_BASE}/daily-reports/stock-estimates`, () =>
         HttpResponse.json({ computed_at: null, items: [], feedback: [] }),
       ),
       http.get(`${API_BASE}/tenant/members/me`, () =>
-        HttpResponse.json({ user_id: "u1", tenant_id: "tenant-1", role: "order_handler" }),
+        HttpResponse.json({
+          user_id: "u1",
+          tenant_id: "tenant-1",
+          role: "order_handler",
+        }),
       ),
     )
   })
 
-  it("割り付け済み・未割当・未照合の内訳と、未照合の名寄せへの導線を出す", async () => {
+  it("サマリと、関心事のカード（未割当・未照合・工程マスタ未登録・作り置き）を出す", async () => {
     const requests = mockCoverage()
 
     render(<DailyReportCoverage />)
 
     expect(await screen.findByText("600 / 1,000 個")).toBeInTheDocument()
-    expect(screen.getByText("600 / 1,000 個")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /4 行を名寄せで対応付ける/ })).toHaveAttribute(
-      "href",
-      "/master/daily-report-names",
-    )
+    const cards = within(screen.getByRole("group", { name: "確認する内容" })).getAllByRole("button")
+    expect(cards.map((c) => c.textContent)).toEqual([
+      "未割当（照合はできた）300 個30%・3 件",
+      "未照合（マスタに無い表記）100 個10%・4 行",
+      "工程マスタ未登録要対応1 製品200 個・5 行が割り付け対象外",
+      "作り置き（推定）参考0 製品受注に割り付いていない在庫",
+    ])
     expect(screen.getByText(/2026\/08\/01 以降/)).toBeInTheDocument()
     // 既定は直近3か月
     expect(requests[0].searchParams.get("months")).toBe("3")
+  })
+
+  it("既定では未割当のパネルだけを出し、他のカードの情報は出さない", async () => {
+    mockCoverage()
+    render(<DailyReportCoverage />)
+
+    await screen.findByText("600 / 1,000 個")
+    expect(screen.getByRole("region", { name: "未割当の実績" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^未割当/, pressed: true })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "未照合の表記" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: /工程マスタ未登録の製品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: /作り置き/ })).not.toBeInTheDocument()
+  })
+
+  it("カードを選ぶとそのパネルに切り替わり、選択をハッシュに残す", async () => {
+    mockCoverage()
+    render(<DailyReportCoverage />)
+
+    await screen.findByText("600 / 1,000 個")
+    await userEvent.click(screen.getByRole("button", { name: /^未照合/ }))
+
+    expect(screen.getByRole("region", { name: "未照合の表記" })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "未割当の実績" })).not.toBeInTheDocument()
+    expect(window.location.hash).toBe("#unmatched")
+    expect(screen.getByRole("link", { name: /名寄せで対応付ける/ })).toHaveAttribute(
+      "href",
+      "/master/daily-report-names",
+    )
+  })
+
+  it("ハッシュで開くカードを指定でき、未知の値は未割当に戻す", async () => {
+    mockCoverage()
+    window.location.hash = "#routing"
+    const { unmount } = render(<DailyReportCoverage />)
+
+    expect(
+      await screen.findByRole("region", { name: /工程マスタ未登録の製品/ }),
+    ).toBeInTheDocument()
+    unmount()
+
+    window.location.hash = "#unknown"
+    render(<DailyReportCoverage />)
+    expect(await screen.findByRole("region", { name: "未割当の実績" })).toBeInTheDocument()
   })
 
   it("既定の「要確認」では出荷済みの受注のみの実績を除き、「すべて」で出す", async () => {
@@ -125,7 +175,9 @@ describe("DailyReportCoverage", () => {
       expect.stringContaining("テスト製品A（P-001）"),
       expect.stringContaining("テスト製品C"),
     ])
-    expect(screen.getByText("この製品の工程に「溶接」がありません。実際の工程順は？")).toBeInTheDocument()
+    expect(
+      screen.getByText("この製品の工程に「溶接」がありません。実際の工程順は？"),
+    ).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole("button", { name: /^すべて\s*3$/ }))
 
@@ -159,20 +211,20 @@ describe("DailyReportCoverage", () => {
       screen.getByText(/日報の顧客先と別の顧客に同じ製品の受注があります。顧客先の書き間違い？/),
     ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "顧客B・A-77" })).toHaveAttribute("href", "/orders/77")
-    expect(screen.getByRole("link", { name: "顧客不明・#78" })).toHaveAttribute("href", "/orders/78")
+    expect(screen.getByRole("link", { name: "顧客不明・#78" })).toHaveAttribute(
+      "href",
+      "/orders/78",
+    )
   })
 
-  it("サマリの内訳を押すと一覧をその分類に絞り込む", async () => {
+  it("パネル内の絞り込みで、その分類の実績だけにする", async () => {
     mockCoverage()
     render(<DailyReportCoverage />)
 
     await screen.findByText("600 / 1,000 個")
-    await userEvent.click(screen.getByRole("button", { name: /^出荷済みの受注のみ\s*80/ }))
+    await userEvent.click(screen.getByRole("button", { name: /^出荷済みの受注のみ\s*1$/ }))
 
     expect(groupRows()).toEqual([expect.stringContaining("テスト製品B")])
-    expect(
-      screen.getByRole("button", { name: /^出荷済みの受注のみ\s*1$/, pressed: true }),
-    ).toBeInTheDocument()
   })
 
   it("行を開くと、製品・工程名・理由・期間で絞り込んだ元の日報の行を出す", async () => {
@@ -226,18 +278,25 @@ describe("DailyReportCoverage", () => {
     expect(requests[1].searchParams.has("months")).toBe(false)
   })
 
-  it("工程ルートが無い製品から工程管理を開ける", async () => {
+  it("工程マスタ未登録の製品から工程管理を開ける", async () => {
     mockCoverage()
+    window.location.hash = "#routing"
     server.use(
       http.get(`${API_BASE}/process-routings`, () => HttpResponse.json([])),
       http.get(`${API_BASE}/equipment-groups`, () => HttpResponse.json([])),
       http.get(`${API_BASE}/tenant/members/me`, () =>
-        HttpResponse.json({ user_id: "u1", tenant_id: "tenant-1", role: "order_handler" }),
+        HttpResponse.json({
+          user_id: "u1",
+          tenant_id: "tenant-1",
+          role: "order_handler",
+        }),
       ),
     )
     render(<DailyReportCoverage />)
 
-    const section = await screen.findByRole("region", { name: /工程ルートが無い製品/ })
+    const section = await screen.findByRole("region", {
+      name: /工程マスタ未登録の製品/,
+    })
     expect(within(section).getByText("日報に出てきた工程: 溶接")).toBeInTheDocument()
     const button = within(section).getByRole("button", { name: "工程を登録" })
     // 製品マスタの読み込み後に押せる

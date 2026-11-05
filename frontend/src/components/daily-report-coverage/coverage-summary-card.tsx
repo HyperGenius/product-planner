@@ -1,45 +1,105 @@
 "use client"
 
-import Link from "next/link"
-import { ArrowRight } from "lucide-react"
+import * as React from "react"
+import { Info } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import {
-  CATEGORY_META,
-  CATEGORY_ORDER,
   allocatedRatio,
   formatPercent,
   ratio,
+  type CoverageCard,
 } from "@/lib/daily-report-coverage-utils"
-import type { CoverageSummary, UnallocatedCategory } from "@/types/daily-report-progress"
+import type { CoverageSummary } from "@/types/daily-report-progress"
 
+/** 3色バーの区分。カードの色・並び（未割当 → 未照合）はこれに合わせる */
 const SEGMENTS = [
-  { key: "allocated", label: "受注に割り付け済み", color: "bg-emerald-500" },
-  { key: "unallocated", label: "未割当（照合はできた）", color: "bg-amber-400" },
-  { key: "unmatched", label: "未照合（マスタに無い表記）", color: "bg-slate-400" },
+  { key: "allocated", label: "割り付け済み", color: "bg-emerald-500" },
+  { key: "unallocated", label: "未割当", color: "bg-amber-400" },
+  { key: "unmatched", label: "未照合", color: "bg-slate-400" },
 ] as const
 
+export interface CoverageCardsInfo {
+  /** 工程マスタ未登録の製品 */
+  routing: { productCount: number; qty: number; rowCount: number }
+  /** 作り置きの推定の製品数。取得前・失敗時は null */
+  stockCount: number | null
+  /** 未割当のまとめの件数 */
+  unallocatedGroupCount: number
+}
+
 /**
- * 照合状況のサマリ (Issue #542)。日報の良品数を「割り付け済み / 未割当 / 未照合」に分けて出し、
- * 未割当は分類ごとの内訳を押すと下の一覧がその分類に絞り込まれる。
+ * 照合状況のサマリと、関心事のカード (Issue #542 / #639)。
+ * 日報の良品数を「割り付け済み / 未割当 / 未照合」に分けて出し、
+ * カードを選ぶと下に、その関心事の詳細だけを出す。
  */
 export function CoverageSummaryCard({
   summary,
-  onSelectCategory,
+  info,
+  selected,
+  onSelect,
 }: {
   summary: CoverageSummary
-  onSelectCategory: (category: UnallocatedCategory) => void
+  info: CoverageCardsInfo
+  selected: CoverageCard
+  onSelect: (card: CoverageCard) => void
 }) {
+  const [noteOpen, setNoteOpen] = React.useState(false)
   const values = {
     allocated: summary.allocated_qty,
     unallocated: summary.unallocated_qty,
     unmatched: summary.unmatched_qty,
   }
-  const byCategory = new Map(summary.unallocated.map((t) => [t.category, t]))
-  const categories = CATEGORY_ORDER.filter((c) => byCategory.has(c))
+  const share = (qty: number) => formatPercent(ratio(qty, summary.total_qty))
+
+  const cards: {
+    key: CoverageCard
+    label: string
+    badge?: { text: string; className: string }
+    main: string
+    sub: string
+    /** 上辺の色（バーと同じ色） */
+    stripe: string
+    ring: string
+  }[] = [
+    {
+      key: "unallocated",
+      label: "未割当（照合はできた）",
+      main: `${summary.unallocated_qty.toLocaleString()} 個`,
+      sub: `${share(summary.unallocated_qty)}・${info.unallocatedGroupCount.toLocaleString()} 件`,
+      stripe: "border-t-amber-400",
+      ring: "ring-amber-400",
+    },
+    {
+      key: "unmatched",
+      label: "未照合（マスタに無い表記）",
+      main: `${summary.unmatched_qty.toLocaleString()} 個`,
+      sub: `${share(summary.unmatched_qty)}・${summary.unmatched_rows.toLocaleString()} 行`,
+      stripe: "border-t-slate-400",
+      ring: "ring-slate-400",
+    },
+    {
+      key: "routing",
+      label: "工程マスタ未登録",
+      badge: { text: "要対応", className: "text-red-600 dark:text-red-400" },
+      main: `${info.routing.productCount.toLocaleString()} 製品`,
+      sub: `${info.routing.qty.toLocaleString()} 個・${info.routing.rowCount.toLocaleString()} 行が割り付け対象外`,
+      stripe: "border-t-red-500",
+      ring: "ring-red-500",
+    },
+    {
+      key: "stock",
+      label: "作り置き（推定）",
+      badge: { text: "参考", className: "text-muted-foreground" },
+      main: info.stockCount === null ? "－" : `${info.stockCount.toLocaleString()} 製品`,
+      sub: "受注に割り付いていない在庫",
+      stripe: "border-t-sky-500",
+      ring: "ring-sky-500",
+    },
+  ]
 
   return (
     <Card>
-      <CardContent className="space-y-5 pt-6">
+      <CardContent className="space-y-4 pt-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-sm text-muted-foreground">受注に割り付けできた実績</p>
@@ -49,15 +109,27 @@ export function CoverageSummaryCard({
           </div>
           <p className="text-sm text-muted-foreground tabular-nums">
             {summary.allocated_qty.toLocaleString()} / {summary.total_qty.toLocaleString()} 個
+            <button
+              type="button"
+              className="ml-1.5 inline-flex align-middle text-muted-foreground hover:text-foreground"
+              aria-label="数量の数え方"
+              aria-expanded={noteOpen}
+              onClick={() => setNoteOpen((v) => !v)}
+            >
+              <Info className="h-4 w-4" />
+            </button>
           </p>
         </div>
+        {noteOpen && (
+          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            数量は日報の良品数です。1行が2つの工程にまたがる表記（「カシメ、仕上げ加工」など）は工程ごとに数えます。
+          </p>
+        )}
 
         <div
           className="flex h-3 w-full overflow-hidden rounded-full bg-muted"
           role="img"
-          aria-label={SEGMENTS.map(
-            (s) => `${s.label} ${formatPercent(ratio(values[s.key], summary.total_qty))}`,
-          ).join("、")}
+          aria-label={SEGMENTS.map((s) => `${s.label} ${share(values[s.key])}`).join("、")}
         >
           {SEGMENTS.map((s) => {
             const r = ratio(values[s.key], summary.total_qty)
@@ -67,66 +139,38 @@ export function CoverageSummaryCard({
           })}
         </div>
 
-        <dl className="grid gap-3 sm:grid-cols-3">
-          {SEGMENTS.map((s) => (
-            <div key={s.key} className="space-y-0.5">
-              <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className={`inline-block h-2.5 w-2.5 rounded-sm ${s.color}`} />
-                {s.label}
-              </dt>
-              <dd className="text-lg font-semibold tabular-nums">
-                {values[s.key].toLocaleString()} 個
-                <span className="ml-1.5 text-sm font-normal text-muted-foreground">
-                  {formatPercent(ratio(values[s.key], summary.total_qty))}
+        <div
+          className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4"
+          role="group"
+          aria-label="確認する内容"
+        >
+          {cards.map((card) => {
+            const isSelected = selected === card.key
+            return (
+              <button
+                key={card.key}
+                type="button"
+                aria-pressed={isSelected}
+                aria-controls="coverage-panel"
+                className={`flex flex-col gap-0.5 rounded-lg border border-t-[5px] bg-card px-3 py-2.5 text-left hover:bg-accent ${card.stripe} ${
+                  isSelected ? `bg-accent ring-2 ${card.ring}` : ""
+                }`}
+                onClick={() => onSelect(card.key)}
+              >
+                <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{card.label}</span>
+                  {card.badge && (
+                    <span className={`font-semibold ${card.badge.className}`}>
+                      {card.badge.text}
+                    </span>
+                  )}
                 </span>
-              </dd>
-              {s.key === "unmatched" && summary.unmatched_rows > 0 && (
-                <dd>
-                  <Link
-                    href="/master/daily-report-names"
-                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                  >
-                    {summary.unmatched_rows.toLocaleString()} 行を名寄せで対応付ける
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
-                </dd>
-              )}
-            </div>
-          ))}
-        </dl>
-
-        {categories.length > 0 && (
-          <div className="space-y-1.5 border-t pt-4">
-            <p className="text-xs font-medium text-muted-foreground">未割当の内訳</p>
-            <ul className="grid gap-1 sm:grid-cols-2">
-              {categories.map((category) => {
-                const total = byCategory.get(category)!
-                const { label, needsHearing } = CATEGORY_META[category]
-                return (
-                  <li key={category}>
-                    <button
-                      type="button"
-                      className="flex w-full items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-                      onClick={() => onSelectCategory(category)}
-                    >
-                      <span className={needsHearing ? "" : "text-muted-foreground"}>{label}</span>
-                      <span className="tabular-nums text-muted-foreground">
-                        <span className="font-medium text-foreground">
-                          {total.qty.toLocaleString()}
-                        </span>{" "}
-                        個・{total.row_count.toLocaleString()} 行
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          数量は日報の良品数です。1行が2つの工程にまたがる表記（「カシメ、仕上げ加工」など）は工程ごとに数えます。
-        </p>
+                <span className="text-xl font-bold tabular-nums">{card.main}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{card.sub}</span>
+              </button>
+            )
+          })}
+        </div>
       </CardContent>
     </Card>
   )
