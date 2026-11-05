@@ -178,6 +178,10 @@ cd backend && ruff check . && mypy .
     （製品の別名辞書 `product_name_aliases` は `product_id` NOT NULL でメール起票と共有のため）。対象外は照合結果に影響させず、
     `list_unmatched_names()` で除外するだけにする。書き込めるロールは Backend `_ALIAS_EDITOR_ROLES` と Frontend
     `DAILY_REPORT_NAME_EDITOR_ROLES` を揃える
+  - **名寄せ画面のレイアウト（Issue #643）**: 外側のモードは下線タブ、内側の種別は `KindTabsList`（色付きカード）で、同じ見た目の `Tabs` を
+    入れ子にしない。種別の色は `KIND_COLORS` 1か所で、選択中の色は CSS 変数 `--kind-color` で一覧の上辺へ渡す。ページ全体はスクロールさせず
+    `h-[calc(100dvh-6.75rem)]` の縦 flex にし、`TabsContent` と親 `Tabs` に `min-h-0 flex-1` を付けて一覧（`KIND_PANEL_CLASS`）だけを
+    スクロールさせる（`min-h-0` が無いと flex の子が内容の高さまで伸びてページが動く）。ページ側の `py-4` は外す（高さの計算に含まれる）
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は

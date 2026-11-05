@@ -16,7 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { useCustomers } from "@/hooks/use-customers"
 import {
   useDeleteNameAlias,
@@ -27,12 +27,8 @@ import { useEquipments } from "@/hooks/use-equipments"
 import { useProducts } from "@/hooks/use-products"
 import { nameMutationErrorMessage } from "@/lib/daily-report-name-utils"
 import { equipmentDisplayName } from "@/lib/equipment-utils"
-import {
-  NAME_KIND_LABELS,
-  NAME_KINDS,
-  type NameKind,
-  type ProductNameAlias,
-} from "@/types/daily-report-names"
+import type { NameKind, ProductNameAlias } from "@/types/daily-report-names"
+import { KIND_PANEL_CLASS, KindTabsList, kindColorStyle } from "./kind-tabs"
 import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from "./target-pickers"
 
 const PRODUCT_ALIAS_SOURCE_LABELS: Record<ProductNameAlias["source"], string> = {
@@ -50,43 +46,43 @@ export function NameAliasList({ canEdit }: { canEdit: boolean }) {
   const [query, setQuery] = React.useState("")
 
   return (
-    <div className="space-y-3">
-      <Tabs value={kind} onValueChange={(v) => setKind(v as NameKind)}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <TabsList>
-            {NAME_KINDS.map((k) => (
-              <TabsTrigger key={k} value={k}>
-                {NAME_KIND_LABELS[k]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <Input
-            className="h-8 w-56"
-            placeholder="表記で絞り込み"
-            aria-label="表記で絞り込み"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <TabsContent value="equipment">
-          <EquipmentAliases canEdit={canEdit} query={query} />
-        </TabsContent>
-        <TabsContent value="process">
-          <ProcessAliases canEdit={canEdit} query={query} />
-        </TabsContent>
-        <TabsContent value="customer">
-          <CustomerAliases canEdit={canEdit} query={query} />
-        </TabsContent>
-        <TabsContent value="product">
-          <p className="mb-2 text-xs text-muted-foreground">
-            製品の別名はメール起票と共通です（顧客ごと）。変更・削除はメール起票の照合にも反映されます。
-          </p>
-          <ProductAliases canEdit={canEdit} query={query} />
-        </TabsContent>
-      </Tabs>
-    </div>
+    <Tabs
+      value={kind}
+      onValueChange={(v) => setKind(v as NameKind)}
+      className="min-h-0 flex-1"
+      style={kindColorStyle(kind)}
+    >
+      <KindTabsList />
+      <div className="flex justify-end">
+        <Input
+          className="h-8 w-56"
+          placeholder="表記で絞り込み"
+          aria-label="表記で絞り込み"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      <TabsContent value="equipment" className={ALIAS_CONTENT_CLASS}>
+        <EquipmentAliases canEdit={canEdit} query={query} />
+      </TabsContent>
+      <TabsContent value="process" className={ALIAS_CONTENT_CLASS}>
+        <ProcessAliases canEdit={canEdit} query={query} />
+      </TabsContent>
+      <TabsContent value="customer" className={ALIAS_CONTENT_CLASS}>
+        <CustomerAliases canEdit={canEdit} query={query} />
+      </TabsContent>
+      <TabsContent value="product" className={ALIAS_CONTENT_CLASS}>
+        <p className="text-xs text-muted-foreground">
+          製品の別名はメール起票と共通です（顧客ごと）。変更・削除はメール起票の照合にも反映されます。
+        </p>
+        <ProductAliases canEdit={canEdit} query={query} />
+      </TabsContent>
+    </Tabs>
   )
 }
+
+/** 種別の中身。一覧（`AliasTable`）が残りの高さを使ってスクロールする (Issue #643) */
+const ALIAS_CONTENT_CLASS = "flex min-h-0 flex-1 flex-col gap-2"
 
 interface ListProps {
   canEdit: boolean
@@ -118,7 +114,7 @@ function AliasTable({
       </p>
     )
   }
-  return <ul className="divide-y rounded-lg border bg-card">{children}</ul>
+  return <ul className={`divide-y ${KIND_PANEL_CLASS}`}>{children}</ul>
 }
 
 function AliasRow({

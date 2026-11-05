@@ -26,7 +26,7 @@ export function IgnoredNameList({ canEdit }: { canEdit: boolean }) {
   }
 
   return (
-    <ul className="divide-y rounded-lg border bg-card">
+    <ul className="min-h-0 flex-1 divide-y overflow-y-auto rounded-lg border bg-card">
       {ignored.map((item) => (
         <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
           <Badge variant="outline">{NAME_KIND_LABELS[item.kind]}</Badge>

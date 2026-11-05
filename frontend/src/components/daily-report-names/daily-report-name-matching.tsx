@@ -7,6 +7,11 @@ import { IgnoredNameList } from "./ignored-name-list"
 import { NameAliasList } from "./name-alias-list"
 import { UnmatchedNameQueue } from "./unmatched-name-queue"
 
+/** 作業モードのタブ（下線）。種別のカード型タブと見分ける (Issue #643) */
+const MODE_TRIGGER_CLASS = "h-full flex-none rounded-none px-1 text-base group-data-[orientation=horizontal]/tabs:after:bottom-[-1px]"
+/** モードの中身。一覧の領域が残りの高さを使ってスクロールする */
+const MODE_CONTENT_CLASS = "flex min-h-0 flex-1 flex-col gap-2"
+
 /**
  * 日報の名寄せ画面 (Issue #489)。
  * 日報の表記（設備・工程・顧客・製品）のうちマスタに照合できなかったものを、
@@ -18,7 +23,8 @@ export function DailyReportNameMatching() {
   const canEdit = member != null && DAILY_REPORT_NAME_EDITOR_ROLES.includes(member.role)
 
   return (
-    <div className="space-y-4 pb-10">
+    // 高さ = 画面 − レイアウトのヘッダー(3.75rem) − 上下余白(3rem)。ページ全体はスクロールさせず、一覧の領域だけで動かす (Issue #643)
+    <div className="flex h-[calc(100dvh-6.75rem)] min-w-0 flex-col gap-3">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">日報の名寄せ</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -30,19 +36,19 @@ export function DailyReportNameMatching() {
           </p>
         )}
       </div>
-      <Tabs defaultValue="unmatched">
-        <TabsList>
-          <TabsTrigger value="unmatched">未照合キュー</TabsTrigger>
-          <TabsTrigger value="aliases">登録済みの対応付け</TabsTrigger>
-          <TabsTrigger value="ignored">対象外</TabsTrigger>
+      <Tabs defaultValue="unmatched" className="min-h-0 flex-1">
+        <TabsList variant="line" className="h-10 w-full justify-start gap-4 border-b p-0">
+          <TabsTrigger value="unmatched" className={MODE_TRIGGER_CLASS}>未照合キュー</TabsTrigger>
+          <TabsTrigger value="aliases" className={MODE_TRIGGER_CLASS}>登録済みの対応付け</TabsTrigger>
+          <TabsTrigger value="ignored" className={MODE_TRIGGER_CLASS}>対象外</TabsTrigger>
         </TabsList>
-        <TabsContent value="unmatched">
+        <TabsContent value="unmatched" className={MODE_CONTENT_CLASS}>
           <UnmatchedNameQueue canEdit={canEdit} />
         </TabsContent>
-        <TabsContent value="aliases">
+        <TabsContent value="aliases" className={MODE_CONTENT_CLASS}>
           <NameAliasList canEdit={canEdit} />
         </TabsContent>
-        <TabsContent value="ignored">
+        <TabsContent value="ignored" className={MODE_CONTENT_CLASS}>
           <IgnoredNameList canEdit={canEdit} />
         </TabsContent>
       </Tabs>
