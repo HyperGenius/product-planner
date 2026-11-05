@@ -166,7 +166,7 @@ export function ShippingOrderRow({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => onShip(order.id, order.order_no ?? "")}
+            onClick={() => onShip(order.id, String(order.order_no ?? order.id))}
             disabled={shipIsPending}
           >
             <Truck className="mr-1.5 h-3.5 w-3.5" />

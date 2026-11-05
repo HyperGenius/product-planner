@@ -42,6 +42,33 @@ function captureListRequests(): number[][] {
 }
 
 describe("useOrderProgressList", () => {
+  it("keepPrevious なら受注の集合が変わっても取得し直す間は直前の結果を返す（Issue #649）", async () => {
+    captureListRequests()
+    const { result, rerender } = renderHook(
+      ({ ids }: { ids: number[] }) => useOrderProgressList(ids, { keepPrevious: true }),
+      { initialProps: { ids: [1, 2] } },
+    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    rerender({ ids: [2] })
+
+    expect(result.current.isLoading).toBe(false)
+    expect(result.current.data?.items.map((i) => i.order_id)).toEqual([1, 2])
+    await waitFor(() => expect(result.current.data?.items.map((i) => i.order_id)).toEqual([2]))
+  })
+
+  it("keepPrevious なしなら受注の集合が変わると読み込み中に戻る", async () => {
+    captureListRequests()
+    const { result, rerender } = renderHook(({ ids }: { ids: number[] }) => useOrderProgressList(ids), {
+      initialProps: { ids: [1, 2] },
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    rerender({ ids: [2] })
+
+    expect(result.current.isLoading).toBe(true)
+  })
+
   it("受注をまとめて1リクエストで引く（重複は除く）", async () => {
     const seen = captureListRequests()
     const { result } = renderHook(() => useOrderProgressList([3, 1, 3, 2]))

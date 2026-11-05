@@ -1,6 +1,6 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { apiClient } from "@/lib/api-client"
 import type { OrderProgress, OrderProgressList } from "@/types/daily-report-progress"
 
@@ -22,10 +22,12 @@ const PROGRESS_STALE_TIME_MS = 5 * 60 * 1000
  *
  * @param options.refetchInterval 自動再取得の間隔(ms)。置きっぱなしのタブレットで見る生産スケジュール
  *   （Issue #581）から指定する。未指定時は自動再取得しない
+ * @param options.keepPrevious true なら `orderIds` が変わって別キーになっても、取得し直す間は直前の結果を返す
+ *   （送品の消し込みで1件送品すると対象の ID が減り、表全体が読み込み中に戻るのを防ぐ。Issue #649）
  */
 export function useOrderProgressList(
   orderIds: readonly number[],
-  options?: { refetchInterval?: number },
+  options?: { refetchInterval?: number; keepPrevious?: boolean },
 ) {
   const ids = Array.from(new Set(orderIds)).sort((a, b) => a - b)
   return useQuery<OrderProgressList>({
@@ -51,6 +53,7 @@ export function useOrderProgressList(
     staleTime: PROGRESS_STALE_TIME_MS,
     refetchOnWindowFocus: false,
     refetchInterval: options?.refetchInterval,
+    placeholderData: options?.keepPrevious ? keepPreviousData : undefined,
   })
 }
 
