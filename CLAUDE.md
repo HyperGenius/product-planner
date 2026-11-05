@@ -215,6 +215,9 @@ cd backend && ruff check . && mypy .
     `daily_report_stock_assignment_sources` に残す（`replace_daily_report_allocation` の `p_stock_sources`。この RPC の最新の定義は
     `20261106000000_add_daily_report_stock_assignment_sources.sql`）。登録前の候補は未割当テーブル＋明細から読み出し時に引く。
     表示は日報の表記（`product_raw` 等）で、マスタ名と並べて From/To を見比べさせる
+  - **工程などで中身が切り替わるダイアログ（Issue #633）**: 切り替えで件数が変わるリスト（引き当て元の候補）は、`DialogContent` が
+    中央寄せのため高さの変化で上下とも動く。リストは固定高＋`overflow-y-auto` の枠に入れ、0件でも枠を消さずに空表示を枠内に出す。
+    見出しに件数を出して隠れた分に気づけるようにする。折り返す説明文には `min-h-*` を付ける
   - **送品日時 `orders.shipped_at`** は `status` が `shipped` / `completed` になったときにトリガー `trg_set_order_shipped_at` が書く。
     送品の経路を足してもアプリから書かない
   - **`merge_products` の最新の定義は `20261029000000_add_daily_report_stock_estimates.sql`**（作り置きの指摘の付け替えを追加）。
@@ -570,7 +573,19 @@ cd backend && ruff check . && mypy .
   # 一時的なSQL実行（本番データの確認・単発の手動UPDATE等）
   supabase db query --db-url "postgresql://postgres.<project-ref>:<url-encoded-password>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" "SELECT ..."
   ```
+- VS Code のタスク「Supabase db push (production) dry-run」→「Supabase db push (production)」で、同じ手順を `scripts/supabase-db-push-prod.sh`
+  経由で実行できる（`backend/.env` を読み、パスワードを percent-encode して `--db-url` を組む）。先に dry-run で対象の版を確かめる。
+  `--include-all` 付きのタスクは、古い日付の版が後から入ったときだけ使う（履歴に無い版を順序を問わず流す）
 - 本番への `db push` / 直接SQL実行は不可逆な操作のため、必ず `--dry-run`（push の場合）や `SELECT` での事前確認を行い、ユーザーの明示的な承認を得てから実行すること
+
+- **本番のマイグレーション未適用に気づく（Issue #633）**: `Deploy Migrations to Supabase`（`.github/workflows/supabase-deploy.yml`）は
+  `supabase/setup-cli` の `version: latest` で `supabase db push` を流すが、最新の CLI は既定でローカルの DB を向き、CI では
+  `connect ECONNREFUSED 127.0.0.1:54322` で失敗する（2026-11-02 から連続で失敗。本番には `--db-url` で手で当てていた）。
+  症状は「特定の操作の後だけ API が 500 になる」形で出る（引き当てを登録すると、引き当て元の新テーブルが無く GET が失敗し
+  「引き当てを取得できませんでした」。同じ RPC を呼ぶ cron も、引数が増えた新しい RPC が無く失敗しうる）。
+  **DB を変える PR をマージしたら Actions の `Deploy Migrations` が成功したかを見る**。バックエンドの unit / API テストは
+  Supabase をモックするので未適用では気づけない。疑うときは `supabase db push --dry-run --db-url ...` で未適用の版を確認する
+  （読み取りのみ）
 
 ## 定期実行（cron）
 

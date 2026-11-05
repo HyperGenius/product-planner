@@ -70,15 +70,30 @@
             }
         },
         {
-            "label": "Supabase db push include all",
+            "label": "Supabase db push (production) dry-run",
             "type": "shell",
-            "command": "source ${workspaceFolder}/backend/.env && supabase db push --include-all --db-url postgresql://postgres.${SUPABASE_PROJECT_ID}:${SUPABASE_DB_PASSWORD}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres",
+            "command": "${workspaceFolder}/scripts/supabase-db-push-prod.sh --dry-run",
             "problemMatcher": [],
             "presentation": {
                 "group": "dev-servers",
-            },
-            "options": {
-                "cwd": "${workspaceFolder}/supabase"
+            }
+        },
+        {
+            "label": "Supabase db push (production)",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/supabase-db-push-prod.sh",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "dev-servers",
+            }
+        },
+        {
+            "label": "Supabase db push (production) include all",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/supabase-db-push-prod.sh --include-all",
+            "problemMatcher": [],
+            "presentation": {
+                "group": "dev-servers",
             }
         },
         {

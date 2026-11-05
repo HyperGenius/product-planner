@@ -224,7 +224,7 @@ function StockAssignmentDialogForm({
   }
 
   return (
-    <DialogContent className="sm:max-w-[520px]">
+    <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-[520px]">
       <DialogHeader>
         <DialogTitle>{STOCK_LABEL}から引き当てる</DialogTitle>
         <DialogDescription>
@@ -250,29 +250,34 @@ function StockAssignmentDialogForm({
               </Button>
             ))}
           </div>
-          {form.processName && (
-            <p className="text-xs text-muted-foreground">
-              {estimate
-                ? `${stockPlaceLabel(estimate)}の${STOCK_LABEL}（推定）: ${estimate.qty.toLocaleString()} 個`
-                : `${stockPlaceLabel({ process_name: form.processName })}の${STOCK_LABEL}の推定はありません`}
-              {existing && `。登録済みの引き当て（${existing.qty.toLocaleString()} 個）を上書きします`}
+          {/* 工程を切り替えてもダイアログの高さが変わらないよう、説明文は最小高さ、候補は固定高の枠にする（Issue #633） */}
+          <p className="min-h-8 text-xs text-muted-foreground">
+            {form.processName
+              ? `${
+                  estimate
+                    ? `${stockPlaceLabel(estimate)}の${STOCK_LABEL}（推定）: ${estimate.qty.toLocaleString()} 個`
+                    : `${stockPlaceLabel({ process_name: form.processName })}の${STOCK_LABEL}の推定はありません`
+                }${existing ? `。登録済みの引き当て（${existing.qty.toLocaleString()} 個）を上書きします` : ""}`
+              : "工程を選ぶと、推定と引き当て元の候補を表示します"}
+          </p>
+          <div className="space-y-1 rounded-md border bg-muted/30 p-2">
+            <p className="text-xs">
+              <span className="text-muted-foreground">引き当て先: </span>
+              {productLabel(data)}
             </p>
-          )}
-          {form.processName && (
-            <div className="space-y-1 rounded-md border bg-muted/30 p-2">
-              <p className="text-xs">
-                <span className="text-muted-foreground">引き当て先: </span>
-                {productLabel(data)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                引き当て元の候補（日報の明細。新しい順に充てます）
-              </p>
-              <SourceEntries
-                entries={candidates}
-                empty="この工程で未割当の日報の明細はありません"
-              />
+            <p className="text-xs text-muted-foreground">
+              引き当て元の候補{form.processName ? `（${candidates.length} 件）` : ""}
+              （日報の明細。新しい順に充てます）
+            </p>
+            <div className="h-40 overflow-y-auto" data-testid="stock-candidates">
+              {form.processName ? (
+                <SourceEntries
+                  entries={candidates}
+                  empty="この工程で未割当の日報の明細はありません"
+                />
+              ) : null}
             </div>
-          )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-3">
           <div className="w-32 space-y-1.5">

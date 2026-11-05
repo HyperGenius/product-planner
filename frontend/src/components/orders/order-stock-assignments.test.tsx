@@ -108,6 +108,20 @@ describe("OrderStockAssignments", () => {
     expect(screen.getByText("この工程で未割当の日報の明細はありません")).toBeInTheDocument()
   })
 
+  it("候補の件数を出し、件数が違っても候補の枠は同じ固定高のままにする（Issue #633）", async () => {
+    setup({ data: { ...DATA, candidates: { クグシ: [SOURCE] } } })
+    render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
+
+    await userEvent.click(await screen.findByRole("button", { name: "作り置きから引き当てる" }))
+    expect(screen.getByText(/引き当て元の候補（1 件）/)).toBeInTheDocument()
+    const frame = screen.getByTestId("stock-candidates")
+    expect(frame).toHaveClass("h-40", "overflow-y-auto")
+
+    await userEvent.click(screen.getByRole("button", { name: "カシメ" }))
+    expect(screen.getByText(/引き当て元の候補（0 件）/)).toBeInTheDocument()
+    expect(screen.getByTestId("stock-candidates")).toHaveClass("h-40", "overflow-y-auto")
+  })
+
   it("最も後の工程の推定を初期値にして引き当てを登録する", async () => {
     const { puts } = setup()
     render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
