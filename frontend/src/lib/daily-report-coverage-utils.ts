@@ -125,6 +125,12 @@ export function sumProductsWithoutRoutings(products: readonly ProductWithoutRout
   }
 }
 
+/**
+ * 詳細パネルの長いリストのスクロール領域 (Issue #639)。ページ全体が縦に伸びないよう、
+ * フィルタ・見出し・「さらに表示」は領域の外に置き、リストだけをスクロールさせる。
+ */
+export const COVERAGE_LIST_SCROLL_CLASS = "max-h-[60dvh] overflow-y-auto"
+
 /** 期間（直近 N か月、今月を含む）。null はすべての期間 */
 export const PERIOD_OPTIONS: { months: number | null; label: string }[] = [
   { months: 1, label: "今月" },

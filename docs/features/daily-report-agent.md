@@ -673,6 +673,7 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
   他のカードの情報は出さない。フィルタ（理由など）はパネル内に置く。タブは設けない
 - 選択中のカードは URL のハッシュ（`#unallocated` / `#unmatched` / `#routing` / `#stock`）に持つ（`hooks/use-coverage-card.ts`。
   `useSyncExternalStore`）。既定は未割当で、未知の値は `toValidCoverageCard()` で未割当に寄せる。カードの切り替えは履歴に積むので戻る操作で戻れる
+- 長いリスト（未割当・作り置き）はページを伸ばさず、リストだけを `max-h-[60dvh]` でスクロールさせる（`COVERAGE_LIST_SCROLL_CLASS`）。見出し・フィルタ・「さらに表示」はスクロール領域の外
 - 未割当: 数量の多い順に50件ずつ。行を開くと元の日報の行（新しい順に最大100行）を出す。理由別のフィルタチップ（既定は「要確認」）
 - 未照合: 件数と名寄せ画面（#489）へのリンクだけを出す最小の実装（表記の一覧は名寄せ画面で見る）。必要なら本番の様子を見て判断する
 - 工程マスタ未登録: `no_routing_process` のうち `product_has_routings=false` を製品ごとに集める（`productsWithoutRoutings()`）。

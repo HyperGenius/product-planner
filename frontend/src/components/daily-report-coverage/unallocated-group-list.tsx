@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   CATEGORY_META,
+  COVERAGE_LIST_SCROLL_CLASS,
   CATEGORY_ORDER,
   matchesCategoryFilter,
   productLabel,
@@ -92,7 +93,7 @@ export function UnallocatedGroupList({
         </p>
       ) : (
         <>
-          <ul className="divide-y rounded-lg border bg-card">
+          <ul className={`divide-y rounded-lg border bg-card ${COVERAGE_LIST_SCROLL_CLASS}`}>
             {filtered.slice(0, visible).map((group) => (
               <UnallocatedGroupRow
                 key={unallocatedGroupKey(group)}
