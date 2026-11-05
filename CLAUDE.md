@@ -575,6 +575,15 @@ cd backend && ruff check . && mypy .
   ```
 - 本番への `db push` / 直接SQL実行は不可逆な操作のため、必ず `--dry-run`（push の場合）や `SELECT` での事前確認を行い、ユーザーの明示的な承認を得てから実行すること
 
+- **本番のマイグレーション未適用に気づく（Issue #633）**: `Deploy Migrations to Supabase`（`.github/workflows/supabase-deploy.yml`）は
+  `supabase/setup-cli` の `version: latest` で `supabase db push` を流すが、最新の CLI は既定でローカルの DB を向き、CI では
+  `connect ECONNREFUSED 127.0.0.1:54322` で失敗する（2026-11-02 から連続で失敗。本番には `--db-url` で手で当てていた）。
+  症状は「特定の操作の後だけ API が 500 になる」形で出る（引き当てを登録すると、引き当て元の新テーブルが無く GET が失敗し
+  「引き当てを取得できませんでした」。同じ RPC を呼ぶ cron も、引数が増えた新しい RPC が無く失敗しうる）。
+  **DB を変える PR をマージしたら Actions の `Deploy Migrations` が成功したかを見る**。バックエンドの unit / API テストは
+  Supabase をモックするので未適用では気づけない。疑うときは `supabase db push --dry-run --db-url ...` で未適用の版を確認する
+  （読み取りのみ）
+
 ## 定期実行（cron）
 
 - 経路は3段: **pg_cron（Supabase、手動登録）→ Edge Function `supabase/functions/parse-order-pdfs-trigger/index.ts` → バックエンドの `GET /api/cron/*`**（`CRON_SECRET` の Bearer 認証、`routers/cron/_auth.py` の `validate_cron_secret`）。Edge Function は1回の起動で全 `/api/cron/*` を順に叩く薄いプロキシ。詳細は [docs/infra/supabase-pgcron-parse-order-pdfs.md](docs/infra/supabase-pgcron-parse-order-pdfs.md)
