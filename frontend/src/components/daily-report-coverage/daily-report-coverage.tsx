@@ -3,7 +3,9 @@
 import * as React from "react"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
 import { Button } from "@/components/ui/button"
+import { useCoverageCard } from "@/hooks/use-coverage-card"
 import { useDailyReportCoverage } from "@/hooks/use-daily-report-coverage"
+import { useStockEstimates } from "@/hooks/use-daily-report-stock"
 import { useProducts } from "@/hooks/use-products"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import {
@@ -11,28 +13,42 @@ import {
   PERIOD_OPTIONS,
   formatComputedAt,
   productsWithoutRoutings,
+  sumProductsWithoutRoutings,
   type CategoryFilter,
+  type CoverageCard,
 } from "@/lib/daily-report-coverage-utils"
 import { formatWorkDate } from "@/lib/daily-report-name-utils"
+import { STOCK_LABEL, feedbackWithoutEstimates } from "@/lib/daily-report-stock-utils"
 import { DAILY_REPORT_NAME_EDITOR_ROLES } from "@/types/member"
 import { CoverageSummaryCard } from "./coverage-summary-card"
 import { ProductsWithoutRoutings } from "./products-without-routings"
 import { StockEstimates } from "./stock-estimates"
 import { UnallocatedGroupList } from "./unallocated-group-list"
+import { UnmatchedPanel } from "./unmatched-panel"
+
+/** 詳細パネルの上辺の色（カードの色に合わせる） */
+const PANEL_STRIPE: Record<CoverageCard, string> = {
+  unallocated: "border-t-amber-400",
+  unmatched: "border-t-slate-400",
+  routing: "border-t-red-500",
+  stock: "border-t-sky-500",
+}
 
 /**
- * 日報の照合状況の画面 (Issue #542)。
- * 日報の実績がどこまで受注の工程につながっているか（割り付け済み・未割当・未照合）と、
- * つながっていない実績を製品・工程・理由ごとに出し、現場ヒアリングの項目として使う。
+ * 日報の照合状況の画面 (Issue #542 / #639)。
+ * 日報の実績がどこまで受注の工程につながっているか（割り付け済み・未割当・未照合）を上に示し、
+ * 関心事のカード（未割当・未照合・工程マスタ未登録・作り置き）を選ぶと、その詳細だけを下に出す。
+ * 選択中のカードは URL のハッシュに持つ。
  */
 export function DailyReportCoverage() {
   const [months, setMonths] = React.useState<number | null>(DEFAULT_PERIOD_MONTHS)
   const [filter, setFilter] = React.useState<CategoryFilter>("hearing")
   const [routingProductId, setRoutingProductId] = React.useState<number | null>(null)
-  const listRef = React.useRef<HTMLDivElement>(null)
+  const [card, setCard] = useCoverageCard()
 
   const { data, isLoading, isError } = useDailyReportCoverage(months)
   const { data: products } = useProducts()
+  const { data: stock } = useStockEstimates()
   const { data: member } = useCurrentMember()
   // 作り置きの指摘（#591）を書き込めるロールは別名辞書と同じ
   const canEditStock = member != null && DAILY_REPORT_NAME_EDITOR_ROLES.includes(member.role)
@@ -41,6 +57,7 @@ export function DailyReportCoverage() {
     [products],
   )
   const canOpenRouting = (productId: number) => productById.has(productId)
+  const withoutRoutings = React.useMemo(() => productsWithoutRoutings(data?.groups ?? []), [data])
   const routingProduct =
     routingProductId === null ? null : (productById.get(routingProductId) ?? null)
 
@@ -88,27 +105,47 @@ export function DailyReportCoverage() {
         <>
           <CoverageSummaryCard
             summary={data.summary}
-            onSelectCategory={(category) => {
-              setFilter(category)
-              listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+            info={{
+              routing: sumProductsWithoutRoutings(withoutRoutings),
+              stockCount: stock ? stock.items.length : null,
+              unallocatedGroupCount: data.groups.length,
             }}
+            selected={card}
+            onSelect={setCard}
           />
-          <ProductsWithoutRoutings
-            products={productsWithoutRoutings(data.groups)}
-            canOpenRouting={canOpenRouting}
-            onEditRouting={setRoutingProductId}
-          />
-          <StockEstimates canEdit={canEditStock} />
-          <div ref={listRef} className="scroll-mt-4">
-            <UnallocatedGroupList
-              key={`${filter}-${months}`}
-              groups={data.groups}
-              months={months}
-              filter={filter}
-              onFilterChange={setFilter}
-              canOpenRouting={canOpenRouting}
-              onEditRouting={setRoutingProductId}
-            />
+          {/* 選択中のカード以外の情報は出さない */}
+          <div id="coverage-panel" className={`space-y-3 border-t-4 pt-4 ${PANEL_STRIPE[card]}`}>
+            {card === "unallocated" && (
+              <UnallocatedGroupList
+                key={`${filter}-${months}`}
+                groups={data.groups}
+                months={months}
+                filter={filter}
+                onFilterChange={setFilter}
+                canOpenRouting={canOpenRouting}
+                onEditRouting={setRoutingProductId}
+              />
+            )}
+            {card === "unmatched" && <UnmatchedPanel summary={data.summary} />}
+            {card === "routing" && (
+              <ProductsWithoutRoutings
+                products={withoutRoutings}
+                canOpenRouting={canOpenRouting}
+                onEditRouting={setRoutingProductId}
+              />
+            )}
+            {card === "stock" && (
+              <>
+                <StockEstimates canEdit={canEditStock} />
+                {stock &&
+                  stock.items.length === 0 &&
+                  feedbackWithoutEstimates(stock).length === 0 && (
+                    <p className="rounded-lg border bg-card py-8 text-center text-sm text-muted-foreground">
+                      推定が出ている{STOCK_LABEL}はありません
+                    </p>
+                  )}
+              </>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             名寄せ・工程の変更・作り置きの指摘は、次の集計（10〜15分ごと）で反映されます。

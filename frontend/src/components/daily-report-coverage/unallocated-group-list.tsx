@@ -62,7 +62,7 @@ export function UnallocatedGroupList({
     <section className="space-y-2" aria-labelledby="unallocated-groups">
       <div>
         <h2 id="unallocated-groups" className="text-lg font-semibold">
-          割り付けできなかった実績
+          未割当の実績
         </h2>
         <p className="text-sm text-muted-foreground">
           製品・工程・理由ごとに、数量の多い順に並べています。上から順に現場で確認すると、少ない手間で割り付けできる実績が増えます。
@@ -86,7 +86,9 @@ export function UnallocatedGroupList({
 
       {filtered.length === 0 ? (
         <p className="rounded-lg border bg-card py-8 text-center text-sm text-muted-foreground">
-          {groups.length === 0 ? "割り付けできなかった実績はありません" : "該当する実績はありません"}
+          {groups.length === 0
+            ? "割り付けできなかった実績はありません"
+            : "該当する実績はありません"}
         </p>
       ) : (
         <>
@@ -156,9 +158,7 @@ function UnallocatedGroupRow({
               <Badge variant="outline">{group.process_name}</Badge>
               <Badge variant={meta.needsHearing ? "secondary" : "outline"}>{meta.label}</Badge>
             </span>
-            <span
-              className={`block text-sm ${meta.needsHearing ? "" : "text-muted-foreground"}`}
-            >
+            <span className={`block text-sm ${meta.needsHearing ? "" : "text-muted-foreground"}`}>
               {meta.question(group)}
             </span>
             {group.other_customer_orders.length > 0 && (
@@ -192,12 +192,7 @@ function UnallocatedGroupRow({
             </span>
           </span>
           {group.category === "no_routing_process" && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!canOpenRouting}
-              onClick={onEditRouting}
-            >
+            <Button variant="outline" size="sm" disabled={!canOpenRouting} onClick={onEditRouting}>
               <ListPlus />
               工程を編集
             </Button>
