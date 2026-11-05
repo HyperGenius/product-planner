@@ -65,7 +65,10 @@ def list_delivery_requests(
     if order_ids:
         orders = (
             client.table(SupabaseTableName.ORDERS.value)
-            .select("id, order_number, customer_id")
+            .select(
+                "id, order_number, customer_id, quantity, deadline_date, "
+                "confirmed_deadline, simulated_deadline"
+            )
             .eq("tenant_id", tenant_id)
             .in_("id", order_ids)
             .execute()
@@ -126,6 +129,15 @@ def list_delivery_requests(
             {
                 **r,
                 "order_number": order.get("order_number") if order else None,
+                "order_quantity": order.get("quantity") if order else None,
+                # 受注の希望納期の DB 列は deadline_date（API では desired_deadline）
+                "desired_deadline": order.get("deadline_date") if order else None,
+                "confirmed_deadline": (
+                    order.get("confirmed_deadline") if order else None
+                ),
+                "simulated_deadline": (
+                    order.get("simulated_deadline") if order else None
+                ),
                 "customer_name": (
                     customer_names.get(int(customer_id)) if customer_id else None
                 ),

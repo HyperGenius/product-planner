@@ -27,4 +27,9 @@ export interface OpenDeliveryRequestCount {
 export interface OpenDeliveryRequestListItem extends OrderDeliveryRequest {
   order_number: string | null
   customer_name: string | null
+  /** 受注の現状（Issue #635）。未紐づけは null。日付は日付のみ（"YYYY-MM-DD"）で `parseISO()` で読む */
+  order_quantity: number | null
+  desired_deadline: string | null
+  confirmed_deadline: string | null
+  simulated_deadline: string | null
 }

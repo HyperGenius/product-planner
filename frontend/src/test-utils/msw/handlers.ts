@@ -59,6 +59,10 @@ export const handlers = [
   // 受注一覧の行が引く「未対応の督促」の件数（Issue #619）。既定は督促なし
   http.get(`${API_BASE}/orders/delivery-requests`, () => HttpResponse.json([])),
   http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => HttpResponse.json([])),
+  // 督促・分納の依頼一覧が引く日報の進捗（Issue #635）。既定は進捗なし
+  http.get(`${API_BASE}/daily-reports/order-progress`, () =>
+    HttpResponse.json({ computed_at: null, items: [] }),
+  ),
   // 受注詳細の「作り置きからの引き当て」（Issue #624）。既定は引き当てなし
   http.get(`${API_BASE}/daily-reports/orders/:orderId/stock-assignments`, () =>
     HttpResponse.json({

@@ -317,6 +317,10 @@ cd backend && ruff check . && mypy .
     （`president` / `order_handler`）。件数は一覧と同じ `useOpenDeliveryRequests()` で取り、注文は取得しない
     （`useSidebarBadgeCounts()` は注文系のキーがあるときだけ `useOrders` を有効にする）。未紐づけの依頼の顧客は依頼元の
     `order_attachments.customer_id` から引く。`GET /orders/delivery-requests` は `/{order_id}` 系より先に登録済みのルーターに置く
+  - **督促・分納の依頼の一覧の中身（Issue #635）**: 一覧の行は依頼の構造化した内容（品名・数量・要望日。本文の抜粋は詳細に回す）と
+    受注の現状（希望納期＋超過日数・完成見込み・受注数量＋最終工程の日報の進捗）を並べ、**納期の基準を混ぜず両方を併記**する。
+    受注の希望納期の DB 列は `orders.deadline_date`（API では `desired_deadline`）。同じ顧客・受注・受信日時の行が並ぶのは二重記録ではなく
+    1通のメールの複数明細（`line_index` 違い）。このページを描画するテストは日報の進捗 `GET /daily-reports/order-progress` の MSW 既定ハンドラに依存する
 - **外部入力（PDF・メール本文）に当てる正規表現**: `[ \t]*-?[ \t]*` のように可変長の繰り返しを任意の記号を挟んで
   隣接させると、長い空白列の後にマッチが失敗する行で分け方を総当たりして O(N²) の後戻りになる（空白2万文字で約7秒）。
   2つ目の繰り返しは記号があるときだけ置く（`[ \t]*(?:-[ \t]*)?`）。cron が全テナント横断で回すので CPU を浪費する

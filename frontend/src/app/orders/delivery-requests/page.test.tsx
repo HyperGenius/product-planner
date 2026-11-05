@@ -26,6 +26,10 @@ function makeRequest(
     created_at: "2026-11-01T00:00:00+00:00",
     order_number: "O-5",
     customer_name: "顧客A",
+    order_quantity: null,
+    desired_deadline: null,
+    confirmed_deadline: null,
+    simulated_deadline: null,
     ...overrides,
   };
 }
@@ -49,6 +53,75 @@ describe("DeliveryRequestsPage", () => {
     const link = await screen.findByRole("link", { name: "O-5" });
     expect(link).toHaveAttribute("href", "/orders/5");
     expect(screen.getByText("未紐づけ")).toBeInTheDocument();
+  });
+
+  it("紐づけ済みは依頼の中身と受注の現状・進捗を表示し、未紐づけは受注側を空にする", async () => {
+    server.use(
+      http.get(`${API_BASE}/orders/delivery-requests`, () =>
+        HttpResponse.json([
+          makeRequest({
+            extracted_product_name: "製品A",
+            quantity: 500,
+            requested_date: "2026-11-10",
+            order_quantity: 200,
+            desired_deadline: "2020-01-01",
+            confirmed_deadline: "2026-11-20",
+          }),
+          makeRequest({
+            id: "r2",
+            order_id: null,
+            order_number: null,
+            extracted_product_name: "製品B",
+          }),
+        ]),
+      ),
+      http.get(`${API_BASE}/daily-reports/order-progress`, () =>
+        HttpResponse.json({
+          computed_at: null,
+          items: [
+            {
+              order_id: 5,
+              process_routing_id: 1,
+              sequence_order: 2,
+              process_name: "検査",
+              good_qty: 80,
+              order_quantity: 200,
+              first_actual_date: null,
+              last_actual_date: null,
+              status: "in_progress",
+              completed_by: null,
+              planned_end_datetime: null,
+            },
+          ],
+        }),
+      ),
+    );
+    render(<DeliveryRequestsPage />);
+    expect(await screen.findByText("製品A")).toBeInTheDocument();
+    expect(screen.getByText(/数量: 500/)).toBeInTheDocument();
+    expect(screen.getByText(/要望日: 11月10日/)).toBeInTheDocument();
+    expect(screen.getByText(/日超過/)).toBeInTheDocument();
+    expect(screen.getByText(/完成見込み: 11月20日/)).toBeInTheDocument();
+    expect(await screen.findByText(/検査 80 \/ 200/)).toBeInTheDocument();
+    // 未紐づけの行は受注側が空表示（「－」）
+    expect(screen.getByText("未紐づけ")).toBeInTheDocument();
+    expect(screen.getAllByText(/希望納期:/)).toHaveLength(1);
+  });
+
+  it("超過日数の多い順に並べ替えられる", async () => {
+    server.use(
+      http.get(`${API_BASE}/orders/delivery-requests`, () =>
+        HttpResponse.json([
+          makeRequest({ id: "r1", extracted_product_name: "新しい依頼", desired_deadline: "2999-01-01" }),
+          makeRequest({ id: "r2", extracted_product_name: "古い納期", desired_deadline: "2020-01-01" }),
+        ]),
+      ),
+    );
+    render(<DeliveryRequestsPage />);
+    await screen.findByText("新しい依頼");
+    await userEvent.click(screen.getByRole("button", { name: "超過日数の多い順" }));
+    const names = screen.getAllByText(/新しい依頼|古い納期/).map((e) => e.textContent);
+    expect(names).toEqual(["古い納期", "新しい依頼"]);
   });
 
   it("対応済みにするとPATCHを送る", async () => {

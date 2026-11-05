@@ -52,7 +52,19 @@ class TestOrderDeliveryRequestsRouter:
         ]
         by_table = {
             "order_delivery_requests": _query(requests),
-            "orders": _query([{"id": 5, "order_number": "O-5", "customer_id": 1}]),
+            "orders": _query(
+                [
+                    {
+                        "id": 5,
+                        "order_number": "O-5",
+                        "customer_id": 1,
+                        "quantity": 200,
+                        "deadline_date": "2026-10-20",
+                        "confirmed_deadline": "2026-11-10",
+                        "simulated_deadline": None,
+                    }
+                ]
+            ),
             "order_attachments": _query([{"id": "a2", "customer_id": 2}]),
             "customers": _query(
                 [{"id": 1, "name": "顧客A"}, {"id": 2, "name": "顧客B"}]
@@ -68,6 +80,13 @@ class TestOrderDeliveryRequestsRouter:
             ("r1", "O-5", "顧客A"),
             ("r2", None, "顧客B"),
         ]
+        linked, unlinked = body
+        assert linked["order_quantity"] == 200
+        assert linked["desired_deadline"] == "2026-10-20"
+        assert linked["confirmed_deadline"] == "2026-11-10"
+        assert linked["simulated_deadline"] is None
+        assert unlinked["order_quantity"] is None
+        assert unlinked["desired_deadline"] is None
 
     def test_list_open_empty(self, headers):
         self._use(_query([]))

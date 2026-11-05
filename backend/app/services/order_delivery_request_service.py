@@ -118,9 +118,20 @@ def record_delivery_requests(
     }
 
     linked: list[int | None] = []
+    seen: set[tuple[Any, ...]] = set()
     for entry in entries:
         if entry.line_index in done:
             continue
+        # 同じメールに同じ内容の明細が重複して読み取られても1行にする（Issue #635）
+        content = (
+            entry.extracted_product_name,
+            entry.quantity,
+            entry.requested_date,
+            entry.product_id,
+        )
+        if content in seen:
+            continue
+        seen.add(content)
         order_id = find_target_order_id(db, tenant_id, customer_id, entry.product_id)
         db.table(table).insert(
             {

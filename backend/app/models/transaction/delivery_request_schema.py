@@ -24,6 +24,11 @@ class OpenDeliveryRequestListItem(OrderDeliveryRequestResponse):
 
     order_number: str | None = None
     customer_name: str | None = None
+    # 紐づけ済みの依頼だけ受注の現状を持つ（未紐づけは None。Issue #635）。日付のみ（"YYYY-MM-DD"）
+    order_quantity: int | None = None
+    desired_deadline: str | None = None
+    confirmed_deadline: str | None = None
+    simulated_deadline: str | None = None
 
 
 class OpenDeliveryRequestCount(BaseModel):

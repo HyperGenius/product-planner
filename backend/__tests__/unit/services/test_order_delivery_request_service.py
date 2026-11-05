@@ -147,3 +147,17 @@ class TestRecordDeliveryRequests:
         assert len(linked) == 1
         inserts = tables["order_delivery_requests"].insert.call_args_list
         assert [c.args[0]["line_index"] for c in inserts] == [1]
+
+    def test_identical_lines_in_one_email_are_recorded_once(self):
+        db, tables = self._db()
+        entries = [
+            DeliveryRequestEntry(0, "製品A", 500, date(2026, 11, 3), 3),
+            DeliveryRequestEntry(1, "製品A", 500, date(2026, 11, 3), 3),
+            DeliveryRequestEntry(2, "製品A", 100, date(2026, 11, 3), 3),
+        ]
+        linked = record_delivery_requests(
+            db, "t1", "att-1", 7, "delivery_chase", entries, "本文"
+        )
+        assert len(linked) == 2
+        inserts = tables["order_delivery_requests"].insert.call_args_list
+        assert [c.args[0]["line_index"] for c in inserts] == [0, 2]
