@@ -54,6 +54,12 @@ async function openPicker(name: string) {
   await userEvent.click(trigger)
 }
 
+/** 確認ダイアログで登録を確定する */
+async function confirmDialog(button: string) {
+  const dialog = await screen.findByRole("alertdialog")
+  await userEvent.click(within(dialog).getByRole("button", { name: button }))
+}
+
 async function openTab(name: RegExp) {
   await userEvent.click(await screen.findByRole("tab", { name }))
 }
@@ -117,6 +123,12 @@ describe("UnmatchedNameQueue", () => {
     render(<UnmatchedNameQueue canEdit />)
     await openPicker("「組立機B」の設備を選択")
     await userEvent.click(await screen.findByRole("option", { name: /組立.*台帳No\.12/ }))
+    expect(posts).toEqual([])
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("組立機B")).toBeInTheDocument()
+    expect(within(dialog).getByText("組立")).toBeInTheDocument()
+    expect(within(dialog).getByText(/過去・今後の日報にも自動で反映されます/)).toBeInTheDocument()
+    await confirmDialog("登録する")
 
     await waitFor(() =>
       expect(posts).toEqual([
@@ -138,6 +150,8 @@ describe("UnmatchedNameQueue", () => {
     await userEvent.click(await screen.findByRole("option", { name: "カシメ" }))
     await userEvent.click(screen.getByRole("option", { name: "クグシ" }))
     await userEvent.click(screen.getByRole("button", { name: "決定" }))
+    expect(posts).toEqual([])
+    await confirmDialog("登録する")
 
     await waitFor(() =>
       expect(posts[0]).toEqual({
@@ -174,6 +188,12 @@ describe("UnmatchedNameQueue", () => {
     )
 
     expect(candidateQuery).toBe("ピン6x20")
+    expect(posts).toEqual([])
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("ピン φ6×20")).toBeInTheDocument()
+    expect(within(dialog).getByText("類似度 82%")).toBeInTheDocument()
+    expect(within(dialog).getByText(/顧客先: 顧客A/)).toBeInTheDocument()
+    await confirmDialog("登録する")
     await waitFor(() =>
       expect(posts[0]).toEqual({
         path: "/daily-reports/name-aliases/product",
@@ -202,6 +222,7 @@ describe("UnmatchedNameQueue", () => {
       await screen.findByRole("button", { name: "「ピンA」を「ピンA 製品」に対応付ける" }),
     )
 
+    await confirmDialog("登録する")
     await waitFor(() => expect(posts).toHaveLength(1))
     // 登録後に未照合一覧は取り直す（ピンA が消える）が、候補の検索は行ごとに1回のまま
     await waitFor(() => expect(screen.queryByText("ピンA")).not.toBeInTheDocument())
@@ -244,6 +265,9 @@ describe("UnmatchedNameQueue", () => {
     render(<UnmatchedNameQueue canEdit />)
     await openTab(/製品/)
     await userEvent.click(await screen.findByRole("button", { name: "「試作品」を対象外にする" }))
+    expect(posts).toEqual([])
+    expect(await screen.findByText(/元に戻すには「対象外」タブから解除します/)).toBeInTheDocument()
+    await confirmDialog("対象外にする")
 
     await waitFor(() =>
       expect(posts[0]).toEqual({
@@ -252,6 +276,50 @@ describe("UnmatchedNameQueue", () => {
       }),
     )
     expect(await screen.findByText("未照合の製品はありません")).toBeInTheDocument()
+  })
+
+  it("キャンセルすると何も登録せず、行も残る", async () => {
+    const posts = mockQueue([unmatched({ raw_text: "組立機B" })])
+
+    render(<UnmatchedNameQueue canEdit />)
+    await openPicker("「組立機B」の設備を選択")
+    await userEvent.click(await screen.findByRole("option", { name: /組立.*台帳No\.12/ }))
+    await confirmDialog("キャンセル")
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(posts).toEqual([])
+    expect(screen.getByRole("button", { name: "組立機B" })).toBeInTheDocument()
+  })
+
+  it("「対象外」もキャンセルすると登録しない", async () => {
+    const posts = mockQueue([unmatched({ raw_text: "試作機" })])
+
+    render(<UnmatchedNameQueue canEdit />)
+    await userEvent.click(await screen.findByRole("button", { name: "「試作機」を対象外にする" }))
+    await confirmDialog("キャンセル")
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(posts).toEqual([])
+  })
+
+  it("登録に失敗したらダイアログを開いたままにする", async () => {
+    mockQueue([unmatched({ raw_text: "組立機B" })])
+    server.use(
+      http.post(`${API_BASE}/daily-reports/name-aliases/equipment`, () =>
+        HttpResponse.json({ detail: "error" }, { status: 500 }),
+      ),
+    )
+
+    render(<UnmatchedNameQueue canEdit />)
+    await openPicker("「組立機B」の設備を選択")
+    await userEvent.click(await screen.findByRole("option", { name: /組立.*台帳No\.12/ }))
+    await confirmDialog("登録する")
+
+    await waitFor(() => expect(screen.getByRole("alertdialog")).toBeInTheDocument())
+    // 失敗後は再度押せる（実行中のままにならない）
+    await waitFor(() =>
+      expect(within(screen.getByRole("alertdialog")).getByRole("button", { name: "登録する" })).toBeEnabled(),
+    )
   })
 
   it("編集できないロールには操作を出さない", async () => {

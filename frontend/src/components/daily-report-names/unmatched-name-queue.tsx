@@ -23,6 +23,7 @@ import {
   type NameKind,
   type UnmatchedName,
 } from "@/types/daily-report-names"
+import { ConfirmMappingDialog, type PendingNameAction } from "./confirm-mapping-dialog"
 import { KIND_PANEL_CLASS, KindTabsList, kindColorStyle } from "./kind-tabs"
 import { NameEntriesTable } from "./name-entries-table"
 import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from "./target-pickers"
@@ -32,7 +33,7 @@ const INLINE_CANDIDATE_COUNT = 3
 
 /**
  * 未照合キュー (Issue #489)。照合できなかった表記を種別ごとに出現件数の多い順で並べ、
- * その場で別名辞書に登録（対応付け）するか「対象外」にする。
+ * 確認ダイアログを経て別名辞書に登録（対応付け）するか「対象外」にする (Issue #645)。
  */
 export function UnmatchedNameQueue({ canEdit }: { canEdit: boolean }) {
   const { data: items, isLoading, isError } = useUnmatchedNames()
@@ -82,23 +83,76 @@ export function UnmatchedNameQueue({ canEdit }: { canEdit: boolean }) {
   )
 }
 
+type AliasVariables = Parameters<ReturnType<typeof useCreateNameAlias>["mutate"]>[0]
+
+/** 確認待ちの操作。登録する中身（variables）は対応付けのときだけ */
+interface PendingOperation {
+  view: PendingNameAction
+  variables: AliasVariables | null
+}
+
 function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boolean }) {
   const [expanded, setExpanded] = React.useState(false)
+  const [pending, setPending] = React.useState<PendingOperation | null>(null)
   const createAlias = useCreateNameAlias()
   const ignore = useIgnoreName()
   const busy = createAlias.isPending || ignore.isPending
 
   const onError = (fallback: string) => (error: unknown) =>
     toast.error(nameMutationErrorMessage(error, fallback))
-  const onMapped = () => toast.success(`「${item.raw_text}」を対応付けました`)
-  const register = (variables: Parameters<typeof createAlias.mutate>[0]) =>
-    createAlias.mutate(variables, {
-      onSuccess: onMapped,
-      onError: onError("対応付けに失敗しました"),
+  // 選んだ時点では登録せず、確認ダイアログを開く (Issue #645)
+  const requestMap = (variables: AliasVariables, targetLabel: string, score?: number) =>
+    setPending({
+      view: {
+        type: "map",
+        kind: item.kind,
+        rawText: item.raw_text,
+        customerRaw: item.customer_raw,
+        targetLabel,
+        score,
+      },
+      variables,
     })
+  const requestIgnore = () =>
+    setPending({
+      view: {
+        type: "ignore",
+        kind: item.kind,
+        rawText: item.raw_text,
+        customerRaw: item.customer_raw,
+      },
+      variables: null,
+    })
+  // 成功したら閉じる。失敗時は開いたままトーストを出す
+  const confirm = () => {
+    if (!pending) return
+    if (pending.variables) {
+      createAlias.mutate(pending.variables, {
+        onSuccess: () => {
+          setPending(null)
+          toast.success(`「${item.raw_text}」を対応付けました`)
+        },
+        onError: onError("対応付けに失敗しました"),
+      })
+    } else {
+      ignore.mutate(item, {
+        onSuccess: () => {
+          setPending(null)
+          toast.success(`「${item.raw_text}」を対象外にしました`)
+        },
+        onError: onError("対象外にできませんでした"),
+      })
+    }
+  }
 
   return (
     <li className="space-y-2 px-3 py-2">
+      <ConfirmMappingDialog
+        pending={pending?.view ?? null}
+        busy={busy}
+        onConfirm={confirm}
+        onCancel={() => setPending(null)}
+      />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <button
           type="button"
@@ -129,11 +183,11 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
               <EquipmentPicker
                 ariaLabel={`「${item.raw_text}」の設備を選択`}
                 disabled={busy}
-                onSelect={(id) =>
-                  register({
-                    kind: "equipment",
-                    data: { raw_text: item.raw_text, equipment_id: id },
-                  })
+                onSelect={(id, label) =>
+                  requestMap(
+                    { kind: "equipment", data: { raw_text: item.raw_text, equipment_id: id } },
+                    label,
+                  )
                 }
               />
             )}
@@ -141,11 +195,11 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
               <CustomerPicker
                 ariaLabel={`「${item.raw_text}」の顧客を選択`}
                 disabled={busy}
-                onSelect={(id) =>
-                  register({
-                    kind: "customer",
-                    data: { raw_text: item.raw_text, customer_id: id },
-                  })
+                onSelect={(id, label) =>
+                  requestMap(
+                    { kind: "customer", data: { raw_text: item.raw_text, customer_id: id } },
+                    label,
+                  )
                 }
               />
             )}
@@ -154,36 +208,39 @@ function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boo
                 ariaLabel={`「${item.raw_text}」の工程を選択`}
                 disabled={busy}
                 onSubmit={(names) =>
-                  register({
-                    kind: "process",
-                    data: { raw_text: item.raw_text, process_names: names },
-                  })
+                  requestMap(
+                    { kind: "process", data: { raw_text: item.raw_text, process_names: names } },
+                    names.join("・"),
+                  )
                 }
               />
             )}
             {item.kind === "product" && (
-              <ProductMapping item={item} disabled={busy} onSelect={(productId, customerId) =>
-                register({
-                  kind: "product",
-                  data: {
-                    raw_text: item.raw_text,
-                    customer_id: customerId,
-                    product_id: productId,
-                  },
-                })
-              } />
+              <ProductMapping
+                item={item}
+                disabled={busy}
+                onSelect={(productId, customerId, label, score) =>
+                  requestMap(
+                    {
+                      kind: "product",
+                      data: {
+                        raw_text: item.raw_text,
+                        customer_id: customerId,
+                        product_id: productId,
+                      },
+                    },
+                    label,
+                    score,
+                  )
+                }
+              />
             )}
             <Button
               variant="ghost"
               size="sm"
               disabled={busy}
               aria-label={`「${item.raw_text}」を対象外にする`}
-              onClick={() =>
-                ignore.mutate(item, {
-                  onSuccess: () => toast.success(`「${item.raw_text}」を対象外にしました`),
-                  onError: onError("対象外にできませんでした"),
-                })
-              }
+              onClick={requestIgnore}
             >
               <EyeOff />
               対象外
@@ -208,7 +265,7 @@ function ProductMapping({
 }: {
   item: UnmatchedName
   disabled: boolean
-  onSelect: (productId: number, customerId: number) => void
+  onSelect: (productId: number, customerId: number, label: string, score?: number) => void
 }) {
   const blockedReason = productAliasBlockedReason(item)
   if (blockedReason !== null || item.customer_id === null) {
@@ -233,7 +290,7 @@ function ProductCandidates({
   item: UnmatchedName
   customerId: number
   disabled: boolean
-  onSelect: (productId: number, customerId: number) => void
+  onSelect: (productId: number, customerId: number, label: string, score?: number) => void
 }) {
   const { data: candidates } = useProductCandidates(item.raw_text)
   return (
@@ -246,7 +303,9 @@ function ProductCandidates({
           disabled={disabled}
           title={`類似度 ${Math.round(candidate.score * 100)}%`}
           aria-label={`「${item.raw_text}」を「${candidate.name}」に対応付ける`}
-          onClick={() => onSelect(candidate.product_id, customerId)}
+          onClick={() =>
+            onSelect(candidate.product_id, customerId, candidate.name, candidate.score)
+          }
         >
           <span className="max-w-[10rem] truncate">{candidate.name}</span>
         </Button>
@@ -255,7 +314,7 @@ function ProductCandidates({
         ariaLabel={`「${item.raw_text}」の製品を選択`}
         disabled={disabled}
         candidates={candidates}
-        onSelect={(id) => onSelect(id, customerId)}
+        onSelect={(id, label) => onSelect(id, customerId, label)}
       />
     </>
   )
