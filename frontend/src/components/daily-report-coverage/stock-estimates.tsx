@@ -6,7 +6,7 @@ import { MessageSquareWarning } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useStockEstimates } from "@/hooks/use-daily-report-stock"
-import { productLabel } from "@/lib/daily-report-coverage-utils"
+import { COVERAGE_LIST_SCROLL_CLASS, productLabel } from "@/lib/daily-report-coverage-utils"
 import { formatWorkDate } from "@/lib/daily-report-name-utils"
 import {
   STOCK_LABEL,
@@ -78,7 +78,7 @@ export function StockEstimates({ canEdit }: { canEdit: boolean }) {
       </div>
 
       {data.items.length > 0 && (
-        <ul className="divide-y rounded-lg border bg-card">
+        <ul className={`divide-y rounded-lg border bg-card ${COVERAGE_LIST_SCROLL_CLASS}`}>
           {data.items.map((item) => {
             const feedback = feedbackByProduct.get(item.product_id)
             return (
@@ -92,7 +92,8 @@ export function StockEstimates({ canEdit }: { canEdit: boolean }) {
                     <Badge variant="outline">{stockPlaceLabel(item)}</Badge>
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {stockConsumedByLabel(item)}・最後の動き {formatWorkDate(item.last_movement_date)}
+                    {stockConsumedByLabel(item)}・最後の動き{" "}
+                    {formatWorkDate(item.last_movement_date)}
                   </p>
                   {feedback && <FeedbackNote feedback={feedback} />}
                 </div>
