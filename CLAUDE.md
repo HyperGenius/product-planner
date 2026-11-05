@@ -573,6 +573,9 @@ cd backend && ruff check . && mypy .
   # 一時的なSQL実行（本番データの確認・単発の手動UPDATE等）
   supabase db query --db-url "postgresql://postgres.<project-ref>:<url-encoded-password>@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres" "SELECT ..."
   ```
+- VS Code のタスク「Supabase db push (production) dry-run」→「Supabase db push (production)」で、同じ手順を `scripts/supabase-db-push-prod.sh`
+  経由で実行できる（`backend/.env` を読み、パスワードを percent-encode して `--db-url` を組む）。先に dry-run で対象の版を確かめる。
+  `--include-all` 付きのタスクは、古い日付の版が後から入ったときだけ使う（履歴に無い版を順序を問わず流す）
 - 本番への `db push` / 直接SQL実行は不可逆な操作のため、必ず `--dry-run`（push の場合）や `SELECT` での事前確認を行い、ユーザーの明示的な承認を得てから実行すること
 
 - **本番のマイグレーション未適用に気づく（Issue #633）**: `Deploy Migrations to Supabase`（`.github/workflows/supabase-deploy.yml`）は
