@@ -50,7 +50,7 @@ interface TargetComboboxProps {
   triggerLabel: string
   searchPlaceholder: string
   emptyText: string
-  onSelect: (id: number) => void
+  onSelect: (id: number, label: string) => void
   selectedId?: number | null
   disabled?: boolean
   loading?: boolean
@@ -108,7 +108,7 @@ function TargetCombobox({
                       keywords={[option.label, option.hint ?? "", ...(option.keywords ?? [])]}
                       onSelect={() => {
                         setOpen(false)
-                        onSelect(option.id)
+                        onSelect(option.id, option.label)
                       }}
                     >
                       <Check
@@ -143,7 +143,8 @@ function TargetCombobox({
 }
 
 interface SinglePickerProps {
-  onSelect: (id: number) => void
+  /** label は確認ダイアログに出す選択先の表示名 */
+  onSelect: (id: number, label: string) => void
   selectedId?: number | null
   disabled?: boolean
   triggerLabel?: string

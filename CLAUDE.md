@@ -182,6 +182,10 @@ cd backend && ruff check . && mypy .
     入れ子にしない。種別の色は `KIND_COLORS` 1か所で、選択中の色は CSS 変数 `--kind-color` で一覧の上辺へ渡す。ページ全体はスクロールさせず
     `h-[calc(100dvh-6.75rem)]` の縦 flex にし、`TabsContent` と親 `Tabs` に `min-h-0 flex-1` を付けて一覧（`KIND_PANEL_CLASS`）だけを
     スクロールさせる（`min-h-0` が無いと flex の子が内容の高さまで伸びてページが動く）。ページ側の `py-4` は外す（高さの計算に含まれる）
+  - **未照合キューの確認ダイアログ（Issue #645）**: 対応付け・対象外は選んだ時点では登録せず、`UnmatchedNameRow` が「保留中の操作」を state で1つ持って
+    共通の `ConfirmMappingDialog` を開く（行ごとに `AlertDialog` を持たせない）。確定ボタンは `AlertDialogAction` ではなく通常の `Button`で、成功時に保留を消して閉じ、
+    失敗時は開いたままトーストを出す。ピッカー（`target-pickers.tsx`）の `onSelect` は `(id, label)` を返す（ダイアログに登録先の表示名を出すため）。
+    新しい登録経路を足すときも `register` を直接呼ばず保留 state を経由させる
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は
