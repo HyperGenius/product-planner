@@ -3,9 +3,8 @@
 import * as React from "react"
 import { ChevronDown, ChevronRight, EyeOff } from "lucide-react"
 import { toast } from "sonner"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   useCreateNameAlias,
   useIgnoreName,
@@ -24,6 +23,7 @@ import {
   type NameKind,
   type UnmatchedName,
 } from "@/types/daily-report-names"
+import { KIND_PANEL_CLASS, KindTabsList, kindColorStyle } from "./kind-tabs"
 import { NameEntriesTable } from "./name-entries-table"
 import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from "./target-pickers"
 
@@ -43,33 +43,33 @@ export function UnmatchedNameQueue({ canEdit }: { canEdit: boolean }) {
     return <p className="py-6 text-sm text-destructive">未照合の表記を取得できませんでした</p>
   }
 
+  const counts = Object.fromEntries(
+    NAME_KINDS.map((k) => [k, items.filter((i) => i.kind === k).length]),
+  ) as Record<NameKind, number>
+
   return (
-    <Tabs value={kind} onValueChange={(v) => setKind(v as NameKind)}>
-      <TabsList>
-        {NAME_KINDS.map((k) => (
-          <TabsTrigger key={k} value={k}>
-            {NAME_KIND_LABELS[k]}
-            <Badge variant="secondary" className="ml-1">
-              {items.filter((i) => i.kind === k).length}
-            </Badge>
-          </TabsTrigger>
-        ))}
-      </TabsList>
+    <Tabs value={kind} onValueChange={(v) => setKind(v as NameKind)} className="min-h-0 flex-1">
+      <KindTabsList counts={counts} />
       {NAME_KINDS.map((k) => {
         const kindItems = items.filter((i) => i.kind === k)
         return (
-          <TabsContent key={k} value={k} className="space-y-2">
-            {k === "product" && (
-              <p className="text-xs text-muted-foreground">
-                製品の別名は顧客ごとに登録します。顧客先が未照合の行は、先に「顧客」で対応付けてください。
-              </p>
-            )}
+          <TabsContent
+            key={k}
+            value={k}
+            className="flex min-h-0 flex-1 flex-col gap-2"
+            style={kindColorStyle(k)}
+          >
+            <p className="text-xs text-muted-foreground">
+              {k === "product"
+                ? "製品の別名は顧客ごとに登録します。顧客先が未照合の行は、先に「顧客」で対応付けてください。"
+                : "出現件数の多い順に並んでいます。"}
+            </p>
             {kindItems.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
+              <p className="rounded-lg border border-t-4 border-t-[var(--kind-color)] bg-card py-8 text-center text-sm text-muted-foreground">
                 未照合の{NAME_KIND_LABELS[k]}はありません
               </p>
             ) : (
-              <ul className="divide-y rounded-lg border bg-card">
+              <ul className={`divide-y ${KIND_PANEL_CLASS}`}>
                 {kindItems.map((item) => (
                   <UnmatchedNameRow key={unmatchedNameKey(item)} item={item} canEdit={canEdit} />
                 ))}
