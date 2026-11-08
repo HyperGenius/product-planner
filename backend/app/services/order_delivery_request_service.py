@@ -34,6 +34,9 @@ class DeliveryRequestEntry:
     quantity: int | None
     requested_date: date | None
     product_id: int | None
+    # メールが言及している顧客の注文番号（明細の注文No.、無ければ文書の注文番号）。
+    # 同じ顧客・製品の受注が複数あるとき、受注を絞り込むのに使う
+    customer_order_no: str | None = None
 
 
 def parse_requested_date(raw: Any) -> date | None:
@@ -46,12 +49,27 @@ def parse_requested_date(raw: Any) -> date | None:
         return None
 
 
-def pick_target_order_id(candidates: list[dict[str, Any]], today: date) -> int | None:
+def pick_target_order_id(
+    candidates: list[dict[str, Any]],
+    today: date,
+    customer_order_no: str | None = None,
+) -> int | None:
     """候補の受注から督促の対象を1件に決める。決まらなければ None（未紐づけ）。
+
+    メールが注文番号に触れていて、同じ番号の受注が候補にあれば、その受注に絞る
+    （当たる受注が無いときは、番号の書き方が違うだけかもしれないので絞らない）。
 
     複数当たるときは、督促は納期超過の受注に来るものなので、希望納期が今日以前の受注が
     1件だけならそれを選ぶ。それでも1件に定まらなければ確定しない。
     """
+    order_no = (customer_order_no or "").strip()
+    if order_no:
+        same_no = [
+            c
+            for c in candidates
+            if str(c.get("customer_order_no") or "").strip() == order_no
+        ]
+        candidates = same_no or candidates
     if len(candidates) == 1:
         return int(candidates[0]["id"])
     overdue = [
@@ -68,13 +86,14 @@ def find_target_order_id(
     tenant_id: str,
     customer_id: int | None,
     product_id: int | None,
+    customer_order_no: str | None = None,
 ) -> int | None:
     """顧客と製品で、督促の対象になる未出荷の受注を探す。顧客不明・製品不明は紐づけない。"""
     if customer_id is None or product_id is None:
         return None
     result = (
         db.table(SupabaseTableName.ORDERS.value)
-        .select("id, deadline_date")
+        .select("id, deadline_date, customer_order_no")
         .eq("tenant_id", tenant_id)
         .eq("customer_id", customer_id)
         .eq("product_id", product_id)
@@ -84,7 +103,7 @@ def find_target_order_id(
         .execute()
     )
     candidates = cast(list[dict[str, Any]], result.data or [])
-    return pick_target_order_id(candidates, datetime.now(JST).date())
+    return pick_target_order_id(candidates, datetime.now(JST).date(), customer_order_no)
 
 
 def record_delivery_requests(
@@ -132,7 +151,9 @@ def record_delivery_requests(
         if content in seen:
             continue
         seen.add(content)
-        order_id = find_target_order_id(db, tenant_id, customer_id, entry.product_id)
+        order_id = find_target_order_id(
+            db, tenant_id, customer_id, entry.product_id, entry.customer_order_no
+        )
         db.table(table).insert(
             {
                 "tenant_id": tenant_id,

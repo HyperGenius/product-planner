@@ -40,3 +40,15 @@ class TestEmailIntent:
         schema = kwargs["output_config"]["format"]["schema"]
         assert "email_intent" in schema["required"]
         assert "delivery_chase" in schema["properties"]["email_intent"]["enum"]
+
+    def test_prompt_tells_model_to_ignore_quoted_history_and_treat_reply_as_chase(
+        self,
+    ):
+        """返信の引用を注文として読まない指示がプロンプトとスキーマ説明に入っている。"""
+        _, kwargs = _extract(
+            {"document_order_no": None, "email_intent": "other", "line_items": []}
+        )
+        prompt = kwargs["messages"][0]["content"]
+        assert "引用" in prompt and "delivery_chase" in prompt
+        schema = kwargs["output_config"]["format"]["schema"]
+        assert "注文書を送付済み" in schema["properties"]["email_intent"]["description"]

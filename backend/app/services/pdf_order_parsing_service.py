@@ -428,7 +428,7 @@ def _process_email_body(
     if email_intent in (EMAIL_INTENT_DELIVERY_CHASE, EMAIL_INTENT_SPLIT_DELIVERY):
         # 督促・分納依頼は既に受けた注文についての連絡なので起票しない（Issue #619）
         _process_delivery_request_email(
-            db, row, cast(str, email_intent), line_items, body
+            db, row, cast(str, email_intent), line_items, body, document_order_no
         )
         return 0
 
@@ -454,12 +454,17 @@ def _process_email_body(
     return created_count
 
 
+def _clean_order_no(value: Any) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
+
+
 def _process_delivery_request_email(
     db: Client,
     row: dict[str, Any],
     kind: str,
     line_items: list[dict[str, Any]],
     body: str,
+    document_order_no: str | None = None,
 ) -> None:
     """督促・分納依頼のメールを、起票せず既存の受注に紐づけて記録する（Issue #619）。
 
@@ -480,6 +485,9 @@ def _process_delivery_request_email(
                 ),
                 quantity=quantity if isinstance(quantity, int) else None,
                 requested_date=parse_requested_date(line.get("delivery_date")),
+                customer_order_no=_clean_order_no(
+                    line.get("line_order_no") or document_order_no
+                ),
                 product_id=_resolve_product_id(
                     db,
                     tenant_id,

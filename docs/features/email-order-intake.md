@@ -590,6 +590,12 @@ Gmail ラベルの `{テナント名}` 部分と `tenant_id` の対応は `gmail
    `draft` / `pending_approval` / `confirmed` / `in_progress`（下書きのまま納期超過した受注への督促があるため
    draft も含む）で `superseded_at IS NULL`。複数当たるときは希望納期が今日（JST）以前の受注が1件だけならそれ、
    それでも決まらなければ**未紐づけ**（`order_id` NULL）。顧客不明・製品不明も未紐づけ。
+   メールが注文番号（明細の `line_order_no`、無ければ `document_order_no`）に触れ、同じ `customer_order_no` の受注が
+   候補にあれば先にその受注へ絞る（当たる受注が無いときは絞らない）。
+   **返信メールの引用部分は読まない**: 抽出のプロンプト・スキーマで、`From:` / `Sent:` / `差出人:` / `>` 以降の過去のメールの
+   明細を `line_items` に含めないよう指示している（過去の督促の明細が今回の依頼として記録されるのを防ぐ）。
+   注文書を送付済みの注文番号に触れて「製作予定があるので対応をお願いします」と求める返信は `delivery_chase`。
+   プロンプトによる指示で、引用をコードで切り落とすことはしない（社内転送メールは本文が `From:` から始まるため）。
 4. 記録先は `order_delivery_requests`（RLS: メンバーは参照・更新のみ、作成は取り込みの service role）。
    同じメールの再処理で二重に記録しないよう `(order_attachment_id, line_index)` を UNIQUE にしている。
    受注が削除されても依頼は残す（`ON DELETE SET NULL`）。**受注の納期・数量・ステータスは書き換えない**
