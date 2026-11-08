@@ -458,6 +458,14 @@ cd backend && ruff check . && mypy .
     バッジを出さないロールで注文を取得しないよう、取得は `useOrders({ enabled })` で必要なときだけにする（Epic #553）。
     注文以外のデータ（日報の進捗等）が要るバッジは、画面と同じフックで取ってクエリキーを揃え（「送品の消し込み」は
     `useShippingRows()`）、取得が終わるまでは件数を返さない（途中の件数が一瞬出る。Issue #557）
+  - **一括操作は1件ずつ API を呼ぶ（Issue #653）**: 一括シミュ・承認依頼・承認は、全件を1リクエストで処理して最後に返す API（旧 `approve-bulk`）にしない。
+    全件終わるまで画面が変わらず、承認者が動作しているか分からない。`useOrderBulkActions()` が注文ごとに単体 API（`/simulate`・`/request-approval`・`/confirm`）を
+    `for` で呼び、`bulkProgress`（`{label, done, total}`）を更新して `BulkActionBar` に「n / m件」で出す。新しい一括操作もこの形にそろえ、
+    ループの開始で `setBulkProgress`、1件ごとに `advanceProgress()`、終了で `null` に戻す。ループはブラウザの JS で回るので、
+    タブを閉じる・リロードすると残りは処理されない（1件ごとに確定済みなので半端な状態は残らない。アプリ内の画面遷移では止まらない）。
+    これは `useBulkLeaveGuard(bulkProgress)` が `beforeunload` の確認と、`pagehide` で残す印による次回表示時の toast で知らせる
+    （離脱の瞬間にはページが消えるので toast は出せない）。印は localStorage の外部入力として形を検証してから使う。
+    `approve-bulk` API・`useApproveOrdersBulk()` は残っているが画面からは呼ばない
   - 「送品の消し込み」（Issue #557）の納期の基準は**希望納期 → 無ければ完成見込み**（`getShippingDeadline()`）で、
     完成見込みを基準にする現場ダッシュボードとは意図的に違う。送品は弥生が正なので、候補を示すだけで自動では送品済みにせず、
     一括の送品も作らない。送品の権限は `canShipOrder()`（`order-utils.ts`）で注文一覧と共有する
