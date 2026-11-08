@@ -47,6 +47,23 @@ class TestPickTargetOrderId:
 
 
 @pytest.mark.unit
+class TestPickTargetByOrderNo:
+    def test_narrows_to_the_order_with_the_mentioned_order_no(self):
+        candidates = [
+            {"id": 1, "deadline_date": "2026-12-01", "customer_order_no": "C1871"},
+            {"id": 2, "deadline_date": "2026-12-01", "customer_order_no": "C1880"},
+        ]
+        assert pick_target_order_id(candidates, TODAY, " C1880 ") == 2
+
+    def test_unmatched_order_no_does_not_narrow(self):
+        candidates = [
+            {"id": 1, "deadline_date": "2026-12-01", "customer_order_no": "A"},
+            {"id": 2, "deadline_date": "2026-12-01", "customer_order_no": "B"},
+        ]
+        assert pick_target_order_id(candidates, TODAY, "C1880") is None
+
+
+@pytest.mark.unit
 class TestParseRequestedDate:
     def test_iso_date(self):
         assert parse_requested_date("2026-11-03") == date(2026, 11, 3)

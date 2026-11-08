@@ -331,6 +331,11 @@ cd backend && ruff check . && mypy .
   受注一覧の行は `useOpenDeliveryRequestCounts()`（1リクエストの共有キャッシュ）で印を付けるため、`OrderTableRow` を描画するテストでは
   MSW の既定ハンドラ（`test-utils/msw/handlers.ts`）が無いと `onUnhandledRequest: "error"` で落ちる。詳細は
   [docs/features/email-order-intake.md](docs/features/email-order-intake.md#督促分割納入依頼メールの扱いissue-619)
+- **返信メールの引用と督促の抽出**: 本文だけを抽出に渡す（件名は渡さない）ので、返信の引用（過去の注文・督促の明細）を
+  モデルが明細として拾い、新規注文として起票したり過去の明細を督促として記録したりしうる。引用の除去はコードでやらず
+  抽出プロンプト・スキーマで指示する（社内転送メールは本文が `From:` から始まり、機械的に切ると注文本文ごと消える）。
+  「PDF が無ければ注文とみなさない」は本文だけの注文（#280）を落とすので採らない。督促の受注の紐づけは注文番号があれば
+  `customer_order_no` で先に絞る。プロンプトの効果は単体テストでは確かめられないので、本番の `order_delivery_requests` で見る
 - **担当者に気づかせる手段（Issue #621）**: アプリ内の通知ベル（`notifications`）は廃止した（既読がテナント共通・ロールで
   出し分けない・バッジと重複するため）。**今やるべき作業はサイドバーの件数バッジ（`useSidebarBadgeCounts()`）、出来事の通知は
   Slack（`email_intake_slack_service`）、取り込みの結果は受信メール処理結果**に置き、ベルのような横断の通知テーブルを作り直さない。
