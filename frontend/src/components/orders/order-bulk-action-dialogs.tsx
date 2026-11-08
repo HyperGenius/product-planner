@@ -37,6 +37,7 @@ export function OrderBulkActionDialogs({
         isBulkSimulating={bulk.isBulkSimulating}
         isBulkRequestingApproval={bulk.isBulkRequestingApproval}
         isBulkApproving={bulk.isBulkApproving}
+        progress={bulk.bulkProgress}
         onBulkSimulate={bulk.handleBulkSimulateRequest}
         onBulkRequestApproval={bulk.handleBulkRequestApprovalRequest}
         onBulkApprove={bulk.handleBulkApproveRequest}

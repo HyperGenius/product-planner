@@ -430,6 +430,17 @@ Epic #553 の2画面目。社長が承認待ちの注文を、希望納期とシ
 | 受注担当（`order_handler`） | 取り下げ |
 | それ以外（`iso_officer` / `platform_admin`） | 閲覧のみ（選択欄も出さない） |
 
+#### 一括操作の進捗表示と離脱時の警告
+
+一括シミュレーション・一括承認依頼・一括承認は、いずれも注文を **1件ずつ** API（`/simulate`・`/request-approval`・`/confirm`）へ送るループで、
+`useOrderBulkActions()` の `bulkProgress`（`{ label, done, total }`）を操作バー（`BulkActionBar`）に「n / m件」とプログレスバーで出す。
+一括承認は以前の `POST /orders/approve-bulk`（全件処理後に1回で返す）をやめ、承認できた注文が1件ごとに一覧から消えるようにした
+（`approve-bulk` API と `useApproveOrdersBulk()` は残している）。
+
+ループはブラウザの JS で回るので、タブを閉じる・リロードすると残りは処理されない（処理済みの注文は1件ごとに確定済みで、半端な状態は残らない。
+アプリ内の画面遷移ではループは止まらない）。`useBulkLeaveGuard()`（`hooks/use-bulk-leave-guard.ts`）が、実行中は `beforeunload` で確認ダイアログを出し、
+離脱されたら `pagehide` で途中の件数を localStorage に残して、次に画面を開いたとき toast で知らせる。
+
 #### 一括承認の確認モーダルのレイアウト（Issue #617）
 
 `BulkApproveConfirmDialog`（`components/orders/bulk-approve-confirm-dialog.tsx`）は、15件程度でも1行1段で確認できるようにしている。
