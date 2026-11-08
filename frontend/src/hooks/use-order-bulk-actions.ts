@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
-  useApproveOrdersBulk,
+  useConfirmOrder,
   useRequestApproval,
   useShipOverdueDrafts,
   useSimulateOrderById,
 } from "@/hooks/use-orders"
+import { useBulkLeaveGuard, type BulkProgress } from "@/hooks/use-bulk-leave-guard"
 import type { OrderTableRowProps } from "@/components/orders/order-table-row"
 import { isOverdueDraft, isRepairOrder } from "@/lib/order-utils"
 import type { Order, BulkSimulateResult } from "@/types/order"
@@ -37,6 +38,8 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
   const [isBulkSimulating, setIsBulkSimulating] = useState(false)
   const [isBulkRequestingApproval, setIsBulkRequestingApproval] = useState(false)
   const [isBulkApproving, setIsBulkApproving] = useState(false)
+  /** 実行中の一括処理の進捗（1件ずつ API を呼ぶ件数。操作バーの表示と離脱時の警告に使う） */
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null)
   const [isBulkSimulateConfirmOpen, setIsBulkSimulateConfirmOpen] = useState(false)
   const [bulkSimSummary, setBulkSimSummary] = useState<BulkSimulateResult[] | null>(null)
   const [bulkSimFailedIds, setBulkSimFailedIds] = useState<Set<number>>(new Set())
@@ -47,7 +50,10 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
   const queryClient = useQueryClient()
   const requestApproval = useRequestApproval()
   const simulateOrderById = useSimulateOrderById()
-  const approveOrdersBulk = useApproveOrdersBulk()
+  const confirmOrder = useConfirmOrder()
+  useBulkLeaveGuard(bulkProgress)
+  const advanceProgress = () =>
+    setBulkProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
   const shipOverdueDrafts = useShipOverdueDrafts()
 
   const isBulkOperationInProgress = isBulkSimulating || isBulkRequestingApproval || isBulkApproving
@@ -166,6 +172,7 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
       return
     }
     setIsBulkSimulating(true)
+    setBulkProgress({ label: "一括シミュレーション", done: 0, total: ids.length })
     setBulkSimFailedIds(new Set())
     const results: BulkSimulateResult[] = []
     for (const id of ids) {
@@ -177,6 +184,7 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
       } catch {
         results.push({ orderId: id, orderNo, desiredDeadline: order?.desired_deadline, result: null })
       }
+      advanceProgress()
     }
     await queryClient.invalidateQueries({ queryKey: ["orders"] })
     const failedIds = new Set(
@@ -185,6 +193,7 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     setBulkSimFailedIds(failedIds)
     setSelectedOrderIds([])
     setIsBulkSimulating(false)
+    setBulkProgress(null)
     setBulkSimSummary(results)
   }
 
@@ -192,6 +201,7 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
 
   const handleBulkRequestApprovalFromSummary = async (orderIds: number[]) => {
     setIsBulkRequestingApproval(true)
+    setBulkProgress({ label: "一括承認依頼", done: 0, total: orderIds.length })
     let successCount = 0, failCount = 0
     for (const id of orderIds) {
       try {
@@ -200,9 +210,11 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
       } catch {
         failCount++
       }
+      advanceProgress()
     }
     await queryClient.invalidateQueries({ queryKey: ["orders"] })
     setIsBulkRequestingApproval(false)
+    setBulkProgress(null)
     const parts = (
       [
         successCount > 0 ? `成功 ${successCount}件` : null,
@@ -228,6 +240,7 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     const scheduledIds = ids.filter((id) => orders?.find((o) => o.id === id)?.is_scheduled)
     const skippedCount = ids.length - scheduledIds.length
     setIsBulkRequestingApproval(true)
+    setBulkProgress({ label: "一括承認依頼", done: 0, total: scheduledIds.length })
     let successCount = 0, failCount = 0
     for (const id of scheduledIds) {
       try {
@@ -236,8 +249,10 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
       } catch {
         failCount++
       }
+      advanceProgress()
     }
     setIsBulkRequestingApproval(false)
+    setBulkProgress(null)
     setSelectedOrderIds([])
     const parts = (
       [
@@ -266,22 +281,28 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     )
     if (ids.length === 0) return
     setIsBulkApproving(true)
-    try {
-      const res = await approveOrdersBulk.mutateAsync(ids)
-      const successCount = res.results.filter((r) => r.status === "confirmed").length
-      const failCount = res.results.length - successCount
-      setSelectedOrderIds([])
-      if (failCount === 0) {
-        toast.success(`一括承認完了: 成功 ${successCount}件`)
-      } else if (successCount === 0) {
-        toast.error(`一括承認失敗: ${failCount}件`)
-      } else {
-        toast.warning(`一括承認完了: 成功 ${successCount}件 / 失敗 ${failCount}件`)
+    setBulkProgress({ label: "一括承認", done: 0, total: ids.length })
+    // 1件ずつ承認する。承認できた注文は1件ごとに一覧から消えるので、進み具合が目で見える
+    let successCount = 0
+    let failCount = 0
+    for (const id of ids) {
+      try {
+        await confirmOrder.mutateAsync(id)
+        successCount++
+      } catch {
+        failCount++
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? `一括承認に失敗しました: ${error.message}` : "一括承認に失敗しました")
-    } finally {
-      setIsBulkApproving(false)
+      advanceProgress()
+    }
+    setSelectedOrderIds([])
+    setIsBulkApproving(false)
+    setBulkProgress(null)
+    if (failCount === 0) {
+      toast.success(`一括承認完了: 成功 ${successCount}件`)
+    } else if (successCount === 0) {
+      toast.error(`一括承認失敗: ${failCount}件`)
+    } else {
+      toast.warning(`一括承認完了: 成功 ${successCount}件 / 失敗 ${failCount}件`)
     }
   }
 
@@ -342,6 +363,7 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     isBulkRequestingApproval,
     isBulkApproving,
     isBulkOperationInProgress,
+    bulkProgress,
     // 一括シミュ
     isBulkSimulateConfirmOpen,
     handleBulkSimulateRequest,

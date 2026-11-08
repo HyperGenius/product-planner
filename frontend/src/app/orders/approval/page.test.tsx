@@ -178,13 +178,11 @@ describe("OrdersApprovalPage（Issue #556）", () => {
 
   it("社長は選んだ注文を確認モーダルを挟んで一括承認できる", async () => {
     mockOrders([makeOrder({ id: 1, order_no: "P-1" }), makeOrder({ id: 2, order_no: "P-2" })])
-    let approvedIds: number[] = []
+    const approvedIds: number[] = []
     server.use(
-      http.post(`${API_BASE}/orders/approve-bulk`, async ({ request }) => {
-        approvedIds = ((await request.json()) as { order_ids: number[] }).order_ids
-        return HttpResponse.json({
-          results: approvedIds.map((id) => ({ order_id: id, status: "confirmed" })),
-        })
+      http.post(`${API_BASE}/orders/:id/confirm`, ({ params }) => {
+        approvedIds.push(Number(params.id))
+        return HttpResponse.json({ order_id: Number(params.id) })
       }),
     )
     const user = userEvent.setup()

@@ -138,11 +138,11 @@ describe("useOrderBulkActions（Issue #554）", () => {
   })
 
   it("一括承認は承認待ちだけを送る", async () => {
-    let body: unknown
+    const confirmedIds: number[] = []
     server.use(
-      http.post(`${API_BASE}/orders/approve-bulk`, async ({ request }) => {
-        body = await request.json()
-        return HttpResponse.json({ results: [{ order_id: 3, status: "confirmed" }] })
+      http.post(`${API_BASE}/orders/:id/confirm`, ({ params }) => {
+        confirmedIds.push(Number(params.id))
+        return HttpResponse.json({ order_id: Number(params.id) })
       }),
     )
     const { result } = renderBulk()
@@ -151,9 +151,10 @@ describe("useOrderBulkActions（Issue #554）", () => {
     act(() => result.current.handleToggleSelect(3))
     await act(() => result.current.handleBulkApproveConfirm())
 
-    expect(body).toEqual({ order_ids: [3] })
+    expect(confirmedIds).toEqual([3])
     expect(toast.success).toHaveBeenCalledWith("一括承認完了: 成功 1件")
     expect(result.current.isBulkApproving).toBe(false)
+    expect(result.current.bulkProgress).toBeNull()
   })
 
   it("納期超過の下書きを数え、一括送品の件数をトーストに出す（Issue #367）", async () => {
