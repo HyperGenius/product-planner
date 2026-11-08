@@ -225,82 +225,174 @@ export function formatDateTimeShort(datetimeIso: string | null | undefined): str
 }
 
 /**
- * 「起票の確認」画面（Issue #555）での下書きの区分。次に何をすれば先へ進めるかで分ける。
- * 並び順（`INTAKE_CATEGORIES`）が判定の優先順
+ * 「起票の確認」画面での下書きの区分。データの状態ではなく「誰の番で、次に何をするか」で分ける（Issue #654）。
+ * 並び順（`INTAKE_CATEGORIES`）はカードの並びで、受注担当の作業 → 他の人の作業待ちの順
  */
-export type IntakeCategory =
-  | "no_product"
-  | "no_routing"
-  | "incomplete"
-  | "unsimulated"
-  | "simulated"
+export type IntakeCategory = "rejected" | "needs_input" | "ready_to_request" | "waiting_routing"
 
 export const INTAKE_CATEGORIES: readonly IntakeCategory[] = [
-  "no_product",
-  "no_routing",
-  "incomplete",
-  "unsimulated",
-  "simulated",
+  "rejected",
+  "needs_input",
+  "ready_to_request",
+  "waiting_routing",
 ]
 
 export interface IntakeCategoryMeta {
+  /** 次の操作（動詞）で書く */
   label: string
-  /** 次の操作の案内 */
+  /** 一覧の上に出す、次の操作の案内 */
   description: string
-  /** 件数カード・見出しの色（既存のバッジに合わせる） */
-  cardClass: string
-  countClass: string
+  /** カードの補足（件数の内訳が無いときに出す） */
+  hint: string
+  /**
+   * 他の人の作業待ちか。色の意味は「受注担当の番」と「待ち（グレー）」の2つだけにし、
+   * 区分ごとの色は持たない（色に意味が無いと凡例を足しても読めないため）
+   */
+  waiting: boolean
 }
 
 export const INTAKE_CATEGORY_META: Record<IntakeCategory, IntakeCategoryMeta> = {
-  no_product: {
-    label: "製品未確定",
-    description: "製品マスタと照合できていません。編集で製品を選ぶか、製品マスタに登録してください。",
-    cardClass: "border-red-300 bg-red-50",
-    countClass: "text-red-800",
+  rejected: {
+    label: "差し戻し",
+    description: "社長から差し戻された下書きです。差し戻し理由に対応して、承認依頼を送り直してください。",
+    hint: "理由に対応して依頼し直す",
+    waiting: false,
   },
-  no_routing: {
-    label: "工程未登録",
-    description: "製品に工程が登録されていないためシミュレーションできません。製品マスタで工程を登録してください。",
-    cardClass: "border-amber-300 bg-amber-50",
-    countClass: "text-amber-800",
+  needs_input: {
+    label: "入力を直す",
+    description:
+      "製品・数量・顧客・希望納期のどれかが決まっていません。編集で入力してください。製品マスタに無い製品は、製品マスタに登録してから選んでください。",
+    hint: "編集で入力する",
+    waiting: false,
   },
-  incomplete: {
-    label: "情報不足",
-    description: "顧客または希望納期が設定されていません。編集で入力してください。",
-    cardClass: "border-orange-300 bg-orange-50",
-    countClass: "text-orange-800",
+  ready_to_request: {
+    label: "承認依頼を送る",
+    description:
+      "完成見込み（シミュ納期）と希望納期を見比べて、問題なければ承認依頼を送ってください。完成見込みが無い注文は、先にシミュレーションを実行してください。",
+    hint: "完成見込みを見て依頼する",
+    waiting: false,
   },
-  unsimulated: {
-    label: "シミュ未実行",
-    description: "シミュレーションを実行して、完成見込み日（シミュ納期）を出してください。",
-    cardClass: "border-yellow-300 bg-yellow-50",
-    countClass: "text-yellow-800",
-  },
-  simulated: {
-    label: "シミュ納期の確認",
-    description: "希望納期とシミュ納期を見比べて、問題なければ承認依頼を送ってください。",
-    cardClass: "border-indigo-300 bg-indigo-50",
-    countClass: "text-indigo-800",
+  waiting_routing: {
+    label: "工程の登録待ち",
+    description:
+      "製品に工程が登録されていないため、完成見込みを出せません。社長が製品マスタで工程を登録すると「承認依頼を送る」へ移ります。",
+    hint: "社長が製品マスタで工程を登録する",
+    waiting: true,
   },
 }
 
+/** 「入力を直す」で足りない項目 */
+export type IntakeMissingField = "product" | "quantity" | "customer" | "desired_deadline"
+
+export const INTAKE_MISSING_FIELD_LABELS: Record<IntakeMissingField, string> = {
+  product: "製品",
+  quantity: "数量",
+  customer: "顧客",
+  desired_deadline: "希望納期",
+}
+
 /**
- * 下書きの区分（Issue #555）。下書き以外は null。優先順に最初に当たった区分を返す。
- * - `has_no_routings` は `product_id` が NULL のときも true なので、製品未確定を先に判定する
- * - 工程未登録は `isNoRoutingOrder()` ではなく `has_no_routings` を直接見る（シミュ済も含める）
- * - 修理注文は製品・工程を持たないので製品未確定・工程未登録に入れない。
- *   修理の `is_scheduled` は実施開始日と完了予定日がそろっているかで立つので、シミュの区分はそのまま使える
- * - 差し戻し（`rejection_reason`）は区分に影響させない
+ * 下書きを承認依頼まで進めるのに足りない入力項目。修理等は製品・数量を持たないので数えない（Issue #494）。
+ * 数量が無いとシミュレーションできない（`auto_simulate_intake_order()` も飛ばす）ので含める
+ */
+export function getIntakeMissingFields(order: Order): IntakeMissingField[] {
+  const fields: IntakeMissingField[] = []
+  if (!isRepairOrder(order)) {
+    if (order.product_id == null) fields.push("product")
+    if (order.quantity == null) fields.push("quantity")
+  }
+  if (!order.customer_id) fields.push("customer")
+  if (!order.desired_deadline) fields.push("desired_deadline")
+  return fields
+}
+
+/**
+ * 下書きの区分（Issue #654）。下書き以外は null。判定の優先順は
+ * 差し戻し → 入力を直す → 工程の登録待ち → 承認依頼を送る（受注担当が自分で進められるものを先に出す）。
+ * - 差し戻しは他の問題があっても差し戻しに入れる（足りない項目・工程未入力は行の表示で分かる）。
+ *   差し戻し理由は承認依頼の送信でクリアされるので、依頼し直していない下書きだけが入る
+ * - `has_no_routings` は `product_id` が NULL のときも true なので、入力を直す（製品）を先に判定する
+ * - 工程の登録待ちは `isNoRoutingOrder()` ではなく `has_no_routings` を直接見る（シミュ済も含める）
+ * - 修理等は工程を持たないので工程の登録待ちに入れない。修理の `is_scheduled` は実施開始日と
+ *   完了予定日がそろっているかで立つので、承認依頼を送るの中で日付の入力を案内する
  */
 export function getIntakeCategory(order: Order): IntakeCategory | null {
   if (order.status !== "draft") return null
-  if (!isRepairOrder(order)) {
-    if (order.product_id === null) return "no_product"
-    if (order.has_no_routings === true) return "no_routing"
+  if (order.rejection_reason?.trim()) return "rejected"
+  if (getIntakeMissingFields(order).length > 0) return "needs_input"
+  if (!isRepairOrder(order) && order.has_no_routings === true) return "waiting_routing"
+  return "ready_to_request"
+}
+
+/**
+ * 区分のカードに出す件数の内訳（Issue #654）。内訳が無いときは null（カードには `hint` を出す）
+ * - 入力を直す: 足りない項目ごとの件数（1件の注文が複数の項目に数えられる）
+ * - 承認依頼を送る: 完成見込みが希望納期に間に合わない件数・完成見込みが無い件数
+ * - 工程の登録待ち: 製品の数（工程の登録は製品ごとの作業なので）
+ */
+export function summarizeIntakeCategory(
+  category: IntakeCategory,
+  orders: Order[]
+): { text: string; isAlert: boolean } | null {
+  if (orders.length === 0) return null
+  switch (category) {
+    case "needs_input": {
+      const counts = new Map<IntakeMissingField, number>()
+      for (const order of orders) {
+        for (const field of getIntakeMissingFields(order)) {
+          counts.set(field, (counts.get(field) ?? 0) + 1)
+        }
+      }
+      const parts = (Object.keys(INTAKE_MISSING_FIELD_LABELS) as IntakeMissingField[])
+        .filter((field) => counts.has(field))
+        .map((field) => `${INTAKE_MISSING_FIELD_LABELS[field]} ${counts.get(field)}件`)
+      return parts.length > 0 ? { text: parts.join("・"), isAlert: false } : null
+    }
+    case "ready_to_request": {
+      const late = orders.filter((o) => isDeadlineOverdue(o, o.simulated_deadline)).length
+      const noForecast = orders.filter((o) => !o.is_scheduled).length
+      const parts = [
+        late > 0 ? `希望納期に間に合わない ${late}件` : null,
+        noForecast > 0 ? `完成見込みなし ${noForecast}件` : null,
+      ].filter((part): part is string => part !== null)
+      return parts.length > 0 ? { text: parts.join("・"), isAlert: late > 0 } : null
+    }
+    case "waiting_routing":
+      return { text: `${groupOrdersByProduct(orders).length}製品`, isAlert: false }
+    case "rejected":
+      return null
   }
-  if (!order.customer_id || !order.desired_deadline) return "incomplete"
-  return order.is_scheduled ? "simulated" : "unsimulated"
+}
+
+/**
+ * 注文を製品ごとにまとめる（「工程の登録待ち」は製品ごとの作業なので。Issue #654）。
+ * 製品の並びは、入力の並びで最初に出てきた順（希望納期の近い順に並べた注文を渡せば、最も近い製品が先）
+ */
+export function groupOrdersByProduct(
+  orders: Order[]
+): { productId: number | null; orders: Order[] }[] {
+  const groups = new Map<number | null, Order[]>()
+  for (const order of orders) {
+    const key = order.product_id ?? null
+    const group = groups.get(key)
+    if (group) group.push(order)
+    else groups.set(key, [order])
+  }
+  return Array.from(groups, ([productId, grouped]) => ({ productId, orders: grouped }))
+}
+
+/**
+ * URL のハッシュから選択中の区分を決める（Issue #654）。ハッシュは外部入力なので既知の区分と照合する。
+ * 不正な値・未指定・0件で隠れた差し戻しを指しているときは、件数のある最初の区分にする
+ */
+export function toValidIntakeCategory(
+  hash: string,
+  counts: Record<IntakeCategory, number>
+): IntakeCategory {
+  const value = hash.replace(/^#/, "")
+  const selected = INTAKE_CATEGORIES.find((category) => category === value)
+  if (selected && (selected !== "rejected" || counts.rejected > 0)) return selected
+  return INTAKE_CATEGORIES.find((category) => counts[category] > 0) ?? "needs_input"
 }
 
 /** 「起票の確認」画面で数える起票失敗メールの期間（日数、Issue #555） */

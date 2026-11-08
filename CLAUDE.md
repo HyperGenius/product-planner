@@ -552,6 +552,11 @@ cd backend && ruff check . && mypy .
   「工程未入力・起票不可」（`has_no_routings`）判定は `isNoRoutingOrder()` に集約し、受注詳細（`orders/[id]/page.tsx` の
   `hasNoRouting`）と条件を揃える。詳細は [docs/features/order-management-ui-design.md](docs/features/order-management-ui-design.md) /
   [docs/features/process-routing-confirmation.md](docs/features/process-routing-confirmation.md)
+- **起票の確認の区分（Issue #654）**: 区分は注文データの欠けた項目ではなく**「誰の番で、次に何をするか」**（差し戻し・入力を直す・
+  承認依頼を送る・工程の登録待ち）で分ける。シミュの有無のようなシステムの内部手順を区分にしない。色の意味は「受注担当の番」と
+  「他の人の作業待ち」（`INTAKE_CATEGORY_META.waiting`、グレー）の2つだけで、区分ごとの色を足さない。待ちの区分には受注担当向けの
+  操作を出さず、作業の単位（工程なら製品）でまとめる。カードで選んだ区分の一覧だけを出し、選択は URL ハッシュ（`useLocationHash()`、
+  照合状況と共有）で持つ。注文の表の行の間に見出し行を挟むときは `colSpan={ORDER_TABLE_COLUMN_COUNT}`（`orders-table.tsx`。列を増減したら合わせる）
 - **URL クエリを Union 型にキャストするとき（`?status=` 等）**: `searchParams.get(...) as StatusFilter`
   のように無検証で `as` キャストすると、URL 直接編集・ブックマーク由来の未知の値で「該当なし」の誤表示や
   タブの選択状態不整合を起こす（Issue #460 PR #465 Copilotレビュー指摘）。既知の値の集合
