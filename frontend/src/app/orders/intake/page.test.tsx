@@ -74,8 +74,13 @@ function mockEmailResults(results: EmailIntakeResult[]): void {
   )
 }
 
-function getSection(name: string): HTMLElement {
-  return screen.getByRole("region", { name: new RegExp(`^${name}`) })
+/** 区分のカードを押して、その区分の一覧を返す */
+async function openCategory(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+): Promise<HTMLElement> {
+  await user.click(await screen.findByRole("button", { name: new RegExp(`^${label} \\d+件$`) }))
+  return screen.findByRole("region", { name: new RegExp(`^${label}`) })
 }
 
 const ordersOfAllCategories: Order[] = [
@@ -94,78 +99,152 @@ const ordersOfAllCategories: Order[] = [
   }),
   makeOrder({ id: 7, order_no: "PENDING", status: "pending_approval", is_scheduled: true }),
   makeOrder({ id: 8, order_no: "CONFIRMED", status: "confirmed", is_scheduled: true }),
+  makeOrder({
+    id: 9,
+    order_no: "REJECTED",
+    has_no_routings: true,
+    rejection_reason: "納期を確認してください",
+  }),
 ]
 
-describe("OrdersIntakePage（Issue #555）", () => {
+describe("OrdersIntakePage（Issue #555 / #654）", () => {
   beforeEach(() => {
+    window.location.hash = ""
     mockRole("order_handler")
     mockEmailResults([])
   })
 
-  it("下書きを5区分のいずれか1つにだけ出し、下書き以外は出さない", async () => {
+  it("下書きを4区分のいずれか1つにだけ入れ、選んだ区分の一覧だけを出す", async () => {
     mockOrders(ordersOfAllCategories)
+    const user = userEvent.setup()
     render(<OrdersIntakePage />)
 
-    await screen.findByRole("region", { name: /^製品未確定/ })
-    const expected: Record<string, string[]> = {
-      製品未確定: ["NO-PRODUCT"],
-      工程未登録: ["NO-ROUTING"],
-      情報不足: ["INCOMPLETE"],
-      // 修理注文は製品・工程を持たないので製品未確定・工程未登録に入れない
-      シミュ未実行: ["UNSIMULATED", "REPAIR"],
-      シミュ納期の確認: ["SIMULATED"],
+    // 件数カード
+    for (const name of ["差し戻し 1件", "入力を直す 2件", "承認依頼を送る 3件", "工程の登録待ち 1件"]) {
+      expect(await screen.findByRole("button", { name })).toBeInTheDocument()
     }
-    for (const [name, orderNos] of Object.entries(expected)) {
-      const section = getSection(name)
+
+    // 最初は件数のある最初の区分（差し戻し）を出す
+    expect(screen.getByRole("button", { name: "差し戻し 1件" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getAllByRole("region")).toHaveLength(1)
+
+    const expected: Record<string, { orderNos: string[]; extraRows: number }> = {
+      // 差し戻しは工程が無くても差し戻しに入れる
+      差し戻し: { orderNos: ["REJECTED"], extraRows: 0 },
+      入力を直す: { orderNos: ["NO-PRODUCT", "INCOMPLETE"], extraRows: 0 },
+      // 修理等は製品・工程を持たないので入力を直す（製品）・工程の登録待ちに入れない
+      承認依頼を送る: { orderNos: ["UNSIMULATED", "SIMULATED", "REPAIR"], extraRows: 0 },
+      // 製品の見出し行が1行入る
+      工程の登録待ち: { orderNos: ["NO-ROUTING"], extraRows: 1 },
+    }
+    for (const [name, { orderNos, extraRows }] of Object.entries(expected)) {
+      const section = await openCategory(user, name)
       // 見出し行を除いた行数が区分の件数と一致する（他の区分の注文が混ざらない）
-      expect(within(section).getAllByRole("row")).toHaveLength(orderNos.length + 1)
+      expect(within(section).getAllByRole("row")).toHaveLength(orderNos.length + extraRows + 1)
       for (const orderNo of orderNos) {
         expect(within(section).getByText(orderNo)).toBeInTheDocument()
       }
+      // 選択中の区分以外の一覧は出さない
+      expect(screen.getAllByRole("region")).toHaveLength(1)
     }
-    expect(screen.getAllByText("REPAIR")).toHaveLength(1)
     expect(screen.queryByText("PENDING")).not.toBeInTheDocument()
     expect(screen.queryByText("CONFIRMED")).not.toBeInTheDocument()
+  })
 
-    // 件数カード
-    expect(screen.getByRole("link", { name: "シミュ未実行 2件" })).toHaveAttribute(
-      "href",
-      "#intake-unsimulated",
+  it("選んだ区分を URL のハッシュに残し、ハッシュから復元する", async () => {
+    mockOrders(ordersOfAllCategories)
+    const user = userEvent.setup()
+    const { unmount } = render(<OrdersIntakePage />)
+
+    await openCategory(user, "工程の登録待ち")
+    expect(window.location.hash).toBe("#waiting_routing")
+    unmount()
+
+    render(<OrdersIntakePage />)
+    expect(await screen.findByRole("region", { name: /^工程の登録待ち/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "工程の登録待ち 1件" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     )
+  })
+
+  it("差し戻しが0件なら差し戻しのカードを出さず、ハッシュで指しても件数のある区分を出す", async () => {
+    window.location.hash = "#rejected"
+    mockOrders(ordersOfAllCategories.filter((o) => o.order_no !== "REJECTED"))
+    render(<OrdersIntakePage />)
+
+    expect(await screen.findByRole("region", { name: /^入力を直す/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^差し戻し/ })).toBeNull()
   })
 
   it("区分ごとに次の操作を出す", async () => {
     mockOrders(ordersOfAllCategories)
+    const user = userEvent.setup()
     render(<OrdersIntakePage />)
 
-    const noProduct = await screen.findByRole("region", { name: /^製品未確定/ })
-    expect(within(noProduct).getByRole("button", { name: "製品を選ぶ" })).toBeInTheDocument()
-    expect(within(noProduct).getByRole("link", { name: "製品マスタに登録" })).toHaveAttribute(
+    const rejected = await screen.findByRole("region", { name: /^差し戻し/ })
+    expect(within(rejected).getByRole("button", { name: "編集" })).toBeInTheDocument()
+    expect(within(rejected).getByText("納期を確認してください")).toBeInTheDocument()
+    expect(within(rejected).queryByRole("checkbox")).toBeNull()
+
+    const needsInput = await openCategory(user, "入力を直す")
+    const noProductRow = within(needsInput).getByText("NO-PRODUCT").closest("tr")!
+    expect(within(noProductRow).getByRole("button", { name: "製品を選ぶ" })).toBeInTheDocument()
+    expect(within(noProductRow).getByRole("link", { name: "製品マスタに登録" })).toHaveAttribute(
       "href",
       "/master/products",
     )
     // 製品が無いのでシミュは出さない
-    expect(within(noProduct).queryByRole("button", { name: "シミュレーション実行" })).toBeNull()
-
-    expect(within(getSection("工程未登録")).getByRole("link", { name: "工程を登録" })).toHaveAttribute(
-      "href",
-      "/master/products?highlight=1",
-    )
-    expect(within(getSection("情報不足")).getByRole("button", { name: "編集" })).toBeInTheDocument()
-
-    const unsimulated = getSection("シミュ未実行")
-    // 修理等はシミュレーションせず、詳細ページで日付を入力する（Issue #494）
-    expect(within(unsimulated).getAllByRole("button", { name: "シミュレーション実行" })).toHaveLength(1)
-    expect(within(unsimulated).getByRole("button", { name: "日付を入力" })).toBeInTheDocument()
-    expect(within(unsimulated).getByRole("checkbox", { name: "シミュ未実行をすべて選択" })).toBeInTheDocument()
-
-    const simulated = getSection("シミュ納期の確認")
-    expect(within(simulated).getByRole("button", { name: "承認依頼を送信" })).toBeInTheDocument()
+    expect(within(needsInput).queryByRole("button", { name: "シミュレーション実行" })).toBeNull()
+    const incompleteRow = within(needsInput).getByText("INCOMPLETE").closest("tr")!
+    expect(within(incompleteRow).getByRole("button", { name: "編集" })).toBeInTheDocument()
     // 一括操作の対象にしない区分には選択欄を出さない
-    expect(within(noProduct).queryByRole("checkbox")).toBeNull()
+    expect(within(needsInput).queryByRole("checkbox")).toBeNull()
+
+    const ready = await openCategory(user, "承認依頼を送る")
+    // 修理等はシミュレーションせず、詳細ページで日付を入力する（Issue #494）
+    expect(within(ready).getAllByRole("button", { name: "シミュレーション実行" })).toHaveLength(1)
+    expect(within(ready).getByRole("button", { name: "日付を入力" })).toBeInTheDocument()
+    expect(within(ready).getByRole("button", { name: "承認依頼を送信" })).toBeInTheDocument()
+    expect(
+      within(ready).getByRole("checkbox", { name: "承認依頼を送るをすべて選択" }),
+    ).toBeInTheDocument()
   })
 
-  it("差し戻された下書きは区分を変えず、差し戻しバッジと理由を出す", async () => {
+  it("工程の登録待ちは製品ごとにまとめ、受注担当には工程の登録の操作を出さない", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "A-1", product_id: 1, has_no_routings: true }),
+      makeOrder({ id: 2, order_no: "B-1", product_id: 2, has_no_routings: true }),
+      makeOrder({ id: 3, order_no: "A-2", product_id: 1, has_no_routings: true }),
+    ])
+    render(<OrdersIntakePage />)
+
+    const section = await screen.findByRole("region", { name: /^工程の登録待ち/ })
+    expect(screen.getByRole("button", { name: "工程の登録待ち 3件" })).toHaveTextContent("2製品")
+    expect(within(section).getAllByText("社長の工程登録待ち")).toHaveLength(2)
+    expect(within(section).queryByRole("link", { name: "製品マスタで工程を登録" })).toBeNull()
+    // 同じ製品の注文は同じ見出しの下に並ぶ
+    const rows = within(section).getAllByRole("row").map((row) => row.textContent ?? "")
+    const indexOf = (text: string) => rows.findIndex((row) => row.includes(text))
+    expect(indexOf("A-2")).toBe(indexOf("A-1") + 1)
+    expect(within(section).getAllByText(/^注文 \d+件$/).map((el) => el.textContent)).toEqual([
+      "注文 2件",
+      "注文 1件",
+    ])
+  })
+
+  it("社長には工程の登録待ちの製品から製品マスタへのリンクを出す", async () => {
+    mockRole("president")
+    mockOrders([makeOrder({ id: 1, order_no: "A-1", product_id: 7, has_no_routings: true })])
+    render(<OrdersIntakePage />)
+
+    const section = await screen.findByRole("region", { name: /^工程の登録待ち/ })
+    expect(
+      await within(section).findByRole("link", { name: "製品マスタで工程を登録" }),
+    ).toHaveAttribute("href", "/master/products?highlight=7")
+  })
+
+  it("差し戻された下書きは差し戻しバッジと理由を出す", async () => {
     mockOrders([
       makeOrder({
         id: 5,
@@ -176,10 +255,12 @@ describe("OrdersIntakePage（Issue #555）", () => {
     ])
     render(<OrdersIntakePage />)
 
-    const simulated = await screen.findByRole("region", { name: /^シミュ納期の確認/ })
-    expect(within(simulated).getByText("REJECTED")).toBeInTheDocument()
-    expect(within(simulated).getByText("差し戻し")).toBeInTheDocument()
-    expect(within(simulated).getByText("納期を確認してください")).toBeInTheDocument()
+    const rejected = await screen.findByRole("region", { name: /^差し戻し/ })
+    expect(within(rejected).getByText("REJECTED")).toBeInTheDocument()
+    expect(within(rejected).getAllByText("差し戻し").length).toBeGreaterThan(0)
+    expect(within(rejected).getByText("納期を確認してください")).toBeInTheDocument()
+    // 完成見込みがあるので依頼し直せる
+    expect(within(rejected).getByRole("button", { name: "承認依頼を送信" })).toBeInTheDocument()
   })
 
   it("承認依頼を出した注文は画面から外れる", async () => {

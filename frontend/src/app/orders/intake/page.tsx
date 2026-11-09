@@ -19,15 +19,14 @@ import { OrderBulkActionDialogs } from "@/components/orders/order-bulk-action-di
 import { useOrderActions } from "@/hooks/use-order-actions"
 import { useOrderBulkActions } from "@/hooks/use-order-bulk-actions"
 import { useOrdersIntake } from "@/hooks/use-orders-intake"
-import { INTAKE_CATEGORIES, type IntakeCategory } from "@/lib/order-utils"
 
 /**
  * 起票の確認（Issue #555）
  * URL: /orders/intake
  *
  * 受注担当・ISO担当が、起票された下書きを確認して承認依頼まで進める画面。
- * 下書きを `getIntakeCategory()` の5区分に分け、区分ごとの表で次の操作を出す。
- * 承認依頼を出した注文は下書きでなくなるので、この画面から外れる
+ * 下書きを `getIntakeCategory()` の区分（誰の番で、次に何をするか。Issue #654）に分け、
+ * カードで選んだ区分の一覧だけを出す。承認依頼を出した注文は下書きでなくなるので、この画面から外れる
  */
 export default function OrdersIntakePage() {
   const router = useRouter()
@@ -37,8 +36,10 @@ export default function OrdersIntakePage() {
     customers,
     isLoading,
     ordersByCategory,
-    bulkTargetOrders,
     draftCount,
+    selectedCategory,
+    selectCategory,
+    bulkTargetOrders,
     currentUserRole,
     canShipOverdueDrafts,
   } = useOrdersIntake()
@@ -48,10 +49,6 @@ export default function OrdersIntakePage() {
     pageOrders: bulkTargetOrders,
     selectionResetKey: "intake",
   })
-
-  const counts = Object.fromEntries(
-    INTAKE_CATEGORIES.map((category) => [category, ordersByCategory[category].length])
-  ) as Record<IntakeCategory, number>
 
   return (
     <TooltipProvider>
@@ -96,25 +93,27 @@ export default function OrdersIntakePage() {
           <div className="p-8 text-center text-muted-foreground">読み込み中...</div>
         ) : (
           <>
-            <IntakeCategorySummary counts={counts} />
+            <IntakeCategorySummary
+              ordersByCategory={ordersByCategory}
+              selected={selectedCategory}
+              onSelect={selectCategory}
+            />
 
             {draftCount === 0 ? (
               <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground shadow-sm">
                 確認待ちの下書きはありません
               </div>
             ) : (
-              INTAKE_CATEGORIES.filter((category) => counts[category] > 0).map((category) => (
-                <IntakeCategorySection
-                  key={category}
-                  category={category}
-                  orders={ordersByCategory[category]}
-                  products={products}
-                  customers={customers}
-                  currentUserRole={currentUserRole}
-                  actions={actions}
-                  bulk={bulk}
-                />
-              ))
+              // 選択中の区分以外の一覧は出さない
+              <IntakeCategorySection
+                category={selectedCategory}
+                orders={ordersByCategory[selectedCategory]}
+                products={products}
+                customers={customers}
+                currentUserRole={currentUserRole}
+                actions={actions}
+                bulk={bulk}
+              />
             )}
           </>
         )}

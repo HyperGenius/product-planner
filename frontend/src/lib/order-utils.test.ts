@@ -12,14 +12,18 @@ import {
   getDeadlineColumnLabel,
   getDeadlineForTab,
   getIntakeCategory,
+  getIntakeMissingFields,
   getOrderProductDisplayParts,
   getOrderProductName,
   getOrderUrgency,
   getRepairApprovalBlockReason,
   getRepairSubject,
+  groupOrdersByProduct,
   isNoRoutingOrder,
   matchesOrderType,
   partitionOverdueBySimulatedDeadline,
+  summarizeIntakeCategory,
+  toValidIntakeCategory,
   jstTomorrowIso,
   matchesCustomerProductFilter,
   toValidMasterId,
@@ -220,64 +224,156 @@ describe("matchesCustomerProductFilter / toValidMasterId（Issue #546）", () =>
   })
 })
 
-describe("getIntakeCategory（Issue #555）", () => {
+describe("getIntakeCategory（Issue #654）", () => {
   it("下書き以外は区分を持たない", () => {
     expect(getIntakeCategory(makeOrder({ status: "pending_approval", is_scheduled: true }))).toBeNull()
     expect(getIntakeCategory(makeOrder({ status: "confirmed" }))).toBeNull()
   })
 
-  it("製品未確定を最優先にする（has_no_routings・情報不足より先）", () => {
-    const order = makeOrder({
-      product_id: null,
-      has_no_routings: true,
-      customer_id: undefined,
-      desired_deadline: undefined,
-    })
-    expect(getIntakeCategory(order)).toBe("no_product")
+  it("差し戻しは他の問題があっても差し戻しに入れる", () => {
+    expect(
+      getIntakeCategory(makeOrder({ is_scheduled: true, rejection_reason: "納期を確認してください" })),
+    ).toBe("rejected")
+    expect(
+      getIntakeCategory(
+        makeOrder({ product_id: null, has_no_routings: true, rejection_reason: "製品違い" }),
+      ),
+    ).toBe("rejected")
+    expect(
+      getIntakeCategory(makeOrder({ has_no_routings: true, rejection_reason: "工程を確認" })),
+    ).toBe("rejected")
   })
 
-  it("工程未登録は情報不足より先。シミュ済でも has_no_routings なら工程未登録", () => {
+  it("空白だけの差し戻し理由は差し戻しとみなさない", () => {
+    expect(getIntakeCategory(makeOrder({ rejection_reason: "  " }))).toBe("ready_to_request")
+    expect(getIntakeCategory(makeOrder({ rejection_reason: null }))).toBe("ready_to_request")
+  })
+
+  it("製品・数量・顧客・希望納期のどれかが無ければ入力を直す（工程の登録待ちより先）", () => {
+    expect(getIntakeCategory(makeOrder({ product_id: null, has_no_routings: true }))).toBe(
+      "needs_input",
+    )
+    expect(getIntakeCategory(makeOrder({ quantity: null }))).toBe("needs_input")
     expect(getIntakeCategory(makeOrder({ has_no_routings: true, customer_id: undefined }))).toBe(
-      "no_routing",
+      "needs_input",
     )
-    expect(getIntakeCategory(makeOrder({ has_no_routings: true, is_scheduled: true }))).toBe(
-      "no_routing",
-    )
-  })
-
-  it("顧客か希望納期が未設定なら情報不足（シミュ済でも）", () => {
-    expect(getIntakeCategory(makeOrder({ customer_id: undefined }))).toBe("incomplete")
     expect(getIntakeCategory(makeOrder({ desired_deadline: undefined, is_scheduled: true }))).toBe(
-      "incomplete",
+      "needs_input",
     )
   })
 
-  it("情報がそろっていれば is_scheduled でシミュ未実行／シミュ納期の確認に分ける", () => {
-    expect(getIntakeCategory(makeOrder({ has_no_routings: false }))).toBe("unsimulated")
+  it("入力がそろっていて工程が無ければ工程の登録待ち（シミュ済でも）", () => {
+    expect(getIntakeCategory(makeOrder({ has_no_routings: true }))).toBe("waiting_routing")
+    expect(getIntakeCategory(makeOrder({ has_no_routings: true, is_scheduled: true }))).toBe(
+      "waiting_routing",
+    )
+  })
+
+  it("入力と工程がそろっていれば、完成見込みの有無にかかわらず承認依頼を送る", () => {
+    expect(getIntakeCategory(makeOrder({ has_no_routings: false }))).toBe("ready_to_request")
     expect(getIntakeCategory(makeOrder({ has_no_routings: false, is_scheduled: true }))).toBe(
-      "simulated",
+      "ready_to_request",
     )
   })
 
-  it("修理注文は製品未確定・工程未登録に入れない", () => {
+  it("修理等は製品・数量・工程を見ない", () => {
     const repair = makeOrder({
       order_type: "repair",
       product_id: null,
       quantity: null,
       has_no_routings: true,
     })
-    expect(getIntakeCategory(repair)).toBe("unsimulated")
-    expect(getIntakeCategory({ ...repair, is_scheduled: true })).toBe("simulated")
-    expect(getIntakeCategory({ ...repair, customer_id: undefined })).toBe("incomplete")
+    expect(getIntakeCategory(repair)).toBe("ready_to_request")
+    expect(getIntakeCategory({ ...repair, customer_id: undefined })).toBe("needs_input")
+    expect(getIntakeMissingFields({ ...repair, customer_id: undefined })).toEqual(["customer"])
+  })
+})
+
+describe("summarizeIntakeCategory（Issue #654）", () => {
+  it("入力を直すは足りない項目ごとの件数（1件が複数の項目に数えられる）", () => {
+    const orders = [
+      makeOrder({ product_id: null, customer_id: undefined }),
+      makeOrder({ customer_id: undefined }),
+    ]
+    expect(summarizeIntakeCategory("needs_input", orders)).toEqual({
+      text: "製品 1件・顧客 2件",
+      isAlert: false,
+    })
   })
 
-  it("差し戻された下書きは区分を変えない", () => {
+  it("承認依頼を送るは希望納期に間に合わない件数・完成見込みが無い件数。間に合わない注文があれば強調する", () => {
+    const orders = [
+      makeOrder({ is_scheduled: true, simulated_deadline: "2026-10-05" }),
+      makeOrder({ is_scheduled: true, simulated_deadline: "2026-09-20" }),
+      makeOrder({ is_scheduled: false }),
+    ]
+    expect(summarizeIntakeCategory("ready_to_request", orders)).toEqual({
+      text: "希望納期に間に合わない 1件・完成見込みなし 1件",
+      isAlert: true,
+    })
+    expect(summarizeIntakeCategory("ready_to_request", [orders[1]])).toBeNull()
+  })
+
+  it("工程の登録待ちは製品の数", () => {
+    const orders = [
+      makeOrder({ id: 1, product_id: 10 }),
+      makeOrder({ id: 2, product_id: 20 }),
+      makeOrder({ id: 3, product_id: 10 }),
+    ]
+    expect(summarizeIntakeCategory("waiting_routing", orders)).toEqual({
+      text: "2製品",
+      isAlert: false,
+    })
+  })
+
+  it("0件・差し戻しは内訳を持たない", () => {
+    expect(summarizeIntakeCategory("needs_input", [])).toBeNull()
+    expect(summarizeIntakeCategory("rejected", [makeOrder({ rejection_reason: "x" })])).toBeNull()
+  })
+})
+
+describe("groupOrdersByProduct（Issue #654）", () => {
+  it("製品ごとにまとめ、最初に出てきた順に並べる", () => {
+    const groups = groupOrdersByProduct([
+      makeOrder({ id: 1, product_id: 20 }),
+      makeOrder({ id: 2, product_id: 10 }),
+      makeOrder({ id: 3, product_id: 20 }),
+    ])
+    expect(groups.map((g) => [g.productId, g.orders.map((o) => o.id)])).toEqual([
+      [20, [1, 3]],
+      [10, [2]],
+    ])
+  })
+})
+
+describe("toValidIntakeCategory（Issue #654）", () => {
+  const counts = { rejected: 0, needs_input: 0, ready_to_request: 3, waiting_routing: 1 }
+
+  it("既知の区分のハッシュはそのまま使う（0件でも）", () => {
+    expect(toValidIntakeCategory("#waiting_routing", counts)).toBe("waiting_routing")
+    expect(toValidIntakeCategory("#needs_input", counts)).toBe("needs_input")
+  })
+
+  it("未指定・不正な値なら件数のある最初の区分にする", () => {
+    expect(toValidIntakeCategory("", counts)).toBe("ready_to_request")
+    expect(toValidIntakeCategory("#unknown", counts)).toBe("ready_to_request")
+    expect(toValidIntakeCategory("#unknown", { ...counts, rejected: 1 })).toBe("rejected")
+  })
+
+  it("0件で隠れた差し戻しは指せない", () => {
+    expect(toValidIntakeCategory("#rejected", counts)).toBe("ready_to_request")
+    expect(toValidIntakeCategory("#rejected", { ...counts, rejected: 2 })).toBe("rejected")
+  })
+
+  it("どの区分も0件なら入力を直す", () => {
     expect(
-      getIntakeCategory(makeOrder({ is_scheduled: true, rejection_reason: "納期を確認してください" })),
-    ).toBe("simulated")
-    expect(getIntakeCategory(makeOrder({ product_id: null, rejection_reason: "製品違い" }))).toBe(
-      "no_product",
-    )
+      toValidIntakeCategory("", {
+        rejected: 0,
+        needs_input: 0,
+        ready_to_request: 0,
+        waiting_routing: 0,
+      }),
+    ).toBe("needs_input")
   })
 })
 

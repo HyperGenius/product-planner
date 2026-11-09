@@ -59,6 +59,12 @@ export function OrdersTable({
   )
 }
 
+/**
+ * `OrderTableHeaderRow` の列数（選択・操作の列を出すとき）。行の間に見出し行（`colSpan`）を挟むときに使う。
+ * 列を増減したらここも合わせる
+ */
+export const ORDER_TABLE_COLUMN_COUNT = 8
+
 interface OrderTableHeaderRowProps {
   /** 納期カラムの見出し（「シミュ納期」/「確定納期」）の出し分けに使う */
   statusFilter: StatusFilter

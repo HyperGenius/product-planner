@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { useLocationHash } from "@/hooks/use-location-hash"
 import { useOrders } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
@@ -10,13 +11,15 @@ import {
   getIntakeCategory,
   DEFAULT_SORT,
   INTAKE_CATEGORIES,
+  toValidIntakeCategory,
   type IntakeCategory,
 } from "@/lib/order-utils"
 import type { Order } from "@/types/order"
 
 /**
- * 「起票の確認」画面（Issue #555）のデータ。下書きを `getIntakeCategory()` の区分ごとに分け、
- * 区分内は希望納期の近い順に並べる。行操作・一括操作は `useOrderActions()` / `useOrderBulkActions()` を使う
+ * 「起票の確認」画面（Issue #555 / #654）のデータ。下書きを `getIntakeCategory()` の区分ごとに分け、
+ * 区分内は希望納期の近い順に並べる。選択中の区分は URL のハッシュに持つ。
+ * 行操作・一括操作は `useOrderActions()` / `useOrderBulkActions()` を使う
  */
 export function useOrdersIntake() {
   const { data: orders, isLoading: ordersLoading } = useOrders()
@@ -41,16 +44,20 @@ export function useOrdersIntake() {
     return grouped
   }, [orders])
 
-  // 一括操作（シミュ・承認依頼）の対象になる区分の注文
-  const bulkTargetOrders = useMemo(
-    () => [...ordersByCategory.unsimulated, ...ordersByCategory.simulated],
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        INTAKE_CATEGORIES.map((category) => [category, ordersByCategory[category].length])
+      ) as Record<IntakeCategory, number>,
     [ordersByCategory]
   )
+  const draftCount = INTAKE_CATEGORIES.reduce((sum, category) => sum + counts[category], 0)
 
-  const draftCount = INTAKE_CATEGORIES.reduce(
-    (sum, category) => sum + ordersByCategory[category].length,
-    0
-  )
+  const [hash, setHash] = useLocationHash()
+  const selectedCategory = toValidIntakeCategory(hash, counts)
+
+  // 一括操作（シミュ・承認依頼）の対象は「承認依頼を送る」の注文だけ
+  const bulkTargetOrders = ordersByCategory.ready_to_request
 
   return {
     orders,
@@ -58,8 +65,11 @@ export function useOrdersIntake() {
     customers,
     isLoading: ordersLoading || productsLoading || customersLoading,
     ordersByCategory,
-    bulkTargetOrders,
+    counts,
     draftCount,
+    selectedCategory,
+    selectCategory: setHash as (category: IntakeCategory) => void,
+    bulkTargetOrders,
     currentUserRole,
     canShipOverdueDrafts,
   }
