@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
@@ -97,10 +97,14 @@ export function useOrderBulkActions({ orders, pageOrders, selectionResetKey }: U
     pendingApprovalPageOrders.some((o) => selectedOrderIds.includes(o.id)) &&
     !allPendingApprovalOnPageSelected
 
-  useEffect(() => {
+  // 表示する集合が変わったら選択・一括シミュの失敗印をリセットする。エフェクトで setState すると
+  // 1回余分に描画されるので（react-hooks/set-state-in-effect）、描画中に前回のキーと比べて直す
+  const [prevSelectionResetKey, setPrevSelectionResetKey] = useState(selectionResetKey)
+  if (prevSelectionResetKey !== selectionResetKey) {
+    setPrevSelectionResetKey(selectionResetKey)
     setSelectedOrderIds([])
     setBulkSimFailedIds(new Set())
-  }, [selectionResetKey])
+  }
 
   const handleToggleSelect = (orderId: number) => {
     setSelectedOrderIds((prev) =>
