@@ -22,7 +22,12 @@
 //   AGENT_MAX_BODY_BYTES    任意。ボディの上限バイト数（既定 20MB）。バックエンドの
 //                           DAILY_REPORT_MAX_BYTES を変えたときは合わせて変える
 
-const ALLOWED_PATHS = new Set(["/api/agent/heartbeat", "/api/agent/daily-reports"])
+const ALLOWED_PATHS = new Set([
+  "/api/agent/heartbeat",
+  "/api/agent/daily-reports",
+  // 弥生販売の売上伝票 CSV（Issue #662）
+  "/api/agent/shipment-files",
+])
 const DEFAULT_MAX_BODY_BYTES = 20 * 1024 * 1024
 
 // バックエンドへ渡すリクエストヘッダ。Host や Supabase ゲートウェイが付けるヘッダは渡さない

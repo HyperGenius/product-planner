@@ -3,7 +3,7 @@
     日報Excelをバックエンド（POST /api/agent/daily-reports）へ送る共有PC用エージェント（Issue #472）。
 
 .DESCRIPTION
-    設定ファイルの target_folders 配下の *.xlsx / *.xlsm / *.xls を走査し、前回送信時から
+    設定ファイルの targets（無ければ target_folders）配下のファイルを走査し、前回送信時から
     SHA-256 が変わったファイルだけを送信する。最後に POST /api/agent/heartbeat で実行サマリを送る。
 
     - PowerShell 5.1 で動く（追加モジュールに依存しない）
@@ -35,8 +35,14 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$AgentVersion = '0.1.0'
-$TargetExtensions = @('.xlsx', '.xlsm', '.xls')
+$AgentVersion = '0.2.0'
+
+# 送信先の種類（Issue #662）。設定で任意のエンドポイントを指定させず、既知の種類だけを許す。
+# 既定の拡張子は種類ごとの想定（日報は Excel、弥生販売の売上伝票は CSV/テキスト）。
+$TargetKinds = @{
+    'daily_reports' = [pscustomobject]@{ Endpoint = '/api/agent/daily-reports'; Extensions = @('.xlsx', '.xlsm', '.xls') }
+    'shipment_files' = [pscustomobject]@{ Endpoint = '/api/agent/shipment-files'; Extensions = @('.csv', '.txt') }
+}
 
 # 終了コード（タスクスケジューラの「前回の実行結果」で確認できる）
 $ExitOk = 0
@@ -97,6 +103,45 @@ function Resolve-AgentPath {
     return Join-Path $PSScriptRoot $Path
 }
 
+function Read-AgentTargets {
+    # 監視対象のまとまり。`targets` があればそれを使い、無ければ従来の `target_folders` を
+    # 日報(daily_reports)1つとして扱う（既存の config.json をそのまま動かすため）。
+    param($Json, [bool]$Recurse)
+    $rawTargets = Get-ConfigValue $Json 'targets' $null
+    $result = @()
+    if ($null -eq $rawTargets) {
+        $folders = @(@(Get-ConfigValue $Json 'target_folders' @()) | Where-Object { $_ })
+        if ($folders.Count -eq 0) { throw '設定 target_folders（または targets）が空です' }
+        $kind = $TargetKinds['daily_reports']
+        return [pscustomobject]@{
+                Name       = 'daily_reports'
+                Endpoint   = $kind.Endpoint
+                Extensions = [string[]]$kind.Extensions
+                Folders    = [string[]]$folders
+                Recurse    = $Recurse
+            }
+    }
+    foreach ($t in @($rawTargets)) {
+        $kindName = [string](Get-ConfigValue $t 'kind' '')
+        if (-not $TargetKinds.ContainsKey($kindName)) {
+            throw ('targets の kind が不正です: "{0}"（{1} のいずれか）' -f $kindName, (($TargetKinds.Keys | Sort-Object) -join ' / '))
+        }
+        $kind = $TargetKinds[$kindName]
+        $folders = @(@(Get-ConfigValue $t 'folders' @()) | Where-Object { $_ })
+        if ($folders.Count -eq 0) { throw ('targets[{0}] の folders が空です' -f $kindName) }
+        $extensions = @(@(Get-ConfigValue $t 'extensions' $kind.Extensions) | ForEach-Object { ([string]$_).ToLowerInvariant() })
+        $result += [pscustomobject]@{
+            Name       = $kindName
+            Endpoint   = $kind.Endpoint
+            Extensions = [string[]]$extensions
+            Folders    = [string[]]$folders
+            Recurse    = [bool](Get-ConfigValue $t 'recurse' $Recurse)
+        }
+    }
+    if ($result.Count -eq 0) { throw '設定 targets が空です' }
+    return $result
+}
+
 function Read-AgentConfig {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -116,14 +161,13 @@ function Read-AgentConfig {
         throw 'トークンが設定されていません（config.json の token または環境変数 DAILY_REPORT_AGENT_TOKEN）'
     }
 
-    $folders = @(@(Get-ConfigValue $json 'target_folders' @()) | Where-Object { $_ })
-    if ($folders.Count -eq 0) { throw '設定 target_folders が空です' }
+    $recurse = [bool](Get-ConfigValue $json 'recurse' $true)
+    $targets = @(Read-AgentTargets -Json $json -Recurse $recurse)
 
     return [pscustomobject]@{
         ApiBaseUrl       = $apiBaseUrl
         Token            = $token.Trim()
-        TargetFolders    = [string[]]$folders
-        Recurse          = [bool](Get-ConfigValue $json 'recurse' $true)
+        Targets          = $targets
         StatePath        = Resolve-AgentPath ([string](Get-ConfigValue $json 'state_path' 'state\sent-files.json'))
         LogDir           = Resolve-AgentPath ([string](Get-ConfigValue $json 'log_dir' 'logs'))
         LogRetentionDays = [int](Get-ConfigValue $json 'log_retention_days' 30)
@@ -294,15 +338,15 @@ function Get-ResponseDetail {
     return $text
 }
 
-function Send-DailyReport {
-    param($Config, [string]$Path, [byte[]]$Bytes, [string]$Sha256, [datetime]$LastWriteTime)
+function Send-AgentFile {
+    param($Config, $Target, [string]$Path, [byte[]]$Bytes, [string]$Sha256, [datetime]$LastWriteTime)
     $headers = @{
         'X-File-Sha256'      = $Sha256
         # 日本語を含むパスをヘッダで送るため UTF-8 でパーセントエンコードする
         'X-File-Path'        = [System.Uri]::EscapeDataString($Path)
         'X-File-Modified-At' = $LastWriteTime.ToString('o')
     }
-    return Invoke-AgentRequest -Url ($Config.ApiBaseUrl + '/api/agent/daily-reports') -Token $Config.Token `
+    return Invoke-AgentRequest -Url ($Config.ApiBaseUrl + $Target.Endpoint) -Token $Config.Token `
         -ContentType 'application/octet-stream' -Body $Bytes -Headers $headers -TimeoutSeconds $Config.TimeoutSeconds
 }
 
@@ -319,10 +363,10 @@ function Send-Heartbeat {
 # ---------------------------------------------------------------------------
 
 function Get-TargetFiles {
-    param([string]$Folder, [bool]$Recurse)
+    param([string]$Folder, [bool]$Recurse, [string[]]$Extensions)
     $items = Get-ChildItem -LiteralPath $Folder -File -Recurse:$Recurse -Force -ErrorAction Stop
     return @($items | Where-Object {
-            $TargetExtensions -contains $_.Extension.ToLowerInvariant() -and -not $_.Name.StartsWith('~$')
+            $Extensions -contains $_.Extension.ToLowerInvariant() -and -not $_.Name.StartsWith('~$')
         })
 }
 
@@ -393,10 +437,13 @@ function Invoke-AgentRun {
         folder_error = 0
     }
     $authFailed = $false
+    $targetSummaries = @()
 
-    foreach ($folder in $Config.TargetFolders) {
+    foreach ($target in $Config.Targets) {
+    $before = @{ scanned = $counts.scanned; sent = $counts.sent; duplicate = $counts.duplicate; error = $counts.error }
+    foreach ($folder in $target.Folders) {
         try {
-            $files = Get-TargetFiles -Folder $folder -Recurse $Config.Recurse
+            $files = Get-TargetFiles -Folder $folder -Recurse $target.Recurse -Extensions $target.Extensions
         } catch {
             $counts.folder_error++
             $counts.error++
@@ -453,7 +500,7 @@ function Invoke-AgentRun {
                 continue
             }
 
-            $result = Send-DailyReport -Config $Config -Path $path -Bytes $bytes -Sha256 $sha256 -LastWriteTime $file.LastWriteTime
+            $result = Send-AgentFile -Config $Config -Target $target -Path $path -Bytes $bytes -Sha256 $sha256 -LastWriteTime $file.LastWriteTime
             $status = $null
             if ($result.StatusCode -eq 200) {
                 try { $status = [string](($result.Body | ConvertFrom-Json).status) } catch { $status = $null }
@@ -480,6 +527,16 @@ function Invoke-AgentRun {
             }
         }
         if ($authFailed) { break }
+    }
+    # 送信先の種類ごとの集計（heartbeat の payload に残し、どの経路が止まっているか見分けられるようにする）
+    $targetSummaries += [ordered]@{
+        name            = $target.Name
+        scanned_count   = $counts.scanned - $before.scanned
+        sent_count      = $counts.sent - $before.sent
+        duplicate_count = $counts.duplicate - $before.duplicate
+        error_count     = $counts.error - $before.error
+    }
+    if ($authFailed) { break }
     }
 
     if (-not $DryRun) {
@@ -512,6 +569,7 @@ function Invoke-AgentRun {
         locked_count       = $counts.locked
         too_large_count    = $counts.too_large
         folder_error_count = $counts.folder_error
+        targets            = $targetSummaries
         started_at         = $startedAt.ToString('o')
         finished_at        = $finishedAt.ToString('o')
         hostname           = $env:COMPUTERNAME

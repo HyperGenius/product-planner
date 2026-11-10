@@ -11,6 +11,7 @@ import { OrdersTable } from "@/components/orders/orders-table"
 import { useOrderActions } from "@/hooks/use-order-actions"
 import { useOrdersShipping } from "@/hooks/use-orders-shipping"
 import { formatDateTimeShort } from "@/lib/order-utils"
+import { ShipmentImportStatus } from "@/components/orders/shipping/shipment-import-status"
 
 type ShippingView = "candidates" | "all"
 
@@ -56,6 +57,10 @@ export default function OrdersShippingPage() {
         <p>
           送品の記録は弥生が正です。弥生で送品を確認してから「送品済みにする」を押してください
         </p>
+      </div>
+
+      <div className="mb-2">
+        <ShipmentImportStatus />
       </div>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
