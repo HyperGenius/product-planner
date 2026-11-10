@@ -1,6 +1,8 @@
 # backend/app/dependencies.py
 import os
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 
+import httpx
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from postgrest.exceptions import APIError
@@ -18,6 +20,29 @@ from app.repositories.supa_infra import (
 )
 from supabase import Client, ClientOptions, create_client  # type: ignore
 
+# Supabase クライアントが内部で使う httpx クライアント（プロセスで1つ。Issue #660）。
+#
+# create_client() は postgrest / auth / storage / functions ごとに httpx クライアントを作り、それぞれが
+# SSL コンテキスト（1個あたり約0.85MB の C 側メモリ）を持つ。リクエストごとに作ると、循環 GC まで解放されず
+# スレッド間でヒープも断片化して RSS が増え続け、本番（512MB）が OOM で再起動していた。
+# 注入した httpx クライアントには supabase-py がヘッダーを書き込まず、ユーザーの JWT は Supabase クライアントの
+# インスタンスが持つヘッダーからリクエストごとに渡されるので、ユーザー間で混ざらない。
+# - タイムアウトはこのクライアントの値が各サブクライアントで使われるので、postgrest の既定値（120秒）に合わせる
+# - Cookie はユーザー間で共有されないよう保持しない（Supabase の認証はヘッダーで行う）
+# - HTTP/2 は1本の接続を全スレッドで多重化するので使わず、HTTP/1.1 のコネクションプールにする
+SUPABASE_HTTPX_TIMEOUT_SECONDS = 120
+_shared_httpx_client = httpx.Client(
+    timeout=SUPABASE_HTTPX_TIMEOUT_SECONDS,
+    follow_redirects=True,
+    cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
+)
+
+
+def get_shared_httpx_client() -> httpx.Client:
+    """Supabase クライアントに注入する、プロセス共有の httpx クライアント。"""
+    return _shared_httpx_client
+
+
 # Bearer Token (JWT) を取得するためのスキーム
 security = HTTPBearer()
 
@@ -34,7 +59,8 @@ def get_supabase_client(token: str = Depends(get_current_user_token)) -> Client:
     ユーザーのトークンを使ってSupabaseクライアントを初期化する。
     これによりDB側で auth.uid() が機能し、RLSが正しく動作する。
     """
-    # Supabaseクライアントはアプリ全体で1つだけ作成（シングルトン）
+    # Supabase クライアントはユーザーの JWT を持つのでリクエストごとに作るが、
+    # 中の httpx クライアントはプロセスで共有する（Issue #660）
     sb_url = os.environ.get("SUPABASE_URL")
     # 公開キー(anon key)を使用(service_role keyは絶対に使わない)
     sb_anon_key = os.environ.get("SUPABASE_ANON_KEY")
@@ -47,7 +73,10 @@ def get_supabase_client(token: str = Depends(get_current_user_token)) -> Client:
         client = create_client(
             sb_url,
             sb_anon_key,
-            options=ClientOptions(headers={"Authorization": f"Bearer {token}"}),
+            options=ClientOptions(
+                headers={"Authorization": f"Bearer {token}"},
+                httpx_client=get_shared_httpx_client(),
+            ),
         )
         return client
     except Exception as e:
@@ -226,4 +255,9 @@ def get_supabase_admin_client() -> Client:
             detail="サーバー設定エラー: Supabase環境変数が不足しています",
         )
 
-    return create_client(sb_url, sb_service_role_key)
+    # ClientOptions はインスタンスごとに作る（サインインでヘッダーが書き換わるため共有しない）
+    return create_client(
+        sb_url,
+        sb_service_role_key,
+        options=ClientOptions(httpx_client=get_shared_httpx_client()),
+    )

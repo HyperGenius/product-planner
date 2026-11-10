@@ -97,6 +97,15 @@ cd backend && ruff check . && mypy .
 ## 重要な実装ルール
 
 - **RLS 必須**: 新規テーブルには必ず `ENABLE ROW LEVEL SECURITY` と `is_tenant_member(tenant_id)` ポリシーを設定
+- **Supabase クライアントを作るときは共有の httpx クライアントを渡す（Issue #660）**: `create_client()` は
+  サブクライアントごとに httpx クライアント（SSL コンテキスト1個約0.85MB の C 側メモリ）を作り、リクエストごとに作ると
+  循環 GC まで解放されずヒープも断片化して RSS が増え続ける（本番 512MB で OOM 再起動していた）。新しく
+  `create_client()` を呼ぶ箇所を作らず `get_supabase_client()` / `get_supabase_admin_client()` を使い、どうしても作るときは
+  `ClientOptions(httpx_client=get_shared_httpx_client())` を渡す。`ClientOptions` 自体は共有しない（サインインで
+  `options.headers` が書き換わる）。タイムアウトは共有クライアントの 120 秒が全サブクライアントに効く（`storage_client_timeout`
+  等は効かない）。共有クライアントには Cookie を保持させない・HTTP/2 にしない。メモリの調査は本番と同じイメージを
+  `docker run -m 512m --memory-swap 512m` で動かし、`/proc/1/status` の VmRSS を見る（本番と同じ Linux の glibc で
+  確かめる。`tracemalloc` は C 側のメモリを数えないので、Python オブジェクトが増えていなくても RSS は増えうる）。手順は [docs/features/supabase-client-memory.md](docs/features/supabase-client-memory.md)
 - **Service Role Key 禁止**: アプリコード内で `SUPABASE_SERVICE_ROLE_KEY` を使用しない。必ずユーザー JWT を使用
   - **例外**: ユーザー JWT を持たないリクエストだけは `get_supabase_admin_client()`（service role）を使う。
     cron（`CRON_SECRET` で認可）、共有端末の PIN ログイン（`routers/auth/device.py`）、日報取り込みエージェント
