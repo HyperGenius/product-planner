@@ -1,10 +1,92 @@
 # __tests__/unit/test_dependencies.py
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
-from app.dependencies import get_current_tenant_id
+from app import dependencies
+from app.dependencies import (
+    SUPABASE_HTTPX_TIMEOUT_SECONDS,
+    get_current_tenant_id,
+    get_shared_httpx_client,
+    get_supabase_admin_client,
+    get_supabase_client,
+)
 from fastapi import HTTPException
 from postgrest.exceptions import APIError
+
+_SUPABASE_URL = "http://supabase.test"
+
+
+@pytest.fixture
+def supabase_env(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", _SUPABASE_URL)
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+
+
+class TestSharedHttpxClient:
+    """Supabase クライアントの httpx クライアントをプロセスで共有する（Issue #660）"""
+
+    def test_user_and_admin_clients_share_one_httpx_client(self, supabase_env):
+        """リクエストごとに作る Supabase クライアントが、同じ httpx クライアントを使う"""
+        shared = get_shared_httpx_client()
+        user_a = get_supabase_client(token="token-a")
+        user_b = get_supabase_client(token="token-b")
+        admin = get_supabase_admin_client()
+
+        for client in (user_a, user_b, admin):
+            assert client.postgrest.session is shared
+            assert client.auth._http_client is shared
+            assert client.storage.session is shared
+            assert client.functions._client is shared
+
+    def test_shared_client_does_not_hold_user_token(self, supabase_env):
+        """ユーザーの JWT は Supabase クライアントのインスタンスが持ち、共有の httpx クライアントには載らない"""
+        user_a = get_supabase_client(token="token-a")
+        get_supabase_client(token="token-b")
+
+        assert "authorization" not in get_shared_httpx_client().headers
+        assert user_a.postgrest.headers["Authorization"] == "Bearer token-a"
+
+    def test_each_request_carries_its_own_token(self, supabase_env, monkeypatch):
+        """共有しても、送るリクエストにはそれぞれのユーザーの JWT が付く"""
+        sent: list[str | None] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(request.headers.get("authorization"))
+            return httpx.Response(200, json=[])
+
+        transport_client = httpx.Client(transport=httpx.MockTransport(handler))
+        monkeypatch.setattr(
+            dependencies, "get_shared_httpx_client", lambda: transport_client
+        )
+        user_a = get_supabase_client(token="token-a")
+        user_b = get_supabase_client(token="token-b")
+
+        user_a.table("orders").select("id").execute()
+        user_b.table("orders").select("id").execute()
+        user_a.rpc("some_rpc", {}).execute()
+
+        assert sent == ["Bearer token-a", "Bearer token-b", "Bearer token-a"]
+
+    def test_shared_client_does_not_keep_cookies(self):
+        """応答の Cookie をユーザー間で共有しないよう保持しない"""
+        shared = get_shared_httpx_client()
+        response = httpx.Response(
+            200,
+            headers={"set-cookie": "session=abc; Path=/"},
+            request=httpx.Request("GET", f"{_SUPABASE_URL}/rest/v1/orders"),
+        )
+
+        shared.cookies.extract_cookies(response)
+
+        assert len(shared.cookies) == 0
+
+    def test_timeout_matches_postgrest_default(self):
+        """各サブクライアントは注入した httpx クライアントのタイムアウトを使う"""
+        assert get_shared_httpx_client().timeout == httpx.Timeout(
+            SUPABASE_HTTPX_TIMEOUT_SECONDS
+        )
 
 
 class TestGetCurrentTenantId:
