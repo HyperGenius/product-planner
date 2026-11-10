@@ -23,6 +23,7 @@ import {
   Stamp,
   Truck,
   BellRing,
+  FileUp,
 } from "lucide-react"
 
 import {
@@ -111,6 +112,13 @@ const menuItems: MenuItem[] = [
         url: "/orders/shipping",
         icon: Truck,
         badge: { key: "shipping_candidates", roles: ["president", "order_handler"] },
+      },
+      {
+        // 弥生の売上伝票 CSV の取り込み状況とアップロード。アップロードできるロールにだけ出す（Issue #662）
+        title: "弥生の取り込み",
+        url: "/orders/shipment-import",
+        icon: FileUp,
+        allowedRoles: ["president", "order_handler", "platform_admin"],
       },
       {
         // 督促は社長宛に届き電話で対応する想定なので、社長・受注担当にだけ件数を出す（Issue #622）

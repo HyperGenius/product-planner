@@ -1,8 +1,19 @@
 {
-  "api_base_url": "https://api.example.com",
+  "api_base_url": "https://<project-ref>.supabase.co/functions/v1/agent-gateway",
   "token": "<issue_agent_token.py issue で発行したトークン>",
-  "target_folders": [
-    "\\\\fileserver.example.local\\share\\日報"
+  "targets": [
+    {
+      "kind": "daily_reports",
+      "folders": [
+        "\\\\fileserver.example.local\\share\\日報"
+      ]
+    },
+    {
+      "kind": "shipment_files",
+      "folders": [
+        "\\\\fileserver.example.local\\share\\弥生取り込み"
+      ]
+    }
   ],
   "recurse": true,
   "state_path": "state\\sent-files.json",

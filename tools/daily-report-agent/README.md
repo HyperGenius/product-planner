@@ -89,7 +89,8 @@ python scripts/issue_agent_token.py issue --tenant-id <tenant_uuid> --name "工�
 |---|---|---|---|
 | `api_base_url` | ○ | － | 受付口の Edge Function の URL（`https://<project-ref>.supabase.co/functions/v1/agent-gateway`）。末尾の `/` は不要。`/api/agent/...` はスクリプトが付ける |
 | `token` | ○（※） | － | 手順1で発行したトークン |
-| `target_folders` | ○ | － | 日報Excelを置いているフォルダ（複数可）。UNC パス（`\\server\share\日報`）も可 |
+| `targets` | ○（※2） | － | 監視対象のまとまりの配列。`kind` と `folders` を持つ（下記）。弥生販売の売上伝票 CSV も送るときはこちらを使う（Issue #662） |
+| `target_folders` | ○（※2） | － | 日報Excelを置いているフォルダ（複数可）。`targets` が無いときだけ使われる従来の書き方で、`daily_reports` 1つとして扱う。UNC パス（`\\server\share\日報`）も可 |
 | `recurse` | | `true` | サブフォルダも走査するか |
 | `state_path` | | `state\sent-files.json` | 送信済みファイルの記録 |
 | `log_dir` | | `logs` | ログの出力先 |
@@ -99,7 +100,12 @@ python scripts/issue_agent_token.py issue --tenant-id <tenant_uuid> --name "工�
 
 - JSON 内の `\` は `\\` と書きます（例: `"C:\\Share\\日報"`、UNC パスなら `"\\\\server\\share\\日報"`）
 - 相対パスはスクリプトのあるフォルダが基準です
-- ※ トークンは環境変数 `DAILY_REPORT_AGENT_TOKEN` でも渡せます（設定されていれば `config.json` より優先）
+- ※2 `targets` と `target_folders` のどちらか。`targets` があれば `target_folders` は無視される
+- `targets` の各要素: `kind`（`daily_reports` = 日報Excel、`shipment_files` = 弥生販売の売上伝票 CSV）、`folders`（複数可）、
+  `extensions`（省略可。既定は `daily_reports` が `.xlsx` / `.xlsm` / `.xls`、`shipment_files` が `.csv` / `.txt`）、`recurse`（省略可。既定は全体の `recurse`）。
+  `kind` で送り先が決まる（`/api/agent/daily-reports` / `/api/agent/shipment-files`）ので、任意のエンドポイントは指定できない。
+  同じフォルダを2つの `kind` に指定しても拡張子で振り分けられる。heartbeat の `payload.targets` に種類ごとの集計が入る
+- トークンは環境変数 `DAILY_REPORT_AGENT_TOKEN` でも渡せます（設定されていれば `config.json` より優先）
 - `config.json` にはトークンが平文で入るため、実行アカウントと管理者以外が読めないようにフォルダのアクセス権を
   絞ってください。例:
 

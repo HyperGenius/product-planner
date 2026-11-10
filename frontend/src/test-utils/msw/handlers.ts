@@ -59,6 +59,8 @@ export const handlers = [
   // 受注一覧の行が引く「未対応の督促」の件数（Issue #619）。既定は督促なし
   http.get(`${API_BASE}/orders/delivery-requests`, () => HttpResponse.json([])),
   http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => HttpResponse.json([])),
+  // 送品の消し込みが引く弥生の売上伝票の最終取り込み日時（Issue #662）。既定は未取り込み
+  http.get(`${API_BASE}/shipment-files`, () => HttpResponse.json({ last_received_at: null, files: [] })),
   // 督促・分納の依頼一覧が引く日報の進捗（Issue #635）。既定は進捗なし
   http.get(`${API_BASE}/daily-reports/order-progress`, () =>
     HttpResponse.json({ computed_at: null, items: [] }),

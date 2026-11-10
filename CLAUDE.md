@@ -167,6 +167,18 @@ cd backend && ruff check . && mypy .
     ログオンユーザー）から取る。UNC を読むため `SYSTEM`・S4U は使わない。パスワードは `Get-Credential` 以外で受け取らない。
     コンテナの `pwsh` には `ScheduledTasks` が無いので、ロジックの確認は `New-ScheduledTask*` / `Register-ScheduledTask` を
     スタブ関数で差し替えて実行し、PS 5.1 互換性は PSScriptAnalyzer の `PSUseCompatibleSyntax`（TargetVersions 5.1）で見る
+- **弥生販売の売上伝票 CSV の取り込み（Issue #662）**: 送品の正典は弥生販売（インストール型。API は無く連携は伝票の CSV エクスポート）。
+  事務PC（経理データあり）には**何も入れず**、共有フォルダへ書き出された CSV を既存のエージェント端末が回収する
+  （`DailyReportAgent.ps1` の `targets` に `kind: shipment_files`。`kind` で送り先が決まり、任意のエンドポイントは指定させない。
+  `targets` が無い従来の `target_folders` は日報1つとして動く）。エージェントは**形式を知らず生ファイルを送るだけ**で、解析は
+  サーバー側（形式が分かってから足す）。予備として事務PCのブラウザからアップロードする経路（`POST /shipment-files`）があり、こちらは
+  **ユーザー JWT で書く**（service role は使わない。Storage・テーブルのポリシーは `is_tenant_member()`）。raw body の検証は日報と共通の
+  `routers/agent/_upload.py`。**エージェント向けの API パスを足したら `agent-gateway` の `ALLOWED_PATHS` にも足し、マージ後に
+  `supabase functions deploy agent-gateway --no-verify-jwt` で再デプロイする**（漏れると本番のエージェントだけ 404）。
+  送品は不定期なので「N日更新が無い」警告は出さず最終取り込み日時を見せる。送品は**自動で送品済みにしない**（#557）。
+  jsdom の `File` は `arrayBuffer()` が無く、`fetch` の body に渡すと `[object File]` に文字列化されるので、フックでは
+  `await file.arrayBuffer()` を送り、テストではそのファイルだけ `File.prototype.arrayBuffer` を補う。詳細は
+  [docs/features/shipment-file-import.md](docs/features/shipment-file-import.md)
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は

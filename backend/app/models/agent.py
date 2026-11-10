@@ -51,3 +51,31 @@ class DailyReportUploadResponse(BaseModel):
         description="stored: 新規保存 / duplicate: 同一内容（同一 sha256）を受信済み"
     )
     sha256: str = Field(description="受信したファイルの SHA-256（小文字の hex）")
+
+
+class ShipmentFileUploadResponse(BaseModel):
+    """送品ファイル（弥生販売の売上伝票 CSV）のアップロード結果 (Issue #662)。"""
+
+    status: Literal["stored", "duplicate"] = Field(
+        description="stored: 新規保存 / duplicate: 同一内容を受信済み"
+    )
+    sha256: str = Field(description="受信したファイルの SHA-256（小文字 hex）")
+
+
+class ShipmentFileItem(BaseModel):
+    """取り込み済みの送品ファイル1件（一覧表示用。パスなど経路の詳細は返さない）。"""
+
+    id: str
+    file_name: str
+    source: Literal["agent", "web"]
+    size_bytes: int
+    received_at: str
+
+
+class ShipmentFileListResponse(BaseModel):
+    """最終取り込み日時と直近の送品ファイル (Issue #662)。"""
+
+    last_received_at: str | None = Field(
+        default=None, description="最後にファイルを受信した日時（無ければ null）"
+    )
+    files: list[ShipmentFileItem] = Field(default_factory=list)

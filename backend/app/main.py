@@ -6,7 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.admin import admin_router
-from app.routers.agent import daily_reports_router, heartbeat_router
+from app.routers.agent import (
+    daily_reports_router,
+    heartbeat_router,
+    shipment_files_agent_router,
+)
 from app.routers.auth import device_router
 from app.routers.cron import (
     advance_order_status_router,
@@ -37,6 +41,7 @@ from app.routers.tenant import internal_sender_router, member_router
 from app.routers.transaction import (
     orders_router,
     production_schedules_router,
+    shipment_files_router,
 )
 
 # .envファイルの読み込み
@@ -93,6 +98,8 @@ app.include_router(parse_daily_reports_router)
 app.include_router(compute_daily_report_progress_router)
 app.include_router(heartbeat_router)
 app.include_router(daily_reports_router)
+app.include_router(shipment_files_agent_router)
+app.include_router(shipment_files_router)
 
 
 @app.get("/health")

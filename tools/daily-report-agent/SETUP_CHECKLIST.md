@@ -248,3 +248,32 @@ Issue #478 の完了条件のうち、Windows の実機でしか確認できな�
 - [ ] 9:00 より後に PC を起動すると、起動後に実行される
 - [ ] 削除スクリプトでタスクが消え、もう一度実行してもエラーにならない
 - [ ] 日本語版 Windows で、登録・削除スクリプトのメッセージが文字化けしない
+
+---
+
+## 付録: 弥生販売の売上伝票 CSV を追加で取り込む（Issue #662）
+
+既設のエージェントに `shipment_files` の監視フォルダを足す。事務PC（弥生）には何も入れない。
+背景・構成は [docs/features/shipment-file-import.md](../../docs/features/shipment-file-import.md)。
+
+### 出発前（開発者の手元で）
+
+- [ ] 事務PCの担当者に、共有フォルダへの書き込み確認（同ドキュメントの手順）を依頼し、結果を受け取った
+- [ ] `agent-gateway` が `/api/agent/shipment-files` を通す版でデプロイ済み（`supabase functions deploy agent-gateway --no-verify-jwt`）
+- [ ] 本番に `shipment_files` のマイグレーションが適用済み（Actions の `Deploy Migrations` が成功している）
+- [ ] 最新の `DailyReportAgent.ps1` と `config.sample.json` を持参する（BOM 付き UTF-8 のままコピーする）
+
+### 顧客先での作業
+
+- [ ] 共有フォルダに「弥生取り込み」用のフォルダを作る（事務PCのアカウントに書き込み、エージェント端末の実行アカウントに読み取りを与える）
+- [ ] 事務PCで売上伝票（明細つき）をエクスポートする条件を保存し、実物の CSV を数本もらう（匿名化は持ち帰ってから行う。リポジトリ・Issue に実データを載せない）
+- [ ] エージェント端末の `DailyReportAgent.ps1` を差し替え、`config.json` を `targets` 形式にする（既存の日報のフォルダはそのまま `daily_reports` に移す）
+- [ ] `-DryRun` で、日報のファイルと CSV の両方が「送信対象」に出ることを確認する
+- [ ] 手動で1回実行し、日報が従来どおり送られ、CSV が `stored` になることを確認する。タスクスケジューラの登録は変更不要
+- [ ] 担当者に「送品のたびにエクスポートを1回押す」「範囲は前回と重なるように（例: 直近30日）」を伝える
+
+### 確認（開発者の手元で）
+
+- [ ] アプリの「弥生の取り込み」画面に CSV が `共有フォルダ` として出て、最終取り込み日時が更新されている
+- [ ] 同じファイルをもう一度出力しても行が増えない（`duplicate`）
+- [ ] heartbeat の `payload.targets` に `shipment_files` の集計がある
