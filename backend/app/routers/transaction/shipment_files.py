@@ -51,10 +51,14 @@ def list_shipment_files(
     tenant_id: str = Depends(get_current_tenant_id),
     client: Client = Depends(get_supabase_client),
 ) -> ShipmentFileListResponse:
-    """最終取り込み日時と、直近の取り込み済みファイルを返す。"""
+    """最終取り込み日時と、直近の取り込み済みファイル（解析の結果つき。Issue #667）を返す。"""
     res = (
         client.table("shipment_files")
-        .select("id, file_name, source, size_bytes, received_at")
+        .select(
+            "id, file_name, source, size_bytes, received_at, parse_status, "
+            "parse_error, parsed_at, period_start, period_end, entry_count, "
+            "skipped_count, replace_result"
+        )
         .eq("tenant_id", tenant_id)
         .order("received_at", desc=True)
         .limit(RECENT_FILE_LIMIT)

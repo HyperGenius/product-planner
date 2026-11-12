@@ -35,8 +35,9 @@ _CONTACT_LINE_RE = re.compile(r"(TEL|FAX|〒|e-mail|email)", re.IGNORECASE)
 _CORP_AFFIX_RE = re.compile(
     r"(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|\(有\))"
 )
-# 会社名の照合で無視する空白・区切り記号。
-_NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-―ー－_/／|｜]+")
+# 会社名の照合で無視する空白・区切り記号。長音とハイフン類（`ー` / `－` / `‐` / `-` 等）は
+# 表記揺れで混ざるので同じに扱う（弥生の得意先名の照合で判明。Issue #667）。
+_NAME_NOISE_RE = re.compile(r"[\s　・,，、.．\-‐‑‒–—―−ー－_/／|｜]+")
 
 # PDF文面からの顧客照合で、これより短い正規化後の会社名は誤マッチしやすいため使わない。
 _MIN_COMPANY_CORE_LEN = 3

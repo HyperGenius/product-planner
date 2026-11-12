@@ -162,15 +162,78 @@ describe("OrdersShippingPage（Issue #557）", () => {
     expect(within(noReport).getByText("（完成見込み）")).toBeInTheDocument()
   })
 
+  it("弥生で送品が確認できた注文を先頭に候補として出し、一部送品・区別できない明細も示す（Issue #667）", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "OVERDUE", desired_deadline: PAST, quantity: 10 }),
+      makeOrder({ id: 2, order_no: "YAYOI-DONE", desired_deadline: FUTURE, quantity: 100 }),
+      makeOrder({ id: 3, order_no: "YAYOI-PART", desired_deadline: FUTURE, quantity: 100 }),
+    ])
+    mockProgress([])
+    const entry = (id: number, quantity: number, candidates: number[] = []) => ({
+      id,
+      sales_date: "2026-10-15",
+      slip_no: "1",
+      quantity,
+      note: null,
+      product_name: "品A",
+      method: candidates.length ? null : "deadline",
+      candidate_order_ids: candidates,
+    })
+    server.use(
+      http.get(`${API_BASE}/shipments/order-matches`, () =>
+        HttpResponse.json({
+          latest_sales_date: "2026-10-15",
+          items: [
+            {
+              order_id: 2,
+              shipped_qty: 100,
+              order_quantity: 100,
+              is_fully_shipped: true,
+              last_sales_date: "2026-10-15",
+              entries: [entry(1, 60), entry(2, 40)],
+              ambiguous_entries: [],
+            },
+            {
+              order_id: 3,
+              shipped_qty: 30,
+              order_quantity: 100,
+              is_fully_shipped: false,
+              last_sales_date: "2026-10-15",
+              entries: [entry(3, 30)],
+              ambiguous_entries: [entry(4, 5, [3, 9])],
+            },
+          ],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<OrdersShippingPage />)
+
+    await screen.findByRole("link", { name: "YAYOI-DONE" })
+    expect(getBodyRows().map((r) => within(r).getAllByRole("link")[0].textContent)).toEqual([
+      "YAYOI-DONE",
+      "OVERDUE",
+    ])
+    const done = getRow("YAYOI-DONE")
+    expect(within(done).getByText("弥生で送品済み")).toBeInTheDocument()
+    expect(within(done).getByText("/ 100", { exact: false })).toBeInTheDocument()
+    // 自動では送品済みにしない（ボタンで担当者が確定する）
+    expect(within(done).getByRole("button", { name: /送品済みにする/ })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("tab", { name: "すべて（3）" }))
+    const part = getRow("YAYOI-PART")
+    expect(within(part).getByText("一部送品")).toBeInTheDocument()
+    expect(within(part).getByText("他の受注と区別できない明細 1件")).toBeInTheDocument()
+    expect(screen.getByText(/弥生の売上明細: .*売上分まで/)).toBeInTheDocument()
+  })
+
   it("弥生が正である旨を常に出し、候補が無ければその旨を出す", async () => {
     mockOrders([])
     mockProgress([])
     render(<OrdersShippingPage />)
 
     expect(
-      await screen.findByText(
-        "送品の記録は弥生が正です。弥生で送品を確認してから「送品済みにする」を押してください",
-      ),
+      await screen.findByText(/送品の記録は弥生が正です。弥生で送品を確認してから「送品済みにする」を押してください/),
     ).toBeInTheDocument()
     expect(await screen.findByText("送品済みにする候補の注文はありません")).toBeInTheDocument()
     // 対象が無ければ進捗を取得しない

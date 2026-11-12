@@ -30,7 +30,7 @@ import type { ProductCandidate } from "@/types/daily-report-names"
  * 未照合キューの「対応付け」と、登録済みの対応付けの「変更」で共用する。
  */
 
-interface TargetOption {
+export interface TargetOption {
   id: number
   label: string
   hint?: string
@@ -40,7 +40,7 @@ interface TargetOption {
   keywords?: string[]
 }
 
-interface TargetGroup {
+export interface TargetGroup {
   heading?: string
   options: TargetOption[]
 }
@@ -58,7 +58,7 @@ interface TargetComboboxProps {
   ariaLabel: string
 }
 
-function TargetCombobox({
+export function TargetCombobox({
   groups,
   triggerLabel,
   searchPlaceholder,

@@ -19,6 +19,7 @@ from app.routers.cron import (
     notify_email_intake_slack_router,
     parse_daily_reports_router,
     parse_order_pdfs_router,
+    parse_shipment_files_router,
 )
 from app.routers.daily_reports import (
     daily_report_names_router,
@@ -42,6 +43,7 @@ from app.routers.transaction import (
     orders_router,
     production_schedules_router,
     shipment_files_router,
+    shipments_router,
 )
 
 # .envファイルの読み込み
@@ -96,10 +98,12 @@ app.include_router(notify_email_intake_slack_router)
 app.include_router(advance_order_status_router)
 app.include_router(parse_daily_reports_router)
 app.include_router(compute_daily_report_progress_router)
+app.include_router(parse_shipment_files_router)
 app.include_router(heartbeat_router)
 app.include_router(daily_reports_router)
 app.include_router(shipment_files_agent_router)
 app.include_router(shipment_files_router)
+app.include_router(shipments_router)
 
 
 @app.get("/health")

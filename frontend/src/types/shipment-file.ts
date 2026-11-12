@@ -1,4 +1,4 @@
-/** 弥生販売の売上伝票 CSV（送品ファイル）。Backend の ShipmentFile* スキーマと揃える (Issue #662) */
+/** 弥生販売のエクスポート（送品ファイル）。Backend の ShipmentFile* スキーマと揃える (Issue #662 / #667) */
 
 export interface ShipmentFileItem {
   id: string
@@ -7,7 +7,23 @@ export interface ShipmentFileItem {
   source: "agent" | "web"
   size_bytes: number
   received_at: string
+  /** 解析の状態（Issue #667） */
+  parse_status: ShipmentParseStatus
+  /** 解析エラーの分類（`SHIPMENT_PARSE_ERROR_LABELS` のキー） */
+  parse_error: string | null
+  parsed_at: string | null
+  /** 帳票の3行目の期間（"YYYY-MM-DD"） */
+  period_start: string | null
+  period_end: string | null
+  /** ファイルから読めた商品の行数 */
+  entry_count: number | null
+  /** 売上日が無い・期間の外で保存しなかった行数 */
+  skipped_count: number | null
+  /** replaced: 期間のすべての日を置き換えた / partial: 一部の日は新しいファイルが残った / stale: 反映なし */
+  replace_result: "replaced" | "partial" | "stale" | null
 }
+
+export type ShipmentParseStatus = "pending" | "parsed" | "unsupported" | "failed"
 
 export interface ShipmentFileList {
   last_received_at: string | null

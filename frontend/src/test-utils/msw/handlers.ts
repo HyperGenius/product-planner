@@ -61,6 +61,12 @@ export const handlers = [
   http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => HttpResponse.json([])),
   // 送品の消し込みが引く弥生の売上伝票の最終取り込み日時（Issue #662）。既定は未取り込み
   http.get(`${API_BASE}/shipment-files`, () => HttpResponse.json({ last_received_at: null, files: [] })),
+  // 送品の消し込み・サイドバーの件数が引く弥生の売上明細の送品（Issue #667）。既定は明細なし
+  http.get(`${API_BASE}/shipments/order-matches`, () =>
+    HttpResponse.json({ latest_sales_date: null, items: [] }),
+  ),
+  http.get(`${API_BASE}/shipments/customers`, () => HttpResponse.json([])),
+  http.get(`${API_BASE}/shipments/products`, () => HttpResponse.json([])),
   // 督促・分納の依頼一覧が引く日報の進捗（Issue #635）。既定は進捗なし
   http.get(`${API_BASE}/daily-reports/order-progress`, () =>
     HttpResponse.json({ computed_at: null, items: [] }),

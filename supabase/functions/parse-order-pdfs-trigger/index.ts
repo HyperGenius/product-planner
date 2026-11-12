@@ -61,6 +61,8 @@ Deno.serve(async (_req: Request) => {
     cronSecret,
     "/api/cron/compute-daily-report-progress"
   )
+  // 弥生のエクスポート（得意先別売上明細表）の解析（Issue #667）
+  const parseShipmentFiles = await callCronEndpoint(backendUrl, cronSecret, "/api/cron/parse-shipment-files")
 
   const isSuccess = (status: number) => status >= 200 && status < 300
   const overallStatus =
@@ -69,7 +71,8 @@ Deno.serve(async (_req: Request) => {
     isSuccess(notifyEmailIntakeSlack.status) &&
     isSuccess(advanceOrderStatus.status) &&
     isSuccess(parseDailyReports.status) &&
-    isSuccess(computeDailyReportProgress.status)
+    isSuccess(computeDailyReportProgress.status) &&
+    isSuccess(parseShipmentFiles.status)
       ? 200
       : 502
 
@@ -81,6 +84,7 @@ Deno.serve(async (_req: Request) => {
       advanceOrderStatus,
       parseDailyReports,
       computeDailyReportProgress,
+      parseShipmentFiles,
     }),
     { status: overallStatus, headers: { "Content-Type": "application/json" } }
   )

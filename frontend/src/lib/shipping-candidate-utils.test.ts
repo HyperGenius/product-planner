@@ -184,3 +184,36 @@ describe("buildShippingRows", () => {
     ).toEqual(["due_soon"])
   })
 })
+
+describe("弥生の送品（Issue #667）", () => {
+  const shipment = (orderId: number, shipped: number, full: boolean) => ({
+    order_id: orderId,
+    shipped_qty: shipped,
+    order_quantity: 10,
+    is_fully_shipped: full,
+    last_sales_date: "2026-10-20",
+    entries: [],
+    ambiguous_entries: [],
+  })
+
+  it("合算した数量が受注数量に達したら候補にし、一部送品は候補にしない", () => {
+    const full = buildShippingRow(makeOrder({}), undefined, TODAY, shipment(1, 10, true))
+    expect(full.reasons).toEqual(["yayoi_shipped"])
+    expect(full.shipment?.shipped_qty).toBe(10)
+
+    const part = buildShippingRow(makeOrder({}), undefined, TODAY, shipment(1, 4, false))
+    expect(part.reasons).toEqual([])
+    expect(part.shipment?.shipped_qty).toBe(4)
+
+    expect(buildShippingRow(makeOrder({}), undefined, TODAY).shipment).toBeNull()
+  })
+
+  it("弥生で送品済みの注文を先頭に並べる", () => {
+    const orders = [
+      makeOrder({ id: 1, desired_deadline: "2026-10-01" }),
+      makeOrder({ id: 2, desired_deadline: "2026-12-31" }),
+    ]
+    const rows = buildShippingRows(orders, undefined, TODAY, [shipment(2, 10, true)])
+    expect(rows.map((r) => r.order.id)).toEqual([2, 1])
+  })
+})

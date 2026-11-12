@@ -8,6 +8,7 @@ import {
 import { jstTodayIso } from "@/lib/order-utils"
 import type { ProcessProgress } from "@/types/daily-report-progress"
 import type { Order } from "@/types/order"
+import type { ShipmentOrderMatch } from "@/types/shipment"
 
 /**
  * 「送品の消し込み」画面（Issue #557）の候補判定。送品の記録は弥生が正なので、
@@ -17,14 +18,20 @@ import type { Order } from "@/types/order"
 /**
  * 候補の理由
  *
+ * - `yayoi_shipped`: 弥生の売上明細で、分納を合算した数量が受注数量に達した（Issue #667）
  * - `final_process_completed`（A）: 日報の進捗で最終工程（`sequence_order` が最大）が完了
  * - `overdue`（B）: 納期が今日（JST）より前
  * - `due_soon`（C）: 納期まで残り7日未満（現場ダッシュボードの「1週間未満」と同じ閾値）
  */
-export type ShippingCandidateReason = "final_process_completed" | "overdue" | "due_soon"
+export type ShippingCandidateReason =
+  | "yayoi_shipped"
+  | "final_process_completed"
+  | "overdue"
+  | "due_soon"
 
 /** 表示順（バッジの並び） */
 export const SHIPPING_CANDIDATE_REASONS: readonly ShippingCandidateReason[] = [
+  "yayoi_shipped",
   "final_process_completed",
   "overdue",
   "due_soon",
@@ -113,6 +120,8 @@ export interface ShippingRow {
   daysRemaining: number | null
   /** 進捗の行が無ければ null（「日報なし」） */
   progress: OrderProgressSummary | null
+  /** 弥生の売上明細の送品（分納を合算）。当たった明細が無ければ null（Issue #667） */
+  shipment: ShipmentOrderMatch | null
   /** 候補の理由（`SHIPPING_CANDIDATE_REASONS` の順）。空なら候補でない */
   reasons: ShippingCandidateReason[]
 }
@@ -121,17 +130,22 @@ export interface ShippingRow {
  * 注文1件を判定する。進捗が無い注文は A では候補にしない（B・C だけで判定する。
  * Issue #491 の「進捗の行が無い工程は遅れにしない」と同じ考え方）
  *
+ * 弥生で送品が確認できた数量が受注数量に達していても、自動では送品済みにしない（候補に出すだけ。#557）
+ *
  * @param todayIso JST の今日（"YYYY-MM-DD"）
+ * @param shipment 弥生の売上明細の送品（`GET /shipments/order-matches` の行）
  */
 export function buildShippingRow(
   order: Order,
   processes: readonly ProcessProgress[] | undefined,
   todayIso: string,
+  shipment?: ShipmentOrderMatch,
 ): ShippingRow {
   const deadline = getShippingDeadline(order)
   const deadlineStatus = getDeadlineStatus(deadline?.date, todayIso)
   const progress = summarizeOrderProgress(processes)
   const reasons: ShippingCandidateReason[] = []
+  if (shipment?.is_fully_shipped) reasons.push("yayoi_shipped")
   if (progress?.finalProcessCompleted) reasons.push("final_process_completed")
   if (deadlineStatus === "overdue") reasons.push("overdue")
   if (deadlineStatus === "due_soon") reasons.push("due_soon")
@@ -142,15 +156,19 @@ export function buildShippingRow(
     deadlineStatus,
     daysRemaining: deadline ? getDaysRemaining(deadline.date, todayIso) : null,
     progress,
+    shipment: shipment ?? null,
     reasons,
   }
 }
 
 /**
- * 並び: 最終工程が完了していて納期超過のもの（A かつ B）を先頭に、次に納期の古い順。
- * 納期が無い注文は末尾、同じ納期なら注文 ID の昇順
+ * 並び: 弥生で送品が確認できたものを先頭に、次に最終工程が完了していて納期超過のもの（A かつ B）、
+ * 次に納期の古い順。納期が無い注文は末尾、同じ納期なら注文 ID の昇順
  */
 export function compareShippingRows(a: ShippingRow, b: ShippingRow): number {
+  const aShipped = a.reasons.includes("yayoi_shipped")
+  const bShipped = b.reasons.includes("yayoi_shipped")
+  if (aShipped !== bShipped) return aShipped ? -1 : 1
   const aTop = a.reasons.includes("final_process_completed") && a.reasons.includes("overdue")
   const bTop = b.reasons.includes("final_process_completed") && b.reasons.includes("overdue")
   if (aTop !== bTop) return aTop ? -1 : 1
@@ -167,16 +185,26 @@ export function compareShippingRows(a: ShippingRow, b: ShippingRow): number {
  *
  * @param progressItems `GET /daily-reports/order-progress` の行
  * @param todayIso JST の今日（"YYYY-MM-DD"）。省略時は現在時刻から求める
+ * @param shipmentItems `GET /shipments/order-matches` の行（弥生の送品。Issue #667）
  */
 export function buildShippingRows(
   orders: readonly Order[],
   progressItems: readonly ProcessProgress[] | undefined,
   todayIso: string = jstTodayIso(),
+  shipmentItems?: readonly ShipmentOrderMatch[],
 ): ShippingRow[] {
   const progressByOrder = groupProgressByOrder(progressItems)
+  const shipmentByOrder = new Map(shipmentItems?.map((s) => [s.order_id, s]))
   return orders
     .filter(isShippingTarget)
-    .map((order) => buildShippingRow(order, progressByOrder.get(order.id), todayIso))
+    .map((order) =>
+      buildShippingRow(
+        order,
+        progressByOrder.get(order.id),
+        todayIso,
+        shipmentByOrder.get(order.id),
+      ),
+    )
     .sort(compareShippingRows)
 }
 
