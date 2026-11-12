@@ -23,7 +23,7 @@ export interface ShipmentFileUploadResult {
 export const SHIPMENT_FILE_UPLOAD_ROLES = ["president", "order_handler", "platform_admin"] as const
 
 /** 受け付ける拡張子。Backend の ALLOWED_EXTENSIONS と揃える */
-export const SHIPMENT_FILE_EXTENSIONS = [".csv", ".txt"] as const
+export const SHIPMENT_FILE_EXTENSIONS = [".xlsx", ".csv", ".txt"] as const
 
 /** 受信上限。Backend の MAX_SHIPMENT_FILE_BYTES と揃える */
 export const SHIPMENT_FILE_MAX_BYTES = 20 * 1024 * 1024

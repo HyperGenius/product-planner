@@ -1,5 +1,5 @@
 # backend/app/services/shipment_file_service.py
-"""弥生販売の売上伝票 CSV（送品ファイル）の Storage 保存と重複判定 (Issue #662)。
+"""弥生販売の売上伝票（送品ファイル）の Storage 保存と重複判定 (Issue #662)。
 
 生ファイルを保存するだけで、解析・突合はしない（CSV の形式が確定してから別の変更で足す。
 エージェントを形式に依存させず、解析の修正を再訪問なしで出せるようにするため）。
@@ -38,10 +38,11 @@ MAX_SHIPMENT_FILE_BYTES = int(
     os.environ.get("SHIPMENT_FILE_MAX_BYTES", str(20 * 1024 * 1024))
 )
 
-# 弥生販売のエクスポートで想定する拡張子（テキスト／CSV）。Excel は受けない。
-ALLOWED_EXTENSIONS = (".csv", ".txt")
+# 弥生販売の売上伝票のエクスポートは Excel（.xlsx）。CSV・テキストも念のため受ける（Issue #664）。
+ALLOWED_EXTENSIONS = (".xlsx", ".csv", ".txt")
 # mimetypes に頼らず明示する（CLAUDE.md「Storage のオブジェクトキーと content-type」）。
 _CONTENT_TYPES: dict[str, str] = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".csv": "text/csv",
     ".txt": "text/plain",
 }

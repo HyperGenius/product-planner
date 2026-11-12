@@ -5,13 +5,14 @@ const file = (name: string, size: number) =>
   Object.defineProperty(new File(["x"], name), "size", { value: size })
 
 describe("validateShipmentFile", () => {
-  it("CSV・テキストは通す（拡張子の大文字小文字は問わない）", () => {
+  it("Excel・CSV・テキストは通す（拡張子の大文字小文字は問わない）", () => {
     expect(validateShipmentFile(file("売上.csv", 10))).toBeNull()
     expect(validateShipmentFile(file("売上.TXT", 10))).toBeNull()
+    expect(validateShipmentFile(file("売上.xlsx", 10))).toBeNull()
   })
 
   it("Excel など想定外の拡張子は理由を返す", () => {
-    expect(validateShipmentFile(file("売上.xlsx", 10))).toContain(".csv")
+    expect(validateShipmentFile(file("売上.pdf", 10))).toContain(".csv")
   })
 
   it("空ファイルと上限超過は理由を返す", () => {
