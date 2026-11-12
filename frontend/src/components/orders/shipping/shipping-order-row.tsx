@@ -29,6 +29,7 @@ import type { MemberRole } from "@/types/member"
 import type { Product } from "@/types/product"
 
 const REASON_LABEL: Record<ShippingCandidateReason, string> = {
+  yayoi_shipped: "弥生で送品済み",
   final_process_completed: "最終工程完了",
   overdue: "納期超過",
   due_soon: "納期まで1週間",
@@ -36,6 +37,7 @@ const REASON_LABEL: Record<ShippingCandidateReason, string> = {
 
 // 納期の理由は納期の状態と同じ色（超過＝赤、間近＝amber）にする
 const REASON_CLASS: Record<ShippingCandidateReason, string> = {
+  yayoi_shipped: "bg-blue-100 text-blue-800 hover:bg-blue-100",
   final_process_completed: "bg-green-100 text-green-800 hover:bg-green-100",
   overdue: STATUS_CLASS.overdue,
   due_soon: STATUS_CLASS.due_soon,
@@ -61,6 +63,12 @@ export function ShippingOrderHeaderRow() {
         </div>
       </TableHead>
       <TableHead>工程の進捗</TableHead>
+      <TableHead>
+        <div className="flex flex-col leading-tight">
+          <span>弥生の送品</span>
+          <span className="text-xs font-normal text-muted-foreground">数量／最終売上日</span>
+        </div>
+      </TableHead>
       <TableHead>候補の理由</TableHead>
       <TableHead className="text-right text-foreground">操作</TableHead>
     </TableRow>
@@ -83,6 +91,49 @@ function DaysRemainingLabel({ days }: { days: number }) {
 }
 
 /**
+ * 弥生の売上明細で送品が確認できた数量（分納を合算）と最後の売上日（Issue #667）。
+ * 受注数量に届かない間は「一部送品」。複数の受注に当たって確定できなかった明細は件数だけを出す
+ */
+export function ShipmentCell({ shipment }: { shipment: ShippingRow["shipment"] }) {
+  if (!shipment) return <span className="text-sm text-muted-foreground">-</span>
+  const hasEntries = shipment.entries.length > 0
+  const ambiguousCount = shipment.ambiguous_entries.length
+  const entryTitle = shipment.entries
+    .map((e) => `${e.sales_date} ${e.quantity ?? "-"}${e.note ? `（${e.note}）` : ""}`)
+    .join("\n")
+  return (
+    <div className="flex flex-col items-start gap-0.5 leading-tight text-sm">
+      {hasEntries && (
+        <span className="tabular-nums" title={entryTitle || undefined}>
+          {shipment.shipped_qty.toLocaleString("ja-JP")}
+          {shipment.order_quantity != null && (
+            <span className="text-muted-foreground">
+              {" "}
+              / {shipment.order_quantity.toLocaleString("ja-JP")}
+            </span>
+          )}
+          {!shipment.is_fully_shipped && (
+            <Badge className="ml-1.5 bg-amber-100 text-[10px] text-amber-800 hover:bg-amber-100">
+              一部送品
+            </Badge>
+          )}
+        </span>
+      )}
+      {shipment.last_sales_date && (
+        <span className="text-xs text-muted-foreground">
+          {formatDeadlineShort(shipment.last_sales_date)} 売上
+        </span>
+      )}
+      {ambiguousCount > 0 && (
+        <span className="text-xs text-amber-700">
+          他の受注と区別できない明細 {ambiguousCount}件
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
  * 「送品の消し込み」画面（Issue #557）の行。社長・受注担当には「送品済みにする」を出し、
  * それ以外のロールは閲覧のみ。一括の送品は作らない（弥生で1件ずつ確認する運用のため）
  */
@@ -94,7 +145,7 @@ export function ShippingOrderRow({
   shipIsPending,
   onShip,
 }: ShippingOrderRowProps) {
-  const { order, deadline, deadlineSource, daysRemaining, progress, reasons } = row
+  const { order, deadline, deadlineSource, daysRemaining, progress, shipment, reasons } = row
   const product = getOrderProductDisplayParts(order, products)
   const canShip = canShipOrder(order, currentUserRole)
 
@@ -151,6 +202,9 @@ export function ShippingOrderRow({
         ) : (
           <span className="text-muted-foreground">日報なし</span>
         )}
+      </TableCell>
+      <TableCell>
+        <ShipmentCell shipment={shipment} />
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-1">

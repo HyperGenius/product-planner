@@ -24,6 +24,7 @@ import {
   Truck,
   BellRing,
   FileUp,
+  Link2,
 } from "lucide-react"
 
 import {
@@ -118,6 +119,13 @@ const menuItems: MenuItem[] = [
         title: "弥生の取り込み",
         url: "/orders/shipment-import",
         icon: FileUp,
+        allowedRoles: ["president", "order_handler", "platform_admin"],
+      },
+      {
+        // 弥生の得意先・商品を顧客・製品に対応付ける。辞書を書けるロールにだけ出す（Issue #667）
+        title: "弥生の名寄せ",
+        url: "/orders/shipment-names",
+        icon: Link2,
         allowedRoles: ["president", "order_handler", "platform_admin"],
       },
       {

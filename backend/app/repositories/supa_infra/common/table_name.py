@@ -44,3 +44,8 @@ class SupabaseTableName(Enum):
     CUSTOMER_EXTRACTION_PROMPT_HISTORY = "customer_extraction_prompt_history"
     CUSTOMER_MERGE_LOG = "customer_merge_log"
     CRON_ALERT_STATE = "cron_alert_state"
+    SHIPMENT_FILES = "shipment_files"
+    SHIPMENT_ENTRIES = "shipment_entries"
+    SHIPMENT_CUSTOMER_LINKS = "shipment_customer_links"
+    SHIPMENT_PRODUCT_LINKS = "shipment_product_links"
+    SHIPMENT_IGNORED_CODES = "shipment_ignored_codes"

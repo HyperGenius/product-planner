@@ -10,7 +10,8 @@ import {
 import { OrdersTable } from "@/components/orders/orders-table"
 import { useOrderActions } from "@/hooks/use-order-actions"
 import { useOrdersShipping } from "@/hooks/use-orders-shipping"
-import { formatDateTimeShort } from "@/lib/order-utils"
+import Link from "next/link"
+import { formatDateTimeShort, formatDeadlineShort } from "@/lib/order-utils"
 import { ShipmentImportStatus } from "@/components/orders/shipping/shipment-import-status"
 
 type ShippingView = "candidates" | "all"
@@ -34,6 +35,8 @@ export default function OrdersShippingPage() {
     candidateRows,
     computedAt,
     isProgressError,
+    latestSalesDate,
+    isShipmentError,
   } = useOrdersShipping()
   const actions = useOrderActions(orders)
   const [view, setView] = useState<ShippingView>("candidates")
@@ -45,7 +48,7 @@ export default function OrdersShippingPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold">送品の消し込み</h1>
         <p className="text-muted-foreground mt-2">
-          確定済・生産中の注文のうち、最終工程が完了した・納期を過ぎた・納期まで1週間を切った注文を候補として表示します
+          確定済・生産中の注文のうち、弥生で送品が確認できた・最終工程が完了した・納期を過ぎた・納期まで1週間を切った注文を候補として表示します
         </p>
       </div>
 
@@ -55,12 +58,24 @@ export default function OrdersShippingPage() {
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
-          送品の記録は弥生が正です。弥生で送品を確認してから「送品済みにする」を押してください
+          送品の記録は弥生が正です。弥生で送品を確認してから「送品済みにする」を押してください。
+          「弥生の送品」は取り込んだ売上明細を受注に当てた数量で、自動では送品済みにしません
         </p>
       </div>
 
-      <div className="mb-2">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         <ShipmentImportStatus />
+        <p className="text-xs text-muted-foreground">
+          {isShipmentError
+            ? "弥生の売上明細を取得できませんでした"
+            : latestSalesDate
+              ? `弥生の売上明細: ${formatDeadlineShort(latestSalesDate)} 売上分まで`
+              : "弥生の売上明細はまだ解析されていません"}
+          {" · "}
+          <Link href="/orders/shipment-names" className="underline hover:text-foreground">
+            弥生の名寄せ
+          </Link>
+        </p>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">

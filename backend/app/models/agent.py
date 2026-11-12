@@ -70,6 +70,15 @@ class ShipmentFileItem(BaseModel):
     source: Literal["agent", "web"]
     size_bytes: int
     received_at: str
+    # 解析の結果 (Issue #667)。parse_error は固定の分類（例外の文言は入れない）
+    parse_status: Literal["pending", "parsed", "unsupported", "failed"] = "pending"
+    parse_error: str | None = None
+    parsed_at: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    entry_count: int | None = None
+    skipped_count: int | None = None
+    replace_result: Literal["replaced", "partial", "stale"] | None = None
 
 
 class ShipmentFileListResponse(BaseModel):

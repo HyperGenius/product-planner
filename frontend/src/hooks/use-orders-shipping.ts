@@ -3,9 +3,11 @@
 import { useMemo } from "react"
 import { useOrders } from "@/hooks/use-orders"
 import { useOrderProgressList } from "@/hooks/use-daily-report-progress"
+import { useShipmentOrderMatches } from "@/hooks/use-shipments"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
+import { jstTodayIso } from "@/lib/order-utils"
 import {
   buildShippingRows,
   isShippingCandidate,
@@ -16,7 +18,8 @@ import type { Order } from "@/types/order"
 /**
  * 送品の消し込みの行（Issue #557）。対象（確定済・生産中）の注文の進捗をまとめて引いて判定する。
  * 「送品の消し込み」画面とサイドバーの件数バッジで共有し、進捗を同じクエリキーで取って二重に取得しない。
- * 送品で対象の ID が変わっても表が読み込み中に戻らないよう、直前の進捗を残す（Issue #649）
+ * 送品で対象の ID が変わっても表が読み込み中に戻らないよう、直前の進捗を残す（Issue #649）。
+ * 弥生の売上明細の送品（Issue #667）も同じ対象の ID でまとめて引く
  *
  * @param orders 注文の一覧。undefined の間は進捗を取得しない
  */
@@ -26,10 +29,14 @@ export function useShippingRows(orders: Order[] | undefined) {
     [orders]
   )
   const progress = useOrderProgressList(targetOrderIds, { keepPrevious: true })
+  const shipments = useShipmentOrderMatches(targetOrderIds, { keepPrevious: true })
 
   const rows = useMemo(
-    () => (orders ? buildShippingRows(orders, progress.data?.items) : []),
-    [orders, progress.data]
+    () =>
+      orders
+        ? buildShippingRows(orders, progress.data?.items, jstTodayIso(), shipments.data?.items)
+        : [],
+    [orders, progress.data, shipments.data]
   )
   const candidateRows = useMemo(() => rows.filter(isShippingCandidate), [rows])
 
@@ -37,8 +44,11 @@ export function useShippingRows(orders: Order[] | undefined) {
     rows,
     candidateRows,
     computedAt: progress.data?.computed_at ?? null,
-    isProgressLoading: progress.isLoading,
+    // 弥生の送品が届く前に数えると、送品が確認できた注文が候補から漏れて見える
+    isProgressLoading: progress.isLoading || shipments.isLoading,
     isProgressError: progress.isError,
+    latestSalesDate: shipments.data?.latest_sales_date ?? null,
+    isShipmentError: shipments.isError,
   }
 }
 

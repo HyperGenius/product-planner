@@ -8,6 +8,7 @@ from app.routers.cron.notify_email_intake_slack import (
 )
 from app.routers.cron.parse_daily_reports import parse_daily_reports_router
 from app.routers.cron.parse_order_pdfs import parse_order_pdfs_router
+from app.routers.cron.parse_shipment_files import parse_shipment_files_router
 
 __all__ = [
     "cron_router",
@@ -16,4 +17,5 @@ __all__ = [
     "parse_daily_reports_router",
     "compute_daily_report_progress_router",
     "notify_email_intake_slack_router",
+    "parse_shipment_files_router",
 ]

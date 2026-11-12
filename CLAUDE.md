@@ -179,6 +179,15 @@ cd backend && ruff check . && mypy .
   jsdom の `File` は `arrayBuffer()` が無く、`fetch` の body に渡すと `[object File]` に文字列化されるので、フックでは
   `await file.arrayBuffer()` を送り、テストではそのファイルだけ `File.prototype.arrayBuffer` を補う。詳細は
   [docs/features/shipment-file-import.md](docs/features/shipment-file-import.md)
+  - **解析・名寄せ・突合（Issue #667）**: 実物は帳票「得意先別売上明細表」の `.xlsx`。伝票番号も行番号も冪等キーにならないので、明細
+    （`shipment_entries`）は**ファイルの期間の日ごとに最新のファイルの中身へ置き換える**（RPC `replace_shipment_entries`、日ごとの載っている
+    ファイルは `shipment_coverage`）。照合・突合は保存せず参照のたびに求める（純粋関数 `shipment_matcher.py`、DB は `shipment_matching_service.py`）。
+    **弥生の商品コードは `products.code`（図番）と一致しない**ので、製品は (得意先, 商品コード) の辞書 → 品名の図番 → `parse_product_spec()` の順で、
+    自動は**得意先の顧客の受注にある製品に絞って一意のときだけ**。得意先 → 顧客は**1対多**（商流で請求先≠注文元）で、**受注の顧客は書き換えない**。
+    突合は送品の候補（`yayoi_shipped`）を出すだけで**送品済みにしない**。辞書の FK は CASCADE で、顧客・製品の統合 RPC の付け替え対象に入れていない。
+    書き込めるロールは Backend / Frontend の `SHIPMENT_NAME_EDITOR_ROLES` を揃える。送品の消し込みを描画するテストは MSW の既定ハンドラ
+    `GET /shipments/order-matches` に依存する。`daily_report_name_matcher` を単独のテストファイルで import すると既存の循環 import で落ちる
+    （`unit/` をまとめて流せば通る。CI と同じ）
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は
