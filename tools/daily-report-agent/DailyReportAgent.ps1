@@ -38,10 +38,10 @@ $ErrorActionPreference = 'Stop'
 $AgentVersion = '0.2.0'
 
 # 送信先の種類（Issue #662）。設定で任意のエンドポイントを指定させず、既知の種類だけを許す。
-# 既定の拡張子は種類ごとの想定（日報は Excel、弥生販売の売上伝票は CSV/テキスト）。
+# 既定の拡張子は種類ごとの想定（日報も弥生販売の売上伝票も Excel。売上伝票は CSV/テキストも可）。
 $TargetKinds = @{
     'daily_reports' = [pscustomobject]@{ Endpoint = '/api/agent/daily-reports'; Extensions = @('.xlsx', '.xlsm', '.xls') }
-    'shipment_files' = [pscustomobject]@{ Endpoint = '/api/agent/shipment-files'; Extensions = @('.csv', '.txt') }
+    'shipment_files' = [pscustomobject]@{ Endpoint = '/api/agent/shipment-files'; Extensions = @('.xlsx', '.csv', '.txt') }
 }
 
 # 終了コード（タスクスケジューラの「前回の実行結果」で確認できる）

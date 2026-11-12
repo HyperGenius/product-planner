@@ -64,7 +64,7 @@ describe("ShipmentImportPage", () => {
       }),
     )
     render(<ShipmentImportPage />)
-    const input = await screen.findByLabelText("売上伝票の CSV を選択")
+    const input = await screen.findByLabelText("売上伝票のファイルを選択")
     await userEvent.upload(input, new File(["a,b\n1,2\n"], "売上伝票.csv", { type: "text/csv" }))
     await waitFor(() => expect(received).not.toBeNull())
     expect(received!.name).toBe(encodeURIComponent("売上伝票.csv"))
@@ -72,7 +72,7 @@ describe("ShipmentImportPage", () => {
     expect(received!.text).toBe("a,b\n1,2\n")
   })
 
-  it("CSV 以外のファイルは送らずに理由を表示する", async () => {
+  it("対象外の拡張子のファイルは送らずに理由を表示する", async () => {
     const post = vi.fn()
     server.use(
       member("order_handler"),
@@ -82,9 +82,9 @@ describe("ShipmentImportPage", () => {
       }),
     )
     render(<ShipmentImportPage />)
-    const input = await screen.findByLabelText("売上伝票の CSV を選択")
-    await userEvent.upload(input, new File(["x"], "売上.xlsx"), { applyAccept: false })
-    expect(await screen.findByRole("alert")).toHaveTextContent(".csv / .txt")
+    const input = await screen.findByLabelText("売上伝票のファイルを選択")
+    await userEvent.upload(input, new File(["x"], "売上.pdf"), { applyAccept: false })
+    expect(await screen.findByRole("alert")).toHaveTextContent(".xlsx / .csv / .txt")
     expect(post).not.toHaveBeenCalled()
   })
 
@@ -92,6 +92,6 @@ describe("ShipmentImportPage", () => {
     server.use(member("iso_officer"))
     render(<ShipmentImportPage />)
     await screen.findByText("まだ取り込まれたファイルはありません")
-    expect(screen.queryByLabelText("売上伝票の CSV を選択")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("売上伝票のファイルを選択")).not.toBeInTheDocument()
   })
 })

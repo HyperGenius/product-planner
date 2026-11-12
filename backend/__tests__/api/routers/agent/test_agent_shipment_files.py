@@ -110,9 +110,21 @@ class TestPostShipmentFile:
 
         assert response.json()["status"] == "duplicate"
 
-    def test_non_csv_extension_is_rejected(self, admin):
+    def test_xlsx_is_accepted_with_excel_content_type(self, admin):
         response = client.post(
-            URL, headers=_headers(path=r"\\fs\弥生\売上.xlsx"), content=CONTENT
+            URL, headers=_headers(path=r"\\fs\弥生\売上伝票.xlsx"), content=CONTENT
+        )
+
+        assert response.status_code == 200
+        kwargs = admin.storage.upload.call_args.kwargs
+        assert kwargs["path"] == f"{TENANT_ID}/{SHA256}.xlsx"
+        assert kwargs["file_options"]["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    def test_unsupported_extension_is_rejected(self, admin):
+        response = client.post(
+            URL, headers=_headers(path=r"\\fs\弥生\売上.pdf"), content=CONTENT
         )
 
         assert response.status_code == 400

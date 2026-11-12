@@ -1,8 +1,8 @@
-# 弥生販売の売上伝票 CSV の取り込み（Issue #662）
+# 弥生販売の売上伝票の取り込み（Issue #662 / #664）
 
-送品の正典は弥生販売（インストール型）。弥生にはクラウド API が無く、連携手段は伝票のエクスポート（CSV）なので、
-事務PCが書き出した CSV を**生ファイルのまま**受け取って保存するところまでを実装している。
-解析・突合（送品の消し込みの候補への反映）は、実物の CSV の項目を確認してから別の変更で足す（フェーズ2）。
+送品の正典は弥生販売（インストール型）。弥生にはクラウド API が無く、連携手段は伝票のエクスポートなので、
+事務PCが書き出したファイル（実際のエクスポートは Excel の `.xlsx`。Issue #664）を**生ファイルのまま**受け取って保存するところまでを実装している。
+解析・突合（送品の消し込みの候補への反映）は、実物のファイルの項目を確認してから別の変更で足す（フェーズ2。Excel なので日報と同様 `openpyxl` で読む）。
 
 ## 構成
 
@@ -24,7 +24,7 @@
 - テーブル `shipment_files`（マイグレーション `20261108000000_add_shipment_files.sql`）。`UNIQUE (tenant_id, sha256)` で
   再送・同名上書き・同時送信を重複排除する。`source` は `agent` / `web`。`agent` は `agent_token_id`、`web` は
   `uploaded_by` が必須（CHECK）
-- バケット `shipment-files`（private、20MB）。キーは `{tenant_id}/{sha256}.csv`（日本語ファイル名はキーに使わない）
+- バケット `shipment-files`（private、20MB）。キーは `{tenant_id}/{sha256}{拡張子}`（`.xlsx` / `.csv` / `.txt`）（日本語ファイル名はキーに使わない）
 - RLS: 参照はテナントメンバー。INSERT は `source='web'` かつ `uploaded_by = auth.uid()` のメンバーだけ（エージェント経由は
   service role）。Storage は自テナントのフォルダへの追加のみ（UPDATE・DELETE ポリシーは無い）。`auth.jwt() ->> 'tenant_id'` は
   発行されていないので `is_tenant_member()` で判定し、先頭フォルダが UUID でないキーで `::uuid` が失敗しないよう `CASE` で形式を先に確かめる
@@ -37,7 +37,7 @@
 | アプリ | `POST /shipment-files`（octet-stream。`X-File-Name`（URL エンコード）/ 任意 `X-File-Modified-At`）。SHA-256 はサーバーが求める | ユーザー JWT。`order_handler` / `president` / `platform_admin` |
 | アプリ | `GET /shipment-files`（最終取り込み日時＋直近20件。パスは返さない） | テナントメンバー |
 
-- 受け付ける拡張子は `.csv` / `.txt`（`shipment_file_service.ALLOWED_EXTENSIONS`）、上限は `SHIPMENT_FILE_MAX_BYTES`（既定 20MB）
+- 受け付ける拡張子は `.xlsx` / `.csv` / `.txt`（content-type は `_CONTENT_TYPES` に明示。当初 `.xlsx` を除外していて弥生の実エクスポートが 400 になった。#664）（`shipment_file_service.ALLOWED_EXTENSIONS`）、上限は `SHIPMENT_FILE_MAX_BYTES`（既定 20MB）
 - raw body の検証（サイズ上限・ハッシュ）は日報と共通の `routers/agent/_upload.py`。テストで上限を変えるときは
   ルーターモジュール側（`routers.agent.shipment_files` / `routers.transaction.shipment_files`）の定数を `monkeypatch` する
 - **`agent-gateway`（Edge Function）の `ALLOWED_PATHS` に `/api/agent/shipment-files` を足してある。マージ後に
@@ -47,7 +47,7 @@
 
 - 設定の `targets`（`kind` = `daily_reports` / `shipment_files`、`folders`、任意の `extensions` / `recurse`）で、フォルダごとに
   送り先を切り替える。`targets` が無い従来の `target_folders` は `daily_reports` 1つとして動くので、既設の `config.json` はそのまま動く
-- `kind` で送り先が決まる（任意のエンドポイントは指定できない）。拡張子の既定は日報が Excel、送品が `.csv` / `.txt`
+- `kind` で送り先が決まる（任意のエンドポイントは指定できない）。拡張子の既定は日報が Excel、送品が `.xlsx` / `.csv` / `.txt`
 - heartbeat の `payload.targets` に種類ごとの集計が入る。`-DryRun` は従来どおり送信せず対象だけを一覧する
 
 ## 画面

@@ -87,8 +87,13 @@ class TestShipmentFilesRouter:
         assert response.status_code == 403
         db.storage.from_.return_value.upload.assert_not_called()
 
-    def test_unsupported_extension_is_rejected(self, db, role):
+    def test_xlsx_is_accepted(self, db, role):
         response = client.post(URL, headers=_headers("売上伝票.xlsx"), content=CONTENT)
+
+        assert response.status_code == 200
+
+    def test_unsupported_extension_is_rejected(self, db, role):
+        response = client.post(URL, headers=_headers("売上伝票.pdf"), content=CONTENT)
 
         assert response.status_code == 400
 

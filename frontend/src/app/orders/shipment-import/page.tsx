@@ -63,7 +63,7 @@ export default function ShipmentImportPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold">弥生の売上伝票の取り込み</h1>
         <p className="text-muted-foreground mt-2">
-          弥生販売からエクスポートした売上伝票の CSV の取り込み状況です
+          弥生販売からエクスポートした売上伝票のファイルの取り込み状況です
         </p>
       </div>
 
@@ -73,7 +73,7 @@ export default function ShipmentImportPage() {
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
-          共有フォルダに保存した CSV は自動で取り込まれます。共有フォルダを使えないときは下のボタンから
+          共有フォルダに保存したファイルは自動で取り込まれます。共有フォルダを使えないときは下のボタンから
           直接アップロードできます。取り込んだ内容は、まだ「送品の消し込み」の候補には反映されません
         </p>
       </div>
@@ -92,12 +92,12 @@ export default function ShipmentImportPage() {
               type="file"
               accept={SHIPMENT_FILE_EXTENSIONS.join(",")}
               className="hidden"
-              aria-label="売上伝票の CSV を選択"
+              aria-label="売上伝票のファイルを選択"
               onChange={handleSelect}
             />
             <Button onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
               <Upload className="mr-2 h-4 w-4" />
-              {upload.isPending ? "アップロード中…" : "CSV をアップロード"}
+              {upload.isPending ? "アップロード中…" : "ファイルをアップロード"}
             </Button>
           </div>
         )}
