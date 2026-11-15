@@ -1,4 +1,4 @@
-"""日報の実績の割り付けと進捗の算出のテスト (Issue #490)。"""
+"""日報の実績の割り付けと進捗の算出のテスト (Issue #490, #681)。"""
 
 from datetime import date
 
@@ -619,4 +619,115 @@ class TestProgressStatus:
 
         assert allocate_actuals(entries, orders, ROUTINGS) == allocate_actuals(
             list(reversed(entries)), list(reversed(orders)), list(reversed(ROUTINGS))
+        )
+
+
+class TestUntrackedProcesses:
+    """日報で追わない工程（Issue #681）。製品 100 の検査（5）を日報で追わない工程にする。"""
+
+    def test_untracked_process_has_no_progress_row(self):
+        orders = [_order(1, 100, date(2026, 10, 10))]
+
+        result = allocate_actuals(
+            [], orders, ROUTINGS, untracked_process_names=["検査"]
+        )
+
+        assert [p.process_routing_id for p in result.progress] == [11, 12, 13, 14]
+
+    def test_last_tracked_process_becomes_the_final_process(self):
+        # 検査に実績が無くても、日報で追う最後の工程（クグシ）が数量で完了すれば受注の進捗は完了
+        orders = [_order(1, 100, date(2026, 10, 10))]
+        entries = [_entry(1, 100, "クグシ")]
+
+        result = allocate_actuals(
+            entries, orders, ROUTINGS, untracked_process_names=["検査"]
+        )
+
+        progress = _progress(result, 1)
+        assert "検査" not in progress
+        assert {p.status for p in progress.values()} == {"completed"}
+        assert progress["クグシ"].completed_by == "quantity"
+
+    def test_process_before_untracked_completes_only_by_quantity(self):
+        # 後の工程（検査）に実績が無いので、クグシは数量が揃うまで完了にならない
+        orders = [_order(1, 100, date(2026, 10, 10))]
+
+        result = allocate_actuals(
+            [_entry(1, 60, "クグシ")],
+            orders,
+            ROUTINGS,
+            untracked_process_names=["検査"],
+        )
+
+        assert _progress(result, 1)["クグシ"].status == "in_progress"
+
+    def test_actuals_of_untracked_process_are_left_unallocated(self):
+        orders = [_order(1, 100, date(2026, 10, 10))]
+        entries = [_entry(1, 100, "検査")]
+
+        result = allocate_actuals(
+            entries, orders, ROUTINGS, untracked_process_names=["検査"]
+        )
+
+        assert result.unallocated == [
+            UnallocatedActual(
+                entry_id=1,
+                product_id=PRODUCT,
+                customer_id=None,
+                process_name="検査",
+                work_date=date(2026, 9, 10),
+                qty=100,
+                reason="untracked_process",
+            )
+        ]
+        assert result.allocations == []
+        # 検査の実績で前の工程が完了にならない
+        assert _progress(result, 1)["クグシ"].status == "not_started"
+
+    def test_untracked_takes_precedence_over_no_routing_process(self):
+        # 工程ルートに検査が無い製品でも、日報で追わない工程なら untracked_process
+        result = allocate_actuals(
+            [_entry(1, 10, "検査", product_id=OTHER_PRODUCT)],
+            [],
+            ROUTINGS,
+            untracked_process_names=["検査"],
+        )
+
+        assert [u.reason for u in result.unallocated] == ["untracked_process"]
+
+    def test_names_are_compared_without_surrounding_spaces(self):
+        routings = [*ROUTINGS[:4], RoutingRef(15, PRODUCT, 5, " 検査　")]
+
+        result = allocate_actuals(
+            [_entry(1, 10, "検査")],
+            [_order(1, 100, date(2026, 10, 10))],
+            routings,
+            untracked_process_names=["検査 "],
+        )
+
+        assert 15 not in {p.process_routing_id for p in result.progress}
+        assert [u.reason for u in result.unallocated] == ["untracked_process"]
+
+    def test_stock_assignment_to_untracked_process_is_ignored(self):
+        orders = [_order(1, 100, date(2026, 11, 1), order_date=date(2026, 10, 21))]
+        entries = [_entry(1, 100, "検査", date(2026, 10, 14))]
+        assignments = [
+            StockAssignment(
+                order_id=1, process_name="検査", qty=100, assigned_on=date(2026, 11, 2)
+            )
+        ]
+
+        result = allocate_actuals(
+            entries, orders, ROUTINGS, assignments, untracked_process_names=["検査"]
+        )
+
+        assert result.allocations == []
+        assert [u.reason for u in result.unallocated] == ["untracked_process"]
+
+    def test_without_setting_the_result_is_unchanged(self):
+        orders = [_order(1, 100, date(2026, 10, 10))]
+        entries = [_entry(1, 100, "プレス"), _entry(2, 30, "検査")]
+
+        assert allocate_actuals(entries, orders, ROUTINGS) == allocate_actuals(
+            entries, orders, ROUTINGS, untracked_process_names=[]
         )

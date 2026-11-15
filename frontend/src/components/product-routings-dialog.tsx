@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Pencil, Trash2, Plus, Loader2, Lock, ArrowUp, ArrowDown } from "lucide-react"
+import { Pencil, Trash2, Plus, Loader2, Lock, ArrowUp, ArrowDown, X } from "lucide-react"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -46,6 +46,18 @@ import {
 } from "@/lib/hooks/use-equipment-groups"
 import { useSimulateOrder } from "@/hooks/use-orders"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
+import {
+  useAddUntrackedProcessName,
+  useRemoveUntrackedProcessName,
+  useUntrackedProcessNames,
+} from "@/hooks/use-untracked-process-names"
+import { ApiError } from "@/lib/api-client"
+import {
+  findUntrackedProcessName,
+  normalizeProcessName,
+  UNTRACKED_PROCESS_LABEL,
+} from "@/lib/untracked-process-utils"
+import { UNTRACKED_PROCESS_EDITOR_ROLES } from "@/types/member"
 import type { Product } from "@/types/product"
 import type { ProcessRouting } from "@/types/process-routing"
 
@@ -77,6 +89,11 @@ const toDraft = (routing: ProcessRouting): DraftRouting => ({
   confirmed_by: routing.confirmed_by,
   confirmed_at: routing.confirmed_at,
 })
+
+/** 「日報で追わない」の設定・解除の確認中の操作（Issue #681） */
+type PendingUntracked =
+  | { action: "add"; processName: string }
+  | { action: "remove"; processName: string; id: number }
 
 // 下書きの差分検知用に比較可能な形へ正規化する（並び順・追加・削除・編集・確定状態の変化を検知する）
 const serializeDrafts = (drafts: DraftRouting[]) => JSON.stringify(drafts)
@@ -120,12 +137,21 @@ export function ProductRoutingsDialog({
   // 個数からの目安
   const [estimateQuantity, setEstimateQuantity] = useState<number | "">(1000)
 
+  // 日報で追わない工程の設定・解除の確認（Issue #681）
+  const [pendingUntracked, setPendingUntracked] = useState<PendingUntracked | null>(null)
+
   // データ取得
   const { data: routings, isLoading: isLoadingRoutings } = useProcessRoutings(product?.id ?? null)
   const { data: equipmentGroups, isLoading: isLoadingGroups } = useEquipmentGroups()
   const { data: currentMember } = useCurrentMember()
 
   const isAdmin = currentMember?.role === "president"
+  const canEditUntracked =
+    !!currentMember?.role && UNTRACKED_PROCESS_EDITOR_ROLES.includes(currentMember.role)
+  const { data: untrackedNames } = useUntrackedProcessNames()
+  const addUntracked = useAddUntrackedProcessName()
+  const removeUntracked = useRemoveUntrackedProcessName()
+  const isUntrackedPending = addUntracked.isPending || removeUntracked.isPending
 
   // ミューテーション
   const updateMutation = useUpdateProcessRouting()
@@ -385,6 +411,43 @@ export function ProductRoutingsDialog({
 
   const isPending = updateMutation.isPending || bulkSaveMutation.isPending
 
+  // 「日報で追わない」の切り替え（確認ダイアログを開く。名前の単位なので未保存の工程でも設定できる）
+  const handleUntrackedToggle = (processName: string) => {
+    const name = normalizeProcessName(processName)
+    if (!name) return
+    const current = findUntrackedProcessName(untrackedNames, name)
+    setPendingUntracked(
+      current
+        ? { action: "remove", processName: name, id: current.id }
+        : { action: "add", processName: name },
+    )
+  }
+
+  // 確認ダイアログの確定。完了を待って閉じ、失敗したら開いたまま知らせる
+  const handleUntrackedConfirm = async () => {
+    if (!pendingUntracked) return
+    const { processName } = pendingUntracked
+    try {
+      if (pendingUntracked.action === "add") {
+        await addUntracked.mutateAsync(processName)
+        toast.success(`工程「${processName}」を日報で追わない工程にしました`)
+      } else {
+        await removeUntracked.mutateAsync(pendingUntracked.id)
+        toast.success(`工程「${processName}」を日報で追う工程に戻しました`)
+      }
+      setPendingUntracked(null)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        // 別の画面で先に設定された
+        toast.info(`工程「${processName}」は既に日報で追わない工程です`)
+        setPendingUntracked(null)
+        return
+      }
+      toast.error("日報で追わない工程の設定に失敗しました")
+      console.error(error)
+    }
+  }
+
   return (
     <>
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -432,6 +495,7 @@ export function ProductRoutingsDialog({
                       <TableHead className="w-[120px]">段取り時間(秒)</TableHead>
                       <TableHead className="w-[120px]">単位時間(秒)</TableHead>
                       <TableHead className="w-[80px] text-center">確定</TableHead>
+                      <TableHead className="w-[88px] text-center">日報</TableHead>
                       <TableHead className="w-[130px] text-right">操作</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -469,6 +533,11 @@ export function ProductRoutingsDialog({
                         <TableCell>
                           <div className="flex items-center gap-2">
                             {routing.process_name}
+                            {findUntrackedProcessName(untrackedNames, routing.process_name) && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                                {UNTRACKED_PROCESS_LABEL}
+                              </Badge>
+                            )}
                             {routing.id < 0 && (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500 text-amber-600 bg-amber-50">
                                 未保存
@@ -504,6 +573,26 @@ export function ProductRoutingsDialog({
                               <Lock className="h-3.5 w-3.5 text-muted-foreground" />
                             </div>
                           )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {(() => {
+                            const untracked = !!findUntrackedProcessName(untrackedNames, routing.process_name)
+                            const label = untracked ? "追わない" : "追う"
+                            return canEditUntracked ? (
+                              <Button
+                                variant={untracked ? "secondary" : "ghost"}
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => handleUntrackedToggle(routing.process_name)}
+                                disabled={isUntrackedPending}
+                                aria-label={`${routing.process_name}を日報で${untracked ? "追う" : "追わない"}工程にする`}
+                              >
+                                {label}
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{label}</span>
+                            )
+                          })()}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
@@ -595,6 +684,49 @@ export function ProductRoutingsDialog({
                 <p className="text-[10px] text-muted-foreground leading-snug">
                   他の受注がない場合の単体換算値です。実際の納期は設備の混雑状況により長くなる場合があります。
                   未保存の工程変更は反映されません。
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* 日報で追わない工程（工程名の単位、全製品共通。Issue #681） */}
+            <Card className="shrink-0">
+              <CardHeader className="pb-2 pt-3 px-3">
+                <CardTitle className="text-xs font-semibold">日報で追わない工程（全製品共通）</CardTitle>
+              </CardHeader>
+              <CardContent className="px-3 pb-3 space-y-2">
+                {untrackedNames && untrackedNames.length > 0 ? (
+                  <ul className="flex flex-wrap gap-1.5" aria-label="日報で追わない工程">
+                    {untrackedNames.map((item) => (
+                      <li key={item.id}>
+                        <Badge variant="secondary" className="gap-1 pr-1 text-xs font-normal">
+                          {item.process_name}
+                          {canEditUntracked && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPendingUntracked({
+                                  action: "remove",
+                                  processName: item.process_name,
+                                  id: item.id,
+                                })
+                              }
+                              disabled={isUntrackedPending}
+                              aria-label={`${item.process_name}を日報で追う工程に戻す`}
+                              className="rounded-sm hover:text-destructive disabled:opacity-50"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">設定した工程はありません</p>
+                )}
+                <p className="text-[10px] text-muted-foreground leading-snug">
+                  検査など日報に書かない工程は、日報の進捗（ガント・受注詳細・送品の消し込み）で遅れや未完了に見えないよう、
+                  工程一覧の「日報」列で「追わない」にします。同じ工程名の工程を持つすべての製品に効き、進捗には次の定期集計の後に反映されます。
                 </p>
               </CardContent>
             </Card>
@@ -738,6 +870,37 @@ export function ProductRoutingsDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>キャンセル</AlertDialogCancel>
           <AlertDialogAction onClick={handleUnconfirmConfirm}>確定を取り消す</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* 日報で追わない工程の設定・解除の確認（Issue #681） */}
+    <AlertDialog
+      open={pendingUntracked !== null}
+      onOpenChange={(next) => {
+        if (!next && !isUntrackedPending) setPendingUntracked(null)
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {pendingUntracked?.action === "add"
+              ? "日報で追わない工程にしますか？"
+              : "日報で追う工程に戻しますか？"}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {pendingUntracked?.action === "add"
+              ? `工程「${pendingUntracked.processName}」の日報の進捗を出さなくなります（ガント・受注詳細では「計画のみ」になり、遅れになりません）。`
+              : `工程「${pendingUntracked?.processName ?? ""}」の日報の実績を、再び受注の進捗に割り付けます。`}
+            同じ工程名の工程を持つすべての製品に効きます。進捗には次の定期集計の後に反映されます。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isUntrackedPending}>キャンセル</AlertDialogCancel>
+          <Button onClick={handleUntrackedConfirm} disabled={isUntrackedPending}>
+            {isUntrackedPending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            {pendingUntracked?.action === "add" ? "日報で追わない" : "日報で追う"}
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

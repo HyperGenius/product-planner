@@ -22,6 +22,7 @@ from app.services.daily_report_allocator import (
     RoutingRef,
     StockAssignment,
     allocate_actuals,
+    is_untracked,
 )
 from app.services.daily_report_coverage import (
     CLOSED_ORDER_STATUSES,
@@ -249,6 +250,21 @@ def load_routings(db: Client, tenant_id: str) -> list[RoutingRef]:
     ]
 
 
+def load_untracked_process_names(db: Client, tenant_id: str) -> frozenset[str]:
+    """日報で追わない工程名（前後の空白を除いた値。Issue #681）。"""
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.UNTRACKED_PROCESS_NAMES.value)
+            .select("id, process_name")
+            .eq("tenant_id", tenant_id)
+            .order("id")
+        )
+    )
+    return frozenset(
+        name for row in rows if (name := str(row.get("process_name") or "").strip())
+    )
+
+
 def _iso(value: date | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -319,17 +335,23 @@ def recompute_tenant_allocation(
     entries, unmatched = load_actual_entries(db, tenant_id, matcher)
     orders = load_candidate_orders(db, tenant_id)
     routings = load_routings(db, tenant_id)
+    untracked = load_untracked_process_names(db, tenant_id)
 
     result = allocate_actuals(
-        entries, orders, routings, load_stock_assignments(db, tenant_id)
+        entries,
+        orders,
+        routings,
+        load_stock_assignments(db, tenant_id),
+        untracked_process_names=untracked,
     )
     progress, unallocated = _rpc_payload(result)
     # 照合状況の画面（#542）用に、照合済み・未照合の数量を加工月ごとに残す
     coverage = [m.to_json() for m in summarize_coverage(entries, unmatched)]
     # 作り置きの推定（#591）。期限切れの判定の「今日」は計算時刻の JST 暦日
+    # 日報で追わない工程は作り置きの工程の並びにも入れない（#681。実績が来ても未割当に残すのと揃える）
     stock = estimate_stock(
         entries,
-        routings,
+        [r for r in routings if not is_untracked(r, untracked)],
         result.allocations,
         load_shipped_orders(db, tenant_id),
         load_stock_feedback(db, tenant_id),

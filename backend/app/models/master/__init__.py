@@ -16,6 +16,10 @@ from .product_schemas import (
     ProductNameAliasUpdateSchema,
     ProductUpdateSchema,
 )
+from .untracked_process_schemas import (
+    UntrackedProcessNameCreateSchema,
+    UntrackedProcessNameResponse,
+)
 
 __all__ = [
     "ProductCreateSchema",
@@ -30,4 +34,6 @@ __all__ = [
     "CustomerContactResponse",
     "CustomerCreateSchema",
     "CustomerUpdateSchema",
+    "UntrackedProcessNameCreateSchema",
+    "UntrackedProcessNameResponse",
 ]

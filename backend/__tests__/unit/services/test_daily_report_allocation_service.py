@@ -1,4 +1,4 @@
-"""日報の実績の割り付けと進捗の DB 入出力のテスト (Issue #490)。"""
+"""日報の実績の割り付けと進捗の DB 入出力のテスト (Issue #490, #681)。"""
 
 from datetime import UTC, date, datetime
 from typing import Any
@@ -314,6 +314,28 @@ class TestRecomputeTenantAllocation:
         assert progress[(1, 12)]["status"] == "completed"
         assert progress[(1, 12)]["completed_by"] == "later_process"
         assert summary["unmatched_entries"] == 1
+
+    def test_untracked_process_names_of_the_tenant_are_applied(self):
+        # 日報で追わない工程（#681）。クグシ（13）の進捗の行は作らず、実績は untracked_process
+        tables = _tables(
+            untracked_process_names=[
+                {"id": 1, "tenant_id": TENANT, "process_name": "クグシ"},
+                # 他テナントの設定は効かない
+                {"id": 2, "tenant_id": OTHER_TENANT, "process_name": "プレス"},
+            ]
+        )
+        tables["daily_report_entries"].append(_entry(7, 10, "クグシ"))
+        db = _fake_db(tables)
+
+        service.recompute_tenant_allocation(db, TENANT, COMPUTED_AT)
+
+        params = _rpc_params(db)
+        assert {p["process_routing_id"] for p in params["p_progress"]} == {11, 12}
+        assert [(u["entry_id"], u["reason"]) for u in params["p_unallocated"]] == [
+            (7, "untracked_process")
+        ]
+        # 作り置きの推定の工程の並びにも入れない
+        assert all(s["process_name"] != "クグシ" for s in params["p_stock"])
 
     def test_unallocated_actuals_are_sent_with_reason(self):
         tables = _tables()

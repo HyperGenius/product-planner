@@ -43,6 +43,8 @@ export interface OrderProgressList {
 
 /** 未割当の理由（`daily_report_unallocated_actuals.reason`） */
 export type UnallocatedReason =
+  /** 日報で追わない工程に実績が来た（Issue #681） */
+  | "untracked_process"
   | "no_routing_process"
   | "no_candidate_order"
   | "before_order_date"
@@ -75,6 +77,8 @@ export interface UnallocatedActual {
  * `unapproved_order`（下書き・承認待ちあり）/ `closed_order_only`（出荷済み・完了だけ）/ `no_order` に分かれる
  */
 export type UnallocatedCategory =
+  /** 日報で追わない工程に実績が来た（設定を外す合図。Issue #681） */
+  | "untracked_process"
   | "no_routing_process"
   /** 同じ製品の確定済み・生産中の受注が別の顧客にある (Issue #625) */
   | "other_customer_order"

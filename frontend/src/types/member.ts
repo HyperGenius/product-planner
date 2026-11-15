@@ -72,6 +72,13 @@ export const PRODUCT_MERGE_ROLES: MemberRole[] = ["president", "platform_admin"]
 export const CUSTOMER_MERGE_ROLES: MemberRole[] = ["president", "platform_admin"]
 
 /**
+ * 日報で追わない工程（検査など）を設定・解除できるロール（工程ルートの画面、Issue #681）。
+ * Backend `routers/master/untracked_process_names.py` の `UNTRACKED_PROCESS_EDITOR_ROLES` と揃える。
+ * 工程マスタを持つ社長とプラットフォーム管理者に限る
+ */
+export const UNTRACKED_PROCESS_EDITOR_ROLES: MemberRole[] = ["president", "platform_admin"]
+
+/**
  * 生産スケジュールの開始・終了を変更できるロール（ガントの詳細シートの「操作」）。
  * Backend `services/schedule_shift_service.py` の `SCHEDULE_EDITOR_ROLES` と揃える（Issue #581 / #582）。
  * 承認系の操作と同じく platform_admin を含めない。生産管理者のロールができたらここに足す

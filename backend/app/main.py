@@ -37,6 +37,7 @@ from app.routers.master import (
     process_routing_router,
     product_router,
     scheduling_settings_router,
+    untracked_process_name_router,
 )
 from app.routers.tenant import internal_sender_router, member_router
 from app.routers.transaction import (
@@ -77,6 +78,7 @@ app.include_router(product_router)
 app.include_router(equipment_router)
 app.include_router(equipment_group_router)
 app.include_router(process_routing_router)
+app.include_router(untracked_process_name_router)
 app.include_router(calendar_router)
 app.include_router(customer_router)
 app.include_router(customer_contact_router)

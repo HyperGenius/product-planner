@@ -21,6 +21,8 @@ import { useProcessShiftPreview, useSchedules, useShiftProcess, useUpdateSchedul
 import { useOrderProgressList } from "@/hooks/use-daily-report-progress"
 import { useLocalStorageState } from "@/hooks/use-local-storage-state"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
+import { useUntrackedProcessNames } from "@/hooks/use-untracked-process-names"
+import { toUntrackedNameSet } from "@/lib/untracked-process-utils"
 import { useEquipmentGroups } from "@/lib/hooks/use-equipment-groups"
 import { useCalendars } from "@/hooks/use-calendars"
 import { buildScheduleDetail, type ScheduleSelection } from "@/lib/schedule-detail-utils"
@@ -192,6 +194,9 @@ export default function SchedulePage() {
     [schedules],
   )
   const progressQuery = useOrderProgressList(scheduleOrderIds, { refetchInterval: REFETCH_INTERVAL_MS })
+  // 日報で追わない工程（Issue #681）。詳細シートで「計画のみ」と区別して出す
+  const { data: untrackedNames } = useUntrackedProcessNames()
+  const untrackedNameSet = useMemo(() => toUntrackedNameSet(untrackedNames), [untrackedNames])
   const orderProgress = progressQuery.data
   const isRefreshError = schedulesQuery.isError || progressQuery.isError
   const lastUpdatedAt = schedulesQuery.dataUpdatedAt ? new Date(schedulesQuery.dataUpdatedAt) : null
@@ -568,6 +573,7 @@ export default function SchedulePage() {
             onClose={() => handleSelect(null)}
             onSelect={handleSelect}
             onEditSegment={setEditingSchedule}
+            untrackedProcessNames={untrackedNameSet}
             shift={{
               workingDays: activeShift?.workingDays ?? 0,
               preview: shiftPreviewData,

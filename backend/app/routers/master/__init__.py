@@ -8,6 +8,7 @@ from .equipments import equipment_router
 from .process_routings import process_routing_router
 from .products import product_router
 from .scheduling_settings import scheduling_settings_router
+from .untracked_process_names import untracked_process_name_router
 
 __all__ = [
     "product_router",
@@ -19,4 +20,5 @@ __all__ = [
     "customer_contact_router",
     "customer_extraction_prompt_router",
     "scheduling_settings_router",
+    "untracked_process_name_router",
 ]
