@@ -24,6 +24,8 @@ from app.services.daily_report_allocator import (
 # 画面での未割当の分類。reason の `no_candidate_order`（確定済み・生産中の受注が無い）は、
 # その製品の他のステータスの受注の有無で聞くことが変わるので3つに分ける
 UnallocatedCategory = Literal[
+    # 日報で追わない工程に実績が来た（設定を外す合図。#681）
+    "untracked_process",
     "no_routing_process",
     # 同じ製品の確定済み・生産中の受注が別の顧客にある（日報の顧客先の誤記の可能性。#625）
     "other_customer_order",

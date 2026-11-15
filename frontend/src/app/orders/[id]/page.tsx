@@ -388,7 +388,11 @@ export default function OrderDetailPage() {
           {/* 工程の進捗（日報の実績の割り付け対象＝確定済み・生産中のみ。Issue #491） */}
           {(order.status === "confirmed" || order.status === "in_progress") && (
             <>
-              <OrderProcessProgress orderId={order.id} stockHintTargetId={STOCK_ASSIGNMENTS_ANCHOR_ID} />
+              <OrderProcessProgress
+                orderId={order.id}
+                productId={order.product_id}
+                stockHintTargetId={STOCK_ASSIGNMENTS_ANCHOR_ID}
+              />
               {/* 作り置きからの引き当て（Issue #624） */}
               <OrderStockAssignments
                 anchorId={STOCK_ASSIGNMENTS_ANCHOR_ID}

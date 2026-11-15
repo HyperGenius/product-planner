@@ -19,6 +19,12 @@ interface CategoryMeta {
 }
 
 export const CATEGORY_META: Record<UnallocatedCategory, CategoryMeta> = {
+  untracked_process: {
+    label: "日報で追わない工程の実績",
+    question: (g) =>
+      `「${g.process_name}」は日報で追わない工程に設定していますが、日報に実績があります。この工程の日報を書き始めましたか？（書き始めたなら、工程ルートの画面で「日報で追わない」を外してください）`,
+    needsHearing: true,
+  },
   no_routing_process: {
     label: "工程ルートに無い工程",
     question: (g) => `この製品の工程に「${g.process_name}」がありません。実際の工程順は？`,
@@ -69,6 +75,7 @@ export const CATEGORY_META: Record<UnallocatedCategory, CategoryMeta> = {
 
 /** 分類の表示順（ヒアリングで聞く分類を先に） */
 export const CATEGORY_ORDER: UnallocatedCategory[] = [
+  "untracked_process",
   "no_routing_process",
   "other_customer_order",
   "no_order",

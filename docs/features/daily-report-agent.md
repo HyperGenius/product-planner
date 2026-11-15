@@ -531,6 +531,7 @@ DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings
   後者は未割当にも含めない（cron のサマリの `unmatched_entries` に件数だけ出す）
 - 作り置きの手動の引き当て（`StockAssignment`、#624）は、通常の割り付けの**後で**未割当に残った実績から充当する
   （詳細は「[作り置きを受注へ手で引き当てる](#作り置きを受注へ手で引き当てるissue-624)」）
+- 日報で追わない工程（`untracked_process_names`、#681）は割り付けない（下の「[日報で追わない工程](#日報で追わない工程issue-681)」）
 
 ### 進捗の状態
 
@@ -543,6 +544,8 @@ DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings
 | `in_progress` | 実績が1件以上あり、完了でない | なし |
 | `not_started` | それ以外（後の工程に実績が無い日報に出ない工程も、計画どおり未着手のまま） | なし |
 
+日報で追わない工程（#681）は進捗の行を作らない。
+
 - 「後の工程に実績がある」は**同じ受注に割り付いた実績**で判定する（別の受注に割り付いた実績では完了にしない）
 - 割り付けの良品数は受注数量が上限（あふれた分は次の受注か未割当）
 - 受注のステータス（`orders.status`）はこの処理では変更しない（実績による `completed` への自動遷移は別途検討）
@@ -551,6 +554,7 @@ DB から切り離した純粋関数 `allocate_actuals(entries, orders, routings
 
 | reason | 意味 |
 |---|---|
+| `untracked_process` | 日報で追わない工程（#681）に実績が来た。工程ルートの有無より先に判定する |
 | `no_routing_process` | その製品の工程ルートにその工程名が無い（工程ルートが1件も無い製品を含む）。受注の有無より先に判定する（#542 で `no_candidate_order` から分離） |
 | `no_candidate_order` | 同じ製品（顧客が照合できていれば同じ顧客）の確定済み・生産中の受注が無い |
 | `before_order_date` | 候補の受注はあるが、加工日がどの候補の受注日よりも前 |
@@ -598,6 +602,34 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 | `GET /daily-reports/order-progress?order_id=1&order_id=2`（`routers/daily_reports/progress.py`） | ガントチャート向けに複数受注をまとめて返す `{computed_at, items: [...]}`（`items` の各行は上と同じ＋`order_id`）。`order_id` 省略時は全件、指定は500件まで |
 | `GET /daily-reports/unallocated-actuals` | 未割当の実績を加工日の新しい順に。日報上の位置と表記（`sheet_name` / `row_no` / `customer_raw` / `product_raw` / `process_raw`）を添える。#542 で絞り込み（`product_id` / `process_name` / `reason` / `months` / `limit`）を追加 |
 | `GET /daily-reports/coverage?months=3` | 照合状況のサマリと未割当のまとめ（#542。[日報の照合状況の画面](#日報の照合状況の画面issue-542)） |
+
+### 日報で追わない工程（Issue #681）
+
+検査など**日報に書かない（まだ取り込めていない）工程**を、工程マスタ側で「日報で追わない」に設定する。最終工程付近の検査の日報を
+取り込めていないと、検査の進捗の行が「未着手」のまま残ってガント・受注詳細で遅れに見え、送品の消し込みの「最終工程が完了」も
+成り立たない（Epic #679）。
+
+- **設定の単位は工程名（テナント共通）**: `untracked_process_names`（`(tenant_id, process_name)` UNIQUE）。検査は製品をまたいで
+  同じ名前で、新しい製品の工程ルートにも自動で効く（工程の別名辞書 `process_name_aliases` も工程名の単位）。工程名は前後の空白
+  （全角を含む）を除いて比べる（Backend `daily_report_allocator.is_untracked()` / Frontend `lib/untracked-process-utils.ts`）
+- 日報の名寄せの「対象外」（`daily_report_ignored_names`）は使わない。日報の表記の側の設定で、工程の名寄せの途中の工程と区別できない
+- **割り付け**: 設定した工程の進捗の行を作らない。これで
+  - ガント・受注詳細では「計画のみ」（#580 の進捗の行が無い工程）になり、遅れにならない。画面では「日報の対象外」と出す
+  - 送品の候補「最終工程が完了」（`summarizeOrderProgress()`）とガントの注文の状態（`orderStateLabelText()`）は、進捗の行がある
+    工程だけを見るので、自動で日報で追う最後の工程で判定される
+  - 設定した工程の手前の工程は、後の工程（設定した工程）に実績が無いので `later_process` で完了にならず、良品数が受注数量に
+    達したときだけ完了になる（仕様）
+- 設定した工程に実績が来たら、割り付けずに未割当 `untracked_process` で残す（照合状況の分類 `untracked_process`。検査の日報を
+  取り込み始めた合図で、設定を外せば次の再計算で割り付く）。作り置きの引き当て（#624）も充当せず、作り置きの推定（#591）の
+  工程の並びにも入れない
+- 設定の変更（API はユーザー JWT）から同期で再計算しない。進捗には次の cron（`compute-daily-report-progress`）で反映される
+- API（`routers/master/untracked_process_names.py`）: `GET /untracked-process-names`（テナントメンバー全員）・
+  `POST /untracked-process-names` `{process_name}`（重複は 409 `duplicate_untracked_process`）・`DELETE /untracked-process-names/{id}`。
+  書き込めるのは社長・プラットフォーム管理者（Backend `UNTRACKED_PROCESS_EDITOR_ROLES` と Frontend `UNTRACKED_PROCESS_EDITOR_ROLES` を揃える）。
+  RLS はテナント所属（`is_tenant_member`）で、ロールは API で絞る
+- 画面: 製品の工程ルートのダイアログ（`components/product-routings-dialog.tsx`）の「日報」列で切り替え（確認ダイアログで
+  全製品に効くことを示す）、右側に設定済みの工程名の一覧（解除）。受注詳細の「工程の進捗」は製品の工程ルートと突き合わせて
+  「日報の対象外」の行を工程順に並べ、ガントの詳細シートは `untrackedProcessNames` で「計画のみ」と区別する
 
 ## ガントチャート・受注詳細への進捗表示（Issue #491）
 
@@ -660,6 +692,7 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 
 | 分類 | 条件 | 要確認 |
 |---|---|---|
+| `untracked_process` | reason のまま（日報で追わない工程に実績が来た。設定を外すか確かめる。#681） | ○ |
 | `no_routing_process` | reason のまま | ○ |
 | `other_customer_order` | 同じ製品の確定済み・生産中の受注がある（Issue #625。割り付けは顧客が照合できた明細を同じ顧客の受注にだけ充当するので、受注があるのに未割当なら**別の顧客の受注**。日報の顧客先の誤記の可能性） | ○ |
 | `unapproved_order` | 下書き・承認待ちの受注がある（出荷済みより優先） | ○ |

@@ -33,6 +33,7 @@ import {
   type ScheduleDetail,
   type ScheduleSelection,
 } from '@/lib/schedule-detail-utils'
+import { isUntrackedProcessName, UNTRACKED_PROCESS_LABEL } from '@/lib/untracked-process-utils'
 import type { ProcessProgress } from '@/types/daily-report-progress'
 import type { Schedule } from '@/types/schedule'
 
@@ -49,6 +50,11 @@ export interface ScheduleDetailSheetProps {
   onEditSegment: (schedule: Schedule) => void
   /** 工程の前倒し・後ろ倒し（Issue #582）。確定済み・生産中の注文の工程で、canEdit のときだけ出す */
   shift?: ProcessShiftControlsProps
+  /**
+   * 日報で追わない工程名（`toUntrackedNameSet()`、Issue #681）。進捗の行が無いこれらの工程は
+   * 「計画のみ」ではなく「日報の対象外」と出す
+   */
+  untrackedProcessNames?: ReadonlySet<string>
 }
 
 /** 日付のみの値（YYYY-MM-DD）。parseISO でローカル深夜として読む */
@@ -122,7 +128,22 @@ function OrderPageLink({ orderId }: { orderId: number }) {
   )
 }
 
-function ProgressFields({ progress, state }: { progress: ProcessProgress | undefined; state: ProcessDisplayState }) {
+function ProgressFields({
+  progress,
+  state,
+  untracked,
+}: {
+  progress: ProcessProgress | undefined
+  state: ProcessDisplayState
+  untracked: boolean
+}) {
+  if (!progress && untracked) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {UNTRACKED_PROCESS_LABEL}: 日報で追わない工程（工程ルートの画面で設定）なので、日報の進捗を出していません。
+      </p>
+    )
+  }
   if (!progress) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -160,7 +181,11 @@ function ProcessDetailBody({
   onSelect,
   onEditSegment,
   shift,
-}: { detail: ProcessDetail } & Pick<ScheduleDetailSheetProps, 'canEdit' | 'onSelect' | 'onEditSegment' | 'shift'>) {
+  untrackedProcessNames,
+}: { detail: ProcessDetail } & Pick<
+  ScheduleDetailSheetProps,
+  'canEdit' | 'onSelect' | 'onEditSegment' | 'shift' | 'untrackedProcessNames'
+>) {
   const { visibleRange, processRange, segments } = detail
   const showWholeRange =
     processRange.start.getTime() !== visibleRange.start.getTime() ||
@@ -180,7 +205,11 @@ function ProcessDetailBody({
         />
       </Section>
       <Section title="実績">
-        <ProgressFields progress={detail.progress} state={detail.state} />
+        <ProgressFields
+          progress={detail.progress}
+          state={detail.state}
+          untracked={isUntrackedProcessName(untrackedProcessNames, detail.processName)}
+        />
       </Section>
       <Section title="注文">
         <OrderFields
@@ -238,7 +267,8 @@ function ProcessDetailBody({
 function OrderDetailBody({
   detail,
   onSelect,
-}: { detail: OrderDetail } & Pick<ScheduleDetailSheetProps, 'onSelect'>) {
+  untrackedProcessNames,
+}: { detail: OrderDetail } & Pick<ScheduleDetailSheetProps, 'onSelect' | 'untrackedProcessNames'>) {
   return (
     <>
       <Section title="注文">
@@ -267,8 +297,14 @@ function OrderDetailBody({
                       .join(' ・ ')}
                   </p>
                 </div>
-                {p.state !== 'planned_only' && (
+                {p.state !== 'planned_only' ? (
                   <StateBadge state={p.state} text={PROCESS_DISPLAY_STATE_LABEL[p.state]} />
+                ) : (
+                  isUntrackedProcessName(untrackedProcessNames, p.processName) && (
+                    <span className="shrink-0 rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {UNTRACKED_PROCESS_LABEL}
+                    </span>
+                  )
                 )}
               </>
             )
@@ -315,6 +351,7 @@ export function ScheduleDetailSheet({
   onSelect,
   onEditSegment,
   shift,
+  untrackedProcessNames,
 }: ScheduleDetailSheetProps) {
   const orderState =
     detail.kind === 'order' ? orderStateLabelText(detail.progressItems, now) : null
@@ -351,9 +388,14 @@ export function ScheduleDetailSheet({
             onSelect={onSelect}
             onEditSegment={onEditSegment}
             shift={shift}
+            untrackedProcessNames={untrackedProcessNames}
           />
         ) : (
-          <OrderDetailBody detail={detail} onSelect={onSelect} />
+          <OrderDetailBody
+            detail={detail}
+            onSelect={onSelect}
+            untrackedProcessNames={untrackedProcessNames}
+          />
         )}
       </div>
     </aside>

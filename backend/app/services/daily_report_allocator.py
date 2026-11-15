@@ -21,10 +21,15 @@ DB の読み書きは `daily_report_allocation_service`。
   受注数量（通常の割り付けで充当した分を除く）と未割当の数を超えては充当しない
 * どの受注にも充当できなかった数量は未割当として返す。製品の工程ルートにその工程名が無い実績は、
   受注の有無より先に `no_routing_process` にする（工程の棚卸しで聞くことが受注の有無と違うため。Issue #542）
+* 日報で追わない工程（`untracked_process_names`。検査など日報に書かない・まだ取り込めていない工程、Issue #681）は
+  進捗の行を作らない（ガント・受注詳細で「計画のみ」になり遅れに見えない。受注の最終工程の判定も日報で追う
+  最後の工程になる）。その工程に実績が来たら充当せず、工程ルートの有無より先に `untracked_process` で未割当に
+  残す（日報を取り込み始めた合図。設定を外せば次の再計算で割り付く）。作り置きの引き当ても充当しない
 
 進捗の状態（受注×工程）:
 * completed: 割り付けた良品数が受注数量以上、または後の工程（`sequence_order` が大きい工程）に
-  実績がある。日報に出てこない工程（洗浄・内職・検査など）も同じ規則で完了になる
+  実績がある。日報に出てこない工程（洗浄・内職・検査など）も同じ規則で完了になる。日報で追わない工程の
+  手前の工程は、後の工程（日報で追わない工程）に実績が無いので、良品数が受注数量に達したときだけ完了になる
 * in_progress: 実績があり、完了でない
 * not_started: それ以外
 """
@@ -37,6 +42,7 @@ from typing import Literal
 ProgressStatus = Literal["not_started", "in_progress", "completed"]
 CompletedBy = Literal["quantity", "later_process"]
 UnallocatedReason = Literal[
+    "untracked_process",
     "no_routing_process",
     "no_candidate_order",
     "before_order_date",
@@ -183,9 +189,13 @@ def allocate_actuals(
     orders: Iterable[OrderRef],
     routings: Iterable[RoutingRef],
     assignments: Iterable[StockAssignment] = (),
+    untracked_process_names: Iterable[str] = (),
 ) -> AllocationResult:
+    """`untracked_process_names` は日報で追わない工程名（前後の空白を除いて比べる。Issue #681）。"""
+    untracked = frozenset(n.strip() for n in untracked_process_names if n.strip())
     routing_list = list(routings)
-    routing_index = _routing_by_process(routing_list)
+    tracked_routings = [r for r in routing_list if not is_untracked(r, untracked)]
+    routing_index = _routing_by_process(tracked_routings)
     sorted_orders = sorted(orders, key=_deadline_order_key)
     orders_by_product: dict[int, list[OrderRef]] = {}
     for order in sorted_orders:
@@ -201,14 +211,18 @@ def allocate_actuals(
         if entry.good_qty <= 0:
             continue
         for process_name in dict.fromkeys(entry.process_names):
-            reason, remaining = _allocate_one(
-                entry,
-                process_name,
-                routing_index,
-                orders_by_product,
-                allocated,
-                result.allocations,
-            )
+            reason: UnallocatedReason | None
+            if process_name.strip() in untracked:
+                reason, remaining = "untracked_process", entry.good_qty
+            else:
+                reason, remaining = _allocate_one(
+                    entry,
+                    process_name,
+                    routing_index,
+                    orders_by_product,
+                    allocated,
+                    result.allocations,
+                )
             if reason is not None:
                 result.unallocated.append(
                     UnallocatedActual(
@@ -231,8 +245,13 @@ def allocate_actuals(
         result.allocations,
         result.stock_sources,
     )
-    result.progress = _progress_rows(sorted_orders, routing_list, allocated)
+    result.progress = _progress_rows(sorted_orders, tracked_routings, allocated)
     return result
+
+
+def is_untracked(routing: RoutingRef, untracked_process_names: frozenset[str]) -> bool:
+    """日報で追わない工程か（工程名の前後の空白を除いて比べる。Issue #681）。"""
+    return (routing.process_name or "").strip() in untracked_process_names
 
 
 def _apply_stock_assignments(

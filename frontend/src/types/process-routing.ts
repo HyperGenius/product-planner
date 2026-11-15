@@ -54,3 +54,13 @@ export interface ProcessRoutingBulkItem {
   setup_time_seconds: number
   unit_time_seconds: number
 }
+
+/**
+ * 日報で追わない工程（GET /untracked-process-names、Issue #681）。
+ * 工程名の単位（テナント共通）で、同じ名前の工程を持つすべての製品に効く
+ */
+export interface UntrackedProcessName {
+  id: number
+  process_name: string
+  created_at: string
+}

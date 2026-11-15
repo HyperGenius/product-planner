@@ -8,6 +8,8 @@ from pydantic import BaseModel
 ProgressStatus = Literal["not_started", "in_progress", "completed"]
 CompletedBy = Literal["quantity", "later_process"]
 UnallocatedReason = Literal[
+    # 日報で追わない工程に実績が来た（Issue #681）
+    "untracked_process",
     "no_routing_process",
     "no_candidate_order",
     "before_order_date",
@@ -72,6 +74,7 @@ class UnallocatedActualResponse(BaseModel):
 # 画面での未割当の分類。no_candidate_order は、その製品の候補にならない受注の有無で
 # unapproved_order（下書き・承認待ちあり）/ closed_order_only（出荷済み・完了だけ）/ no_order に分ける
 UnallocatedCategory = Literal[
+    "untracked_process",
     "no_routing_process",
     # 同じ製品の確定済み・生産中の受注が別の顧客にある（Issue #625）
     "other_customer_order",

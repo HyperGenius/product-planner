@@ -56,6 +56,10 @@ export const handlers = [
   http.get(`${API_BASE}/products`, () => HttpResponse.json(sampleProducts)),
   http.get(`${API_BASE}/customers`, () => HttpResponse.json(sampleCustomers)),
   http.get(`${API_BASE}/production-schedules`, () => HttpResponse.json([])),
+  // 日報で追わない工程（Issue #681）。工程ルートの画面・受注詳細・ガントの詳細シートが読む
+  http.get(`${API_BASE}/untracked-process-names`, () => HttpResponse.json([])),
+  // 受注詳細の工程の進捗が、日報で追わない工程を並べるために製品の工程ルートを読む（Issue #681）
+  http.get(`${API_BASE}/process-routings`, () => HttpResponse.json([])),
   // 受注一覧の行が引く「未対応の督促」の件数（Issue #619）。既定は督促なし
   http.get(`${API_BASE}/orders/delivery-requests`, () => HttpResponse.json([])),
   http.get(`${API_BASE}/orders/delivery-requests/open-counts`, () => HttpResponse.json([])),

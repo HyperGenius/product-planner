@@ -11,6 +11,8 @@ Integration テスト: 日報の実績の受注への割り付けと進捗 (Issu
 - 作り置きの推定（#591）: 送品日時のトリガー、推定の保存、指摘の登録・取り消しと反映、RLS、
   製品の統合での指摘の引き継ぎ
 - 作り置きの引き当て（#624）: API での登録・取り消しと、再計算での進捗・未割当・作り置きへの反映
+- 日報で追わない工程（#681）: API での設定・解除と、再計算での進捗・未割当（新しい理由の CHECK）・
+  照合状況への反映、設定のロール・RLS
 
 実行:
   supabase start
@@ -174,6 +176,7 @@ def tenants(admin_db, auth_user_id):
             "daily_report_stock_assignments",
             "order_process_progress",
             "process_name_aliases",
+            "untracked_process_names",
             "daily_report_files",
             "agent_tokens",
             "production_schedules",
@@ -1073,4 +1076,112 @@ class TestMergeProductsKeepsStockFeedback:
         # 指摘した日時のまま
         assert datetime.fromisoformat(rows[0]["updated_at"]) == datetime(
             2026, 10, 1, tzinfo=UTC
+        )
+
+
+@pytest.mark.integration
+class TestUntrackedProcesses:
+    """日報で追わない工程（Issue #681）"""
+
+    def _set_role(self, admin_db, auth_user_id, tenant, role: str) -> None:
+        admin_db.table("organization_members").update({"role": role}).eq(
+            "user_id", auth_user_id
+        ).eq("tenant_id", tenant["id"]).execute()
+
+    def test_setting_via_api_is_reflected_on_recompute(
+        self, admin_db, auth_token, auth_user_id, tenants
+    ):
+        own = tenants["own"]
+        self._set_role(admin_db, auth_user_id, own, "president")
+        rows = [*ENTRY_ROWS, ["2026.09.13", "サンプル工業", "ピン", "クグシ", 10, 0]]
+        _replace_entries(admin_db, own, rows, "2026-09-13T18:00:00+09:00")
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+
+        res = client.post(
+            "/untracked-process-names",
+            json={"process_name": " クグシ "},
+            headers=headers,
+        )
+        assert res.status_code == 201, res.text
+        setting_id = res.json()["id"]
+        duplicate = client.post(
+            "/untracked-process-names", json={"process_name": "クグシ"}, headers=headers
+        )
+        assert duplicate.status_code == 409
+        recompute_tenant_allocation(admin_db, own["id"], COMPUTED_AT)
+
+        # クグシの進捗の行は作られず、実績は untracked_process で未割当に残る
+        assert {name for _, name in _progress(admin_db, own)} == {
+            "プレス",
+            "洗浄",
+            "カシメ",
+        }
+        assert ("クグシ", "2026-09-13", 10, "untracked_process") in _unallocated(
+            admin_db, own
+        )
+        res = client.get("/daily-reports/coverage", headers=headers)
+        assert "untracked_process" in {g["category"] for g in res.json()["groups"]}
+        res = client.get("/untracked-process-names", headers=headers)
+        assert [r["process_name"] for r in res.json()] == ["クグシ"]
+
+        # 設定を外すと、次の再計算でクグシの実績が割り付く
+        res = client.delete(f"/untracked-process-names/{setting_id}", headers=headers)
+        assert res.status_code == 204
+        recompute_tenant_allocation(
+            admin_db, own["id"], COMPUTED_AT + timedelta(minutes=1)
+        )
+        assert _progress(admin_db, own)[("early", "クグシ")]["good_qty"] == 10
+        assert all(r[3] != "untracked_process" for r in _unallocated(admin_db, own))
+
+    def test_order_handler_cannot_change_setting(self, auth_token, tenants):
+        # tenants フィクスチャのログインユーザーは order_handler
+        own = tenants["own"]
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+
+        res = client.post(
+            "/untracked-process-names", json={"process_name": "検査"}, headers=headers
+        )
+
+        assert res.status_code == 403
+
+    def test_member_reads_and_writes_own_tenant_only(
+        self, admin_db, real_supabase_client, auth_user_id, tenants
+    ):
+        own, other = tenants["own"], tenants["other"]
+        for tenant in (own, other):
+            admin_db.table("untracked_process_names").insert(
+                {
+                    "tenant_id": tenant["id"],
+                    "process_name": "検査",
+                    "created_by": auth_user_id,
+                }
+            ).execute()
+
+        visible = _rows(
+            real_supabase_client.table("untracked_process_names")
+            .select("tenant_id")
+            .in_("tenant_id", [own["id"], other["id"]])
+            .execute()
+        )
+        assert {r["tenant_id"] for r in visible} == {own["id"]}
+
+        with pytest.raises(APIError):
+            real_supabase_client.table("untracked_process_names").insert(
+                {
+                    "tenant_id": other["id"],
+                    "process_name": "洗浄",
+                    "created_by": auth_user_id,
+                }
+            ).execute()
+        # 他テナントの行は消せない（0 行）
+        real_supabase_client.table("untracked_process_names").delete().eq(
+            "tenant_id", other["id"]
+        ).execute()
+        assert _rows(
+            admin_db.table("untracked_process_names")
+            .select("id")
+            .eq("tenant_id", other["id"])
+            .execute()
         )

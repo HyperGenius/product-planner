@@ -232,6 +232,12 @@ cd backend && ruff check . && mypy .
   `parse-daily-reports` の直後に毎回回り、次の実行で反映される）。割り付けの候補は `confirmed` / `in_progress` の受注で、
   加工日が受注日（`order_date` の JST 暦日）より前の実績は充当しない（出荷済みで候補から外れた受注の実績が後の受注を完了に
   見せないため。未割当 `before_order_date` に残る）。詳細は [docs/features/daily-report-agent.md](docs/features/daily-report-agent.md)
+  - **日報で追わない工程（Issue #681）**: 検査など日報に書かない工程は工程名の単位（テナント共通）の `untracked_process_names` で設定し、
+    割り付けで**進捗の行を作らない**（ガントは「計画のみ」、受注の最終工程の判定は日報で追う最後の工程になる）。日報の名寄せの「対象外」で
+    表さない（名寄せの途中の工程と区別できない）。実績が来たら未割当 `untracked_process`（工程ルートの有無より先に判定）。未割当の理由を足すときは
+    Backend の `UnallocatedReason`（allocator・models）/`UnallocatedCategory`（coverage・models）、Frontend の型と `CATEGORY_META`・`CATEGORY_ORDER`、
+    `daily_report_unallocated_actuals_reason_check` の張り直しを揃える。受注詳細の「工程の進捗」は製品の工程ルートも読むので、描画するテストは
+    MSW の既定ハンドラ `GET /process-routings`・`GET /untracked-process-names` に依存する
   - **ガント・受注詳細への進捗表示（Issue #491）**: ガントは表示中の受注 ID をまとめて `GET /daily-reports/order-progress` で
     1リクエスト取得し (`order_id`, `process_routing_id`) で結合する（スケジュール API には混ぜない）。遅れの基準の計画終了日時は
     **バックエンドの `planned_end_datetime`（その工程の全セグメントの `end_datetime` の最大）を使う**。ガントは表示範囲の

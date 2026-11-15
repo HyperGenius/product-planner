@@ -230,4 +230,69 @@ describe("OrderProcessProgress", () => {
       expect(screen.queryByText(HINT)).toBeNull()
     })
   })
+  it("日報で追わない工程は「日報の対象外」として工程順に並べる（Issue #681）", async () => {
+    respond({
+      order_id: ORDER_ID,
+      computed_at: "2026-09-12T02:00:00Z",
+      processes: [
+        progress({ process_routing_id: 11, sequence_order: 1, process_name: "プレス", status: "completed", completed_by: "quantity", good_qty: 100 }),
+        progress({ process_routing_id: 13, sequence_order: 3, process_name: "クグシ" }),
+      ],
+    })
+    const routing = (id: number, sequence_order: number, process_name: string) => ({
+      id,
+      product_id: 7,
+      process_name,
+      equipment_group_id: null,
+      sequence_order,
+      setup_time_seconds: 0,
+      unit_time_seconds: 1,
+      is_confirmed: true,
+      confirmed_by: null,
+      confirmed_at: null,
+      tenant_id: "tenant-1",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:00:00Z",
+    })
+    server.use(
+      http.get(`${API_BASE}/process-routings`, () =>
+        HttpResponse.json([routing(11, 1, "プレス"), routing(12, 2, "外観検査"), routing(13, 3, "クグシ"), routing(14, 4, "検査")]),
+      ),
+      http.get(`${API_BASE}/untracked-process-names`, () =>
+        HttpResponse.json([
+          { id: 1, process_name: "検査", created_at: "2026-11-15T00:00:00Z" },
+          { id: 2, process_name: "外観検査", created_at: "2026-11-15T00:00:00Z" },
+        ]),
+      ),
+    )
+
+    render(<OrderProcessProgress orderId={ORDER_ID} productId={7} />)
+
+    await screen.findByText("検査")
+    const names = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent)
+    expect(names).toEqual(["プレス", "外観検査", "クグシ", "検査"])
+    expect(within(row("検査")).getByText("日報の対象外")).toBeInTheDocument()
+    expect(within(row("外観検査")).getByText("日報の対象外")).toBeInTheDocument()
+    expect(within(row("クグシ")).queryByText("日報の対象外")).toBeNull()
+  })
+
+  it("製品を渡さなければ工程ルートを取得しない", async () => {
+    respond({
+      order_id: ORDER_ID,
+      computed_at: "2026-09-12T02:00:00Z",
+      processes: [progress({ process_routing_id: 11, process_name: "プレス" })],
+    })
+    let routingRequested = false
+    server.use(
+      http.get(`${API_BASE}/process-routings`, () => {
+        routingRequested = true
+        return HttpResponse.json([])
+      }),
+    )
+
+    render(<OrderProcessProgress orderId={ORDER_ID} />)
+
+    await screen.findByText("プレス")
+    expect(routingRequested).toBe(false)
+  })
 })

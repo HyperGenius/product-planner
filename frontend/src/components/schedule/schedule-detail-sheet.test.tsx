@@ -190,4 +190,52 @@ describe("ScheduleDetailSheet（Issue #581）", () => {
     expect(badge).toHaveAttribute("data-state", "completed")
     expect(badge.querySelector("svg")).not.toBeNull()
   })
+
+  it("日報で追わない工程は「計画のみ」ではなく「日報の対象外」と出す（Issue #681）", () => {
+    const untracked = new Set(["カシメ"])
+    const { unmount } = render(
+      <ScheduleDetailSheet
+        detail={buildProcessDetail(SCHEDULES, PROGRESS, 1, 12, NOW)!}
+        now={NOW}
+        canEdit={false}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        onEditSegment={vi.fn()}
+        untrackedProcessNames={untracked}
+      />,
+    )
+    expect(screen.getByText(/日報の対象外: 日報で追わない工程/)).toBeInTheDocument()
+    expect(screen.queryByText(/計画のみ/)).toBeNull()
+    unmount()
+
+    render(
+      <ScheduleDetailSheet
+        detail={buildOrderDetail(SCHEDULES, PROGRESS, 1, NOW)!}
+        now={NOW}
+        canEdit={false}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        onEditSegment={vi.fn()}
+        untrackedProcessNames={untracked}
+      />,
+    )
+    const kashime = screen.getByText("カシメ", { selector: "p" }).closest("li")!
+    expect(kashime).toHaveTextContent("日報の対象外")
+    const press = screen.getByText("プレス", { selector: "p" }).closest("li")!
+    expect(press).not.toHaveTextContent("日報の対象外")
+  })
+
+  it("設定を渡さなければ従来どおり「計画のみ」の説明を出す", () => {
+    render(
+      <ScheduleDetailSheet
+        detail={buildProcessDetail(SCHEDULES, PROGRESS, 1, 12, NOW)!}
+        now={NOW}
+        canEdit={false}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        onEditSegment={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/計画のみ/)).toBeInTheDocument()
+  })
 })
