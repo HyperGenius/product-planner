@@ -12,6 +12,9 @@ const LINE: PreviewLineItem = {
   line_order_no: null,
   customer_order_no: "C100",
   product: { id: 42, code: "A-1", name: "部品A" },
+  is_forecast: false,
+  forecast_period_start: null,
+  forecast_period_end: null,
 }
 
 function reading(overrides: Partial<PreviewReading> = {}): PreviewReading {
@@ -96,5 +99,48 @@ describe("compareReadings", () => {
 
     expect(rows["確度"]).toMatchObject({ current: "顧客確定", edited: "不明" })
     expect(rows["数量"].edited).toBe("読めない値（起票しない）")
+  })
+
+  it("内示の明細は起票せず記録することと期間を表示する（Issue #676）", () => {
+    const forecast: PreviewLineItem = {
+      ...LINE,
+      delivery_date: null,
+      certainty: "forecast",
+      is_forecast: true,
+      forecast_period_start: "2027-01-01",
+      forecast_period_end: "2027-03-01",
+    }
+    const result = compareReadings(
+      reading(),
+      reading({
+        line_items: [forecast],
+      }),
+    )
+    const rows = Object.fromEntries(result.lines[0].rows.map((r) => [r.label, r]))
+
+    expect(rows["取り込み"]).toMatchObject({
+      current: "受注を起票",
+      edited: "内示として記録（起票しない）",
+    })
+    expect(rows["内示の期間"]).toMatchObject({ current: "－", edited: "2027/01〜2027/03" })
+  })
+
+  it("1か月の内示は月だけ、読めない期間は「不明」と表示する", () => {
+    const forecast: PreviewLineItem = {
+      ...LINE,
+      certainty: "forecast_tentative",
+      is_forecast: true,
+      forecast_period_start: "2026-12-01",
+      forecast_period_end: "2026-12-01",
+    }
+    const result = compareReadings(
+      reading({ line_items: [forecast] }),
+      reading({
+        line_items: [{ ...forecast, forecast_period_start: null, forecast_period_end: null }],
+      }),
+    )
+    const period = result.lines[0].rows.find((r) => r.label === "内示の期間")
+
+    expect(period).toMatchObject({ current: "2026/12", edited: "不明" })
   })
 })

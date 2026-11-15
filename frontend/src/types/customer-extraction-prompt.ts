@@ -55,6 +55,11 @@ export interface PreviewLineItem {
   customer_order_no: string | null
   /** null は未照合（取り込みでは製品未照合の下書きになる） */
   product: PreviewProduct | null
+  /** 内示の明細（取り込みでは受注にせず内示として記録する。Issue #676） */
+  is_forecast: boolean
+  /** 内示の期間の開始月・終了月（"YYYY-MM-01"）。内示でない・読めなければ null */
+  forecast_period_start: string | null
+  forecast_period_end: string | null
 }
 
 export interface PreviewReading {

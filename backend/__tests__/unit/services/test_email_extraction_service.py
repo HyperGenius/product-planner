@@ -52,3 +52,20 @@ class TestEmailIntent:
         assert "引用" in prompt and "delivery_chase" in prompt
         schema = kwargs["output_config"]["format"]["schema"]
         assert "注文書を送付済み" in schema["properties"]["email_intent"]["description"]
+
+
+@pytest.mark.unit
+class TestForecastPeriod:
+    def test_schema_and_prompt_include_forecast_period(self):
+        """内示の期間（Issue #676）を明細の必須項目として求める。"""
+        _, kwargs = _extract(
+            {"document_order_no": None, "email_intent": "new_order", "line_items": []}
+        )
+        line_schema = kwargs["output_config"]["format"]["schema"]["properties"][
+            "line_items"
+        ]["items"]
+        assert {"forecast_period_start", "forecast_period_end"} <= set(
+            line_schema["required"]
+        )
+        assert set(line_schema["required"]) == set(line_schema["properties"])
+        assert "forecast_period_start" in kwargs["messages"][0]["content"]

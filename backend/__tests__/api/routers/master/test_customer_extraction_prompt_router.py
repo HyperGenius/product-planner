@@ -1,4 +1,5 @@
 # __tests__/api/routers/master/test_customer_extraction_prompt_router.py
+from datetime import date
 from unittest.mock import MagicMock
 
 import anthropic
@@ -313,6 +314,60 @@ class TestCustomerExtractionPromptRouter:
         }
         assert body["edited"]["line_items"][0]["product"] is None
         assert body["edited"]["line_items"][0]["invalid_quantity"] is False
+        assert body["current"]["line_items"][0]["is_forecast"] is False
+        assert body["current"]["line_items"][0]["forecast_period_start"] is None
+
+    def test_preview_marks_forecast_lines(
+        self, headers, set_role, customer_found, attachment_found, monkeypatch
+    ):
+        """内示の明細は取り込みで受注にしないことと期間を返す（Issue #676）。"""
+        set_role("platform_admin")
+        forecast = ExtractionReading(
+            error=None,
+            document_order_no=None,
+            is_repair=False,
+            subject=None,
+            line_items=[
+                LineItemReading(
+                    product_number_raw="A-1",
+                    product_name_raw="部品A",
+                    extracted_product_name="部品A",
+                    quantity=39600,
+                    deadline_date=None,
+                    certainty="forecast",
+                    line_order_no=None,
+                    customer_order_no=None,
+                    product_id=None,
+                    forecast_period_start=date(2027, 1, 1),
+                    forecast_period_end=date(2027, 3, 1),
+                )
+            ],
+            fallback=None,
+        )
+        monkeypatch.setattr(
+            router_module,
+            "preview_extraction",
+            lambda *_args: ExtractionPreview(
+                source="text",
+                unreadable_reason=None,
+                current=forecast,
+                edited=forecast,
+                same_prompt=True,
+                products={},
+            ),
+        )
+
+        response = client.post(
+            "/customers/7/extraction-prompt/preview",
+            json={"attachment_id": _ATTACHMENT_ID, "prompt": "今の指示"},
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        line = response.json()["current"]["line_items"][0]
+        assert line["is_forecast"] is True
+        assert line["forecast_period_start"] == "2027-01-01"
+        assert line["forecast_period_end"] == "2027-03-01"
 
     def test_preview_rejects_attachment_of_other_customer(
         self, headers, set_role, customer_found, monkeypatch

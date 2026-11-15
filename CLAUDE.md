@@ -324,6 +324,12 @@ cd backend && ruff check . && mypy .
   Python の `str.strip()` と揃えるときは除く文字を明示する（`normalize_extraction_prompt()`）。`orders` に `created_at` 列は無い
   （並べるなら `id`。モックの unit テストでは気づけず integration で 42703）。詳細は
   [docs/features/customer-extraction-prompt.md](docs/features/customer-extraction-prompt.md)
+- **内示は受注にしない（Issue #676）**: 注文書の内示・内々示の明細（確度 `forecast` / `forecast_tentative`）は全顧客で起票せず、
+  `_process_line_items()` が振り分けて RPC `replace_order_forecasts` で注文書（ステージング行）ごとに `order_forecasts` へ保存する。
+  取り込みの経路を足すときも明細を `_process_line_item()` に直接渡さず `_process_line_items()` を通す。期間は抽出スキーマの
+  `forecast_period_start` / `forecast_period_end`（`order_forecast_service.FORECAST_PERIOD_PROPERTIES`。PDF とメール本文で共有し、
+  strict な構造化出力なので `required` にも入れる）。古い注文書の内示は前回比のために残す。製品・顧客の FK は ON DELETE SET NULL で、
+  統合 RPC の付け替え対象に入れていない。詳細は [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md#内示は受注にせず記録するissue-676)
 - **社内転送者と顧客不明（Issue #521）**: `tenant_internal_senders` に登録したアドレス（社長など）からのメールは、
   差出人での顧客の突合・下書き顧客の作成をせず、本文の候補でも決まらなければ**ステージング行・受注の
   `customer_id` を NULL（顧客不明）にする**。テナント共通の「顧客不明」レコードは作らない（重複判定の UNIQUE に

@@ -39,6 +39,7 @@ const REASON_LABELS: Record<string, string> = {
   resent_document: "再送（既存の受注に添付）",
   non_order_email: "対象外メール",
   delivery_request: "督促・分納の依頼（起票せず記録）",
+  forecast_recorded: "内示（起票せず記録）",
   invalid_quantity: "数量不正",
   image_extracted: "画像から読み取り",
   failed_encrypted: "暗号化PDF",
