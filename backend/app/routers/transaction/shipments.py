@@ -27,6 +27,7 @@ from app.models.shipment import (
     ShipmentOrderMatchListResponse,
     ShipmentProductItem,
     ShipmentProductLinkUpsert,
+    ShipmentUnmatchedListResponse,
 )
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.shipment_matcher import normalize_code
@@ -34,6 +35,7 @@ from app.services.shipment_matching_service import (
     get_order_shipments,
     list_customer_items,
     list_product_items,
+    list_unmatched_entries,
 )
 from supabase import Client  # type: ignore
 
@@ -45,6 +47,11 @@ SHIPMENT_NAME_EDITOR_ROLES = ("order_handler", "president", "platform_admin")
 # 送品の消し込みの対象の受注をまとめて引く。URL の長さを抑えるため上限を設ける
 _MAX_ORDER_IDS = 500
 _UNIQUE_VIOLATION = "23505"
+# 受注に当たらない明細を見る期間（最新の売上日からの日数）と、原因ごとのまとめの上限（Issue #682）
+_DEFAULT_UNMATCHED_DAYS = 60
+_MAX_UNMATCHED_DAYS = 366
+_DEFAULT_UNMATCHED_LIMIT = 200
+_MAX_UNMATCHED_LIMIT = 1000
 
 
 def _require_editor(tenant_id: str, user_id: str, client: Client) -> None:
@@ -118,6 +125,24 @@ def get_shipment_order_matches(
 ):
     """受注ごとの弥生の送品（`?order_id=1&order_id=2` で絞る。省略時は当たった受注すべて）。"""
     return get_order_shipments(client, tenant_id, order_id)
+
+
+@shipments_router.get(
+    "/unmatched-entries", response_model=ShipmentUnmatchedListResponse
+)
+def get_shipment_unmatched_entries(
+    days: int = Query(default=_DEFAULT_UNMATCHED_DAYS, ge=1, le=_MAX_UNMATCHED_DAYS),
+    limit: int = Query(default=_DEFAULT_UNMATCHED_LIMIT, ge=1, le=_MAX_UNMATCHED_LIMIT),
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """受注に当たらない弥生の明細（送品の消し込みの「要確認」。Issue #682）。
+
+    原因（得意先・商品コードが未照合／受注が無い／受注が区別できない）ごとに (得意先, 商品コード) で
+    まとめる。期間は取り込んだ明細の最新の売上日から `days` 日分、`limit` は原因ごとの上限。
+    受注を起票したり送品済みにしたりはしない
+    """
+    return list_unmatched_entries(client, tenant_id, days, limit)
 
 
 @shipments_router.get("/customers", response_model=list[ShipmentCustomerItem])
