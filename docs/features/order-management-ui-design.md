@@ -516,6 +516,39 @@ frontend/src/
 
 Epic #553 の3画面目。確定済・生産中の注文のうち、送品済みになっていそうなものを候補として上に出す。**送品の記録は弥生が正**で、この画面は候補を示すだけで自動では送品済みにしない（担当者が弥生で確認してから1件ずつ押す）。Backend の変更は無く、`GET /orders` と `GET /daily-reports/order-progress`（Issue #490）で判定する。
 
+### カードの構成（Issue #682）
+
+画面は「送品の候補」と「要確認」の**カード**で、選んだカードの詳細だけを出す。選択は URL のハッシュ（`#candidates` / `#review`）で持ち、
+`useLocationHash()`（照合状況・起票の確認と共有）＋ `toValidShippingCard()`（`lib/shipping-review-utils.ts`。知らない値は送品の候補に寄せる）で読む。
+カードの見た目（上辺の色・選択中の ring）は照合状況（#639）・起票の確認（#654）にそろえ、色は送品の候補＝青（受注担当の作業）・要確認＝amber（直す作業）。
+
+| カード | 件数 | 詳細 |
+|---|---|---|
+| 送品の候補 | 候補の注文の数（「候補のみ」の件数） | 下記の一覧（「候補のみ／すべて」のタブは今どおり） |
+| 要確認 | 直す単位（得意先 × 商品コード × 原因のまとめ）の数 | 受注に当たらない弥生の明細（下記） |
+
+- **要確認の件数はサイドバーのバッジに出さない**（Epic #679 の方針）。バッジは今どおり `useShippingRows()` で候補だけを数える
+- 外枠は `ListPageLayout` のまま。カードの下の詳細パネル（`#shipping-panel`）を `min-h-0 flex-1` の縦 flex にし、送品の候補は `OrdersTable` の `fill`、
+  要確認は `ScrollTable` で表の中だけをスクロールさせる
+
+### 要確認: 受注に当たらない弥生の明細（Issue #682）
+
+`GET /shipments/unmatched-entries`（`useShipmentUnmatchedEntries()`、キーは `["shipments"]` 配下なので名寄せの登録で取り直す）。
+受注を起点に行を作る送品の候補には、弥生では送品済みなのに受注が無い明細（起票漏れ）が出ないので、明細を起点に別に出す。
+原因ごとの見出し行に説明と**直す画面へのリンクを1回だけ**置き、行は得意先 × 商品コードでまとめる（`components/orders/shipping/unmatched-shipment-entries.tsx`）。
+
+| 原因（突合の状態） | 見出し | 行き先 | 行に出す手がかり |
+|---|---|---|---|
+| `unmatched_customer` | 得意先が未照合 | 弥生の名寄せ（`/orders/shipment-names#customers`） | 備考 |
+| `unmatched_product` | 商品コードが未照合 | 弥生の名寄せ（`/orders/shipment-names#products`） | 照合できた顧客・備考 |
+| `no_order` | 受注が無い（起票漏れ） | 受注の新規作成（`/orders/new`） | 照合できた顧客・製品、備考の「○/○納期分」 |
+| `ambiguous` | 受注が区別できない | 行ごとの候補の受注（`/orders/{id}`） | 候補の受注の注文番号・希望納期・注番・ステータス |
+
+- 行には弥生の表記（得意先名・品名。最新の明細の値）とコード、明細の件数、数量の合計、最新の売上日を出す
+- `/orders/new` は初期値のクエリを受け取らないので、受注の新規作成へは初期値なしでリンクする（初期値の受け渡しは別 Issue）
+- 弥生の名寄せは `#products` / `#customers` のハッシュで開くとその種別のタブを出す（`toValidNameKind()`）。タブを切り替えた後はハッシュを見ない
+- ここから受注を起票したり送品済みにしたりはしない（送品の記録は弥生が正）
+
 ### 候補の判定
 
 判定は純粋関数 `lib/shipping-candidate-utils.ts`（`buildShippingRows()`）。対象は `status` が `confirmed` / `in_progress` の注文で、次のいずれかに当たれば候補にする。
@@ -552,8 +585,11 @@ frontend/src/
   app/orders/shipping/page.tsx                  # 下記を組み合わせる
   hooks/use-orders-shipping.ts                  # useShippingRows（画面とサイドバーで共有）/ useOrdersShipping
   lib/shipping-candidate-utils.ts               # 候補の判定・並び（純粋関数）
+  lib/shipping-review-utils.ts                  # カード・要確認の原因の表示（Issue #682）
   components/orders/shipping/
     shipping-order-row.tsx                      # ShippingOrderHeaderRow / ShippingOrderRow
+    shipping-review-cards.tsx                   # 「送品の候補」「要確認」のカード（Issue #682）
+    unmatched-shipment-entries.tsx              # 要確認の詳細（受注に当たらない弥生の明細、Issue #682）
 ```
 
 ### 導線

@@ -188,6 +188,12 @@ cd backend && ruff check . && mypy .
     書き込めるロールは Backend / Frontend の `SHIPMENT_NAME_EDITOR_ROLES` を揃える。送品の消し込みを描画するテストは MSW の既定ハンドラ
     `GET /shipments/order-matches` に依存する。`daily_report_name_matcher` を単独のテストファイルで import すると既存の循環 import で落ちる
     （`unit/` をまとめて流せば通る。CI と同じ）
+  - **送品の消し込みの「要確認」（Issue #682）**: 受注に当たらない明細は `GET /shipments/unmatched-entries`（純粋関数 `group_unmatched_entries()`）で、
+    突合は**全件の明細で行い、まとめるときだけ期間で絞る**（期間で先に絞ると他の受注と候補が重なるかの判定が変わる）。期間の基準は今日ではなく
+    取り込んだ明細の最新の売上日。`limit` は原因ごと。画面はカード（`#candidates` / `#review`、`toValidShippingCard()`）で、**要確認の件数はサイドバーの
+    バッジに出さず `useShippingRows()` も変えない**（Epic #679）。原因の見出しに直す画面へのリンクを1回だけ置き、行に繰り返さない。弥生の名寄せは
+    `#products` / `#customers` で開くとその種別のタブを出す。`/orders/new` は初期値のクエリを受け取らない。送品の消し込みを描画するテストは
+    MSW の既定ハンドラ `GET /shipments/unmatched-entries` に依存する
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は
