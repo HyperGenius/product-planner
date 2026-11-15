@@ -503,6 +503,12 @@ cd backend && ruff check . && mypy .
     表全体がスケルトンになる（Issue #649）。画面全体の `isLoading` に含めるクエリは `placeholderData: keepPreviousData`
     （`useOrderProgressList(ids, { keepPrevious: true })`）で直前の結果を残す。行操作のトーストに出す注文番号は
     `order.order_no ?? order.id`（一覧の表示と同じ。`?? ""` だと `order_no` が NULL の注文で「」が空になる）
+- **一覧が中心の画面の外枠（Issue #671）**: ページを画面の高さに収めて表の中だけをスクロールさせる。外枠は `ListPageLayout`
+  （`components/layout/list-page-layout.tsx`。高さ `100dvh − 6.75rem` はここ1か所）、表は `ScrollTable`（`components/scroll-table.tsx`。
+  見出しの固定・読み込み中／エラー／0件）、注文の表は `OrdersTable` に `fill` を付ける。`max-h-[calc(100vh-Nrem)]` のような当て推量や、
+  画面ごとの `h-[calc(100dvh-...)]` を新しく書かない。`ListPageLayout` の中では `container py-6 px-4` を付けず、`Tabs` には `min-h-0 flex-1`、
+  `TabsContent` には `flex min-h-0 flex-col` を付ける。タブレット用に部品を分けない（縦が低いときは表の最低の高さ 16rem を超えた分だけページがスクロールする）。
+  jsdom はレイアウトを計算しないので、スクロールの見え方は Playwright でページの `scrollHeight` と枠の `scrollTop` を測って確かめる
 - **スクロールする表の見出しを `sticky` にするとき**: shadcn の `Table` は自前で `overflow-auto` の div を挟むので、その外側のスクロール
   コンテナに対して `sticky top-0` が効かない。スクロール領域の中では素の `<table>`（`TableHeader` / `TableRow` 等は流用可）を使う。
   ダイアログは `max-h-[85dvh] flex flex-col` ＋ 表の領域 `min-h-0 flex-1 overflow-y-auto` にすると低い画面でもフッターが重ならない

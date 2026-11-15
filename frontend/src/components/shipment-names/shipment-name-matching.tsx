@@ -7,14 +7,9 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { TableCell, TableHead, TableRow } from "@/components/ui/table"
+import { ListPageLayout } from "@/components/layout/list-page-layout"
+import { ScrollTable } from "@/components/scroll-table"
 import { CustomerPicker, TargetCombobox } from "@/components/daily-report-names/target-pickers"
 import { useCustomers } from "@/hooks/use-customers"
 import { useProducts } from "@/hooks/use-products"
@@ -384,33 +379,8 @@ function ProductRow({
 // 画面
 // ---------------------------------------------------------------------------
 
-function ListFrame({
-  isLoading,
-  isError,
-  rowCount,
-  emptyText,
-  header,
-  children,
-}: {
-  isLoading: boolean
-  isError: boolean
-  rowCount: number
-  emptyText: string
-  header: React.ReactNode
-  children: React.ReactNode
-}) {
-  if (isLoading) return <p className="p-8 text-center text-muted-foreground">読み込み中...</p>
-  if (isError) return <p className="p-8 text-center text-red-600">取得できませんでした</p>
-  if (rowCount === 0) return <p className="p-8 text-center text-muted-foreground">{emptyText}</p>
-  return (
-    <div className="rounded-lg border bg-card">
-      <Table>
-        <TableHeader>{header}</TableHeader>
-        <TableBody>{children}</TableBody>
-      </Table>
-    </div>
-  )
-}
+/** 種別のタブの中身。一覧（`ScrollTable`）が残りの高さを使ってスクロールする（Issue #671） */
+const TAB_CONTENT_CLASS = "flex min-h-0 flex-col"
 
 /**
  * 弥生の名寄せ（Issue #667）。弥生の得意先 → 顧客、(得意先, 商品コード) → 製品を対応付ける。
@@ -437,17 +407,13 @@ export function ShipmentNameMatching() {
   const visibleProducts = filter === "unmatched" ? unmatchedProducts : productItems
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">弥生の名寄せ</h1>
-        <p className="text-muted-foreground mt-2">
-          弥生の売上明細の得意先・商品を、アプリの顧客・製品に対応付けます
-        </p>
-      </div>
-
+    <ListPageLayout
+      title="弥生の名寄せ"
+      description="弥生の売上明細の得意先・商品を、アプリの顧客・製品に対応付けます"
+    >
       <div
         role="note"
-        className="mb-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"
+        className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
@@ -460,8 +426,8 @@ export function ShipmentNameMatching() {
         </p>
       </div>
 
-      <Tabs defaultValue="customers">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <Tabs defaultValue="customers" className="min-h-0 flex-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <TabsList>
             <TabsTrigger value="customers">得意先（未照合 {unmatchedCustomers.length}）</TabsTrigger>
             <TabsTrigger value="products">商品（未照合 {unmatchedProducts.length}）</TabsTrigger>
@@ -474,12 +440,12 @@ export function ShipmentNameMatching() {
           </Tabs>
         </div>
 
-        <TabsContent value="customers">
-          <ListFrame
+        <TabsContent value="customers" className={TAB_CONTENT_CLASS}>
+          <ScrollTable
             isLoading={customersQuery.isLoading}
             isError={customersQuery.isError}
             rowCount={visibleCustomers.length}
-            emptyText={filter === "unmatched" ? "未照合の得意先はありません" : "弥生の売上明細はまだありません"}
+            emptyState={filter === "unmatched" ? "未照合の得意先はありません" : "弥生の売上明細はまだありません"}
             header={
               <TableRow>
                 <TableHead>得意先</TableHead>
@@ -494,15 +460,15 @@ export function ShipmentNameMatching() {
             {visibleCustomers.map((item) => (
               <CustomerRow key={item.code_key} item={item} customers={customers} canEdit={canEdit} />
             ))}
-          </ListFrame>
+          </ScrollTable>
         </TabsContent>
 
-        <TabsContent value="products">
-          <ListFrame
+        <TabsContent value="products" className={TAB_CONTENT_CLASS}>
+          <ScrollTable
             isLoading={productsQuery.isLoading}
             isError={productsQuery.isError}
             rowCount={visibleProducts.length}
-            emptyText={filter === "unmatched" ? "未照合の商品はありません" : "弥生の売上明細はまだありません"}
+            emptyState={filter === "unmatched" ? "未照合の商品はありません" : "弥生の売上明細はまだありません"}
             header={
               <TableRow>
                 <TableHead>商品</TableHead>
@@ -523,9 +489,9 @@ export function ShipmentNameMatching() {
                 canEdit={canEdit}
               />
             ))}
-          </ListFrame>
+          </ScrollTable>
         </TabsContent>
       </Tabs>
-    </div>
+    </ListPageLayout>
   )
 }

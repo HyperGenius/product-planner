@@ -13,6 +13,7 @@ import { useOrdersShipping } from "@/hooks/use-orders-shipping"
 import Link from "next/link"
 import { formatDateTimeShort, formatDeadlineShort } from "@/lib/order-utils"
 import { ShipmentImportStatus } from "@/components/orders/shipping/shipment-import-status"
+import { ListPageLayout } from "@/components/layout/list-page-layout"
 
 type ShippingView = "candidates" | "all"
 
@@ -44,17 +45,13 @@ export default function OrdersShippingPage() {
   const computedAtLabel = formatDateTimeShort(computedAt)
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">送品の消し込み</h1>
-        <p className="text-muted-foreground mt-2">
-          確定済・生産中の注文のうち、弥生で送品が確認できた・最終工程が完了した・納期を過ぎた・納期まで1週間を切った注文を候補として表示します
-        </p>
-      </div>
-
+    <ListPageLayout
+      title="送品の消し込み"
+      description="確定済・生産中の注文のうち、弥生で送品が確認できた・最終工程が完了した・納期を過ぎた・納期まで1週間を切った注文を候補として表示します"
+    >
       <div
         role="note"
-        className="mb-4 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"
+        className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
@@ -63,7 +60,7 @@ export default function OrdersShippingPage() {
         </p>
       </div>
 
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <ShipmentImportStatus />
         <p className="text-xs text-muted-foreground">
           {isShipmentError
@@ -78,7 +75,7 @@ export default function OrdersShippingPage() {
         </p>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Tabs value={view} onValueChange={(v) => setView(v as ShippingView)}>
           <TabsList>
             <TabsTrigger value="candidates">候補のみ（{candidateRows.length}）</TabsTrigger>
@@ -95,6 +92,7 @@ export default function OrdersShippingPage() {
       </div>
 
       <OrdersTable
+        fill
         isLoading={isLoading}
         header={<ShippingOrderHeaderRow />}
         rowCount={visibleRows.length}
@@ -117,6 +115,6 @@ export default function OrdersShippingPage() {
           />
         ))}
       </OrdersTable>
-    </div>
+    </ListPageLayout>
   )
 }

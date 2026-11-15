@@ -2,13 +2,8 @@
 
 import type { ReactNode } from "react"
 import { MasterPagination } from "@/components/master-pagination"
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { ScrollTable } from "@/components/scroll-table"
+import { TableHead, TableRow } from "@/components/ui/table"
 import { getDeadlineColumnLabel, type StatusFilter } from "@/lib/order-utils"
 
 interface OrdersTableProps {
@@ -23,11 +18,19 @@ interface OrdersTableProps {
   totalCount?: number
   /** 1ページの件数。ページは URL の `?page=` で持つので、1画面に表を複数並べるときは省略する */
   pageSize?: number
+  /**
+   * 親の縦 flex（`ListPageLayout` の本文）の残りの高さを使うか。省略時は外枠を移していない画面向けに
+   * 画面の高さからの当て推量（`max-h-[calc(100vh-20rem)]`）で上限を決める（Issue #671）
+   */
+  fill?: boolean
   /** 行（`OrderTableRow` 等） */
   children: ReactNode
 }
 
-/** 注文の表の外枠（読み込み中・空状態・スクロール領域・ページング。Issue #554） */
+/** `fill` しない画面の枠の上限。見出し・絞り込みの高さを当て推量している */
+const LEGACY_MAX_HEIGHT_CLASS = "max-h-[calc(100vh-20rem)]"
+
+/** 注文の表の外枠（読み込み中・空状態・スクロール領域・ページング。Issue #554。枠は `ScrollTable`、Issue #671） */
 export function OrdersTable({
   isLoading,
   header,
@@ -35,22 +38,20 @@ export function OrdersTable({
   emptyState,
   totalCount,
   pageSize,
+  fill = false,
   children,
 }: OrdersTableProps) {
   return (
     <>
-      <div className="rounded-lg border bg-card shadow-sm max-h-[calc(100vh-20rem)] overflow-y-auto">
-        {isLoading ? (
-          <div className="p-8 text-center text-muted-foreground">読み込み中...</div>
-        ) : rowCount > 0 ? (
-          <Table>
-            <TableHeader className="sticky top-0 z-10 bg-card">{header}</TableHeader>
-            <TableBody>{children}</TableBody>
-          </Table>
-        ) : (
-          <div className="p-8 text-center text-muted-foreground">{emptyState}</div>
-        )}
-      </div>
+      <ScrollTable
+        isLoading={isLoading}
+        rowCount={rowCount}
+        emptyState={emptyState}
+        header={header}
+        className={fill ? undefined : LEGACY_MAX_HEIGHT_CLASS}
+      >
+        {children}
+      </ScrollTable>
 
       {totalCount !== undefined && pageSize !== undefined && (
         <MasterPagination totalCount={totalCount} pageSize={pageSize} />
