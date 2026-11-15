@@ -69,6 +69,16 @@ export const handlers = [
   http.get(`${API_BASE}/shipments/order-matches`, () =>
     HttpResponse.json({ latest_sales_date: null, items: [] }),
   ),
+  // 送品の消し込みの「要確認」が引く受注に当たらない弥生の明細（Issue #682）。既定は明細なし
+  http.get(`${API_BASE}/shipments/unmatched-entries`, () =>
+    HttpResponse.json({
+      latest_sales_date: null,
+      since: null,
+      counts: { unmatched_customer: 0, unmatched_product: 0, no_order: 0, ambiguous: 0 },
+      truncated: false,
+      items: [],
+    }),
+  ),
   http.get(`${API_BASE}/shipments/customers`, () => HttpResponse.json([])),
   http.get(`${API_BASE}/shipments/products`, () => HttpResponse.json([])),
   // 督促・分納の依頼一覧が引く日報の進捗（Issue #635）。既定は進捗なし

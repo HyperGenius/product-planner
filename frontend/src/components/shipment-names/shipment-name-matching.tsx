@@ -12,6 +12,7 @@ import { ListPageLayout } from "@/components/layout/list-page-layout"
 import { ScrollTable } from "@/components/scroll-table"
 import { CustomerPicker, TargetCombobox } from "@/components/daily-report-names/target-pickers"
 import { useCustomers } from "@/hooks/use-customers"
+import { useLocationHash } from "@/hooks/use-location-hash"
 import { useProducts } from "@/hooks/use-products"
 import {
   useAddShipmentCustomerLink,
@@ -379,6 +380,12 @@ function ProductRow({
 // 画面
 // ---------------------------------------------------------------------------
 
+type NameKind = "customers" | "products"
+
+function toValidNameKind(value: string): NameKind {
+  return value.replace(/^#/, "") === "products" ? "products" : "customers"
+}
+
 /** 種別のタブの中身。一覧（`ScrollTable`）が残りの高さを使ってスクロールする（Issue #671） */
 const TAB_CONTENT_CLASS = "flex min-h-0 flex-col"
 
@@ -398,6 +405,11 @@ export function ShipmentNameMatching() {
   const role = currentMember?.role ?? null
   const canEdit = role !== null && (SHIPMENT_NAME_EDITOR_ROLES as readonly string[]).includes(role)
   const [filter, setFilter] = useState<ViewFilter>("unmatched")
+  // 送品の消し込みの「要確認」から `#products` / `#customers` で開いたときはその種別を出す（Issue #682）。
+  // ハッシュは外部入力なので既知の値だけを受け取る。タブを切り替えたら以降は選んだ種別を出す
+  const [hash] = useLocationHash()
+  const [selectedKind, setSelectedKind] = useState<NameKind | null>(null)
+  const kind = selectedKind ?? toValidNameKind(hash)
 
   const customerItems = useMemo(() => customersQuery.data ?? [], [customersQuery.data])
   const productItems = useMemo(() => productsQuery.data ?? [], [productsQuery.data])
@@ -426,7 +438,11 @@ export function ShipmentNameMatching() {
         </p>
       </div>
 
-      <Tabs defaultValue="customers" className="min-h-0 flex-1">
+      <Tabs
+        value={kind}
+        onValueChange={(v) => setSelectedKind(toValidNameKind(v))}
+        className="min-h-0 flex-1"
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <TabsList>
             <TabsTrigger value="customers">得意先（未照合 {unmatchedCustomers.length}）</TabsTrigger>
