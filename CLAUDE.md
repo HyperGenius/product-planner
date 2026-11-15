@@ -184,7 +184,7 @@ cd backend && ruff check . && mypy .
     ファイルは `shipment_coverage`）。照合・突合は保存せず参照のたびに求める（純粋関数 `shipment_matcher.py`、DB は `shipment_matching_service.py`）。
     **弥生の商品コードは `products.code`（図番）と一致しない**ので、製品は (得意先, 商品コード) の辞書 → 品名の図番 → `parse_product_spec()` の順で、
     自動は**得意先の顧客の受注にある製品に絞って一意のときだけ**。得意先 → 顧客は**1対多**（商流で請求先≠注文元）で、**受注の顧客は書き換えない**。
-    突合は送品の候補（`yayoi_shipped`）を出すだけで**送品済みにしない**。辞書の FK は CASCADE で、顧客・製品の統合 RPC の付け替え対象に入れていない。
+    突合は送品の候補（`yayoi_shipped`）を出すだけで**送品済みにしない**。突合の候補には**送品済みにした受注も残す**（未送品だけにすると「送品済みにする」を押した時点で明細が `no_order` に変わる。手がかりの無い明細は送品日の7日後までの売上だけ。#680）ので、候補の受注を絞る条件を変えるときは送品済みにする前後で結果が変わらないかをテストで見る。辞書の FK は CASCADE で、顧客・製品の統合 RPC の付け替え対象に入れていない。
     書き込めるロールは Backend / Frontend の `SHIPMENT_NAME_EDITOR_ROLES` を揃える。送品の消し込みを描画するテストは MSW の既定ハンドラ
     `GET /shipments/order-matches` に依存する。`daily_report_name_matcher` を単独のテストファイルで import すると既存の循環 import で落ちる
     （`unit/` をまとめて流せば通る。CI と同じ）

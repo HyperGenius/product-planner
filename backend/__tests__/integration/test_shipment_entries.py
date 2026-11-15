@@ -6,6 +6,7 @@ Integration テスト: 弥生の売上明細の置き換え RPC と突合のク�
   （同じファイルの再処理は冪等・期間の重なりが違うファイル・古いファイルは 'stale'・他テナントは拒否）
 - パーサーの出力が RPC 経由でそのまま保存され、金額の列を持たないこと
 - 突合のサービスが実際の列名（orders.deadline_date 等）で受注・明細を読めること
+- 送品済みにした受注（トリガーが書く orders.shipped_at）にも明細が当たり続けること（Issue #680）
 - ユーザー JWT から RPC を実行できないこと
 
 実行:
@@ -299,3 +300,57 @@ class TestOrderShipments:
             .data["status"]
         )
         assert status == "in_progress"
+
+    def test_entries_keep_matching_after_order_is_shipped(self, admin_db, tenants):
+        # 送品済みにすると status と shipped_at（トリガー trg_set_order_shipped_at）が変わる。
+        # 突合はその列を読み、送品日以前の売上を引き続きこの受注に当てる（Issue #680）
+        own = tenants["own"]
+        customer = (
+            admin_db.table("customers")
+            .insert({"tenant_id": own, "name": "架空工業株式会社"})
+            .execute()
+            .data[0]
+        )
+        product = (
+            admin_db.table("products")
+            .insert({"tenant_id": own, "name": "品A", "code": "123456"})
+            .execute()
+            .data[0]
+        )
+        order = (
+            admin_db.table("orders")
+            .insert(
+                {
+                    "tenant_id": own,
+                    "customer_id": customer["id"],
+                    "product_id": product["id"],
+                    "quantity": 100,
+                    "status": "in_progress",
+                    "deadline_date": "2026-10-20",
+                    "order_date": "2026-09-01T00:00:00+09:00",
+                }
+            )
+            .execute()
+            .data[0]
+        )
+        file_id = _insert_file(admin_db, own, "2026-11-01T09:00:00+09:00")
+        _replace(
+            admin_db,
+            own,
+            file_id,
+            _parsed(
+                OCT, _row(date(2026, 10, 5), 60), _row(date(2026, 10, 9), 40, None)
+            ),
+        )
+        before = get_order_shipments(admin_db, own, [order["id"]])
+
+        admin_db.table("orders").update({"status": "shipped"}).eq(
+            "id", order["id"]
+        ).execute()
+        after = get_order_shipments(admin_db, own, [order["id"]])
+
+        assert [e["method"] for e in before["items"][0]["entries"]] == [
+            "deadline",
+            "single_open_order",
+        ]
+        assert after["items"] == before["items"]

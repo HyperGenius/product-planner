@@ -20,10 +20,11 @@ DB から切り離した純粋なロジック。マスタ・受注・辞書の�
   2・3 は**得意先に対応する顧客の受注にある製品**に絞り、一意のときだけ照合する。類似度の候補では
   照合しない。候補が複数のときは名寄せの画面に候補として出すだけにする。
 
-明細 → 受注（未送品の受注。下書き・承認待ちも含む）:
+明細 → 受注（未送品の受注。下書き・承認待ちも含む。送品済みにした受注も候補に残す。Issue #680）:
   1. 備考の注文番号が `orders.customer_order_no` と一致する受注
   2. 備考の `M/D納期分` / `N月末納期分` が希望納期（`orders.deadline_date`）と一致する受注
-  3. どちらも無ければ、顧客＋製品の未送品の受注が1件だけのとき（受注日より前の売上は充当しない）
+  3. どちらも無ければ、顧客＋製品の候補の受注が1件だけのとき（受注日より前の売上は充当しない。
+     送品済みの受注は、売上日が送品日の `SHIPPED_ORDER_GRACE_DAYS` 日後までのときだけ候補）
   候補が複数なら確定しない（並べて示す）。分納は受注ごとに数量を合算する。
 """
 
@@ -32,7 +33,7 @@ import re
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Literal
 
 from app.services.customer_matching_service import normalize_company_name
@@ -43,6 +44,18 @@ from app.services.product_spec_parser import ProductSpec, parse_product_spec
 OPEN_ORDER_STATUSES = frozenset(
     {"draft", "pending_approval", "confirmed", "in_progress"}
 )
+# 送品済みにした受注（Issue #680）。未送品だけを候補にすると、送品の消し込みで「送品済みにする」を
+# 押した時点で、その受注に当たっていた明細が「受注なし」に変わる。そのため送品済みの受注も候補に残す。
+# 取り消し（canceled）は残さない
+SHIPPED_ORDER_STATUSES = frozenset({"shipped", "completed"})
+# 備考に手がかり（注文番号・納期分）が無い明細で、送品済みの受注を候補に残すのは、売上日が
+# 送品日（`shipped_at` の JST 暦日）の何日後までか。送品済みにするのは弥生で送品を確かめた後なので、
+# その受注の売上は送品日以前に入っている。弥生への入力が送品済みにするより遅れる分だけ余裕を持たせる。
+# これより後の売上は、同じ顧客・製品の次の受注（繰り返しの注文）の分とみなす（残すと次の受注と
+# 区別できなくなる）。送品日より前は区切らない（分納・弥生の月次の書き出しで売上日が送品日より前に
+# 散らばるため。受注日より前の売上を充当しない規則は未送品と同じく効く）。
+# 備考の手がかりで当てるときは、重複判定の UNIQUE（顧客・製品・希望納期）で受注が特定できるので区切らない
+SHIPPED_ORDER_GRACE_DAYS = 7
 
 CustomerMethod = Literal["link", "name"]
 ProductMethod = Literal["link", "drawing_no", "spec"]
@@ -163,6 +176,8 @@ class OrderInfo:
     # 受注日（order_date の JST 暦日）
     order_date: date | None = None
     customer_order_no: str | None = None
+    # 送品日（shipped_at の JST 暦日）。送品済みの受注を候補に残す期間の判定に使う（Issue #680）
+    shipped_on: date | None = None
 
 
 @dataclass
@@ -240,6 +255,27 @@ def _material_matches(a: str, b: str) -> bool:
     return a.startswith(b) or b.startswith(a)
 
 
+def _may_receive_shipments(order: OrderInfo) -> bool:
+    """明細を当てる候補になりうる受注か（未送品、または送品日のわかる送品済み）。"""
+    if order.status in OPEN_ORDER_STATUSES:
+        return True
+    # `shipped_at` が無い送品済みの受注（列を足す前に送品した受注）は、どこまで候補に残すか
+    # 決められないので候補にしない（誤って当てるほうが害が大きい）
+    return order.status in SHIPPED_ORDER_STATUSES and order.shipped_on is not None
+
+
+def is_fallback_candidate(order: OrderInfo, sales_date: date) -> bool:
+    """備考に手がかりが無い売上日 `sales_date` の明細で、候補に入れる受注か。
+
+    送品済みの受注は、売上日が送品日の `SHIPPED_ORDER_GRACE_DAYS` 日後までのときだけ。
+    """
+    if order.status in OPEN_ORDER_STATUSES:
+        return True
+    if order.status not in SHIPPED_ORDER_STATUSES or order.shipped_on is None:
+        return False
+    return sales_date <= order.shipped_on + timedelta(days=SHIPPED_ORDER_GRACE_DAYS)
+
+
 class ShipmentMatcher:
     def __init__(self, snapshot: ShipmentSnapshot) -> None:
         self._snapshot = snapshot
@@ -252,26 +288,26 @@ class ShipmentMatcher:
                     self._customer_by_name.setdefault(key, []).append(customer)
         # 顧客 → その顧客の受注にある製品
         self._products_by_customer: dict[int, set[int]] = {}
-        # (顧客, 製品) → 未送品の受注
-        self._open_orders: dict[tuple[int, int], list[OrderInfo]] = {}
-        # 顧客 → 注文番号（正規化）→ 未送品の受注
-        self._open_orders_by_no: dict[int, dict[str, list[OrderInfo]]] = {}
+        # (顧客, 製品) → 候補になりうる受注（未送品・送品済み。売上日での絞り込みは突合のとき）
+        self._candidate_orders: dict[tuple[int, int], list[OrderInfo]] = {}
+        # 顧客 → 注文番号（正規化）→ 候補になりうる受注
+        self._candidate_orders_by_no: dict[int, dict[str, list[OrderInfo]]] = {}
         for order in snapshot.orders:
             if order.customer_id is None or order.product_id is None:
                 continue
             self._products_by_customer.setdefault(order.customer_id, set()).add(
                 order.product_id
             )
-            if order.status not in OPEN_ORDER_STATUSES:
+            if not _may_receive_shipments(order):
                 continue
-            self._open_orders.setdefault(
+            self._candidate_orders.setdefault(
                 (order.customer_id, order.product_id), []
             ).append(order)
             order_no = normalize_code(order.customer_order_no)
             if order_no:
-                self._open_orders_by_no.setdefault(order.customer_id, {}).setdefault(
-                    order_no, []
-                ).append(order)
+                self._candidate_orders_by_no.setdefault(
+                    order.customer_id, {}
+                ).setdefault(order_no, []).append(order)
         self._spec_cache: dict[int, ProductSpec | None] = {}
 
     # --- 得意先 → 顧客 ---------------------------------------------------
@@ -437,10 +473,10 @@ class ShipmentMatcher:
         note = entry.get("note")
         deadlines = parse_note_deadlines(note, sales_date)
         deadline = deadlines[0] if len(deadlines) == 1 else None
-        open_orders = [
+        candidates = [
             o
             for customer_id in sorted(customer_ids)
-            for o in self._open_orders.get((customer_id, product_id), [])
+            for o in self._candidate_orders.get((customer_id, product_id), [])
         ]
 
         order_nos = parse_note_order_nos(note)
@@ -449,12 +485,19 @@ class ShipmentMatcher:
                 o
                 for customer_id in sorted(customer_ids)
                 for no in order_nos
-                for o in self._open_orders_by_no.get(customer_id, {}).get(no, [])
+                for o in self._candidate_orders_by_no.get(customer_id, {}).get(no, [])
                 if o.product_id == product_id
             ]
             if by_no:
                 if len(by_no) > 1 and deadline is not None:
                     narrowed = [o for o in by_no if o.deadline_date == deadline]
+                    by_no = narrowed or by_no
+                if len(by_no) > 1:
+                    # 同じ注文番号の受注（分割した受注など）のうち、送品日を過ぎて久しい送品済みの
+                    # 受注は、手がかりが無いときと同じく次の受注の分とみなす
+                    narrowed = [
+                        o for o in by_no if is_fallback_candidate(o, sales_date)
+                    ]
                     by_no = narrowed or by_no
                 self._settle(result, by_no, "order_no")
                 return
@@ -462,14 +505,17 @@ class ShipmentMatcher:
         if deadlines:
             if deadline is None:
                 # 1行に複数の納期分が書かれていると、どの受注の分か決められない
-                hits = [o for o in open_orders if o.deadline_date in deadlines]
+                hits = [o for o in candidates if o.deadline_date in deadlines]
             else:
-                hits = [o for o in open_orders if o.deadline_date == deadline]
+                hits = [o for o in candidates if o.deadline_date == deadline]
             self._settle(result, hits, "deadline")
             return
 
         eligible = [
-            o for o in open_orders if o.order_date is None or o.order_date <= sales_date
+            o
+            for o in candidates
+            if (o.order_date is None or o.order_date <= sales_date)
+            and is_fallback_candidate(o, sales_date)
         ]
         self._settle(result, eligible, "single_open_order")
 
