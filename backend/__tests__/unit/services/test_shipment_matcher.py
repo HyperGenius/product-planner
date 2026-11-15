@@ -347,10 +347,11 @@ class TestShippedOrders:
 
         assert matcher.match_entry(_entry()).order_id == 1
 
-    def test_shipped_order_without_shipped_at_is_not_a_candidate(self):
+    def test_shipped_order_without_shipped_at(self):
+        # 列を足す前に送品した受注。備考の納期分で特定できれば当て、手がかりが無ければ当てない
         matcher = ShipmentMatcher(_snapshot(orders=[_order(1, status="shipped")]))
 
-        assert matcher.match_entry(_entry()).status == "no_order"
+        assert matcher.match_entry(_entry()).order_id == 1
         assert matcher.match_entry(_entry(note=None)).status == "no_order"
 
     def test_canceled_order_is_not_a_candidate(self):

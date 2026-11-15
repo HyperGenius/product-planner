@@ -256,18 +256,16 @@ def _material_matches(a: str, b: str) -> bool:
 
 
 def _may_receive_shipments(order: OrderInfo) -> bool:
-    """明細を当てる候補になりうる受注か（未送品、または送品日のわかる送品済み）。"""
-    if order.status in OPEN_ORDER_STATUSES:
-        return True
-    # `shipped_at` が無い送品済みの受注（列を足す前に送品した受注）は、どこまで候補に残すか
-    # 決められないので候補にしない（誤って当てるほうが害が大きい）
-    return order.status in SHIPPED_ORDER_STATUSES and order.shipped_on is not None
+    """明細を当てる候補になりうる受注か（未送品・送品済み。取り消しは除く）。"""
+    return order.status in OPEN_ORDER_STATUSES or order.status in SHIPPED_ORDER_STATUSES
 
 
 def is_fallback_candidate(order: OrderInfo, sales_date: date) -> bool:
     """備考に手がかりが無い売上日 `sales_date` の明細で、候補に入れる受注か。
 
     送品済みの受注は、売上日が送品日の `SHIPPED_ORDER_GRACE_DAYS` 日後までのときだけ。
+    `shipped_at` が無い送品済みの受注（列を足す前に送品した受注）は、どこまで候補に残すか
+    決められないので候補にしない（備考の手がかりで当てるときは受注が特定できるので候補にする）
     """
     if order.status in OPEN_ORDER_STATUSES:
         return True
