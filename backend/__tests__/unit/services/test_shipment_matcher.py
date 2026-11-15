@@ -1,10 +1,11 @@
 # __tests__/unit/services/test_shipment_matcher.py
-"""弥生の売上明細の名寄せ・受注への突合のテスト (Issue #667)。値はすべて架空。"""
+"""弥生の売上明細の名寄せ・受注への突合のテスト (Issue #667, #680)。値はすべて架空。"""
 
 from datetime import date
 from typing import Any
 
 from app.services.shipment_matcher import (
+    SHIPPED_ORDER_GRACE_DAYS,
     CustomerInfo,
     OrderInfo,
     ProductInfo,
@@ -34,6 +35,7 @@ def _order(
     deadline: date | None = date(2026, 10, 20),
     order_date: date | None = date(2026, 9, 1),
     order_no: str | None = None,
+    shipped_on: date | None = None,
 ) -> OrderInfo:
     return OrderInfo(
         id=order_id,
@@ -44,6 +46,7 @@ def _order(
         deadline_date=deadline,
         order_date=order_date,
         customer_order_no=order_no,
+        shipped_on=shipped_on,
     )
 
 
@@ -313,6 +316,132 @@ class TestMatchEntry:
             matcher.match_entry(_entry(product_name="不明な品名")).status
             == "unmatched_product"
         )
+
+
+class TestShippedOrders:
+    """送品済みにした受注も突合の候補に残す (Issue #680)。"""
+
+    def test_entries_keep_matching_after_order_is_shipped(self):
+        entries = [
+            _entry(id=1, sales_date="2026-10-05", note="10/20納期分"),
+            _entry(id=2, sales_date="2026-10-09", note=None),
+        ]
+        before = ShipmentMatcher(_snapshot(orders=[_order(1)]))
+        after = ShipmentMatcher(
+            _snapshot(
+                orders=[_order(1, status="shipped", shipped_on=date(2026, 10, 12))]
+            )
+        )
+
+        for entry in entries:
+            b, a = before.match_entry(entry), after.match_entry(entry)
+            assert (a.status, a.order_id, a.method) == (b.status, b.order_id, b.method)
+            assert a.order_id == 1
+
+    def test_completed_order_is_a_candidate(self):
+        matcher = ShipmentMatcher(
+            _snapshot(
+                orders=[_order(1, status="completed", shipped_on=date(2026, 10, 12))]
+            )
+        )
+
+        assert matcher.match_entry(_entry()).order_id == 1
+
+    def test_shipped_order_without_shipped_at(self):
+        # 列を足す前に送品した受注。備考の納期分で特定できれば当て、手がかりが無ければ当てない
+        matcher = ShipmentMatcher(_snapshot(orders=[_order(1, status="shipped")]))
+
+        assert matcher.match_entry(_entry()).order_id == 1
+        assert matcher.match_entry(_entry(note=None)).status == "no_order"
+
+    def test_canceled_order_is_not_a_candidate(self):
+        matcher = ShipmentMatcher(_snapshot(orders=[_order(1, status="canceled")]))
+
+        assert matcher.match_entry(_entry()).status == "no_order"
+
+    def test_note_deadline_matches_shipped_order_regardless_of_sales_date(self):
+        # 備考の納期分で特定できれば、送品日から日が経った売上（残りの分納の入力遅れ等）も当てる
+        matcher = ShipmentMatcher(
+            _snapshot(
+                orders=[_order(1, status="shipped", shipped_on=date(2026, 10, 1))]
+            )
+        )
+
+        match = matcher.match_entry(_entry(sales_date="2026-11-10"))
+
+        assert (match.status, match.order_id, match.method) == (
+            "matched",
+            1,
+            "deadline",
+        )
+
+    def test_fallback_keeps_shipped_order_within_grace_days(self):
+        shipped_on = date(2026, 10, 12)
+        last_day = date.fromordinal(shipped_on.toordinal() + SHIPPED_ORDER_GRACE_DAYS)
+        matcher = ShipmentMatcher(
+            _snapshot(orders=[_order(1, status="shipped", shipped_on=shipped_on)])
+        )
+
+        match = matcher.match_entry(_entry(sales_date=last_day.isoformat(), note=None))
+
+        assert (match.order_id, match.method) == (1, "single_open_order")
+
+    def test_fallback_drops_shipped_order_after_grace_days(self):
+        # 繰り返しの注文: 送品済みの前の受注と次の受注が並ぶ。送品日から日が経った
+        # 手がかりの無い売上は次の受注の分とみなす（区別できない扱いにしない）
+        shipped_on = date(2026, 10, 12)
+        after_grace = date.fromordinal(
+            shipped_on.toordinal() + SHIPPED_ORDER_GRACE_DAYS + 1
+        )
+        matcher = ShipmentMatcher(
+            _snapshot(
+                orders=[
+                    _order(1, status="shipped", shipped_on=shipped_on),
+                    _order(
+                        2, deadline=date(2026, 11, 20), order_date=date(2026, 10, 1)
+                    ),
+                ]
+            )
+        )
+
+        match = matcher.match_entry(
+            _entry(sales_date=after_grace.isoformat(), note=None)
+        )
+
+        assert (match.status, match.order_id) == ("matched", 2)
+
+    def test_fallback_is_ambiguous_with_recently_shipped_order(self):
+        # 送品済みにする前（両方が未送品）と同じく、区別できない
+        matcher = ShipmentMatcher(
+            _snapshot(
+                orders=[
+                    _order(1, status="shipped", shipped_on=date(2026, 10, 12)),
+                    _order(
+                        2, deadline=date(2026, 11, 20), order_date=date(2026, 10, 1)
+                    ),
+                ]
+            )
+        )
+
+        match = matcher.match_entry(_entry(note=None))
+
+        assert match.status == "ambiguous"
+        assert match.candidate_order_ids == (1, 2)
+
+    def test_order_number_shared_by_split_orders(self):
+        # 同じ注文番号の受注（分割）で納期の手がかりが無いとき、送品日から日が経った
+        # 送品済みの受注は外す
+        orders = [
+            _order(1, status="shipped", shipped_on=date(2026, 10, 1), order_no="PO-1"),
+            _order(2, deadline=date(2026, 11, 20), order_no="PO-1"),
+        ]
+        matcher = ShipmentMatcher(_snapshot(orders=orders))
+
+        late = matcher.match_entry(_entry(sales_date="2026-11-10", note="PO-1"))
+        early = matcher.match_entry(_entry(sales_date="2026-09-28", note="PO-1"))
+
+        assert (late.status, late.order_id, late.method) == ("matched", 2, "order_no")
+        assert early.status == "ambiguous"
 
 
 class TestSummarizeByOrder:

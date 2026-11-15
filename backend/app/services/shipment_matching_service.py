@@ -53,8 +53,8 @@ def _to_date(value: Any) -> date | None:
     return date.fromisoformat(str(value)[:10])
 
 
-def _order_date_jst(value: Any) -> date | None:
-    """`orders.order_date`（timestamptz）の JST の暦日。"""
+def _jst_date(value: Any) -> date | None:
+    """`orders.order_date` / `orders.shipped_at`（timestamptz）の JST の暦日。"""
     if not value:
         return None
     text = str(value)
@@ -82,7 +82,7 @@ def load_snapshot(db: Client, tenant_id: str) -> ShipmentSnapshot:
         db,
         SupabaseTableName.ORDERS,
         "id, customer_id, product_id, quantity, status, deadline_date, order_date, "
-        "customer_order_no",
+        "customer_order_no, shipped_at",
         tenant_id,
         lambda q: q.eq("order_type", "production").not_.is_("product_id", "null"),
     )
@@ -138,8 +138,9 @@ def load_snapshot(db: Client, tenant_id: str) -> ShipmentSnapshot:
                 quantity=o.get("quantity"),
                 status=o["status"],
                 deadline_date=_to_date(o.get("deadline_date")),
-                order_date=_order_date_jst(o.get("order_date")),
+                order_date=_jst_date(o.get("order_date")),
                 customer_order_no=o.get("customer_order_no"),
+                shipped_on=_jst_date(o.get("shipped_at")),
             )
             for o in orders
         ],
