@@ -99,18 +99,36 @@ async function openDialog() {
 }
 
 describe("OrderStockAssignments", () => {
-  it("作り置きの推定と登録済みの引き当てを表示する", async () => {
-    setup({ data: { ...DATA, assignments: [ASSIGNMENT] } })
+  it("引き当てが無ければ、引き当てられる工程の作り置きと未割当の日報を表で出す（Issue #673）", async () => {
+    setup({ data: { ...DATA, candidate_totals: { プレス: { count: 3, qty: 60 } } } })
     render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
 
     expect(
-      await screen.findByText("「カシメ」の後 28 個 / 「クグシ」の後 8,222 個"),
+      await screen.findByText(/この製品の作り置き・未割当の日報があります/),
     ).toBeInTheDocument()
-    expect(screen.getByText("棚の分")).toBeInTheDocument()
-    expect(screen.getByText("2026/11/02")).toBeInTheDocument()
+    const table = screen.getByRole("table", { name: "引き当てられる作り置き" })
+    // 工程ルートの順。引き当てられるものが無い工程は出さない
+    expect(within(table).getAllByRole("row").slice(1).map((r) => r.textContent)).toEqual([
+      "「プレス」の後－3 件 / 60 個",
+      "「カシメ」の後28 個－",
+      "「クグシ」の後8,222 個－",
+    ])
+    expect(screen.getByText("この受注の製品: ボルトM6（B-06）")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "作り置きから引き当てる" })).toBeInTheDocument()
   })
 
-  it("引き当て先の製品と、充当した日報の明細（日報の表記）を表示する", async () => {
+  it("引き当てられるものが無ければその旨を出し、ボタンは目立たせずに残す（Issue #673）", async () => {
+    setup({ data: { ...DATA, stock_estimates: [] } })
+    render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
+
+    expect(
+      await screen.findByText("この製品の作り置き・未割当の日報はありません"),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("table", { name: "引き当てられる作り置き" })).toBeNull()
+    expect(screen.getByRole("button", { name: "作り置きから引き当てる" })).toBeInTheDocument()
+  })
+
+  it("集計に反映済みの引き当ては、充当した日報の明細（日報の表記）を出す", async () => {
     setup({
       data: {
         ...DATA,
@@ -122,11 +140,34 @@ describe("OrderStockAssignments", () => {
     })
     render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
 
-    expect(await screen.findByText("ボルトM6（B-06）")).toBeInTheDocument()
-    expect(screen.getByText("ボルトM6 作り置き")).toBeInTheDocument()
-    expect(screen.getByText("A社 / 50t 3号機")).toBeInTheDocument()
-    // 集計前の引き当ては、元の明細がまだ無いことを示す
-    expect(screen.getByText("次の集計で表示されます")).toBeInTheDocument()
+    const table = await screen.findByRole("table", { name: "登録済みの引き当て" })
+    expect(within(table).getAllByText("反映済み")).toHaveLength(2)
+    // 引き当てた日とメモは明細の行に出す
+    expect(within(table).getAllByText("・棚の分")).toHaveLength(2)
+    expect(within(table).getAllByText(/^2026\/11\/02 に引き当て/)).toHaveLength(2)
+    expect(within(table).getByText("ボルトM6 作り置き")).toBeInTheDocument()
+    expect(within(table).getByText("A社 / 50t 3号機")).toBeInTheDocument()
+    // 集計しても充てられる明細が無かった引き当て
+    expect(within(table).getByText("充てられる未割当の日報の明細はありませんでした")).toBeInTheDocument()
+    // 引き当てがあるときは「引き当てられるもの」の表は出さない
+    expect(screen.queryByRole("table", { name: "引き当てられる作り置き" })).toBeNull()
+  })
+
+  it("集計より後に登録した引き当ては反映待ちにし、前回の内訳は出さない（Issue #673）", async () => {
+    setup({
+      data: {
+        ...DATA,
+        assignments: [{ ...ASSIGNMENT, updated_at: "2026-11-02T04:00:00Z", sources: [SOURCE] }],
+      },
+    })
+    render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
+
+    const table = await screen.findByRole("table", { name: "登録済みの引き当て" })
+    expect(within(table).getByText("反映待ち")).toBeInTheDocument()
+    expect(
+      within(table).getByText("次の集計（10〜15分ごと）で工程の進捗に反映されます"),
+    ).toBeInTheDocument()
+    expect(within(table).queryByText("ボルトM6 作り置き")).toBeNull()
   })
 
   it("ダイアログで選んだ工程の引き当て元の候補を表示する", async () => {
@@ -289,7 +330,7 @@ describe("OrderStockAssignments", () => {
     setup({ data: { ...DATA, assignments: [ASSIGNMENT] }, role: "iso_officer" })
     render(<OrderStockAssignments orderId={1} orderQuantity={5000} />)
 
-    expect(await screen.findByText("棚の分")).toBeInTheDocument()
+    expect(await screen.findByText("・棚の分")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "作り置きから引き当てる" })).toBeNull()
     expect(screen.queryByRole("button", { name: "取り消す" })).toBeNull()
   })

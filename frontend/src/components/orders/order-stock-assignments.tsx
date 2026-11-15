@@ -3,6 +3,7 @@
 import * as React from "react"
 import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -26,7 +27,9 @@ import {
   STOCK_LABEL,
   distinctRawValues,
   initialStockAssignmentForm,
+  isAssignmentPending,
   plannedSourceUsage,
+  shouldShowStockHint,
   stockAssignmentWarnings,
   stockPlaceLabel,
   stockProcessRows,
@@ -89,9 +92,12 @@ export function OrderStockAssignments({
   orderQuantity,
   orderCustomerId = null,
   orderCustomerLabel = null,
+  anchorId,
 }: {
   orderId: number
   orderQuantity: number
+  /** カードの要素の id（工程の進捗カードの案内からスクロールして来る先。Issue #673） */
+  anchorId?: string
   /** 受注の顧客（引き当て元の日報の顧客先と見比べる。Issue #673）。顧客不明なら null */
   orderCustomerId?: number | null
   /** 受注の顧客の通称（無ければ正式名） */
@@ -114,19 +120,28 @@ export function OrderStockAssignments({
     })
   }
 
+  const stockRows = data ? stockProcessRows(data, undefined).filter((row) => row.hasStock) : []
+  const hasStock = stockRows.length > 0
+
   return (
-    <div className="rounded-lg border bg-card p-6 shadow-sm">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+    <div id={anchorId} className="scroll-mt-4 rounded-lg border bg-card p-6 shadow-sm">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-xl font-semibold">{STOCK_LABEL}からの引き当て</h2>
         {canEdit && data?.assignable && (
-          <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            // 引き当てられるものが無いときも出す（推定が外れている・日報の取り込み待ちのことがある）が目立たせない
+            className={hasStock || data.assignments.length > 0 ? undefined : "text-muted-foreground"}
+            onClick={() => setDialogOpen(true)}
+          >
             {STOCK_LABEL}から引き当てる
           </Button>
         )}
       </div>
-      <p className="mb-4 text-sm text-muted-foreground">
-        受注日より前に作った分や、日報の顧客先が違う分をこの受注に充てます。次の集計（10〜15分ごと）で工程の進捗に反映されます。
-      </p>
+      {data?.product_name && (
+        <p className="mb-3 text-xs text-muted-foreground">この受注の製品: {productLabel(data)}</p>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">読み込み中...</p>
@@ -134,63 +149,122 @@ export function OrderStockAssignments({
         <p className="text-sm text-destructive">{STOCK_LABEL}の引き当てを取得できませんでした</p>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm">
-            <span className="text-muted-foreground">引き当て先（この受注の製品）: </span>
-            {productLabel(data)}
-          </p>
-          <p className="text-sm">
-            <span className="text-muted-foreground">この製品の{STOCK_LABEL}（推定）: </span>
-            {data.stock_estimates.length === 0
-              ? "なし"
-              : data.stock_estimates
-                  .map((e) => `${stockPlaceLabel(e)} ${e.qty.toLocaleString()} 個`)
-                  .join(" / ")}
-          </p>
           {data.assignments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">引き当てはありません</p>
+            hasStock ? (
+              <>
+                <p className="text-sm">
+                  この製品の{STOCK_LABEL}・未割当の日報があります。この受注に充てた分を登録すると、次の集計で工程の進捗に反映されます。
+                </p>
+                <table className="w-full text-sm" aria-label={`引き当てられる${STOCK_LABEL}`}>
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-2 pr-2 font-medium">工程</th>
+                      <th className="py-2 pr-2 text-right font-medium">{STOCK_LABEL}（推定）</th>
+                      <th className="py-2 text-right font-medium">未割当の日報</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockRows.map((row) => (
+                      <tr key={row.processName} className="border-b last:border-0">
+                        <td className="py-2 pr-2">{stockPlaceLabel({ process_name: row.processName })}</td>
+                        <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">
+                          {row.estimateQty ? `${row.estimateQty.toLocaleString()} 個` : "－"}
+                        </td>
+                        <td className="whitespace-nowrap py-2 text-right tabular-nums">
+                          {row.candidateCount > 0
+                            ? `${row.candidateCount.toLocaleString()} 件 / ${row.candidateQty.toLocaleString()} 個`
+                            : "－"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                この製品の{STOCK_LABEL}・未割当の日報はありません
+              </p>
+            )
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" aria-label="登録済みの引き当て">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
                   <th className="py-2 pr-2 font-medium">工程</th>
                   <th className="py-2 pr-2 text-right font-medium">数</th>
-                  <th className="py-2 pr-2 font-medium">引き当てた日</th>
-                  <th className="py-2 pr-2 font-medium">メモ</th>
+                  <th className="py-2 pr-2 font-medium">状態</th>
                   {canEdit && <th className="py-2 font-medium" />}
                 </tr>
               </thead>
               <tbody>
-                {data.assignments.map((a) => (
-                  <React.Fragment key={a.id}>
-                    <tr>
-                      <td className="py-2 pr-2">{stockPlaceLabel(a)}</td>
-                      <td className="py-2 pr-2 text-right tabular-nums">{a.qty.toLocaleString()}</td>
-                      <td className="py-2 pr-2">{formatWorkDate(a.assigned_on)}</td>
-                      <td className="py-2 pr-2 break-all">{a.note ?? "－"}</td>
-                      {canEdit && (
-                        <td className="py-2 text-right">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={remove.isPending}
-                            onClick={() => handleDelete(a.id)}
-                          >
-                            取り消す
-                          </Button>
+                {data.assignments.map((a) => {
+                  const pending = isAssignmentPending(a, data.computed_at)
+                  return (
+                    <React.Fragment key={a.id}>
+                      <tr>
+                        <td className="py-2 pr-2">{stockPlaceLabel(a)}</td>
+                        <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">
+                          {a.qty.toLocaleString()}
                         </td>
-                      )}
-                    </tr>
-                    <tr className="border-b last:border-0">
-                      <td colSpan={canEdit ? 5 : 4} className="pb-2">
-                        <p className="mb-0.5 text-xs text-muted-foreground">引き当て元（日報の明細）</p>
-                        <SourceEntries entries={a.sources} empty="次の集計で表示されます" />
-                      </td>
-                    </tr>
-                  </React.Fragment>
-                ))}
+                        <td className="whitespace-nowrap py-2 pr-2">
+                          <Badge
+                            className={
+                              pending
+                                ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
+                                : "bg-green-100 text-green-800 hover:bg-green-100"
+                            }
+                          >
+                            {pending ? "反映待ち" : "反映済み"}
+                          </Badge>
+                        </td>
+                        {canEdit && (
+                          <td className="py-2 text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={remove.isPending}
+                              onClick={() => handleDelete(a.id)}
+                            >
+                              取り消す
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                      <tr className="border-b last:border-0">
+                        <td colSpan={canEdit ? 4 : 3} className="space-y-1 pb-2">
+                          {/* 列を増やすと受注詳細の狭い列で折り返すので、引き当てた日とメモは2行目に置く */}
+                          <p className="break-words text-xs text-muted-foreground">
+                            {formatWorkDate(a.assigned_on)} に引き当て
+                            {a.note ? <span className="text-foreground">・{a.note}</span> : null}
+                          </p>
+                          {pending ? (
+                            // 前回の集計の内訳は登録し直す前のものなので出さない
+                            <p className="text-xs text-muted-foreground">
+                              次の集計（10〜15分ごと）で工程の進捗に反映されます
+                            </p>
+                          ) : (
+                            <>
+                              <p className="mb-0.5 text-xs text-muted-foreground">引き当て元（日報の明細）</p>
+                              <SourceEntries
+                                entries={a.sources}
+                                empty="充てられる未割当の日報の明細はありませんでした"
+                              />
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
             </table>
           )}
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none">引き当てが要るとき</summary>
+            <p className="mt-1">
+              日報の実績は、受注日より後に作った分だけが、受注の顧客の受注に付きます。受注日より前に{STOCK_LABEL}した分や、
+              日報の顧客先が違う分は付かないので、ここで引き当てると工程の進捗に反映されます。
+            </p>
+          </details>
         </div>
       )}
 
@@ -495,5 +569,33 @@ function ComparisonRow({ label, from, to }: { label: string; from: string; to: s
       <td className="break-words py-1.5 pr-2">{from}</td>
       <td className="break-words py-1.5">{to}</td>
     </tr>
+  )
+}
+
+/**
+ * 工程の進捗カードの下に出す案内 (Issue #673)。日報の実績が付いていない工程があり、その製品に引き当てられるもの
+ * （作り置きの推定か未割当の日報）があるときだけ出し、引き当てのカード（`targetId`）へスクロールさせる。
+ * 進捗・引き当ては受注詳細の各カードと同じクエリキーなので、追加のリクエストは増えない
+ */
+export function StockAssignmentHint({ orderId, targetId }: { orderId: number; targetId: string }) {
+  const { data: progress } = useOrderProgress(orderId)
+  const { data: stock } = useOrderStockAssignments(orderId)
+  if (!shouldShowStockHint(progress, stock)) return null
+
+  return (
+    <div className="mt-4 space-y-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+      <p>
+        日報の実績が付いていない工程があります。{STOCK_LABEL}から出した場合は、「{STOCK_LABEL}からの引き当て」で充てると進捗に反映されます。
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() =>
+          document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+      >
+        {STOCK_LABEL}からの引き当てへ
+      </Button>
+    </div>
   )
 }

@@ -2,6 +2,7 @@
 
 import { format } from "date-fns"
 import { ja } from "date-fns/locale"
+import { StockAssignmentHint } from "@/components/orders/order-stock-assignments"
 import { Badge } from "@/components/ui/badge"
 import { useOrderProgress } from "@/hooks/use-daily-report-progress"
 import {
@@ -22,7 +23,17 @@ const STATUS_BADGE_CLASS: Record<ProcessProgress["status"], string> = {
  * 受注詳細の工程ごとの進捗（日報の実績から算出、Issue #491）。
  * 割り付けの対象（確定済み・生産中）の受注でだけ描画する想定（呼び出し側で出し分ける）。
  */
-export function OrderProcessProgress({ orderId }: { orderId: number }) {
+export function OrderProcessProgress({
+  orderId,
+  stockHintTargetId,
+}: {
+  orderId: number
+  /**
+   * 作り置きの引き当てのカードの要素の id。渡すと、実績の付いていない工程があり引き当てられるものがあるときに
+   * そのカードへの案内を出す（Issue #673）
+   */
+  stockHintTargetId?: string
+}) {
   const { data, isLoading, isError } = useOrderProgress(orderId)
   const now = new Date()
 
@@ -86,6 +97,7 @@ export function OrderProcessProgress({ orderId }: { orderId: number }) {
           </tbody>
         </table>
       )}
+      {stockHintTargetId && <StockAssignmentHint orderId={orderId} targetId={stockHintTargetId} />}
     </div>
   )
 }

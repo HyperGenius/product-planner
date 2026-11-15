@@ -272,7 +272,9 @@ cd backend && ruff check . && mypy .
     見出しに件数を出して隠れた分に気づけるようにする。折り返す説明文には `min-h-*` を付ける
   - **引き当てのダイアログ（Issue #673）**: 工程は工程×数量の表で選び、引き当て元（日報の表記）と引き当て先（マスタ・受注）を横に並べる。
     名称の一致は自動で判定しない。未割当の合計は明細（30件で打ち切り）を足し上げず API の `candidate_totals` を使う。ダイアログが
-    工程の進捗（`GET /orders/:orderId/progress`）も読むので、描画するテストは MSW の既定ハンドラに依存する
+    工程の進捗（`GET /orders/:orderId/progress`）も読むので、描画するテストは MSW の既定ハンドラに依存する。カードの引き当ての
+    「反映待ち」は `updated_at > computed_at`（`isAssignmentPending()`）で、反映待ちの間は前回の内訳を出さない。仕組みの説明は
+    タブレットで開けるよう `<details>` に置き、ツールチップにしない
   - **Radix の `Dialog` の中身の DOM にマウント時に触れるとき**: ポータルは最初の描画の後に中身を DOM へ入れるので、ダイアログの
     フォームの `useEffect(..., [])` では `ref.current` が null。コールバック ref（`useCallback(node => ..., [])`）で要素が付いた時点に動かす。
     スクロール枠の中の行を見せるときは `scrollIntoView` ではなく枠の `scrollTop` を動かす（ダイアログ本体までスクロールする）。

@@ -1,7 +1,8 @@
 import { formatWorkDate } from "@/lib/daily-report-name-utils"
-import type { ProcessProgress } from "@/types/daily-report-progress"
+import type { OrderProgress, ProcessProgress } from "@/types/daily-report-progress"
 import type {
   OrderStockAssignments,
+  StockAssignment,
   StockAssignmentInput,
   StockEstimate,
   StockEstimates,
@@ -297,4 +298,41 @@ export function toStockAssignmentInput(
     return { error: `数は受注数量（${orderQuantity.toLocaleString()}）以下にしてください` }
   }
   return { input: { process_name: processName, qty, note: form.note.trim() || null } }
+}
+
+/**
+ * 引き当てが集計にまだ反映されていないか (Issue #673)。登録・上書きの後、割り付けの最終計算日時より後に
+ * 書いた引き当ては次の集計（cron）まで進捗に効かない。一度も計算していなければ反映待ち
+ */
+export function isAssignmentPending(
+  assignment: Pick<StockAssignment, "updated_at">,
+  computedAt: string | null,
+): boolean {
+  if (!computedAt) return true
+  return new Date(assignment.updated_at).getTime() > new Date(computedAt).getTime()
+}
+
+/**
+ * 工程の進捗カードに「作り置きから引き当てられるかも」の案内を出すか (Issue #673)。
+ * 日報の実績が付いていない工程があり、引き当てられる受注で、その製品に引き当てられるもの（推定か未割当の日報）が
+ * あるときだけ。反映待ちの引き当てがあるときは、登録済みなので出さない
+ */
+export function shouldShowStockHint(
+  progress: Pick<OrderProgress, "computed_at" | "processes"> | undefined,
+  stock:
+    | Pick<
+        OrderStockAssignments,
+        | "computed_at"
+        | "assignable"
+        | "process_names"
+        | "stock_estimates"
+        | "candidate_totals"
+        | "assignments"
+      >
+    | undefined,
+): boolean {
+  if (!progress?.computed_at || !stock?.assignable) return false
+  if (!progress.processes.some((p) => p.status === "not_started")) return false
+  if (stock.assignments.some((a) => isAssignmentPending(a, stock.computed_at))) return false
+  return stockProcessRows(stock, progress.processes).some((row) => row.hasStock)
 }

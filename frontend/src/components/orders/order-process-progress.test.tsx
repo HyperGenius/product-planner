@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { http, HttpResponse } from "msw"
-import { render, screen, within } from "@/test-utils/render"
+import { fireEvent, render, screen, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import type { OrderProgress, ProcessProgress } from "@/types/daily-report-progress"
+import type { OrderStockAssignments } from "@/types/daily-report-stock"
 import { OrderProcessProgress } from "./order-process-progress"
 
 const ORDER_ID = 1000001
@@ -116,5 +117,117 @@ describe("OrderProcessProgress", () => {
     )
     render(<OrderProcessProgress orderId={ORDER_ID} />)
     expect(await screen.findByText("工程の進捗を取得できませんでした")).toBeInTheDocument()
+  })
+
+  describe("作り置きの引き当ての案内（Issue #673）", () => {
+    const STOCK: OrderStockAssignments = {
+      computed_at: "2026-09-12T02:00:00Z",
+      assignable: true,
+      product_name: "テスト製品",
+      product_code: null,
+      process_names: ["プレス", "検査"],
+      stock_estimates: [
+        { process_name: "プレス", next_process_name: "検査", qty: 40, last_movement_date: null },
+      ],
+      assignments: [],
+      candidates: {},
+      candidate_totals: {},
+    }
+    const NOT_STARTED: OrderProgress = {
+      order_id: ORDER_ID,
+      computed_at: "2026-09-12T02:00:00Z",
+      processes: [
+        progress({ process_routing_id: 11, sequence_order: 1, process_name: "プレス" }),
+        progress({ process_routing_id: 12, sequence_order: 2, process_name: "検査" }),
+      ],
+    }
+    const HINT = /日報の実績が付いていない工程があります/
+
+    function respondStock(body: OrderStockAssignments) {
+      const state = { fetched: false }
+      server.use(
+        http.get(`${API_BASE}/daily-reports/orders/${ORDER_ID}/stock-assignments`, () => {
+          state.fetched = true
+          return HttpResponse.json(body)
+        }),
+      )
+      return state
+    }
+
+    it("実績の付いていない工程があり引き当てられるものがあれば、引き当てのカードへ案内する", async () => {
+      respond(NOT_STARTED)
+      respondStock(STOCK)
+      const target = document.createElement("div")
+      target.id = "stock-target"
+      target.scrollIntoView = vi.fn()
+      document.body.appendChild(target)
+      try {
+        render(<OrderProcessProgress orderId={ORDER_ID} stockHintTargetId="stock-target" />)
+
+        expect(await screen.findByText(HINT)).toBeInTheDocument()
+        fireEvent.click(screen.getByRole("button", { name: "作り置きからの引き当てへ" }))
+        expect(target.scrollIntoView).toHaveBeenCalled()
+      } finally {
+        target.remove()
+      }
+    })
+
+    it.each<[string, OrderProgress, OrderStockAssignments]>([
+      [
+        "すべての工程に実績がある",
+        {
+          ...NOT_STARTED,
+          processes: NOT_STARTED.processes.map((p) => ({ ...p, status: "completed" as const })),
+        },
+        STOCK,
+      ],
+      ["引き当てられるものが無い", NOT_STARTED, { ...STOCK, stock_estimates: [] }],
+      [
+        "反映待ちの引き当てがある",
+        NOT_STARTED,
+        {
+          ...STOCK,
+          assignments: [
+            {
+              id: "a-1",
+              order_id: ORDER_ID,
+              process_name: "プレス",
+              qty: 40,
+              assigned_on: "2026-09-12",
+              note: null,
+              updated_by: "u",
+              updated_at: "2026-09-12T02:30:00Z",
+              sources: [],
+            },
+          ],
+        },
+      ],
+    ])("%s ときは案内しない", async (_label, progressBody, stock) => {
+      respond(progressBody)
+      const state = respondStock(stock)
+      render(<OrderProcessProgress orderId={ORDER_ID} stockHintTargetId="stock-target" />)
+
+      expect(await screen.findByText("プレス")).toBeInTheDocument()
+      // 引き当ての取得を待ってから、案内が無いことを確かめる
+      await waitFor(() => expect(state.fetched).toBe(true))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(screen.queryByText(HINT)).toBeNull()
+    })
+
+    it("案内の先を渡さなければ引き当てを取得しない（他の画面で使うとき）", async () => {
+      respond(NOT_STARTED)
+      let fetched = false
+      server.use(
+        http.get(`${API_BASE}/daily-reports/orders/${ORDER_ID}/stock-assignments`, () => {
+          fetched = true
+          return HttpResponse.json(STOCK)
+        }),
+      )
+      render(<OrderProcessProgress orderId={ORDER_ID} />)
+
+      expect(await screen.findByText("プレス")).toBeInTheDocument()
+      expect(fetched).toBe(false)
+      expect(screen.queryByText(HINT)).toBeNull()
+    })
   })
 })
