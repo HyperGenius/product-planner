@@ -1,4 +1,5 @@
 import { formatWorkDate } from "@/lib/daily-report-name-utils"
+import type { ProcessProgress } from "@/types/daily-report-progress"
 import type {
   OrderStockAssignments,
   StockAssignmentInput,
@@ -7,6 +8,7 @@ import type {
   StockFeedback,
   StockFeedbackInput,
   StockFeedbackKind,
+  StockSourceEntry,
 } from "@/types/daily-report-stock"
 
 /**
@@ -132,20 +134,151 @@ export interface StockAssignmentForm {
   note: string
 }
 
+/** 引き当てのダイアログが使う受注の作り置き・未割当の情報（Issue #673） */
+export type StockAssignmentBasis = Pick<OrderStockAssignments, "stock_estimates"> &
+  Partial<Pick<OrderStockAssignments, "process_names" | "candidate_totals" | "assignments">>
+
 /**
- * 引き当ての初期値。推定の出ている工程のうち工程ルートで最も後の工程（最も先まで済んだ作り置き）を選び、
- * 数は min(推定数, 受注数量)。推定が無ければ空欄にして選ばせる。
+ * 工程を選んだときの数の初期値 (Issue #673)。登録済みの引き当てがあればその数、無ければ
+ * min(作り置きの推定 か 未割当の日報の合計, 受注数量)。どちらも無ければ空欄
+ */
+export function suggestedStockQty(
+  data: StockAssignmentBasis,
+  processName: string,
+  orderQuantity: number,
+): string {
+  if (!processName) return ""
+  const existing = data.assignments?.find((a) => a.process_name === processName)
+  if (existing) return String(existing.qty)
+  const estimate = data.stock_estimates.find((e) => e.process_name === processName)?.qty ?? 0
+  const basis = estimate > 0 ? estimate : (data.candidate_totals?.[processName]?.qty ?? 0)
+  return basis > 0 ? String(Math.min(basis, orderQuantity)) : ""
+}
+
+/**
+ * 引き当ての初期値。推定の出ている工程のうち工程ルートで最も後の工程（最も先まで済んだ作り置き）を選ぶ。
+ * 推定が無ければ、未割当の日報のある工程のうち工程ルートで最も後の工程（日報の顧客先の誤記の分）。
+ * どちらも無ければ空欄にして選ばせる。数は `suggestedStockQty()`
  */
 export function initialStockAssignmentForm(
-  data: Pick<OrderStockAssignments, "stock_estimates">,
+  data: StockAssignmentBasis,
   orderQuantity: number,
 ): StockAssignmentForm {
   const estimate = data.stock_estimates.filter((e) => e.qty > 0).at(-1)
-  return {
-    processName: estimate?.process_name ?? "",
-    qty: estimate ? String(Math.min(estimate.qty, orderQuantity)) : "",
-    note: "",
+  const withCandidates = (data.process_names ?? []).filter(
+    (name) => (data.candidate_totals?.[name]?.qty ?? 0) > 0,
+  )
+  const processName = estimate?.process_name ?? withCandidates.at(-1) ?? ""
+  return { processName, qty: suggestedStockQty(data, processName, orderQuantity), note: "" }
+}
+
+/** 工程を選ぶ表の1行 (Issue #673) */
+export interface StockProcessRow {
+  processName: string
+  /** 工程ルートで次の工程。null は最後の工程 */
+  nextProcessName: string | null
+  /** 作り置きの推定。推定が無ければ null */
+  estimateQty: number | null
+  /** 未割当の日報の件数・合計（全件） */
+  candidateCount: number
+  candidateQty: number
+  /** この受注の実績（良品数）。進捗が無ければ null */
+  actualQty: number | null
+  /** この工程の登録済みの引き当て。無ければ null */
+  assignedQty: number | null
+  /** 引き当てられるもの（推定か未割当の日報）があるか */
+  hasStock: boolean
+}
+
+/** 工程ルートの順に全工程の行を作る。実績は同じ工程名の進捗の良品数の最大 */
+export function stockProcessRows(
+  data: Pick<
+    OrderStockAssignments,
+    "process_names" | "stock_estimates" | "candidate_totals" | "assignments"
+  >,
+  progress: readonly Pick<ProcessProgress, "process_name" | "good_qty">[] | undefined,
+): StockProcessRow[] {
+  return data.process_names.map((processName, i) => {
+    const estimateQty =
+      data.stock_estimates.find((e) => e.process_name === processName)?.qty ?? null
+    const total = data.candidate_totals?.[processName]
+    const actuals = (progress ?? [])
+      .filter((p) => p.process_name === processName)
+      .map((p) => p.good_qty)
+    const candidateQty = total?.qty ?? 0
+    return {
+      processName,
+      nextProcessName: data.process_names[i + 1] ?? null,
+      estimateQty,
+      candidateCount: total?.count ?? 0,
+      candidateQty,
+      actualQty: actuals.length > 0 ? Math.max(...actuals) : null,
+      assignedQty: data.assignments.find((a) => a.process_name === processName)?.qty ?? null,
+      hasStock: (estimateQty ?? 0) > 0 || candidateQty > 0,
+    }
+  })
+}
+
+/** 引き当てる数を、明細（加工日の新しい順）に新しい順で割り振った見込み。数が不正なら全て0 */
+export function plannedSourceUsage(
+  entries: readonly Pick<StockSourceEntry, "qty">[],
+  qtyText: string,
+): number[] {
+  let rest = /^\d+$/.test(qtyText.trim()) ? Number(qtyText.trim()) : 0
+  return entries.map((e) => {
+    const used = Math.min(e.qty, rest)
+    rest -= used
+    return used
+  })
+}
+
+/** 明細の表記（日報の商品名・顧客先）を、重複と空欄を除いて出てきた順に並べる */
+export function distinctRawValues(
+  entries: readonly StockSourceEntry[],
+  key: "product_raw" | "customer_raw",
+): string[] {
+  const values = entries.map((e) => e[key]?.trim()).filter((v): v is string => !!v)
+  return [...new Set(values)]
+}
+
+/**
+ * 登録を妨げない注意 (Issue #673)。数が未割当の合計を超える・日報の顧客先が受注の顧客と違う・
+ * 登録済みを上書きする、の3つ。顧客は日報の顧客先を照合した顧客で比べる（照合できない明細は比べない）
+ */
+export function stockAssignmentWarnings({
+  qtyText,
+  candidateQty,
+  usedEntries,
+  orderCustomerId,
+  existingQty,
+}: {
+  qtyText: string
+  candidateQty: number
+  usedEntries: readonly Pick<StockSourceEntry, "customer_id">[]
+  orderCustomerId: number | null
+  existingQty: number | null
+}): string[] {
+  const warnings: string[] = []
+  const qty = /^\d+$/.test(qtyText.trim()) ? Number(qtyText.trim()) : 0
+  if (qty > 0 && qty > candidateQty) {
+    warnings.push(
+      candidateQty === 0
+        ? `この工程に未割当の日報はありません。日報が取り込まれるまで、集計では${STOCK_LABEL}を充てられません`
+        : `未割当の日報は合計 ${candidateQty.toLocaleString()} 個です。集計で充てられるのは ${candidateQty.toLocaleString()} 個までです`,
+    )
   }
+  if (
+    orderCustomerId !== null &&
+    usedEntries.some((e) => e.customer_id != null && e.customer_id !== orderCustomerId)
+  ) {
+    warnings.push(
+      "日報の顧客先が受注の顧客と違う明細があります。顧客先の誤記なら、このまま引き当ててかまいません",
+    )
+  }
+  if (existingQty !== null) {
+    warnings.push(`登録済みの引き当て（${existingQty.toLocaleString()} 個）を上書きします`)
+  }
+  return warnings
 }
 
 /** フォームの値を API の入力にする。入力に誤りがあればその理由を返す */

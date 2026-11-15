@@ -52,6 +52,7 @@ import { useCustomers } from "@/hooks/use-customers"
 import {
   getOrderProductName,
   getCustomerName,
+  getCustomerDisplayName,
   getStatusLabel,
   getStatusBadgeClass,
   formatDeadlineDate,
@@ -386,7 +387,14 @@ export default function OrderDetailPage() {
             <>
               <OrderProcessProgress orderId={order.id} />
               {/* 作り置きからの引き当て（Issue #624） */}
-              <OrderStockAssignments orderId={order.id} orderQuantity={order.quantity ?? 0} />
+              <OrderStockAssignments
+                orderId={order.id}
+                orderQuantity={order.quantity ?? 0}
+                orderCustomerId={order.customer_id ?? null}
+                orderCustomerLabel={
+                  order.customer_id ? getCustomerDisplayName(order.customer_id, customers) : null
+                }
+              />
             </>
           )}
 

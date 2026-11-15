@@ -195,6 +195,7 @@ class TestDailyReportStockAssignmentRouter:
             {
                 "id": 1,
                 "entry_id": 1,
+                "customer_id": 5,
                 "process_name": "カシメ",
                 "work_date": "2026-10-01",
                 "qty": 7,
@@ -213,6 +214,9 @@ class TestDailyReportStockAssignmentRouter:
         assert response.status_code == 200
         body = response.json()
         assert len(body["candidates"]["クグシ"]) == 30
+        # 日報の顧客先を照合した顧客（受注の顧客との違いを画面で注意する。Issue #673）
+        assert body["candidates"]["カシメ"][0]["customer_id"] == 5
+        assert body["candidates"]["クグシ"][0]["customer_id"] is None
         assert body["candidate_totals"] == {
             "クグシ": {"count": 31, "qty": 310},
             "カシメ": {"count": 1, "qty": 7},

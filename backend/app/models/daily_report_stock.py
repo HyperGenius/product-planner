@@ -93,6 +93,8 @@ class StockSourceEntryResponse(BaseModel):
     product_raw: str | None
     customer_raw: str | None
     equipment_raw: str | None
+    # 日報の顧客先を照合した顧客（候補だけ。照合できない・充当した明細では None。Issue #673）
+    customer_id: int | None = None
     # 充てた数（候補では未割当に残っている数）
     qty: int
 
