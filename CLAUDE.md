@@ -270,6 +270,13 @@ cd backend && ruff check . && mypy .
   - **工程などで中身が切り替わるダイアログ（Issue #633）**: 切り替えで件数が変わるリスト（引き当て元の候補）は、`DialogContent` が
     中央寄せのため高さの変化で上下とも動く。リストは固定高＋`overflow-y-auto` の枠に入れ、0件でも枠を消さずに空表示を枠内に出す。
     見出しに件数を出して隠れた分に気づけるようにする。折り返す説明文には `min-h-*` を付ける
+  - **引き当てのダイアログ（Issue #673）**: 工程は工程×数量の表で選び、引き当て元（日報の表記）と引き当て先（マスタ・受注）を横に並べる。
+    名称の一致は自動で判定しない。未割当の合計は明細（30件で打ち切り）を足し上げず API の `candidate_totals` を使う。ダイアログが
+    工程の進捗（`GET /orders/:orderId/progress`）も読むので、描画するテストは MSW の既定ハンドラに依存する
+  - **Radix の `Dialog` の中身の DOM にマウント時に触れるとき**: ポータルは最初の描画の後に中身を DOM へ入れるので、ダイアログの
+    フォームの `useEffect(..., [])` では `ref.current` が null。コールバック ref（`useCallback(node => ..., [])`）で要素が付いた時点に動かす。
+    スクロール枠の中の行を見せるときは `scrollIntoView` ではなく枠の `scrollTop` を動かす（ダイアログ本体までスクロールする）。
+    登録前の注意は本文のスクロールの外（ボタンの上）に置き、`DialogContent` は `flex max-h-[85dvh] flex-col` ＋本文 `min-h-0 flex-1 overflow-y-auto`
   - **送品日時 `orders.shipped_at`** は `status` が `shipped` / `completed` になったときにトリガー `trg_set_order_shipped_at` が書く。
     送品の経路を足してもアプリから書かない
   - **`merge_products` の最新の定義は `20261029000000_add_daily_report_stock_estimates.sql`**（作り置きの指摘の付け替えを追加）。
