@@ -666,6 +666,10 @@ CHECK 制約・型定義・RPC の変更は無い。
   開始が終了より後なら不明（NULL）
 - 数量は0（内示なし）も残す。負の値・読めない値は NULL（数量不明）
 - 顧客不明（#521）の注文書の内示も `customer_id` NULL で残す
+- **抽出の出力の上限は 16000**（`EXTRACTION_MAX_TOKENS`、メール本文も同じ）。Claude Sonnet 5 は `thinking` を省略すると
+  adaptive で思考し、思考も `max_tokens` に数えられる。内示の期間を足した後、月次の注文一覧表で思考だけで 4096 を使い切り
+  （本文の出力0文字、`stop_reason=max_tokens`）、試し読みが「明細なし」になった。上限で切れたときは警告をログに残す
+  （テキストPDFは空の結果のままメール本文の読み直しに回るので、ログが無いと気づけない）
 
 **`order_forecasts`**（`20261110000000_add_order_forecasts.sql`）
 

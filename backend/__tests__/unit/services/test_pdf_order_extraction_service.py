@@ -252,3 +252,39 @@ class TestForecastPeriodExtraction:
         assert {"forecast_period_start", "forecast_period_end"} <= set(
             line_schema["required"]
         )
+
+
+@pytest.mark.unit
+class TestTextPdfMaxTokens:
+    """思考だけで 4096 を使い切り、JSON が出ないことがあった（Issue #676）。"""
+
+    def test_uses_extraction_max_tokens(self):
+        from app.services.pdf_order_extraction_service import (
+            EXTRACTION_MAX_TOKENS,
+            extract_order_lines,
+        )
+
+        with patch("app.services.pdf_order_extraction_service._client") as mock_client:
+            mock_client.messages.create.return_value = _response(
+                {"document_order_no": None, "line_items": []}
+            )
+            extract_order_lines("注文一覧表")
+
+        assert EXTRACTION_MAX_TOKENS == 16000
+        assert mock_client.messages.create.call_args.kwargs["max_tokens"] == 16000
+
+    def test_truncated_output_returns_empty_and_logs(self):
+        from app.services.pdf_order_extraction_service import extract_order_lines
+
+        with (
+            patch("app.services.pdf_order_extraction_service._client") as mock_client,
+            patch("app.services.pdf_order_extraction_service.logger") as mock_logger,
+        ):
+            mock_client.messages.create.return_value = SimpleNamespace(
+                stop_reason="max_tokens", content=[]
+            )
+            result = extract_order_lines("注文一覧表")
+
+        assert result["line_items"] == []
+        mock_logger.warning.assert_called_once()
+        assert "max_tokens" in mock_logger.warning.call_args.args[0]

@@ -330,6 +330,11 @@ cd backend && ruff check . && mypy .
   `forecast_period_start` / `forecast_period_end`（`order_forecast_service.FORECAST_PERIOD_PROPERTIES`。PDF とメール本文で共有し、
   strict な構造化出力なので `required` にも入れる）。古い注文書の内示は前回比のために残す。製品・顧客の FK は ON DELETE SET NULL で、
   統合 RPC の付け替え対象に入れていない。詳細は [docs/features/pdf-order-parsing.md](docs/features/pdf-order-parsing.md#内示は受注にせず記録するissue-676)
+  - **抽出の `max_tokens` は思考も含む**: 抽出のモデル（Claude Sonnet 5 等）は `thinking` を省略すると adaptive で思考し、
+    思考のトークンも `max_tokens` に数えられる。スキーマの項目や指示を足すと思考が増え、4096 では JSON が1文字も出ずに
+    空の結果（＝「明細なし」）になった。上限は `EXTRACTION_MAX_TOKENS`（16000）にそろえ、`stop_reason` が `max_tokens` /
+    `refusal` なら警告をログに残す。プロンプト・スキーマを変えたら、実際の注文書で `usage.output_tokens_details.thinking_tokens`
+    と `stop_reason` を見る（単体テストのモックでは気づけない）
 - **社内転送者と顧客不明（Issue #521）**: `tenant_internal_senders` に登録したアドレス（社長など）からのメールは、
   差出人での顧客の突合・下書き顧客の作成をせず、本文の候補でも決まらなければ**ステージング行・受注の
   `customer_id` を NULL（顧客不明）にする**。テナント共通の「顧客不明」レコードは作らない（重複判定の UNIQUE に

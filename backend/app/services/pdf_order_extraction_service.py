@@ -16,6 +16,11 @@ logger = get_logger(__name__)
 
 _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
+# 出力の上限。思考（adaptive thinking）も上限に数えられ、明細の多い注文書では思考だけで
+# 4096 を使い切って JSON が1文字も出ないことがあった（Issue #676、内示の期間を足した後に
+# 月次の注文一覧表で発生）。ストリーミングしない要求の推奨値に揃える
+EXTRACTION_MAX_TOKENS = 16000
+
 # 構造化出力（output_config.format）用の JSON Schema。
 # 以前は強制ツール呼び出し（tool_choice={"type": "tool"}）で JSON を整形していたが、
 # 純粋な抽出用途なので構造化出力へ移行した（Issue #420）。
@@ -189,7 +194,7 @@ def extract_order_lines(
 
     response = _client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=EXTRACTION_MAX_TOKENS,
         output_config={
             "format": {
                 "type": "json_schema",
@@ -198,6 +203,13 @@ def extract_order_lines(
         },
         messages=[{"role": "user", "content": prompt}],
     )
+    if response.stop_reason in ("refusal", "max_tokens"):
+        # 空の結果になり、取り込みはメール本文からの読み直しに回る。黙って起きると
+        # 原因に気づけないので残す
+        logger.warning(
+            "pdf_order_extraction: text PDF extraction stopped "
+            f"(stop_reason={response.stop_reason})"
+        )
     return _normalize_result(_parse_response(response))
 
 
@@ -281,7 +293,7 @@ def extract_order_lines_from_pdf(
     try:
         response = _client.messages.create(
             model=model,
-            max_tokens=16000,
+            max_tokens=EXTRACTION_MAX_TOKENS,
             output_config={
                 "format": {
                     "type": "json_schema",
