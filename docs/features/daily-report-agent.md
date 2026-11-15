@@ -794,6 +794,9 @@ DB から切り離した純粋関数 `estimate_stock()`。割り付けと同じ�
 - **引き当て元の候補**（登録前・ダイアログ）: その製品の未割当の日報の明細（`daily_report_unallocated_actuals` を工程ごとに
   加工日の新しい順で最大30件）。日報に書かれた表記（`product_raw` / `customer_raw` / `equipment_raw`）と加工日・数を出す。
   マスタ側は同じ製品だが、日報の商品名の別名・顧客先の誤記を目で確かめられる
+- **引き当て元の候補の合計**（`candidate_totals`、Issue #673）: 工程ごとの未割当の明細の件数と数の合計。明細は30件で打ち切るので、
+  画面で明細を足し上げず必ずこれを使う。未割当は `fetch_all_rows()` でページングして全件読み（PostgREST の `max_rows` で切られない）、
+  合計は全件から、明細は工程ごとに先頭30件だけ返す（`summarize_candidates()`）
 - **充当した明細**（登録後・一覧）: 再計算で `StockAssignmentSource`（受注・工程・明細・加工日・数）を求め、RPC
   `replace_daily_report_allocation` の `p_stock_sources` で `daily_report_stock_assignment_sources` に**テナント単位で置き換える**。
   API は現存する引き当ての (受注, 工程) に合う行だけを `assignments[].sources` に付ける。登録し直し・取り消しの後は次の再計算まで
@@ -808,7 +811,7 @@ RLS は作り置きの指摘と同じ（参照はテナントメンバー、INSE
 
 ### API（`routers/daily_reports/stock_assignments.py`、ユーザー JWT）
 
-- `GET /daily-reports/orders/{order_id}/stock-assignments`: `{computed_at, assignable, process_names, stock_estimates, assignments}`。
+- `GET /daily-reports/orders/{order_id}/stock-assignments`: `{computed_at, assignable, product_name, product_code, process_names, stock_estimates, assignments, candidates, candidate_totals}`。
   `assignable` は確定済み・生産中の、製品のある生産の受注か。`process_names` は製品の工程ルートの順、`stock_estimates` はその製品の
   作り置きの推定（工程ルートの順）。受注が無ければ 404
 - `PUT /daily-reports/orders/{order_id}/stock-assignments`: `{process_name, qty, note?}` で登録・上書き。`assigned_on` は登録した日
