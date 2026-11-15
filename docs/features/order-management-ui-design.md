@@ -15,6 +15,24 @@
 
 ---
 
+## 一覧の画面の外枠とスクロール（Issue #671）
+
+一覧が中心の画面は、ページを画面の高さに収めて**表の中だけ**をスクロールさせる。見出し・案内・タブ・絞り込みは常に画面内に残る。
+
+| 部品 | 役割 |
+|---|---|
+| `components/layout/list-page-layout.tsx`（`ListPageLayout`） | 見出し（タイトル・説明・右の操作）と本文の縦 flex。高さ `h-[calc(100dvh-6.75rem)]`（レイアウトのヘッダー 3.75rem ＋ 上下の余白 3rem を引いた値）をここ1か所に持つ |
+| `components/scroll-table.tsx`（`ScrollTable`） | 枠・スクロール・見出しの行の固定・読み込み中／エラー／0件の表示。既定は親の縦 flex の残りの高さ（`min-h-64 flex-1`）を使う |
+| `components/orders/orders-table.tsx`（`OrdersTable`） | 注文の表。枠は `ScrollTable`。`fill` を付けると `ListPageLayout` の残りの高さを使い、付けない画面は従来の `max-h-[calc(100vh-20rem)]` |
+
+- `ScrollTable` は shadcn の `Table` ではなく素の `<table>` で組む（shadcn の `Table` は内側に `overflow-auto` の div を挟むので、見出しの `sticky` が外側の枠に対して効かない。#671 以前の `OrdersTable` は見出しが固定されていなかった）。`TableHeader` / `TableRow` / `TableCell` はそのまま使える。見出しの下線は `border-collapse` だと行と一緒にスクロールするので影で引く
+- `ListPageLayout` を使う画面では `container mx-auto py-6 px-4` を付けない（余白はレイアウト `authenticated-layout.tsx` が持つ。二重に付けると高さの計算がずれる）
+- `Tabs` で一覧を切り替えるときは、`Tabs` に `min-h-0 flex-1`、`TabsContent` に `flex min-h-0 flex-col` を付ける（無いと flex の子が内容の高さまで伸びてページが動く）
+- 縦が低い画面（タブレットの縦向き等）で表の領域が 16rem を下回るときは、はみ出した分だけページ側がスクロールする。タブレット用に部品を分けない
+- 適用済み: 送品の消し込み・弥生の名寄せ。日報の名寄せ（#643）・生産スケジュール（#578）は同じ高さの計算を各画面に書いている。すべての注文・起票の確認・承認は `OrdersTable` の `fill` 無し。触るときに移す
+
+---
+
 ## 現状の課題
 
 | 課題 | 詳細 |
