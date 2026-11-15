@@ -6,9 +6,11 @@ import pytest
 from app.services.email_extraction_service import extract_email_order_lines
 
 
-def _response(payload):
+def _response(payload, stop_reason="end_turn"):
+    text = payload if isinstance(payload, str) else json.dumps(payload)
     return SimpleNamespace(
-        content=[SimpleNamespace(type="text", text=json.dumps(payload))]
+        stop_reason=stop_reason,
+        content=[SimpleNamespace(type="text", text=text)],
     )
 
 
@@ -69,3 +71,28 @@ class TestForecastPeriod:
         )
         assert set(line_schema["required"]) == set(line_schema["properties"])
         assert "forecast_period_start" in kwargs["messages"][0]["content"]
+
+
+@pytest.mark.unit
+class TestMaxTokens:
+    """思考も出力の上限に数えられるので、明細の多いメールで切れない上限にする（Issue #676）。"""
+
+    def test_uses_extraction_max_tokens(self):
+        _, kwargs = _extract(
+            {"document_order_no": None, "email_intent": "new_order", "line_items": []}
+        )
+        assert kwargs["max_tokens"] == 16000
+
+    def test_truncated_output_returns_empty_and_logs(self):
+        with (
+            patch("app.services.email_extraction_service._client") as client,
+            patch("app.services.email_extraction_service.logger") as logger,
+        ):
+            client.messages.create.return_value = _response(
+                '{"line_items": [', stop_reason="max_tokens"
+            )
+            result = extract_email_order_lines("本文")
+
+        assert result["line_items"] == []
+        logger.warning.assert_called_once()
+        assert "max_tokens" in logger.warning.call_args.args[0]

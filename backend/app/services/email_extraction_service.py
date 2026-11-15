@@ -9,6 +9,13 @@ from app.services.order_forecast_service import (
     FORECAST_INSTRUCTION,
     FORECAST_PERIOD_PROPERTIES,
 )
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+# 出力の上限。明細の多いメール（品番ごとに複数月の内示が並ぶ表）では 1024 で JSON が途中で切れ、
+# 空の結果になりうる。PDF の抽出と同じくストリーミングしない要求の推奨値にする（Issue #676）
+_MAX_TOKENS = 16000
 
 _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -159,7 +166,7 @@ def extract_email_order_lines(
 
     response = _client.messages.create(
         model=model,
-        max_tokens=1024,
+        max_tokens=_MAX_TOKENS,
         output_config={
             "format": {
                 "type": "json_schema",
@@ -168,6 +175,10 @@ def extract_email_order_lines(
         },
         messages=[{"role": "user", "content": prompt}],
     )
+    if response.stop_reason in ("refusal", "max_tokens"):
+        logger.warning(
+            f"email_extraction: extraction stopped (stop_reason={response.stop_reason})"
+        )
     # output_config.format 指定時は最初の text ブロックに valid JSON が入るが、
     # モデル都合で非JSON／dict以外が返っても呼び出し側（dict/list 前提）が壊れないよう
     # 空結果へフォールバックする（旧・強制ツール呼び出し時の未検出フォールバックと同じ挙動）
