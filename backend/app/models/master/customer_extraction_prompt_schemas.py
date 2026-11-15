@@ -1,7 +1,7 @@
 # models/master/customer_extraction_prompt_schemas.py
 """顧客ごとの抽出指示の編集・試し読み API のスキーマ（Issue #602）。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -91,6 +91,11 @@ class PreviewLineItem(BaseModel):
     customer_order_no: str | None
     # 照合できなければ None（取り込みでは製品未照合の下書きになる）
     product: PreviewProduct | None
+    # 内示の明細（取り込みでは受注にせず内示として記録する。Issue #676）
+    is_forecast: bool
+    # 内示の期間（開始月・終了月の1日）。内示でない・読めなければ None
+    forecast_period_start: date | None
+    forecast_period_end: date | None
 
 
 class PreviewReading(BaseModel):

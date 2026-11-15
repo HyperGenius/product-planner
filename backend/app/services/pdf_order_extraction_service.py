@@ -6,6 +6,10 @@ from typing import Any
 
 import anthropic
 
+from app.services.order_forecast_service import (
+    FORECAST_INSTRUCTION,
+    FORECAST_PERIOD_PROPERTIES,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -89,6 +93,11 @@ _EXTRACT_SCHEMA: Any = {
     "required": ["document_order_no", "line_items", "order_type", "subject"],
     "additionalProperties": False,
 }
+# 内示の期間（Issue #676）。内示は受注にせず月単位の期間で保存する
+_LINE_ITEM_SCHEMA = _EXTRACT_SCHEMA["properties"]["line_items"]["items"]
+_LINE_ITEM_SCHEMA["properties"].update(copy.deepcopy(FORECAST_PERIOD_PROPERTIES))
+_LINE_ITEM_SCHEMA["required"].extend(FORECAST_PERIOD_PROPERTIES)
+
 # 注文書の種別と件名（Issue #493）。修理は製品マスタに当てはめず、件名と明細の内訳を
 # まとめて作業内容として1件の受注にする（pdf_order_parsing_service 側で分岐する）
 _EXTRACT_SCHEMA["properties"]["order_type"] = {
@@ -105,11 +114,12 @@ _EXTRACT_SCHEMA["properties"]["subject"] = {
     "description": "注文書の件名（「件名」「品名」欄の見出し等）。無い場合は null。",
 }
 
-# 種別・件名の抽出指示。テキストPDF・画像PDFのプロンプトに共通で付ける（Issue #493）
+# 種別・件名の抽出指示。テキストPDF・画像PDFのプロンプトに共通で付ける（Issue #493）。
+# 内示の期間の指示（Issue #676）も同じく両方に付ける
 _ORDER_TYPE_INSTRUCTION = (
     "あわせて、注文書の種別(order_type)と件名(subject)を返してください。"
     "件名・品名に修理・補修・メンテナンス・洗浄などの作業依頼が書かれ、製品の生産ではない注文は"
-    " repair、それ以外は production とします。"
+    " repair、それ以外は production とします。" + FORECAST_INSTRUCTION
 )
 
 

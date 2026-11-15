@@ -5,6 +5,7 @@
 """
 
 from app.models.transaction.order_schema import EmailIntakeOutcome
+from app.services.order_forecast_service import FORECAST_PARSE_LOG_REASON
 
 # order_parse_log.reason は CHECK 制約のない自由文字列。分類は完全にアプリ側の責務。
 
@@ -31,6 +32,9 @@ EMAIL_INTAKE_SKIP_REASONS = frozenset(
         "resent_document",
         # 督促・分割納入の依頼メール（起票せず既存の受注に紐づけて記録。Issue #619）
         "delivery_request",
+        # 内示だけの注文書（受注にせず order_forecasts に記録。Issue #676）。
+        # 当月の確定分も起票した注文書は起票数で「起票」に分類される
+        FORECAST_PARSE_LOG_REASON,
     }
 )
 EMAIL_INTAKE_KNOWN_REASONS = (

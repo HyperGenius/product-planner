@@ -244,6 +244,9 @@ def _to_preview_reading(
                 certainty=line.certainty,
                 line_order_no=line.line_order_no,
                 customer_order_no=line.customer_order_no,
+                is_forecast=line.is_forecast,
+                forecast_period_start=line.forecast_period_start,
+                forecast_period_end=line.forecast_period_end,
                 product=(
                     PreviewProduct(
                         id=product["id"],

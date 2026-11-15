@@ -213,3 +213,42 @@ class TestOrderTypeExtraction:
             "format"
         ]["schema"]
         assert {"order_type", "subject"} <= set(schema["required"])
+
+
+@pytest.mark.unit
+class TestForecastPeriodExtraction:
+    """内示の期間（Issue #676）。テキスト・画像PDFの両方の明細に必須の項目として入る。"""
+
+    @staticmethod
+    def _line_schema(kwargs):
+        schema = kwargs["output_config"]["format"]["schema"]
+        return schema["properties"]["line_items"]["items"]
+
+    def test_text_pdf_schema_and_prompt(self):
+        from app.services.pdf_order_extraction_service import extract_order_lines
+
+        with patch("app.services.pdf_order_extraction_service._client") as mock_client:
+            mock_client.messages.create.return_value = _response(
+                {"document_order_no": None, "line_items": []}
+            )
+            extract_order_lines("注文一覧表")
+
+        kwargs = mock_client.messages.create.call_args.kwargs
+        line_schema = self._line_schema(kwargs)
+        assert {"forecast_period_start", "forecast_period_end"} <= set(
+            line_schema["required"]
+        )
+        assert set(line_schema["required"]) == set(line_schema["properties"])
+        assert "forecast_period_start" in kwargs["messages"][0]["content"]
+
+    def test_image_pdf_schema(self):
+        with patch("app.services.pdf_order_extraction_service._client") as mock_client:
+            mock_client.messages.create.return_value = _response(
+                {"document_order_no": None, "line_items": []}
+            )
+            extract_order_lines_from_pdf(b"%PDF-fax")
+
+        line_schema = self._line_schema(mock_client.messages.create.call_args.kwargs)
+        assert {"forecast_period_start", "forecast_period_end"} <= set(
+            line_schema["required"]
+        )

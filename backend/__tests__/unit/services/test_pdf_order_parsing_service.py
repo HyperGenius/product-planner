@@ -317,9 +317,10 @@ class TestParsePendingOrderPdfs:
         assert attachment_insert["storage_path"] == "tenant-1/inbox/msg-1/order.pdf"
 
     def test_body_fallback_with_multiple_line_items_creates_multiple_orders(self):
-        """1通のメールに部品番号ごとの複数月分の内示数量が含まれる場合
+        """1通のメールに部品番号ごとの複数月分の数量が含まれる場合
         （Issue #280の実例）、line_items配列として複数明細を抽出し、
-        それぞれ別のorderとして作成すること。"""
+        それぞれ別のorderとして作成すること。内示は受注にしない（Issue #676）ので
+        確定の明細で確かめる。"""
         mock_db = MagicMock()
         mock_db.table().select().is_().eq().order().limit().execute.return_value = (
             MagicMock(data=[self._staging_row()])
@@ -334,7 +335,7 @@ class TestParsePendingOrderPdfs:
                 "product_number_raw": "B115105",
                 "quantity": q,
                 "delivery_date": f"2026-{month:02d}-01",
-                "certainty": "forecast",
+                "certainty": "confirmed",
             }
             for month, q in zip(range(10, 13), [100, 110, 120], strict=True)
         ]
@@ -512,7 +513,7 @@ class TestParsePendingOrderPdfs:
                             "product_number_raw": "CODE-B",
                             "quantity": 3,
                             "delivery_date": "2026-11-30",
-                            "certainty": "forecast_tentative",
+                            "certainty": "confirmed",
                         }
                     ],
                 },
@@ -2452,3 +2453,272 @@ class TestDeliveryRequestEmail:
 
         assert created == 1
         record.assert_not_called()
+
+
+@pytest.mark.unit
+class TestForecastLines:
+    """内示の明細は受注にせず、注文書ごとに order_forecasts へ保存する（Issue #676）。"""
+
+    _CONFIRMED = {
+        "product_name_raw": "FILTER COMP",
+        "product_number_raw": "F-1",
+        "quantity": 20000,
+        "delivery_date": "2026-10-05",
+        "line_order_no": None,
+        "certainty": "confirmed",
+        "forecast_period_start": None,
+        "forecast_period_end": None,
+    }
+    _NEXT_MONTH = {
+        **_CONFIRMED,
+        "quantity": 36000,
+        "delivery_date": None,
+        "certainty": "forecast",
+        "forecast_period_start": "2026-11",
+        "forecast_period_end": "2026-11",
+    }
+    _QUARTER = {
+        **_CONFIRMED,
+        "quantity": 39600,
+        "delivery_date": None,
+        "certainty": "forecast_tentative",
+        "forecast_period_start": "2027-01",
+        "forecast_period_end": "2027-03",
+    }
+
+    def _staging_row(self, **overrides):
+        row = {
+            "id": "att-1",
+            "tenant_id": "tenant-1",
+            "customer_id": 7,
+            "gmail_message_id": "msg-1",
+            "source_raw": "本文",
+            "storage_path": "tenant-1/inbox/msg-1/order.pdf",
+            "original_filename": "order.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 1234,
+            "parse_status": "pending",
+        }
+        row.update(overrides)
+        return row
+
+    def _mock_db(self, staging_row):
+        mock_db = MagicMock()
+        mock_db.table().select().is_().eq().order().limit().execute.return_value = (
+            MagicMock(data=[staging_row])
+        )
+        mock_db.rpc().execute.return_value = MagicMock(
+            data=[{"order_id": 42, "action": "inserted"}]
+        )
+        # 顧客固有の抽出指示なし
+        mock_db.table().select().eq().eq().limit().execute.return_value = MagicMock(
+            data=[]
+        )
+        return mock_db
+
+    def _run_text_pdf(self, mock_db, line_items):
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fake",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(text="注文一覧表", failure_reason=None),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines",
+                return_value={"document_order_no": None, "line_items": line_items},
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=100,
+            ),
+        ):
+            return parse_pending_order_pdfs(mock_db)
+
+    @staticmethod
+    def _rpc_calls(mock_db, name):
+        return [
+            c.args[1]
+            for c in mock_db.rpc.call_args_list
+            if c.args and c.args[0] == name
+        ]
+
+    @staticmethod
+    def _parse_log_inserts(mock_db):
+        return [
+            c.args[0]
+            for c in mock_db.table().insert.call_args_list
+            if c.args and isinstance(c.args[0], dict) and "reason" in c.args[0]
+        ]
+
+    def test_forecast_lines_are_recorded_and_not_created_as_orders(
+        self, _no_auto_simulate
+    ):
+        mock_db = self._mock_db(self._staging_row())
+
+        result = self._run_text_pdf(
+            mock_db, [self._CONFIRMED, self._NEXT_MONTH, self._QUARTER]
+        )
+
+        # 当月の確定分だけを起票する
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        upserts = self._rpc_calls(mock_db, "upsert_order_by_dedupe_key")
+        assert [c["p_customer_certainty"] for c in upserts] == ["confirmed"]
+        _no_auto_simulate.assert_called_once()
+
+        [forecast_call] = self._rpc_calls(mock_db, "replace_order_forecasts")
+        assert forecast_call["p_tenant_id"] == "tenant-1"
+        assert forecast_call["p_attachment_id"] == "att-1"
+        assert forecast_call["p_customer_id"] == 7
+        assert forecast_call["p_rows"] == [
+            {
+                "line_index": 1,
+                "product_id": 100,
+                "product_name_raw": "FILTER COMP",
+                "product_number_raw": "F-1",
+                "extracted_product_name": "FILTER COMP",
+                "period_start": "2026-11-01",
+                "period_end": "2026-11-01",
+                "quantity": 36000,
+                "certainty": "forecast",
+            },
+            {
+                "line_index": 2,
+                "product_id": 100,
+                "product_name_raw": "FILTER COMP",
+                "product_number_raw": "F-1",
+                "extracted_product_name": "FILTER COMP",
+                "period_start": "2027-01-01",
+                "period_end": "2027-03-01",
+                "quantity": 39600,
+                "certainty": "forecast_tentative",
+            },
+        ]
+        logs = self._parse_log_inserts(mock_db)
+        assert {
+            "tenant_id": "tenant-1",
+            "order_attachment_id": "att-1",
+            "reason": "forecast_recorded",
+            "detail": {"forecast_count": 2},
+        } in logs
+
+    def test_forecast_only_document_creates_no_order(self, _no_auto_simulate):
+        mock_db = self._mock_db(self._staging_row())
+
+        result = self._run_text_pdf(mock_db, [self._NEXT_MONTH])
+
+        assert result == {"processed": 1, "orders_created": 0, "errors": 0}
+        assert self._rpc_calls(mock_db, "upsert_order_by_dedupe_key") == []
+        _no_auto_simulate.assert_not_called()
+        assert len(self._rpc_calls(mock_db, "replace_order_forecasts")) == 1
+        reasons = [log["reason"] for log in self._parse_log_inserts(mock_db)]
+        assert "forecast_recorded" in reasons
+
+    def test_zero_and_unreadable_forecast_quantities(self):
+        """数量0は「内示なし」として残し、負の値・読めない値は数量不明（None）にする。"""
+        mock_db = self._mock_db(self._staging_row())
+
+        self._run_text_pdf(
+            mock_db,
+            [
+                {**self._NEXT_MONTH, "quantity": 0},
+                {**self._NEXT_MONTH, "quantity": -5},
+                {**self._NEXT_MONTH, "quantity": "36,000"},
+            ],
+        )
+
+        [forecast_call] = self._rpc_calls(mock_db, "replace_order_forecasts")
+        assert [row["quantity"] for row in forecast_call["p_rows"]] == [0, None, None]
+
+    def test_forecast_without_period_uses_delivery_month(self):
+        mock_db = self._mock_db(self._staging_row())
+
+        self._run_text_pdf(
+            mock_db,
+            [
+                {
+                    **self._NEXT_MONTH,
+                    "delivery_date": "2026-12-15",
+                    "forecast_period_start": None,
+                    "forecast_period_end": None,
+                },
+                {
+                    **self._NEXT_MONTH,
+                    "forecast_period_start": None,
+                    "forecast_period_end": None,
+                },
+            ],
+        )
+
+        [forecast_call] = self._rpc_calls(mock_db, "replace_order_forecasts")
+        assert [
+            (row["period_start"], row["period_end"]) for row in forecast_call["p_rows"]
+        ] == [("2026-12-01", "2026-12-01"), (None, None)]
+
+    def test_unknown_customer_forecast_is_recorded_with_null_customer(self):
+        """顧客不明（Issue #521）の注文書の内示も、顧客 NULL で残す。"""
+        mock_db = self._mock_db(self._staging_row(customer_id=None))
+
+        self._run_text_pdf(mock_db, [self._NEXT_MONTH])
+
+        [forecast_call] = self._rpc_calls(mock_db, "replace_order_forecasts")
+        assert forecast_call["p_customer_id"] is None
+
+    def test_email_body_forecast_lines_are_recorded(self):
+        """メール本文の内示も同じく受注にしない。"""
+        mock_db = self._mock_db(
+            self._staging_row(storage_path="", content_type=None, source_raw="内示")
+        )
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.extract_email_order_lines",
+                return_value={
+                    "document_order_no": None,
+                    "email_intent": "new_order",
+                    "line_items": [self._CONFIRMED, self._NEXT_MONTH],
+                },
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=100,
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        [forecast_call] = self._rpc_calls(mock_db, "replace_order_forecasts")
+        assert [row["line_index"] for row in forecast_call["p_rows"]] == [1]
+
+    def test_image_pdf_forecast_lines_are_recorded(self):
+        mock_db = self._mock_db(self._staging_row())
+        with (
+            patch(
+                "app.services.pdf_order_parsing_service.download_attachment",
+                return_value=b"%PDF-fax",
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_text",
+                return_value=PdfTextResult(text=None, failure_reason="failed_image"),
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.extract_order_lines_from_pdf",
+                return_value={
+                    "document_order_no": None,
+                    "line_items": [self._CONFIRMED, self._QUARTER],
+                    "issuer_company_name": None,
+                },
+            ),
+            patch(
+                "app.services.pdf_order_parsing_service.match_product_by_code",
+                return_value=100,
+            ),
+        ):
+            result = parse_pending_order_pdfs(mock_db)
+
+        assert result == {"processed": 1, "orders_created": 1, "errors": 0}
+        [forecast_call] = self._rpc_calls(mock_db, "replace_order_forecasts")
+        assert [row["certainty"] for row in forecast_call["p_rows"]] == [
+            "forecast_tentative"
+        ]

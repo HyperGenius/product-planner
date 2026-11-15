@@ -20,6 +20,13 @@ from app.services.order_delivery_request_service import (
     parse_requested_date,
     record_delivery_requests,
 )
+from app.services.order_forecast_service import (
+    FORECAST_CERTAINTIES,
+    FORECAST_PARSE_LOG_REASON,
+    forecast_period,
+    forecast_quantity,
+    is_forecast_line,
+)
 from app.services.order_simulation_service import auto_simulate_intake_order
 from app.services.pdf_order_extraction_service import (
     PdfDocumentRejectedError,
@@ -329,12 +336,8 @@ def _parse_one(db: Client, row: dict[str, Any]) -> int:
                 db, pdf_row, extraction, auto_order_no
             )
         elif line_items:
-            created_count = sum(
-                1
-                for line in line_items
-                if _process_line_item(
-                    db, pdf_row, line, document_order_no, auto_order_no
-                )
+            created_count = _process_line_items(
+                db, pdf_row, line_items, document_order_no, auto_order_no
             )
         else:
             # PDFの内容が注文と無関係で明細が1件も抽出できなかった場合、
@@ -441,10 +444,8 @@ def _process_email_body(
         )
         return 0
 
-    created_count = sum(
-        1
-        for line in line_items
-        if _process_line_item(db, row, line, document_order_no, auto_order_no)
+    created_count = _process_line_items(
+        db, row, line_items, document_order_no, auto_order_no
     )
     logger.info(
         f"pdf_order_parsing: attachment {attachment_id} "
@@ -591,17 +592,13 @@ def _process_image_pdf(db: Client, row: dict[str, Any], content: bytes) -> int:
             attachment_parse_status="success_image",
         )
     else:
-        created_count = sum(
-            1
-            for line in line_items
-            if _process_line_item(
-                db,
-                pdf_row,
-                line,
-                document_order_no,
-                auto_order_no,
-                attachment_parse_status="success_image",
-            )
+        created_count = _process_line_items(
+            db,
+            pdf_row,
+            line_items,
+            document_order_no,
+            auto_order_no,
+            attachment_parse_status="success_image",
         )
 
     _log_if_no_order_created(db, row, created_count)
@@ -1040,11 +1037,19 @@ class LineItemReading:
     customer_order_no: str | None
     # 照合できなければ None（product_id=NULL の下書きになる）
     product_id: int | None
+    # 内示の期間（開始月・終了月の1日）。内示でない明細・読めない期間は None（Issue #676）
+    forecast_period_start: date | None = None
+    forecast_period_end: date | None = None
 
     @property
     def has_valid_quantity(self) -> bool:
         """数量が整数か未指定か（それ以外の明細は起票せずスキップする）。"""
         return self.quantity is None or isinstance(self.quantity, int)
+
+    @property
+    def is_forecast(self) -> bool:
+        """内示の明細か（受注として起票せず order_forecasts に保存する。Issue #676）。"""
+        return self.certainty in FORECAST_CERTAINTIES
 
 
 def read_line_item(
@@ -1075,6 +1080,9 @@ def read_line_item(
     certainty = certainty_raw if certainty_raw in _VALID_CUSTOMER_CERTAINTIES else None
 
     line_order_no = line.get("line_order_no")
+    period_start, period_end = (
+        forecast_period(line) if certainty in FORECAST_CERTAINTIES else (None, None)
+    )
     return LineItemReading(
         product_number_raw=product_number_raw,
         product_name_raw=product_name_raw,
@@ -1089,7 +1097,102 @@ def read_line_item(
         product_id=_resolve_product_id(
             db, tenant_id, customer_id, product_number_raw, product_name_raw
         ),
+        forecast_period_start=period_start,
+        forecast_period_end=period_end,
     )
+
+
+def _process_line_items(
+    db: Client,
+    staging_row: dict[str, Any],
+    line_items: list[dict[str, Any]],
+    document_order_no: str | None,
+    auto_order_no: str | None,
+    *,
+    attachment_parse_status: str = "success",
+) -> int:
+    """抽出した明細を、受注にする明細と内示の明細に振り分けて処理する。起票した受注の数を返す。
+
+    内示（確度 forecast / forecast_tentative）は受注として起票せず、注文書ごとに
+    order_forecasts へ保存する（Issue #676）。内示は月単位の見込みで、その月の初旬に改めて
+    注文が来るため。全顧客で同じ扱いにする。
+    """
+    created_count = sum(
+        1
+        for line in line_items
+        if not is_forecast_line(line)
+        and _process_line_item(
+            db,
+            staging_row,
+            line,
+            document_order_no,
+            auto_order_no,
+            attachment_parse_status=attachment_parse_status,
+        )
+    )
+    forecast_lines = [
+        (index, line) for index, line in enumerate(line_items) if is_forecast_line(line)
+    ]
+    if forecast_lines:
+        _record_forecasts(
+            db, staging_row, forecast_lines, document_order_no, auto_order_no
+        )
+    return created_count
+
+
+def _record_forecasts(
+    db: Client,
+    staging_row: dict[str, Any],
+    forecast_lines: list[tuple[int, dict[str, Any]]],
+    document_order_no: str | None,
+    auto_order_no: str | None,
+) -> None:
+    """内示の明細を、ステージング行（注文書）の内示として丸ごと保存する（Issue #676）。
+
+    同じステージング行を処理し直しても二重にならないよう、RPC `replace_order_forecasts` が
+    その注文書の内示を置き換える。製品は受注と同じ照合（`read_line_item`）で引く。
+    """
+    tenant_id = staging_row["tenant_id"]
+    attachment_id = staging_row["id"]
+    customer_id = _staging_customer_id(staging_row)
+    rows: list[dict[str, Any]] = []
+    for index, line in forecast_lines:
+        reading = read_line_item(
+            db, tenant_id, customer_id, line, document_order_no, auto_order_no
+        )
+        rows.append(
+            {
+                "line_index": index,
+                "product_id": reading.product_id,
+                "product_name_raw": reading.product_name_raw,
+                "product_number_raw": reading.product_number_raw,
+                "extracted_product_name": reading.extracted_product_name,
+                "period_start": _iso_or_none(reading.forecast_period_start),
+                "period_end": _iso_or_none(reading.forecast_period_end),
+                "quantity": forecast_quantity(reading.quantity),
+                "certainty": reading.certainty,
+            }
+        )
+    db.rpc(
+        "replace_order_forecasts",
+        {
+            "p_tenant_id": tenant_id,
+            "p_attachment_id": attachment_id,
+            "p_customer_id": customer_id,
+            "p_rows": rows,
+        },
+    ).execute()
+    _log_parse_event(
+        db,
+        tenant_id,
+        attachment_id,
+        FORECAST_PARSE_LOG_REASON,
+        {"forecast_count": len(rows)},
+    )
+
+
+def _iso_or_none(value: date | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _process_line_item(

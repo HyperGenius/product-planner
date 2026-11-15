@@ -53,6 +53,14 @@ const LINE_FIELDS: { label: string; format: (line: PreviewLineItem) => string }[
     label: "確度",
     format: (line) => (line.certainty ? getCertaintyLabel(line.certainty) : "不明"),
   },
+  {
+    label: "取り込み",
+    format: (line) => (line.is_forecast ? "内示として記録（起票しない）" : "受注を起票"),
+  },
+  {
+    label: "内示の期間",
+    format: (line) => formatForecastPeriod(line),
+  },
   { label: "明細の注文番号", format: (line) => line.line_order_no ?? EMPTY },
   { label: "起票される注文番号", format: (line) => line.customer_order_no ?? EMPTY },
   {
@@ -69,6 +77,20 @@ function formatDate(value: string | null): string {
   // 日付のみの値は parseISO でローカル深夜として読む（new Date だと UTC 扱いでずれる）
   const parsed = parseISO(value)
   return Number.isNaN(parsed.getTime()) ? value : format(parsed, "yyyy/MM/dd")
+}
+
+/** 内示の期間（"2026/11" / "2027/01〜2027/03"）。内示でない明細は "－"、読めない期間は「不明」 */
+function formatForecastPeriod(line: PreviewLineItem): string {
+  if (!line.is_forecast) return EMPTY
+  if (!line.forecast_period_start || !line.forecast_period_end) return "不明"
+  const start = formatMonth(line.forecast_period_start)
+  const end = formatMonth(line.forecast_period_end)
+  return start === end ? start : `${start}〜${end}`
+}
+
+function formatMonth(value: string): string {
+  const parsed = parseISO(value)
+  return Number.isNaN(parsed.getTime()) ? value : format(parsed, "yyyy/MM")
 }
 
 const FALLBACK_LABELS: Record<NonNullable<PreviewReading["fallback"]>, string> = {

@@ -323,6 +323,10 @@ class TestOrderRouter:
             ("success", 0, ["non_order_email"], ("skipped", False, False)),
             ("success", 0, ["draft_conflict_skipped"], ("skipped", False, False)),
             ("success", 0, ["downgrade_skipped"], ("skipped", False, False)),
+            # 内示だけの注文書（受注にせず記録: Issue #676）
+            ("success", 0, ["forecast_recorded"], ("skipped", False, False)),
+            # 当月の確定分を起票し、内示も記録した注文書
+            ("success", 1, ["forecast_recorded"], ("created", False, False)),
             ("success", 0, [], ("skipped", False, False)),
             # 失敗（読み取り不能PDF。空の下書きが1件起票される: _process_unreadable_pdf）
             ("success", 1, ["failed_encrypted"], ("failed", False, True)),

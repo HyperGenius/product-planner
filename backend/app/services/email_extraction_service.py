@@ -1,8 +1,14 @@
+import copy
 import json
 import os
 from typing import Any
 
 import anthropic
+
+from app.services.order_forecast_service import (
+    FORECAST_INSTRUCTION,
+    FORECAST_PERIOD_PROPERTIES,
+)
 
 _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -112,6 +118,10 @@ _EXTRACT_SCHEMA: Any = {
     "required": ["document_order_no", "email_intent", "line_items"],
     "additionalProperties": False,
 }
+# 内示の期間（Issue #676）。PDF の抽出と同じ項目を足す
+_LINE_ITEM_SCHEMA = _EXTRACT_SCHEMA["properties"]["line_items"]["items"]
+_LINE_ITEM_SCHEMA["properties"].update(copy.deepcopy(FORECAST_PERIOD_PROPERTIES))
+_LINE_ITEM_SCHEMA["required"].extend(FORECAST_PERIOD_PROPERTIES)
 
 
 def extract_email_order_lines(
@@ -139,6 +149,7 @@ def extract_email_order_lines(
         "（最新の送信者が書いた部分だけを対象にします）。"
         "過去のメールで注文書を添付済みの注文番号について、品番・数量・納期を"
         "挙げて対応を求める返信は、新しい注文ではなく delivery_chase です。"
+        + FORECAST_INSTRUCTION
     )
     if customer_extraction_prompt and customer_extraction_prompt.strip():
         prompt += (
