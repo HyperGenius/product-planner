@@ -84,6 +84,7 @@ export const handlers = [
       stock_estimates: [],
       assignments: [],
       candidates: {},
+      candidate_totals: {},
     }),
   ),
 ]

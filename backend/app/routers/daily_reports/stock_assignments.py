@@ -31,6 +31,7 @@ from app.services.daily_report_allocation_service import (
     CANDIDATE_ORDER_STATUSES,
     fetch_last_computed_at,
 )
+from app.services.daily_report_name_matching_service import fetch_all_rows
 from app.utils.calendar import JST
 from supabase import Client  # type: ignore
 
@@ -173,32 +174,46 @@ def _load_sources(
     return sources
 
 
-def _load_candidates(
-    client: Client, tenant_id: str, product_id: int, process_names: list[str]
-) -> dict[str, list[dict[str, Any]]]:
-    """引き当て元の候補: 受注の製品の、前回の集計で未割当に残った明細（工程名ごと）。"""
-    if not process_names:
-        return {}
-    result = (
-        client.table(SupabaseTableName.DAILY_REPORT_UNALLOCATED_ACTUALS.value)
-        .select("entry_id, process_name, work_date, qty")
-        .eq("tenant_id", tenant_id)
-        .eq("product_id", product_id)
-        .in_("process_name", process_names)
-        .not_.is_("work_date", "null")
-        .order("work_date", desc=True)
-        .order("entry_id", desc=True)
-        .execute()
-    )
-    rows = cast(list[dict[str, Any]], result.data or [])
+def summarize_candidates(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, int]]]:
+    """未割当の行（加工日の新しい順）を、返す明細と工程ごとの合計に分ける (Issue #673)。
+
+    明細は工程ごとに先頭 `_CANDIDATES_PER_PROCESS` 件だけ返すが、合計（件数・数）は全行から求める。
+    画面が明細を足し上げると、打ち切った工程で合計が小さく出るため。
+    """
     kept: list[dict[str, Any]] = []
-    counts: dict[str, int] = {}
+    totals: dict[str, dict[str, int]] = {}
     for row in rows:
         name = row["process_name"]
-        if counts.get(name, 0) >= _CANDIDATES_PER_PROCESS:
-            continue
-        counts[name] = counts.get(name, 0) + 1
-        kept.append(row)
+        total = totals.setdefault(name, {"count": 0, "qty": 0})
+        if total["count"] < _CANDIDATES_PER_PROCESS:
+            kept.append(row)
+        total["count"] += 1
+        total["qty"] += int(row["qty"])
+    return kept, totals
+
+
+def _load_candidates(
+    client: Client, tenant_id: str, product_id: int, process_names: list[str]
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, int]]]:
+    """引き当て元の候補: 受注の製品の、前回の集計で未割当に残った明細（工程名ごと）と、その合計。"""
+    if not process_names:
+        return {}, {}
+    rows = fetch_all_rows(
+        lambda: (
+            client.table(SupabaseTableName.DAILY_REPORT_UNALLOCATED_ACTUALS.value)
+            .select("id, entry_id, process_name, work_date, qty")
+            .eq("tenant_id", tenant_id)
+            .eq("product_id", product_id)
+            .in_("process_name", process_names)
+            .not_.is_("work_date", "null")
+            .order("work_date", desc=True)
+            .order("entry_id", desc=True)
+            .order("id", desc=True)
+        )
+    )
+    kept, totals = summarize_candidates(rows)
     entries = _load_entries(client, tenant_id, [int(r["entry_id"]) for r in kept])
     candidates: dict[str, list[dict[str, Any]]] = {}
     for row in kept:
@@ -208,7 +223,7 @@ def _load_candidates(
                 entry_id, int(row["qty"]), row["work_date"], entries.get(entry_id)
             )
         )
-    return candidates
+    return candidates, totals
 
 
 @daily_report_stock_assignment_router.get(
@@ -227,6 +242,7 @@ def get_order_stock_assignments(
     estimates: list[dict[str, Any]] = []
     product: dict[str, Any] = {}
     candidates: dict[str, list[dict[str, Any]]] = {}
+    candidate_totals: dict[str, dict[str, int]] = {}
     if product_id is not None:
         product = _load_product(client, tenant_id, int(product_id))
         process_names = _process_names(client, tenant_id, int(product_id))
@@ -239,7 +255,9 @@ def get_order_stock_assignments(
         )
         estimates = cast(list[dict[str, Any]], estimates_result.data or [])
         # 工程ルートの順に並べる（工程ルートに無い工程は最後）
-        candidates = _load_candidates(client, tenant_id, int(product_id), process_names)
+        candidates, candidate_totals = _load_candidates(
+            client, tenant_id, int(product_id), process_names
+        )
         position = {name: i for i, name in enumerate(process_names)}
         estimates.sort(
             key=lambda r: (
@@ -260,6 +278,7 @@ def get_order_stock_assignments(
             {**a, "sources": sources.get(a["process_name"], [])} for a in assignments
         ],
         "candidates": candidates,
+        "candidate_totals": candidate_totals,
     }
 
 

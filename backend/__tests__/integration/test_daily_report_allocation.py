@@ -864,6 +864,8 @@ class TestStockAssignments:
         assert [(e["process_name"], e["qty"]) for e in body["stock_estimates"]] == [
             ("プレス", 40)
         ]
+        # 引き当て元の候補の工程ごとの合計（Issue #673）
+        assert body["candidate_totals"] == {"プレス": {"count": 1, "qty": 40}}
 
         # 受注日より前に作ったプレスの作り置き 40 を遅い受注に充てる
         res = client.put(

@@ -11,6 +11,7 @@ from app.dependencies import (
     get_supabase_client,
 )
 from app.main import app
+from app.routers.daily_reports.stock_assignments import summarize_candidates
 from app.utils.calendar import JST
 from fastapi.testclient import TestClient
 
@@ -110,7 +111,13 @@ class TestDailyReportStockAssignmentRouter:
             patch(f"{ROUTER}._load_order", return_value=ORDER),
             patch(f"{ROUTER}._load_assignments", return_value=[ASSIGNMENT_ROW]),
             patch(f"{ROUTER}._load_sources", return_value={"クグシ": [SOURCE]}),
-            patch(f"{ROUTER}._load_candidates", return_value={"カシメ": [SOURCE]}),
+            patch(
+                f"{ROUTER}._load_candidates",
+                return_value=(
+                    {"カシメ": [SOURCE]},
+                    {"カシメ": {"count": 45, "qty": 9000}},
+                ),
+            ),
             patch(
                 f"{ROUTER}._load_product",
                 return_value={"name": "ボルトM6", "code": "B-06"},
@@ -128,6 +135,7 @@ class TestDailyReportStockAssignmentRouter:
             body["assignments"][0]["sources"][0]["product_raw"] == "ボルトM6 (作り置き)"
         )
         assert body["candidates"]["カシメ"][0]["entry_id"] == 11
+        assert body["candidate_totals"] == {"カシメ": {"count": 45, "qty": 9000}}
         assert body["process_names"] == PROCESS_NAMES
         # 工程ルートの順
         assert [e["process_name"] for e in body["stock_estimates"]] == [
@@ -149,7 +157,7 @@ class TestDailyReportStockAssignmentRouter:
         with (
             patch(f"{ROUTER}._load_order", return_value=order),
             patch(f"{ROUTER}._load_assignments", return_value=[]),
-            patch(f"{ROUTER}._load_candidates", return_value={}),
+            patch(f"{ROUTER}._load_candidates", return_value=({}, {})),
             patch(f"{ROUTER}._load_product", return_value={}),
             patch(f"{ROUTER}.fetch_last_computed_at", return_value=None),
         ):
@@ -169,6 +177,60 @@ class TestDailyReportStockAssignmentRouter:
         response = client.get("/daily-reports/orders/999/stock-assignments")
 
         assert response.status_code == 404
+
+    def test_load_candidates_totals_cover_rows_beyond_the_listed_ones(
+        self, mock_client
+    ):
+        # クグシは31件（明細は30件に打ち切るが合計は31件分）、カシメは1件
+        rows = [
+            {
+                "id": 100 - i,
+                "entry_id": 100 - i,
+                "process_name": "クグシ",
+                "work_date": "2026-10-20",
+                "qty": 10,
+            }
+            for i in range(31)
+        ] + [
+            {
+                "id": 1,
+                "entry_id": 1,
+                "process_name": "カシメ",
+                "work_date": "2026-10-01",
+                "qty": 7,
+            }
+        ]
+        with (
+            patch(f"{ROUTER}._load_order", return_value=ORDER),
+            patch(f"{ROUTER}.fetch_all_rows", return_value=rows),
+            patch(f"{ROUTER}._load_entries", return_value={}),
+            patch(f"{ROUTER}._load_assignments", return_value=[]),
+            patch(f"{ROUTER}._load_product", return_value={}),
+            patch(f"{ROUTER}.fetch_last_computed_at", return_value=COMPUTED_AT),
+        ):
+            response = client.get("/daily-reports/orders/1/stock-assignments")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["candidates"]["クグシ"]) == 30
+        assert body["candidate_totals"] == {
+            "クグシ": {"count": 31, "qty": 310},
+            "カシメ": {"count": 1, "qty": 7},
+        }
+
+    def test_get_without_product_returns_empty_totals(self):
+        with (
+            patch(
+                f"{ROUTER}._load_order",
+                return_value={**ORDER, "product_id": None},
+            ),
+            patch(f"{ROUTER}._load_assignments", return_value=[]),
+            patch(f"{ROUTER}.fetch_last_computed_at", return_value=None),
+        ):
+            response = client.get("/daily-reports/orders/1/stock-assignments")
+
+        assert response.status_code == 200
+        assert response.json()["candidate_totals"] == {}
 
     # --- 登録 -----------------------------------------------------------------
 
@@ -294,3 +356,25 @@ class TestDailyReportStockAssignmentRouter:
 
         assert response.status_code == 403
         tables["daily_report_stock_assignments"].delete.assert_not_called()
+
+
+@pytest.mark.api
+class TestSummarizeCandidates:
+    def test_keeps_first_rows_per_process_and_totals_all_rows(self):
+        rows = [
+            {"process_name": "クグシ", "qty": 5, "entry_id": i} for i in range(32)
+        ] + [{"process_name": "検査", "qty": 3, "entry_id": 99}]
+
+        kept, totals = summarize_candidates(rows)
+
+        assert [r["entry_id"] for r in kept if r["process_name"] == "クグシ"] == list(
+            range(30)
+        )
+        assert [r["entry_id"] for r in kept if r["process_name"] == "検査"] == [99]
+        assert totals == {
+            "クグシ": {"count": 32, "qty": 160},
+            "検査": {"count": 1, "qty": 3},
+        }
+
+    def test_empty(self):
+        assert summarize_candidates([]) == ([], {})

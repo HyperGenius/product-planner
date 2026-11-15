@@ -121,6 +121,15 @@ class OrderStockEstimateResponse(BaseModel):
     last_movement_date: date | None
 
 
+class StockCandidateTotalResponse(BaseModel):
+    """工程ごとの引き当て元の候補（未割当の日報の明細）の合計（Issue #673）。"""
+
+    # 明細の件数（`candidates` は先頭30件に打ち切るが、これは全件）
+    count: int
+    # 未割当に残っている数の合計
+    qty: int
+
+
 class OrderStockAssignmentsResponse(BaseModel):
     """受注詳細の「作り置きから引き当て」に出すもの。"""
 
@@ -138,6 +147,8 @@ class OrderStockAssignmentsResponse(BaseModel):
     assignments: list[StockAssignmentResponse]
     # 引き当て元の候補: 受注の製品の未割当の日報の明細（工程名ごと、加工日の新しい順）
     candidates: dict[str, list[StockSourceEntryResponse]] = {}
+    # 引き当て元の候補の工程ごとの合計（打ち切らない全件。Issue #673）
+    candidate_totals: dict[str, StockCandidateTotalResponse] = {}
 
 
 class StockAssignmentUpsert(BaseModel):

@@ -96,6 +96,14 @@ export interface OrderStockEstimate {
   last_movement_date: string | null
 }
 
+/** 工程ごとの引き当て元の候補の合計 (Issue #673) */
+export interface StockCandidateTotal {
+  /** 明細の件数（`candidates` は先頭30件に打ち切るが、これは全件） */
+  count: number
+  /** 未割当に残っている数の合計 */
+  qty: number
+}
+
 /** GET /daily-reports/orders/{order_id}/stock-assignments */
 export interface OrderStockAssignments {
   /** 割り付けの最終計算日時。引き当ての登録・取り消しはこれより後の計算で反映される */
@@ -112,6 +120,8 @@ export interface OrderStockAssignments {
   assignments: StockAssignment[]
   /** 引き当て元の候補: 受注の製品の未割当の日報の明細（工程名ごと、加工日の新しい順） */
   candidates: Record<string, StockSourceEntry[]>
+  /** 引き当て元の候補の工程ごとの合計（打ち切らない全件。候補の無い工程はキーが無い） */
+  candidate_totals: Record<string, StockCandidateTotal>
 }
 
 /** PUT /daily-reports/orders/{order_id}/stock-assignments */

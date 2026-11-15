@@ -44,6 +44,7 @@ const DATA: Data = {
   ],
   assignments: [],
   candidates: {},
+  candidate_totals: {},
 }
 
 function setup({ data = DATA, role = "order_handler" }: { data?: Data; role?: MemberRole } = {}) {
