@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest"
-import type { StockEstimate, StockEstimates, StockFeedback } from "@/types/daily-report-stock"
+import type {
+  StockAssignment,
+  StockEstimate,
+  StockEstimates,
+  StockFeedback,
+  StockSourceEntry,
+} from "@/types/daily-report-stock"
 import {
+  distinctRawValues,
   feedbackSummary,
   feedbackWithoutEstimates,
   initialStockAssignmentForm,
+  plannedSourceUsage,
+  stockAssignmentWarnings,
+  stockProcessRows,
+  suggestedStockQty,
   groupStockByConsumer,
   initialStockFeedbackForm,
   stockConsumedByLabel,
@@ -174,6 +185,19 @@ describe("作り置きの引き当て (Issue #624)", () => {
       expect(initialStockAssignmentForm(data, 10000).qty).toBe("8222")
     })
 
+    it("推定が無ければ、未割当の日報のある工程のうち工程ルートで最も後の工程を選ぶ（Issue #673）", () => {
+      const data = {
+        stock_estimates: [],
+        process_names: ["プレス", "カシメ", "クグシ"],
+        candidate_totals: { プレス: { count: 1, qty: 10 }, カシメ: { count: 2, qty: 300 } },
+      }
+      expect(initialStockAssignmentForm(data, 100)).toEqual({
+        processName: "カシメ",
+        qty: "100",
+        note: "",
+      })
+    })
+
     it("推定が無ければ空欄", () => {
       expect(initialStockAssignmentForm({ stock_estimates: [] }, 100)).toEqual({
         processName: "",
@@ -201,6 +225,163 @@ describe("作り置きの引き当て (Issue #624)", () => {
       [{ qty: "5001" }, "数は受注数量（5,000）以下にしてください"],
     ])("入力の誤り %o", (patch, error) => {
       expect(toStockAssignmentInput({ ...FORM, ...patch }, 5000)).toEqual({ error })
+    })
+  })
+})
+
+describe("作り置きの引き当てのダイアログ (Issue #673)", () => {
+  const ASSIGNMENT: StockAssignment = {
+    id: "a-1",
+    order_id: 1,
+    process_name: "カシメ",
+    qty: 7,
+    assigned_on: "2026-11-02",
+    note: null,
+    updated_by: "u1",
+    updated_at: "2026-11-02T01:00:00Z",
+    sources: [],
+  }
+  const DATA = {
+    process_names: ["プレス", "カシメ", "クグシ"],
+    stock_estimates: [
+      { process_name: "クグシ", next_process_name: null, qty: 8222, last_movement_date: null },
+    ],
+    candidate_totals: { プレス: { count: 3, qty: 60 }, クグシ: { count: 1, qty: 10 } },
+    assignments: [ASSIGNMENT],
+  }
+  const entry = (overrides: Partial<StockSourceEntry>): StockSourceEntry => ({
+    entry_id: 1,
+    work_date: "2026-10-20",
+    product_raw: "テスト製品",
+    customer_raw: "A社",
+    equipment_raw: null,
+    qty: 10,
+    ...overrides,
+  })
+
+  describe("suggestedStockQty", () => {
+    it.each<[string, number, string]>([
+      // 推定があれば推定と受注数量の小さい方
+      ["クグシ", 5000, "5000"],
+      ["クグシ", 10000, "8222"],
+      // 推定が無ければ未割当の日報の合計
+      ["プレス", 5000, "60"],
+      // 登録済みの引き当てがあればその数
+      ["カシメ", 5000, "7"],
+      ["", 5000, ""],
+    ])("%s（受注数量 %d）→ %s", (processName, orderQuantity, expected) => {
+      expect(suggestedStockQty(DATA, processName, orderQuantity)).toBe(expected)
+    })
+
+    it("推定も未割当も無ければ空欄", () => {
+      expect(suggestedStockQty({ ...DATA, assignments: [] }, "カシメ", 100)).toBe("")
+    })
+  })
+
+  describe("stockProcessRows", () => {
+    it("工程ルートの順に全工程の行を作り、次の工程・実績・登録済みを付ける", () => {
+      const rows = stockProcessRows(DATA, [
+        { process_name: "プレス", good_qty: 5 },
+        { process_name: "プレス", good_qty: 8 },
+      ])
+      expect(rows).toEqual([
+        {
+          processName: "プレス",
+          nextProcessName: "カシメ",
+          estimateQty: null,
+          candidateCount: 3,
+          candidateQty: 60,
+          actualQty: 8,
+          assignedQty: null,
+          hasStock: true,
+        },
+        {
+          processName: "カシメ",
+          nextProcessName: "クグシ",
+          estimateQty: null,
+          candidateCount: 0,
+          candidateQty: 0,
+          actualQty: null,
+          assignedQty: 7,
+          hasStock: false,
+        },
+        {
+          processName: "クグシ",
+          nextProcessName: null,
+          estimateQty: 8222,
+          candidateCount: 1,
+          candidateQty: 10,
+          actualQty: null,
+          assignedQty: null,
+          hasStock: true,
+        },
+      ])
+    })
+  })
+
+  describe("plannedSourceUsage", () => {
+    const entries = [{ qty: 30 }, { qty: 50 }, { qty: 20 }]
+
+    it.each<[string, number[]]>([
+      ["60", [30, 30, 0]],
+      ["200", [30, 50, 20]],
+      ["0", [0, 0, 0]],
+      ["", [0, 0, 0]],
+      ["1.5", [0, 0, 0]],
+    ])("%s 個を新しい順に割り振る", (qty, expected) => {
+      expect(plannedSourceUsage(entries, qty)).toEqual(expected)
+    })
+  })
+
+  describe("distinctRawValues", () => {
+    it("重複と空欄を除いて出てきた順に並べる", () => {
+      const entries = [
+        entry({ product_raw: "B" }),
+        entry({ product_raw: " A " }),
+        entry({ product_raw: "B" }),
+        entry({ product_raw: null }),
+        entry({ product_raw: " " }),
+      ]
+      expect(distinctRawValues(entries, "product_raw")).toEqual(["B", "A"])
+    })
+  })
+
+  describe("stockAssignmentWarnings", () => {
+    const BASE = {
+      qtyText: "10",
+      candidateQty: 10,
+      usedEntries: [{ customer_id: 1 }],
+      orderCustomerId: 1,
+      existingQty: null,
+    }
+
+    it("問題が無ければ注意なし", () => {
+      expect(stockAssignmentWarnings(BASE)).toEqual([])
+    })
+
+    it("数が未割当の合計を超える", () => {
+      expect(stockAssignmentWarnings({ ...BASE, qtyText: "11" })).toEqual([
+        "未割当の日報は合計 10 個です。集計で充てられるのは 10 個までです",
+      ])
+      expect(stockAssignmentWarnings({ ...BASE, candidateQty: 0, usedEntries: [] })).toEqual([
+        "この工程に未割当の日報はありません。日報が取り込まれるまで、集計では作り置きを充てられません",
+      ])
+    })
+
+    it("充てる明細の顧客が受注の顧客と違う（照合できない明細・顧客不明の受注は比べない）", () => {
+      const message =
+        "日報の顧客先が受注の顧客と違う明細があります。顧客先の誤記なら、このまま引き当ててかまいません"
+      expect(stockAssignmentWarnings({ ...BASE, usedEntries: [{ customer_id: 2 }] })).toEqual([message])
+      expect(stockAssignmentWarnings({ ...BASE, usedEntries: [{ customer_id: null }, {}] })).toEqual([])
+      expect(
+        stockAssignmentWarnings({ ...BASE, usedEntries: [{ customer_id: 2 }], orderCustomerId: null }),
+      ).toEqual([])
+    })
+
+    it("登録済みを上書きする", () => {
+      expect(stockAssignmentWarnings({ ...BASE, existingQty: 1200 })).toEqual([
+        "登録済みの引き当て（1,200 個）を上書きします",
+      ])
     })
   })
 })

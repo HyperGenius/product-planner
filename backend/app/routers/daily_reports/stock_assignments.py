@@ -135,7 +135,11 @@ def _load_entries(
 
 
 def _source_entry(
-    entry_id: int, qty: int, work_date: str | None, entry: dict[str, Any] | None
+    entry_id: int,
+    qty: int,
+    work_date: str | None,
+    entry: dict[str, Any] | None,
+    customer_id: int | None = None,
 ) -> dict[str, Any]:
     entry = entry or {}
     return {
@@ -144,6 +148,7 @@ def _source_entry(
         "product_raw": entry.get("product_raw"),
         "customer_raw": entry.get("customer_raw"),
         "equipment_raw": entry.get("equipment_raw"),
+        "customer_id": customer_id,
         "qty": qty,
     }
 
@@ -203,7 +208,7 @@ def _load_candidates(
     rows = fetch_all_rows(
         lambda: (
             client.table(SupabaseTableName.DAILY_REPORT_UNALLOCATED_ACTUALS.value)
-            .select("id, entry_id, process_name, work_date, qty")
+            .select("id, entry_id, customer_id, process_name, work_date, qty")
             .eq("tenant_id", tenant_id)
             .eq("product_id", product_id)
             .in_("process_name", process_names)
@@ -220,7 +225,11 @@ def _load_candidates(
         entry_id = int(row["entry_id"])
         candidates.setdefault(row["process_name"], []).append(
             _source_entry(
-                entry_id, int(row["qty"]), row["work_date"], entries.get(entry_id)
+                entry_id,
+                int(row["qty"]),
+                row["work_date"],
+                entries.get(entry_id),
+                row.get("customer_id"),
             )
         )
     return candidates, totals

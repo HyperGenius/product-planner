@@ -67,6 +67,11 @@ export interface StockSourceEntry {
   product_raw: string | null
   customer_raw: string | null
   equipment_raw: string | null
+  /**
+   * 日報の顧客先を照合した顧客（候補だけ。照合できない・充当した明細では null。Issue #673）。
+   * 古い API では返らないので任意
+   */
+  customer_id?: number | null
   /** 充てた数（候補では未割当に残っている数） */
   qty: number
 }
