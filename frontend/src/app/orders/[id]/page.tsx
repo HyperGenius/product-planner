@@ -64,6 +64,9 @@ import {
 } from "@/lib/order-utils"
 import { ApiError } from "@/lib/api-client"
 
+/** 工程の進捗カードの案内からスクロールする先（作り置きの引き当てのカード。Issue #673） */
+const STOCK_ASSIGNMENTS_ANCHOR_ID = "stock-assignments"
+
 export default function OrderDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -385,9 +388,10 @@ export default function OrderDetailPage() {
           {/* 工程の進捗（日報の実績の割り付け対象＝確定済み・生産中のみ。Issue #491） */}
           {(order.status === "confirmed" || order.status === "in_progress") && (
             <>
-              <OrderProcessProgress orderId={order.id} />
+              <OrderProcessProgress orderId={order.id} stockHintTargetId={STOCK_ASSIGNMENTS_ANCHOR_ID} />
               {/* 作り置きからの引き当て（Issue #624） */}
               <OrderStockAssignments
+                anchorId={STOCK_ASSIGNMENTS_ANCHOR_ID}
                 orderId={order.id}
                 orderQuantity={order.quantity ?? 0}
                 orderCustomerId={order.customer_id ?? null}

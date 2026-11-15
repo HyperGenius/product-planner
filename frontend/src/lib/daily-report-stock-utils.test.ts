@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { ProcessProgress } from "@/types/daily-report-progress"
 import type {
   StockAssignment,
   StockEstimate,
@@ -11,7 +12,9 @@ import {
   feedbackSummary,
   feedbackWithoutEstimates,
   initialStockAssignmentForm,
+  isAssignmentPending,
   plannedSourceUsage,
+  shouldShowStockHint,
   stockAssignmentWarnings,
   stockProcessRows,
   suggestedStockQty,
@@ -382,6 +385,77 @@ describe("作り置きの引き当てのダイアログ (Issue #673)", () => {
       expect(stockAssignmentWarnings({ ...BASE, existingQty: 1200 })).toEqual([
         "登録済みの引き当て（1,200 個）を上書きします",
       ])
+    })
+  })
+})
+
+describe("引き当てのカードと進捗の案内 (Issue #673)", () => {
+  describe("isAssignmentPending", () => {
+    it.each<[string, string | null, boolean]>([
+      ["2026-11-02T04:00:00Z", "2026-11-02T03:00:00Z", true],
+      ["2026-11-02T02:00:00Z", "2026-11-02T03:00:00Z", false],
+      // タイムゾーンの表記が違っても時刻で比べる
+      ["2026-11-02T11:30:00+09:00", "2026-11-02T03:00:00Z", false],
+      ["2026-11-02T02:00:00Z", null, true],
+    ])("登録 %s・集計 %s → 反映待ち %s", (updatedAt, computedAt, expected) => {
+      expect(isAssignmentPending({ updated_at: updatedAt }, computedAt)).toBe(expected)
+    })
+  })
+
+  describe("shouldShowStockHint", () => {
+    const PROGRESS = {
+      computed_at: "2026-11-02T03:00:00Z",
+      processes: [
+        { process_name: "プレス", good_qty: 0, status: "not_started" as const },
+        { process_name: "検査", good_qty: 0, status: "not_started" as const },
+      ] as ProcessProgress[],
+    }
+    const STOCK = {
+      computed_at: "2026-11-02T03:00:00Z",
+      assignable: true,
+      process_names: ["プレス", "検査"],
+      stock_estimates: [],
+      candidate_totals: { 検査: { count: 1, qty: 10 } },
+      assignments: [] as StockAssignment[],
+    }
+    const PENDING: StockAssignment = {
+      id: "a-1",
+      order_id: 1,
+      process_name: "検査",
+      qty: 10,
+      assigned_on: "2026-11-02",
+      note: null,
+      updated_by: "u1",
+      updated_at: "2026-11-02T04:00:00Z",
+      sources: [],
+    }
+
+    it("実績の無い工程があり、引き当てられるもの（未割当の日報だけでも）があれば出す", () => {
+      expect(shouldShowStockHint(PROGRESS, STOCK)).toBe(true)
+    })
+
+    it.each<[string, Parameters<typeof shouldShowStockHint>[0], Parameters<typeof shouldShowStockHint>[1]]>([
+      ["進捗が未取得", undefined, STOCK],
+      ["引き当てが未取得", PROGRESS, undefined],
+      ["進捗が未集計", { ...PROGRESS, computed_at: null }, STOCK],
+      ["引き当てられない受注", PROGRESS, { ...STOCK, assignable: false }],
+      [
+        "すべての工程に実績がある",
+        {
+          ...PROGRESS,
+          processes: PROGRESS.processes.map((p) => ({ ...p, status: "in_progress" as const })),
+        },
+        STOCK,
+      ],
+      ["引き当てられるものが無い", PROGRESS, { ...STOCK, candidate_totals: {} }],
+      ["反映待ちの引き当てがある", PROGRESS, { ...STOCK, assignments: [PENDING] }],
+    ])("%s なら出さない", (_label, progress, stock) => {
+      expect(shouldShowStockHint(progress, stock)).toBe(false)
+    })
+
+    it("反映済みの引き当てだけなら、まだ実績の無い工程があれば出す", () => {
+      const reflected = { ...PENDING, updated_at: "2026-11-02T02:00:00Z" }
+      expect(shouldShowStockHint(PROGRESS, { ...STOCK, assignments: [reflected] })).toBe(true)
     })
   })
 })
