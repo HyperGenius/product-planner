@@ -87,7 +87,7 @@ export function TargetCombobox({
           <ChevronsUpDown className="ml-1 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="end">
+      <PopoverContent className="w-[28rem] max-w-[calc(100vw-2rem)] p-0" align="end">
         <Command
           filter={(_value, search, keywords) => {
             const needle = search.toLowerCase()
@@ -118,9 +118,9 @@ export function TargetCombobox({
                         )}
                       />
                       <span className="min-w-0">
-                        <span className="block truncate">{option.label}</span>
+                        <span className="block break-words">{option.label}</span>
                         {option.description && (
-                          <span className="block truncate text-xs text-muted-foreground">
+                          <span className="block break-words text-xs text-muted-foreground">
                             {option.description}
                           </span>
                         )}
