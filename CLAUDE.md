@@ -194,6 +194,12 @@ cd backend && ruff check . && mypy .
     バッジに出さず `useShippingRows()` も変えない**（Epic #679）。原因の見出しに直す画面へのリンクを1回だけ置き、行に繰り返さない。弥生の名寄せは
     `#products` / `#customers` で開くとその種別のタブを出す。`/orders/new` は初期値のクエリを受け取らない。送品の消し込みを描画するテストは
     MSW の既定ハンドラ `GET /shipments/unmatched-entries` に依存する
+  - **日報の進捗が追いついていない受注（Issue #683）**: `GET /shipments/order-reviews`（純粋関数 `shipment_review.review_orders()`）。原因は保存せず
+    参照のたびに求める。比べるのは**日報で追う最後の工程**（#681 の日報で追わない工程を除く）の良品数で、工程がすべて追わない工程の製品は対象外。
+    未割当を見る期間は受注日以降だが、`before_order_date`（作り置き）だけは受注日より前にしか無いので `STOCK_EXPIRY_MONTHS` 遡る（受注日で切ると
+    作り置きの原因が出なくなる）。`order_process_progress` には `id` 列が無い（主キーは (order_id, process_routing_id)）ので `fetch_all_rows()` の
+    `.order()` は主キーで並べる。画面の要確認は2種類をタブで切り替え（列が違う）、カードの件数は両方の取得が終わってから出す。送品の消し込みを
+    描画するテストは MSW の既定ハンドラ `GET /shipments/order-reviews` に依存する
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は

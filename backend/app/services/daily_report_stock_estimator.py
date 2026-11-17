@@ -76,7 +76,7 @@ class StockEstimate:
     last_movement_date: date | None
 
 
-def _months_before(day: date, months: int) -> date:
+def months_before(day: date, months: int) -> date:
     index = day.year * 12 + (day.month - 1) - months
     year, month = index // 12, index % 12 + 1
     return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
@@ -213,7 +213,7 @@ def estimate_stock(
     for order in shipped_orders:
         shipped_by_product.setdefault(order.product_id, []).append(order)
     feedback_by_product = {f.product_id: f for f in feedback}
-    expires_before = _months_before(today, expiry_months)
+    expires_before = months_before(today, expiry_months)
 
     estimates: list[StockEstimate] = []
     for product_id in sorted(entries_by_product):

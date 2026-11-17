@@ -25,6 +25,7 @@ from app.models.shipment import (
     ShipmentCustomerLinkCreate,
     ShipmentIgnoredCreate,
     ShipmentOrderMatchListResponse,
+    ShipmentOrderReviewListResponse,
     ShipmentProductItem,
     ShipmentProductLinkUpsert,
     ShipmentUnmatchedListResponse,
@@ -34,6 +35,7 @@ from app.services.shipment_matcher import normalize_code
 from app.services.shipment_matching_service import (
     get_order_shipments,
     list_customer_items,
+    list_order_reviews,
     list_product_items,
     list_unmatched_entries,
 )
@@ -143,6 +145,20 @@ def get_shipment_unmatched_entries(
     受注を起票したり送品済みにしたりはしない
     """
     return list_unmatched_entries(client, tenant_id, days, limit)
+
+
+@shipments_router.get("/order-reviews", response_model=ShipmentOrderReviewListResponse)
+def get_shipment_order_reviews(
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """弥生で送品済みなのに日報の進捗が追いついていない受注と原因（送品の消し込みの「要確認」。Issue #683）。
+
+    未送品（確定済・生産中）の受注のうち、弥生の送品数量が日報で追う最後の工程の良品数を超えているもの。
+    原因（工程なし・工程名が日報と合わない・日報の顧客先違い／作り置き・書き漏れ）は参照のたびに求め、
+    保存しない。送品済みにする操作は止めない
+    """
+    return list_order_reviews(client, tenant_id)
 
 
 @shipments_router.get("/customers", response_model=list[ShipmentCustomerItem])

@@ -13,6 +13,11 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
+from app.services.daily_report_allocation_service import (
+    fetch_last_computed_at,
+    load_routings,
+    load_untracked_process_names,
+)
 from app.services.daily_report_name_matching_service import fetch_all_rows
 from app.services.shipment_matcher import (
     UNMATCHED_ENTRY_STATUSES,
@@ -25,6 +30,15 @@ from app.services.shipment_matcher import (
     group_unmatched_entries,
     normalize_code,
     summarize_by_order,
+)
+from app.services.shipment_review import (
+    REVIEW_CAUSES,
+    REVIEW_ORDER_STATUSES,
+    REVIEW_UNALLOCATED_REASONS,
+    ReviewOrder,
+    ReviewShipment,
+    ReviewUnallocated,
+    review_orders,
 )
 from app.utils.calendar import JST
 from supabase import Client  # type: ignore
@@ -293,6 +307,117 @@ def list_unmatched_entries(
         "counts": counts,
         "truncated": any(n > limit for n in counts.values()),
         "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 送品の消し込みの「要確認」: 日報の進捗が追いついていない受注 (Issue #683)
+# ---------------------------------------------------------------------------
+
+
+def fetch_progress_good_qty(db: Client, tenant_id: str) -> dict[tuple[int, int], int]:
+    """(受注 ID, 工程ルート ID) → 割り付けた良品数（`order_process_progress`）。"""
+    # 主キーは (order_id, process_routing_id) で `id` 列が無いので、`_select_all()` を使わない
+    rows = fetch_all_rows(
+        lambda: (
+            db.table(SupabaseTableName.ORDER_PROCESS_PROGRESS.value)
+            .select("order_id, process_routing_id, good_qty")
+            .eq("tenant_id", tenant_id)
+            .order("order_id")
+            .order("process_routing_id")
+        )
+    )
+    return {
+        (int(r["order_id"]), int(r["process_routing_id"])): int(r.get("good_qty") or 0)
+        for r in rows
+    }
+
+
+def fetch_review_unallocated(db: Client, tenant_id: str) -> list[ReviewUnallocated]:
+    """原因の判定に使う理由の未割当の実績（テナント単位で1回。受注ごとに問い合わせない）。"""
+    rows = _select_all(
+        db,
+        SupabaseTableName.DAILY_REPORT_UNALLOCATED_ACTUALS,
+        "id, product_id, process_name, reason, work_date, qty",
+        tenant_id,
+        lambda q: q.in_("reason", sorted(REVIEW_UNALLOCATED_REASONS)),
+    )
+    return [
+        ReviewUnallocated(
+            product_id=int(r["product_id"]),
+            process_name=str(r.get("process_name") or ""),
+            reason=r["reason"],
+            work_date=_to_date(r.get("work_date")),
+            qty=int(r.get("qty") or 0),
+        )
+        for r in rows
+        if r.get("product_id") is not None
+    ]
+
+
+def list_order_reviews(db: Client, tenant_id: str) -> dict[str, Any]:
+    """弥生で送品済みなのに日報の進捗が追いついていない受注と原因（`shipment_review`）。
+
+    弥生の突合は他の受注と候補が重なるかを見るため全件で行う。結果は保存しない
+    """
+    snapshot = load_snapshot(db, tenant_id)
+    matcher = ShipmentMatcher(snapshot)
+    entries = fetch_entries(db, tenant_id)
+    shipments = {
+        order_id: ReviewShipment(
+            shipped_qty=s.shipped_qty, last_sales_date=s.last_sales_date
+        )
+        for order_id, s in summarize_by_order(
+            matcher.match_entry(e) for e in entries
+        ).items()
+        if s.entries
+    }
+    orders = [
+        ReviewOrder(
+            id=o.id,
+            product_id=int(o.product_id),
+            status=o.status,
+            order_date=o.order_date,
+        )
+        for o in snapshot.orders
+        if o.product_id is not None
+        and o.status in REVIEW_ORDER_STATUSES
+        and o.id in shipments
+    ]
+    reviews = (
+        review_orders(
+            orders,
+            shipments,
+            fetch_progress_good_qty(db, tenant_id),
+            load_routings(db, tenant_id),
+            load_untracked_process_names(db, tenant_id),
+            fetch_review_unallocated(db, tenant_id),
+        )
+        if orders
+        else []
+    )
+    counts = {cause: 0 for cause in REVIEW_CAUSES}
+    for review in reviews:
+        counts[review.cause] += 1
+    return {
+        "computed_at": fetch_last_computed_at(db, tenant_id),
+        "counts": counts,
+        "items": [
+            {
+                "order_id": r.order_id,
+                "product_id": r.product_id,
+                "cause": r.cause,
+                "shipped_qty": r.shipped_qty,
+                "last_sales_date": (
+                    r.last_sales_date.isoformat() if r.last_sales_date else None
+                ),
+                "final_process_name": r.final_process_name,
+                "final_good_qty": r.final_good_qty,
+                "unallocated_qty": r.unallocated_qty,
+                "process_names": list(r.process_names),
+            }
+            for r in reviews
+        ],
     }
 
 

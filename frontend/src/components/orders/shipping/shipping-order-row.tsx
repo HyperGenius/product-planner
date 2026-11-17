@@ -23,10 +23,12 @@ import {
   type ShippingCandidateReason,
   type ShippingRow,
 } from "@/lib/shipping-candidate-utils"
+import { ORDER_REVIEW_CAUSE_META } from "@/lib/shipping-review-utils"
 import { cn } from "@/lib/utils"
 import type { Customer } from "@/types/customer"
 import type { MemberRole } from "@/types/member"
 import type { Product } from "@/types/product"
+import type { ShipmentOrderReview } from "@/types/shipment"
 
 const REASON_LABEL: Record<ShippingCandidateReason, string> = {
   yayoi_shipped: "弥生で送品済み",
@@ -80,6 +82,8 @@ interface ShippingOrderRowProps extends OrderRowActionProps {
   products?: Product[]
   customers?: Customer[]
   currentUserRole: MemberRole | null
+  /** 弥生で送品済みなのに日報の進捗が追いついていないときの原因（Issue #683）。送品済みにする操作は止めない */
+  review?: ShipmentOrderReview
 }
 
 function DaysRemainingLabel({ days }: { days: number }) {
@@ -142,6 +146,7 @@ export function ShippingOrderRow({
   products,
   customers,
   currentUserRole,
+  review,
   shipIsPending,
   onShip,
 }: ShippingOrderRowProps) {
@@ -194,14 +199,24 @@ export function ShippingOrderRow({
         </div>
       </TableCell>
       <TableCell className="text-sm tabular-nums">
-        {progress ? (
-          <span>
-            {progress.completedCount} / {progress.totalCount}
-            <span className="ml-1 text-xs text-muted-foreground">工程</span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">日報なし</span>
-        )}
+        <div className="flex flex-col items-start gap-0.5 leading-tight">
+          {progress ? (
+            <span>
+              {progress.completedCount} / {progress.totalCount}
+              <span className="ml-1 text-xs text-muted-foreground">工程</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">日報なし</span>
+          )}
+          {review && (
+            <Link
+              href="#review"
+              className="text-xs font-medium text-amber-700 underline-offset-2 hover:underline"
+            >
+              要確認: {ORDER_REVIEW_CAUSE_META[review.cause].short}
+            </Link>
+          )}
+        </div>
       </TableCell>
       <TableCell>
         <ShipmentCell shipment={shipment} />

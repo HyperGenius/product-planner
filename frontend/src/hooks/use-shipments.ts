@@ -5,6 +5,7 @@ import { ApiError, apiClient } from "@/lib/api-client"
 import type {
   ShipmentCustomerItem,
   ShipmentOrderMatchList,
+  ShipmentOrderReviewList,
   ShipmentProductItem,
   ShipmentUnmatchedList,
 } from "@/types/shipment"
@@ -76,6 +77,20 @@ export function useShipmentUnmatchedEntries() {
       apiClient<ShipmentUnmatchedList>(
         `/shipments/unmatched-entries?days=${SHIPMENT_UNMATCHED_DAYS}`,
       ),
+    staleTime: STALE_TIME_MS,
+    refetchOnWindowFocus: false,
+  })
+}
+
+/**
+ * 弥生で送品済みなのに日報の進捗が追いついていない受注と原因（送品の消し込みの「要確認」。Issue #683）。
+ * 弥生の突合を使うので `["shipments"]` の配下に置く（名寄せの辞書を変えたら取り直す）。
+ * 送品の消し込みのバッジ（`useShippingRows()`）には使わない（Epic #679 の方針）
+ */
+export function useShipmentOrderReviews() {
+  return useQuery<ShipmentOrderReviewList>({
+    queryKey: [...SHIPMENTS_QUERY_KEY, "order-reviews"],
+    queryFn: () => apiClient<ShipmentOrderReviewList>("/shipments/order-reviews"),
     staleTime: STALE_TIME_MS,
     refetchOnWindowFocus: false,
   })

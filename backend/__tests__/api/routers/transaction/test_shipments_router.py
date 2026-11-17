@@ -299,3 +299,92 @@ class TestShipmentsRouter:
         response = client.delete("/shipments/customer-links/xyz")
 
         assert response.status_code == 404
+
+
+@pytest.mark.api
+class TestShipmentOrderReviews:
+    """弥生で送品済みなのに日報の進捗が追いついていない受注 (Issue #683)。"""
+
+    @pytest.fixture
+    def db(self):
+        mock = MagicMock()
+        app.dependency_overrides[get_current_tenant_id] = lambda: TENANT
+        app.dependency_overrides[get_supabase_client] = lambda: mock
+        yield mock
+        app.dependency_overrides = {}
+
+    def _get(self, *, routings, progress, unallocated=()):
+        entries = [_entry(id=1, quantity=60), _entry(id=2, quantity=40)]
+        with (
+            patch(f"{SERVICE}.load_snapshot", return_value=_snapshot()),
+            patch(f"{SERVICE}.fetch_entries", return_value=entries),
+            patch(f"{SERVICE}.load_routings", return_value=list(routings)),
+            patch(f"{SERVICE}.load_untracked_process_names", return_value=frozenset()),
+            patch(f"{SERVICE}.fetch_progress_good_qty", return_value=progress),
+            patch(
+                f"{SERVICE}.fetch_review_unallocated", return_value=list(unallocated)
+            ),
+            patch(
+                f"{SERVICE}.fetch_last_computed_at",
+                return_value="2026-10-21T00:00:00+00:00",
+            ),
+        ):
+            return client.get("/shipments/order-reviews")
+
+    def test_review_disappears_after_master_fixed_and_recomputed(self, db):
+        from app.services.daily_report_allocator import RoutingRef
+        from app.services.shipment_review import ReviewUnallocated
+
+        # 工程が無い製品 → 工程なし
+        response = self._get(routings=[], progress={})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["computed_at"] == "2026-10-21T00:00:00+00:00"
+        assert body["counts"] == {
+            "no_routing": 1,
+            "process_mismatch": 0,
+            "customer_or_stock": 0,
+            "missing_report": 0,
+        }
+        [item] = body["items"]
+        assert item == {
+            "order_id": 1001,
+            "product_id": 101,
+            "cause": "no_routing",
+            "shipped_qty": 100,
+            "last_sales_date": "2026-10-10",
+            "final_process_name": None,
+            "final_good_qty": 0,
+            "unallocated_qty": 0,
+            "process_names": [],
+        }
+
+        # 工程を登録したが、日報の工程名が合わず未割当に残っている → 工程名が日報と合わない
+        routings = [
+            RoutingRef(id=11, product_id=101, sequence_order=1, process_name="プレス")
+        ]
+        unallocated = [
+            ReviewUnallocated(
+                product_id=101,
+                process_name="ﾌﾟﾚｽ加工",
+                reason="no_routing_process",
+                work_date=None,
+                qty=100,
+            )
+        ]
+        [item] = self._get(
+            routings=routings, progress={}, unallocated=unallocated
+        ).json()["items"]
+        assert item["cause"] == "process_mismatch"
+        assert item["process_names"] == ["ﾌﾟﾚｽ加工"]
+        assert item["final_process_name"] == "プレス"
+
+        # 名寄せを直して再計算した → 最後の工程の良品数が送品数に届き、要確認から消える
+        body = self._get(routings=routings, progress={(1001, 11): 100}).json()
+        assert body["items"] == []
+        assert sum(body["counts"].values()) == 0
+
+    def test_never_updates_orders(self, db):
+        self._get(routings=[], progress={})
+
+        db.table.return_value.update.assert_not_called()

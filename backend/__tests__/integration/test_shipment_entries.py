@@ -7,6 +7,7 @@ Integration テスト: 弥生の売上明細の置き換え RPC と突合のク�
 - パーサーの出力が RPC 経由でそのまま保存され、金額の列を持たないこと
 - 突合のサービスが実際の列名（orders.deadline_date 等）で受注・明細を読めること
 - 送品済みにした受注（トリガーが書く orders.shipped_at）にも明細が当たり続けること（Issue #680）
+- 要確認（日報の進捗が追いついていない受注、Issue #683）が実際の列名で進捗・未割当・工程を読めること
 - ユーザー JWT から RPC を実行できないこと
 
 実行:
@@ -20,7 +21,10 @@ from datetime import date, datetime
 from typing import Any, cast
 
 import pytest
-from app.services.shipment_matching_service import get_order_shipments
+from app.services.shipment_matching_service import (
+    get_order_shipments,
+    list_order_reviews,
+)
 from app.services.shipment_parser import parse_shipment_rows
 from postgrest.exceptions import APIError
 
@@ -131,6 +135,7 @@ def tenants(admin_db):
     for tenant_id in ids.values():
         admin_db.table("shipment_files").delete().eq("tenant_id", tenant_id).execute()
         admin_db.table("orders").delete().eq("tenant_id", tenant_id).execute()
+        admin_db.table("process_routings").delete().eq("tenant_id", tenant_id).execute()
         admin_db.table("products").delete().eq("tenant_id", tenant_id).execute()
         admin_db.table("customers").delete().eq("tenant_id", tenant_id).execute()
         admin_db.table("tenants").delete().eq("id", tenant_id).execute()
@@ -354,3 +359,75 @@ class TestOrderShipments:
             "single_open_order",
         ]
         assert after["items"] == before["items"]
+
+
+@pytest.mark.integration
+class TestOrderReviews:
+    def test_review_until_final_process_catches_up(self, admin_db, tenants):
+        own = tenants["own"]
+        customer = (
+            admin_db.table("customers")
+            .insert({"tenant_id": own, "name": "架空工業株式会社"})
+            .execute()
+            .data[0]
+        )
+        product = (
+            admin_db.table("products")
+            .insert({"tenant_id": own, "name": "品A", "code": "123456"})
+            .execute()
+            .data[0]
+        )
+        routing = (
+            admin_db.table("process_routings")
+            .insert(
+                {
+                    "tenant_id": own,
+                    "product_id": product["id"],
+                    "sequence_order": 1,
+                    "process_name": "プレス",
+                    "unit_time_seconds": 1,
+                }
+            )
+            .execute()
+            .data[0]
+        )
+        order = (
+            admin_db.table("orders")
+            .insert(
+                {
+                    "tenant_id": own,
+                    "customer_id": customer["id"],
+                    "product_id": product["id"],
+                    "quantity": 100,
+                    "status": "in_progress",
+                    "deadline_date": "2026-10-20",
+                    "order_date": "2026-09-01T00:00:00+09:00",
+                }
+            )
+            .execute()
+            .data[0]
+        )
+        file_id = _insert_file(admin_db, own, "2026-11-01T09:00:00+09:00")
+        _replace(admin_db, own, file_id, _parsed(OCT, _row(date(2026, 10, 5), 100)))
+
+        # 進捗の行が無い → 日報の書き漏れ・取り込み漏れ
+        [item] = list_order_reviews(admin_db, own)["items"]
+        assert item["order_id"] == order["id"]
+        assert item["cause"] == "missing_report"
+        assert item["final_process_name"] == "プレス"
+        assert item["final_good_qty"] == 0
+
+        # 割り付けの再計算で最後の工程の良品数が送品数に届いた → 要確認から消える
+        admin_db.table("order_process_progress").insert(
+            {
+                "tenant_id": own,
+                "order_id": order["id"],
+                "process_routing_id": routing["id"],
+                "good_qty": 100,
+                "status": "completed",
+                "completed_by": "quantity",
+                "computed_at": "2026-11-01T00:00:00+00:00",
+            }
+        ).execute()
+
+        assert list_order_reviews(admin_db, own)["items"] == []
