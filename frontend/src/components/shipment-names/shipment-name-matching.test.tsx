@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { http, HttpResponse } from "msw"
 import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
@@ -74,6 +74,27 @@ function recordWrites() {
 }
 
 describe("ShipmentNameMatching", () => {
+  afterEach(() => {
+    window.location.hash = ""
+  })
+
+  it("`#products` で開くと商品のタブを出し、タブを切り替えられる（送品の消し込みの要確認から。Issue #682）", async () => {
+    window.location.hash = "#products"
+    mockRole("order_handler")
+    server.use(
+      http.get(`${API_BASE}/shipments/products`, () => HttpResponse.json([productItem({})])),
+    )
+    const user = userEvent.setup()
+    render(<ShipmentNameMatching />)
+
+    expect(await screen.findByRole("tab", { name: "商品（未照合 1）" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await user.click(screen.getByRole("tab", { name: /^得意先/ }))
+    expect(screen.getByRole("tab", { name: /^得意先/ })).toHaveAttribute("aria-selected", "true")
+  })
+
   it("未照合の得意先だけを既定で出し、すべてに切り替えると照合済みも出す", async () => {
     mockRole("order_handler")
     server.use(

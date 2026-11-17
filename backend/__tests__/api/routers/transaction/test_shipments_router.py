@@ -116,6 +116,80 @@ class TestShipmentsRouter:
 
         db.table.return_value.update.assert_not_called()
 
+    def test_unmatched_entries(self, db):
+        entries = [
+            _entry(id=1),  # 受注 1001 に当たる → 出さない
+            _entry(id=2, sales_date="2026-10-12", note="12/1納期分", quantity=30),
+            _entry(id=3, sales_date="2026-10-14", product_code="Z9", product_name="?"),
+            # 期間外（最新の売上日 10/14 から 60 日より前）
+            _entry(id=4, sales_date="2026-07-01", note="12/1納期分"),
+        ]
+        with (
+            patch(f"{SERVICE}.load_snapshot", return_value=_snapshot()),
+            patch(f"{SERVICE}.fetch_entries", return_value=entries),
+        ):
+            response = client.get("/shipments/unmatched-entries")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["latest_sales_date"] == "2026-10-14"
+        assert body["since"] == "2026-08-16"
+        assert body["counts"] == {
+            "unmatched_customer": 0,
+            "unmatched_product": 1,
+            "no_order": 1,
+            "ambiguous": 0,
+        }
+        assert body["truncated"] is False
+        product, no_order = body["items"]
+        assert (product["status"], product["product_code"]) == (
+            "unmatched_product",
+            "Z9",
+        )
+        assert product["customer_ids"] == [1]
+        assert no_order["status"] == "no_order"
+        assert no_order["entry_count"] == 1
+        assert no_order["total_qty"] == 30
+        assert no_order["product_ids"] == [101]
+        assert no_order["note_deadlines"] == ["2026-12-01"]
+        db.table.return_value.update.assert_not_called()
+        db.table.return_value.insert.assert_not_called()
+
+    def test_unmatched_entries_limit_per_status(self, db):
+        entries = [
+            _entry(id=i, product_code=f"P{i}", note="12/1納期分") for i in range(3)
+        ]
+        with (
+            patch(f"{SERVICE}.load_snapshot", return_value=_snapshot()),
+            patch(f"{SERVICE}.fetch_entries", return_value=entries),
+        ):
+            response = client.get("/shipments/unmatched-entries?limit=2&days=7")
+
+        body = response.json()
+        assert body["counts"]["no_order"] == 3
+        assert body["truncated"] is True
+        assert len(body["items"]) == 2
+
+    def test_unmatched_entries_without_entries(self, db):
+        with (
+            patch(f"{SERVICE}.load_snapshot", return_value=_snapshot()),
+            patch(f"{SERVICE}.fetch_entries", return_value=[]),
+        ):
+            response = client.get("/shipments/unmatched-entries")
+
+        body = response.json()
+        assert (body["latest_sales_date"], body["since"], body["items"]) == (
+            None,
+            None,
+            [],
+        )
+
+    @pytest.mark.parametrize("query", ["days=0", "days=400", "limit=0", "limit=5000"])
+    def test_unmatched_entries_rejects_out_of_range(self, db, query):
+        response = client.get(f"/shipments/unmatched-entries?{query}")
+
+        assert response.status_code == 422
+
     def test_customer_items(self, db, data):
         with patch(f"{SERVICE}._select_all", return_value=[]):
             response = client.get("/shipments/customers")

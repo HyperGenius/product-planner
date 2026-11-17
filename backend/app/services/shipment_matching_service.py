@@ -9,18 +9,20 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.repositories.supa_infra.common.table_name import SupabaseTableName
 from app.services.daily_report_name_matching_service import fetch_all_rows
 from app.services.shipment_matcher import (
+    UNMATCHED_ENTRY_STATUSES,
     CustomerInfo,
     EntryMatch,
     OrderInfo,
     ProductInfo,
     ShipmentMatcher,
     ShipmentSnapshot,
+    group_unmatched_entries,
     normalize_code,
     summarize_by_order,
 )
@@ -229,6 +231,69 @@ def get_order_shipments(
         )
     latest = max((str(e["sales_date"])[:10] for e in entries), default=None)
     return {"latest_sales_date": latest, "items": items}
+
+
+# ---------------------------------------------------------------------------
+# 送品の消し込みの「要確認」: 受注に当たらない明細 (Issue #682)
+# ---------------------------------------------------------------------------
+
+
+def list_unmatched_entries(
+    db: Client, tenant_id: str, days: int, limit: int
+) -> dict[str, Any]:
+    """受注に当たらない弥生の明細を、原因（突合の状態）ごとに (得意先, 商品コード) でまとめる。
+
+    対象の期間は取り込んだ明細の最新の売上日から `days` 日分（古い明細の起票漏れは対応しない前提）。
+    突合は他の受注と候補が重なるかを見るため全件で行い、まとめるときだけ期間で絞る。
+    `limit` は原因ごとの上限で、`counts` は上限で切る前の件数。受注の起票・送品済みにする操作はしない
+    """
+    snapshot = load_snapshot(db, tenant_id)
+    matcher = ShipmentMatcher(snapshot)
+    entries = fetch_entries(db, tenant_id)
+    latest = max(
+        (date.fromisoformat(str(e["sales_date"])[:10]) for e in entries),
+        default=None,
+    )
+    since = latest - timedelta(days=days - 1) if latest is not None else None
+    groups = group_unmatched_entries(
+        (matcher.match_entry(e) for e in entries), since=since
+    )
+
+    counts = {status: 0 for status in UNMATCHED_ENTRY_STATUSES}
+    items = []
+    for group in groups:
+        counts[group.status] += 1
+        if counts[group.status] > limit:
+            continue
+        entry = group.latest
+        items.append(
+            {
+                "status": group.status,
+                "customer_code": entry["customer_code"],
+                "customer_code_key": group.customer_code_key,
+                "customer_name": entry.get("customer_name"),
+                "product_code": entry["product_code"],
+                "product_code_key": group.product_code_key,
+                "product_name": entry.get("product_name"),
+                "latest_note": entry.get("note"),
+                "entry_count": group.entry_count,
+                "total_qty": group.total_qty,
+                "last_sales_date": (
+                    group.last_sales_date.isoformat() if group.last_sales_date else None
+                ),
+                "customer_ids": sorted(group.customer_ids),
+                "product_ids": sorted(group.product_ids),
+                "note_deadlines": [d.isoformat() for d in sorted(group.note_deadlines)],
+                "candidate_order_ids": sorted(group.candidate_order_ids),
+            }
+        )
+    return {
+        "latest_sales_date": latest.isoformat() if latest else None,
+        "since": since.isoformat() if since else None,
+        "counts": counts,
+        "truncated": any(n > limit for n in counts.values()),
+        "items": items,
+    }
 
 
 # ---------------------------------------------------------------------------

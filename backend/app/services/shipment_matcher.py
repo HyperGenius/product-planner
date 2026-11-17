@@ -557,3 +557,90 @@ def summarize_by_order(matches: Iterable[EntryMatch]) -> dict[int, OrderShipment
             for order_id in match.candidate_order_ids:
                 get(order_id).ambiguous_entries.append(match)
     return shipments
+
+
+# ---------------------------------------------------------------------------
+# 受注に当たらない明細のまとめ (Issue #682)
+# ---------------------------------------------------------------------------
+
+UnmatchedEntryStatus = Literal[
+    "unmatched_customer", "unmatched_product", "no_order", "ambiguous"
+]
+# 送品の消し込みの「要確認」に出す突合の状態（表示順）。対象外（ignored）・照合済み（matched）は出さない
+UNMATCHED_ENTRY_STATUSES: tuple[UnmatchedEntryStatus, ...] = (
+    "unmatched_customer",
+    "unmatched_product",
+    "no_order",
+    "ambiguous",
+)
+
+
+@dataclass
+class UnmatchedEntryGroup:
+    """受注に当たらない明細を (得意先コード, 商品コード, 状態) でまとめたもの。
+
+    弥生の表記（得意先名・品名・備考）は売上日が最も新しい明細の値を採る。
+    """
+
+    status: UnmatchedEntryStatus
+    customer_code_key: str
+    product_code_key: str
+    latest: dict[str, Any]
+    entry_count: int = 0
+    total_qty: int = 0
+    last_sales_date: date | None = None
+    # 照合できた顧客（商流で複数ありうる）・製品（品名で照合するので明細ごとに違いうる）
+    customer_ids: set[int] = field(default_factory=set)
+    product_ids: set[int] = field(default_factory=set)
+    # 備考の `M/D納期分` / `N月末納期分`（受注が無いときに起票の手がかりにする）
+    note_deadlines: set[date] = field(default_factory=set)
+    # 複数の受注に当たって確定できなかったときの候補
+    candidate_order_ids: set[int] = field(default_factory=set)
+
+
+def group_unmatched_entries(
+    matches: Iterable[EntryMatch], since: date | None = None
+) -> list[UnmatchedEntryGroup]:
+    """受注に当たらない明細（`UNMATCHED_ENTRY_STATUSES`）を (得意先, 商品コード, 状態) でまとめる。
+
+    `since` より前の売上日の明細は数えない（古い明細の起票漏れは対応しない前提）。
+    並びは状態（`UNMATCHED_ENTRY_STATUSES` の順）→ 最新の売上日の新しい順 → 明細の件数の多い順
+    """
+    groups: dict[tuple[str, str, str], UnmatchedEntryGroup] = {}
+    for match in matches:
+        if match.status not in UNMATCHED_ENTRY_STATUSES:
+            continue
+        entry = match.entry
+        sales_date = _entry_sales_date(entry)
+        if since is not None and sales_date < since:
+            continue
+        status: UnmatchedEntryStatus = match.status  # type: ignore[assignment]
+        key = (
+            normalize_code(entry["customer_code"]),
+            normalize_code(entry["product_code"]),
+            status,
+        )
+        group = groups.get(key)
+        if group is None:
+            group = groups[key] = UnmatchedEntryGroup(
+                status=status,
+                customer_code_key=key[0],
+                product_code_key=key[1],
+                latest=entry,
+            )
+        group.entry_count += 1
+        group.total_qty += entry.get("quantity") or 0
+        if group.last_sales_date is None or sales_date >= group.last_sales_date:
+            group.last_sales_date = sales_date
+            group.latest = entry
+        group.customer_ids |= match.customer_ids
+        if match.product_id is not None:
+            group.product_ids.add(match.product_id)
+        group.note_deadlines.update(parse_note_deadlines(entry.get("note"), sales_date))
+        group.candidate_order_ids.update(match.candidate_order_ids)
+
+    order = {status: i for i, status in enumerate(UNMATCHED_ENTRY_STATUSES)}
+    result = sorted(groups.values(), key=lambda g: -g.entry_count)
+    result.sort(key=lambda g: g.last_sales_date or date.min, reverse=True)
+    result.sort(key=lambda g: order[g.status])
+    return result

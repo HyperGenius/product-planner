@@ -6,6 +6,7 @@ import type {
   ShipmentCustomerItem,
   ShipmentOrderMatchList,
   ShipmentProductItem,
+  ShipmentUnmatchedList,
 } from "@/types/shipment"
 
 /**
@@ -57,6 +58,26 @@ export function useShipmentOrderMatches(
     staleTime: STALE_TIME_MS,
     refetchOnWindowFocus: false,
     placeholderData: options?.keepPrevious ? keepPreviousData : undefined,
+  })
+}
+
+/** 受注に当たらない明細を見る期間（最新の売上日からの日数。Backend の既定と同じ） */
+export const SHIPMENT_UNMATCHED_DAYS = 60
+
+/**
+ * 受注に当たらない弥生の明細（送品の消し込みの「要確認」。Issue #682）。
+ * 名寄せの辞書を変えると結果が変わるので `["shipments"]` の配下に置く。
+ * サイドバーの件数バッジには使わない（Epic #679 の方針）
+ */
+export function useShipmentUnmatchedEntries() {
+  return useQuery<ShipmentUnmatchedList>({
+    queryKey: [...SHIPMENTS_QUERY_KEY, "unmatched-entries", SHIPMENT_UNMATCHED_DAYS],
+    queryFn: () =>
+      apiClient<ShipmentUnmatchedList>(
+        `/shipments/unmatched-entries?days=${SHIPMENT_UNMATCHED_DAYS}`,
+      ),
+    staleTime: STALE_TIME_MS,
+    refetchOnWindowFocus: false,
   })
 }
 

@@ -82,5 +82,45 @@ export interface ShipmentProductItem {
   cross_customer_candidates: { product_id: number; customer_ids: number[] }[]
 }
 
+/** 受注に当たらない明細の原因（突合の状態。Issue #682） */
+export type ShipmentUnmatchedStatus =
+  "unmatched_customer" | "unmatched_product" | "no_order" | "ambiguous"
+
+/** 受注に当たらない弥生の明細を (得意先, 商品コード, 原因) でまとめた行。表記は最新の明細の値 */
+export interface ShipmentUnmatchedGroup {
+  status: ShipmentUnmatchedStatus
+  customer_code: string
+  customer_code_key: string
+  customer_name: string | null
+  product_code: string
+  product_code_key: string
+  product_name: string | null
+  latest_note: string | null
+  entry_count: number
+  /** 明細の数量の合計（赤伝を差し引く） */
+  total_qty: number
+  last_sales_date: string | null
+  /** 照合できた顧客（商流で複数ありうる） */
+  customer_ids: number[]
+  /** 照合できた製品 */
+  product_ids: number[]
+  /** 備考の「○/○納期分」の日付 */
+  note_deadlines: string[]
+  /** 受注が区別できないときの候補 */
+  candidate_order_ids: number[]
+}
+
+export interface ShipmentUnmatchedList {
+  /** 取り込んだ明細の最新の売上日 */
+  latest_sales_date: string | null
+  /** 対象の期間の始まり（売上日） */
+  since: string | null
+  /** 原因ごとのまとめの件数（上限で切る前） */
+  counts: Record<ShipmentUnmatchedStatus, number>
+  /** 原因ごとの上限で切ったまとめがあるか */
+  truncated: boolean
+  items: ShipmentUnmatchedGroup[]
+}
+
 /** 辞書・対象外を書き込めるロール。Backend の SHIPMENT_NAME_EDITOR_ROLES と揃える */
 export const SHIPMENT_NAME_EDITOR_ROLES = ["president", "order_handler", "platform_admin"] as const

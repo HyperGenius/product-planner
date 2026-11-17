@@ -1,4 +1,4 @@
-# 弥生販売のエクスポートの取り込み（Issue #662 / #664 / #667）
+# 弥生販売のエクスポートの取り込み（Issue #662 / #664 / #667 / #682）
 
 送品の正典は弥生販売（インストール型）。弥生にはクラウド API が無く、連携手段はエクスポートなので、
 事務PCが書き出したファイル（帳票「得意先別売上明細表」の Excel `.xlsx`。Issue #664）を**生ファイルのまま**受け取って保存し（フェーズ1）、
@@ -65,6 +65,9 @@ cron で解析して受注と突き合わせ、「送品の消し込み」に弥
 - 「送品の消し込み」の各行に「弥生の送品」（合算した数量／受注数量・最後の売上日・一部送品・区別できない明細の件数）を出し、受注数量に達した
   注文は理由「弥生で送品済み」で候補の先頭に並べる。送品の突合は対象の受注 ID でまとめて1リクエスト（`useShipmentOrderMatches()`。
   直前の結果を残す `keepPrevious`）で、サイドバーの件数は突合が届くまで数えない
+- 「送品の消し込み」の「要確認」カード（#682）に、受注に当たらない弥生の明細（得意先・商品コードが未照合／受注が無い＝起票漏れ／
+  受注が区別できない）を原因ごと・得意先 × 商品コードでまとめて出し、直す画面（弥生の名寄せ・受注の新規作成・候補の受注）へ案内する。
+  画面の詳細は [order-management-ui-design.md](order-management-ui-design.md#要確認-受注に当たらない弥生の明細issue-682)
 
 ## エクスポートの形式（実物2本で確認。値はダミー）
 
@@ -179,12 +182,20 @@ shipment_files (parse_status=pending)
 | エンドポイント | 内容 |
 |---|---|
 | `GET /shipments/order-matches?order_id=…` | 受注ごとの弥生の送品（`shipped_qty` / `is_fully_shipped` / `last_sales_date` / 明細 / 区別できない明細）と `latest_sales_date`。上限500件 |
+| `GET /shipments/unmatched-entries?days=60&limit=200` | 受注に当たらない明細（`unmatched_customer` / `unmatched_product` / `no_order` / `ambiguous`）を (得意先, 商品コード, 原因) でまとめた行。下記 |
 | `GET /shipments/customers` | 得意先ごとの照合状況（辞書・自動・対象外）と候補（名前の一部一致・商流の推定） |
 | `GET /shipments/products` | (得意先, 商品コード) ごとの照合状況と候補（受注にある似た製品・別の顧客の受注の製品） |
 | `POST /shipments/customer-links` / `DELETE /shipments/customer-links/{id}` | 得意先 → 顧客（重複は 409） |
 | `PUT /shipments/product-links` / `DELETE /shipments/product-links/{id}` | (得意先, 商品コード) → 製品。登録済みなら付け替え |
 | `POST /shipments/ignored` / `DELETE /shipments/ignored/{id}` | 対象外 |
 
+- `GET /shipments/unmatched-entries`（#682）: まとめる処理は純粋関数 `shipment_matcher.group_unmatched_entries()`、DB は
+  `shipment_matching_service.list_unmatched_entries()`。突合は他の受注と候補が重なるかを見るため**全件の明細で行い、まとめるときだけ期間で絞る**。
+  期間は取り込んだ明細の**最新の売上日**から `days` 日分（既定60、1〜366。今日ではなく取り込み済みの期間を基準にする。古い明細の起票漏れは
+  対応しない前提）。`limit`（既定200、1〜1000）は**原因ごと**の上限で、`counts` は上限で切る前の件数、`truncated` は切ったかどうか。
+  対象外（`shipment_ignored_codes`）・照合済みの明細は出さない。送品済みにした受注も突合の候補に残る（#680）ので、その明細は「受注が無い」に出ない。
+  行は弥生の表記（最新の明細の値）・件数・数量の合計（赤伝を差し引く）・最新の売上日、照合できた顧客・製品、備考の納期分、区別できない候補の受注を返す。
+  並びは原因（上の順）→ 最新の売上日の新しい順 → 件数の多い順。`/shipments/{id}` の GET は無いので登録順の衝突は無い
 - 書き込みはユーザー JWT で、ロールは Backend `SHIPMENT_NAME_EDITOR_ROLES` と Frontend `SHIPMENT_NAME_EDITOR_ROLES` を揃える
   （社長・受注担当・プラットフォーム管理者）。`GET /shipment-files` は解析の結果（期間・件数・エラー）も返す
 

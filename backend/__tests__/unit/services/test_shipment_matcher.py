@@ -11,6 +11,7 @@ from app.services.shipment_matcher import (
     ProductInfo,
     ShipmentMatcher,
     ShipmentSnapshot,
+    group_unmatched_entries,
     normalize_code,
     parse_note_deadlines,
     parse_note_order_nos,
@@ -467,3 +468,112 @@ class TestSummarizeByOrder:
         assert shipments[1].shipped_qty == 0
         assert len(shipments[1].ambiguous_entries) == 1
         assert len(shipments[2].ambiguous_entries) == 1
+
+
+class TestGroupUnmatchedEntries:
+    """送品の消し込みの「要確認」: 受注に当たらない明細のまとめ (Issue #682)。"""
+
+    def _groups(self, matcher: ShipmentMatcher, entries, since=None):
+        return group_unmatched_entries(
+            (matcher.match_entry(e) for e in entries), since=since
+        )
+
+    def test_groups_by_customer_product_and_status(self):
+        matcher = ShipmentMatcher(
+            _snapshot(
+                orders=[],
+                product_links={("00012", "AB123"): 101, ("00012", "CD999"): 103},
+            )
+        )
+        entries = [
+            _entry(id=1, sales_date="2026-10-01", quantity=40, note="10/20納期分"),
+            # 同じ得意先・商品コード（表記ゆれ）は1行にまとめ、表記は最新の明細の値を採る
+            _entry(
+                id=2,
+                sales_date="2026-10-05",
+                product_code="AB123 ",
+                quantity=-10,
+                note="10月末納期分",
+            ),
+            _entry(id=3, sales_date="2026-10-03", product_code="CD999", quantity=5),
+        ]
+
+        groups = self._groups(matcher, entries)
+
+        assert [(g.status, g.product_code_key, g.entry_count) for g in groups] == [
+            ("no_order", "AB123", 2),
+            ("no_order", "CD999", 1),
+        ]
+        first = groups[0]
+        assert first.total_qty == 30
+        assert first.last_sales_date == date(2026, 10, 5)
+        assert first.latest["id"] == 2
+        assert first.customer_ids == {1}
+        assert first.product_ids == {101}
+        assert first.note_deadlines == {date(2026, 10, 20), date(2026, 10, 31)}
+
+    def test_excludes_matched_and_ignored(self):
+        matcher = ShipmentMatcher(
+            _snapshot(ignored_products={("00012", "SHIP")}, ignored_customers={"00099"})
+        )
+        entries = [
+            _entry(id=1),  # 受注 1 に当たる
+            _entry(id=2, product_code="ship"),
+            _entry(id=3, customer_code="00099", customer_name="未登録の会社"),
+        ]
+
+        assert self._groups(matcher, entries) == []
+
+    def test_entries_of_shipped_order_are_not_listed(self):
+        # 送品済みにした受注の明細は「受注が無い」に出さない (#680)
+        matcher = ShipmentMatcher(
+            _snapshot(
+                orders=[_order(1, status="shipped", shipped_on=date(2026, 10, 12))]
+            )
+        )
+
+        assert self._groups(matcher, [_entry(), _entry(id=2, note=None)]) == []
+
+    def test_orders_statuses_and_keeps_candidates(self):
+        matcher = ShipmentMatcher(_snapshot(orders=[_order(1), _order(2)]))
+        entries = [
+            _entry(id=1, sales_date="2026-10-01"),  # ambiguous（受注 1・2）
+            _entry(id=2, sales_date="2026-10-02", note="12/1納期分"),  # no_order
+            _entry(id=3, sales_date="2026-10-03", product_name="不明な品名"),
+            _entry(id=4, sales_date="2026-10-04", customer_name="未登録の会社"),
+        ]
+
+        groups = self._groups(matcher, entries)
+
+        assert [g.status for g in groups] == [
+            "unmatched_customer",
+            "unmatched_product",
+            "no_order",
+            "ambiguous",
+        ]
+        assert groups[0].customer_ids == set()
+        assert groups[1].customer_ids == {1}
+        assert groups[1].product_ids == set()
+        assert groups[3].candidate_order_ids == {1, 2}
+
+    def test_newer_groups_first_within_status(self):
+        matcher = ShipmentMatcher(_snapshot(orders=[]))
+        entries = [
+            _entry(id=1, sales_date="2026-10-01", product_code="OLD"),
+            _entry(id=2, sales_date="2026-10-09", product_code="NEW"),
+        ]
+
+        groups = self._groups(matcher, entries)
+
+        assert [g.product_code_key for g in groups] == ["NEW", "OLD"]
+
+    def test_entries_before_since_are_skipped(self):
+        matcher = ShipmentMatcher(_snapshot(orders=[]))
+        entries = [
+            _entry(id=1, sales_date="2026-08-01", quantity=10),
+            _entry(id=2, sales_date="2026-10-01", quantity=20),
+        ]
+
+        [group] = self._groups(matcher, entries, since=date(2026, 9, 1))
+
+        assert (group.entry_count, group.total_qty) == (1, 20)

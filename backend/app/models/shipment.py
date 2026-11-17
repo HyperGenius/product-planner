@@ -48,6 +48,61 @@ class ShipmentOrderMatchListResponse(BaseModel):
     items: list[ShipmentOrderMatch] = Field(default_factory=list)
 
 
+UnmatchedEntryStatus = Literal[
+    "unmatched_customer", "unmatched_product", "no_order", "ambiguous"
+]
+
+
+class ShipmentUnmatchedGroup(BaseModel):
+    """受注に当たらない弥生の明細を (得意先, 商品コード, 原因) でまとめた行 (Issue #682)。
+
+    弥生の表記（得意先名・品名・備考）は売上日が最も新しい明細の値。
+    """
+
+    status: UnmatchedEntryStatus
+    customer_code: str
+    customer_code_key: str
+    customer_name: str | None = None
+    product_code: str
+    product_code_key: str
+    product_name: str | None = None
+    latest_note: str | None = None
+    entry_count: int
+    total_qty: int = Field(description="明細の数量の合計（赤伝を差し引く）")
+    last_sales_date: str | None = None
+    customer_ids: list[int] = Field(
+        default_factory=list, description="照合できた顧客（商流で複数ありうる）"
+    )
+    product_ids: list[int] = Field(default_factory=list, description="照合できた製品")
+    note_deadlines: list[str] = Field(
+        default_factory=list, description="備考の「○/○納期分」の日付"
+    )
+    candidate_order_ids: list[int] = Field(
+        default_factory=list, description="受注が区別できないときの候補"
+    )
+
+
+class ShipmentUnmatchedCounts(BaseModel):
+    unmatched_customer: int = 0
+    unmatched_product: int = 0
+    no_order: int = 0
+    ambiguous: int = 0
+
+
+class ShipmentUnmatchedListResponse(BaseModel):
+    latest_sales_date: str | None = Field(
+        default=None, description="取り込んだ明細の最新の売上日（無ければ null）"
+    )
+    since: str | None = Field(
+        default=None, description="対象の期間の始まり（売上日。無ければ null）"
+    )
+    counts: ShipmentUnmatchedCounts = Field(
+        description="原因ごとのまとめの件数（上限で切る前）"
+    )
+    truncated: bool = Field(description="原因ごとの上限で切ったまとめがあるか")
+    items: list[ShipmentUnmatchedGroup] = Field(default_factory=list)
+
+
 class ShipmentCustomerLinkRef(BaseModel):
     id: str
     customer_id: int
