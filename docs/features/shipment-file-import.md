@@ -1,4 +1,4 @@
-# 弥生販売のエクスポートの取り込み（Issue #662 / #664 / #667 / #682）
+# 弥生販売のエクスポートの取り込み（Issue #662 / #664 / #667 / #682 / #683）
 
 送品の正典は弥生販売（インストール型）。弥生にはクラウド API が無く、連携手段はエクスポートなので、
 事務PCが書き出したファイル（帳票「得意先別売上明細表」の Excel `.xlsx`。Issue #664）を**生ファイルのまま**受け取って保存し（フェーズ1）、
@@ -68,6 +68,9 @@ cron で解析して受注と突き合わせ、「送品の消し込み」に弥
 - 「送品の消し込み」の「要確認」カード（#682）に、受注に当たらない弥生の明細（得意先・商品コードが未照合／受注が無い＝起票漏れ／
   受注が区別できない）を原因ごと・得意先 × 商品コードでまとめて出し、直す画面（弥生の名寄せ・受注の新規作成・候補の受注）へ案内する。
   画面の詳細は [order-management-ui-design.md](order-management-ui-design.md#要確認-受注に当たらない弥生の明細issue-682)
+- 「要確認」カード（#683）に、弥生で送品済みなのに日報の進捗が追いついていない注文を原因（工程なし・工程名が日報と合わない・
+  日報の顧客先が違う／作り置き・日報の書き漏れ）ごと・製品ごとに出し、直す画面へ案内する。送品の候補の行にも原因を短く出す。
+  画面の詳細は [order-management-ui-design.md](order-management-ui-design.md#要確認-日報の進捗が追いついていない注文issue-683)
 
 ## エクスポートの形式（実物2本で確認。値はダミー）
 
@@ -183,6 +186,7 @@ shipment_files (parse_status=pending)
 |---|---|
 | `GET /shipments/order-matches?order_id=…` | 受注ごとの弥生の送品（`shipped_qty` / `is_fully_shipped` / `last_sales_date` / 明細 / 区別できない明細）と `latest_sales_date`。上限500件 |
 | `GET /shipments/unmatched-entries?days=60&limit=200` | 受注に当たらない明細（`unmatched_customer` / `unmatched_product` / `no_order` / `ambiguous`）を (得意先, 商品コード, 原因) でまとめた行。下記 |
+| `GET /shipments/order-reviews` | 弥生で送品済みなのに日報の進捗が追いついていない受注と原因（`no_routing` / `process_mismatch` / `customer_or_stock` / `missing_report`）。下記 |
 | `GET /shipments/customers` | 得意先ごとの照合状況（辞書・自動・対象外）と候補（名前の一部一致・商流の推定） |
 | `GET /shipments/products` | (得意先, 商品コード) ごとの照合状況と候補（受注にある似た製品・別の顧客の受注の製品） |
 | `POST /shipments/customer-links` / `DELETE /shipments/customer-links/{id}` | 得意先 → 顧客（重複は 409） |
@@ -196,6 +200,17 @@ shipment_files (parse_status=pending)
   対象外（`shipment_ignored_codes`）・照合済みの明細は出さない。送品済みにした受注も突合の候補に残る（#680）ので、その明細は「受注が無い」に出ない。
   行は弥生の表記（最新の明細の値）・件数・数量の合計（赤伝を差し引く）・最新の売上日、照合できた顧客・製品、備考の納期分、区別できない候補の受注を返す。
   並びは原因（上の順）→ 最新の売上日の新しい順 → 件数の多い順。`/shipments/{id}` の GET は無いので登録順の衝突は無い
+- `GET /shipments/order-reviews`（#683）: 判定は純粋関数 `services/shipment_review.review_orders()`、DB は
+  `shipment_matching_service.list_order_reviews()`。結果は保存せず参照のたびに求める（マスタを直せば次の割り付けの再計算の後に消える）。
+  - 対象: 未送品（`confirmed` / `in_progress`）の受注で、突合で確定した弥生の送品数量（区別できない明細は含めない）が、**日報で追う最後の工程**
+    （日報で追わない工程 #681 を除いた `sequence_order` 最大の工程）の良品数（`order_process_progress.good_qty`。行が無ければ0）を超えているもの。
+    製品の工程がすべて日報で追わない工程なら対象にしない。送品済みにした受注は割り付けの候補から外れて進捗が無くなるので対象にしない
+  - 原因（上から順に判定）: 工程ルートが0件 → `no_routing`／その製品の未割当に `no_routing_process` → `process_mismatch`／
+    `no_candidate_order` / `before_order_date` → `customer_or_stock`／どれでもない → `missing_report`（名寄せの未照合は未割当に入らない #490 ので、ここに混ざる）
+  - 未割当を見る期間は、加工日が受注日（`order_date` の JST 暦日）以降・**その受注の弥生の最新の売上日**以前。ただし作り置き（`before_order_date`）は
+    受注日より前に作るので、受注日から作り置きの推定の期限 `STOCK_EXPIRY_MONTHS`（6か月）前まで遡る。加工日の無い未割当は期間にかかわらず含める
+  - 読み出しはテナント単位で1回ずつ（突合・工程ルート・日報で追わない工程・進捗・原因に使う理由の未割当）。受注ごとに問い合わせない
+  - 行は受注・製品・原因・送品数量・最新の売上日・最後の工程名と良品数・原因に当たった未割当の数量と日報の工程名。`counts` は原因ごとの受注の数
 - 書き込みはユーザー JWT で、ロールは Backend `SHIPMENT_NAME_EDITOR_ROLES` と Frontend `SHIPMENT_NAME_EDITOR_ROLES` を揃える
   （社長・受注担当・プラットフォーム管理者）。`GET /shipment-files` は解析の結果（期間・件数・エラー）も返す
 
