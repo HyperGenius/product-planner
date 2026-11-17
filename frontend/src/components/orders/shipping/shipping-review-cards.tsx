@@ -42,7 +42,7 @@ export function ShippingReviewCards({
       key: "review",
       label: "要確認",
       count: reviewCount,
-      sub: "受注に当たらない弥生の明細",
+      sub: "受注に当たらない弥生の明細・日報が追いついていない注文",
     },
   ]
 

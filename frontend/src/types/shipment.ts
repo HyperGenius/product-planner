@@ -124,3 +124,39 @@ export interface ShipmentUnmatchedList {
 
 /** 辞書・対象外を書き込めるロール。Backend の SHIPMENT_NAME_EDITOR_ROLES と揃える */
 export const SHIPMENT_NAME_EDITOR_ROLES = ["president", "order_handler", "platform_admin"] as const
+
+/**
+ * 弥生で送品済みなのに日報の進捗が追いついていない受注の原因（Issue #683）。判定の順に並べる
+ *
+ * - `no_routing`: 製品に工程が無い
+ * - `process_mismatch`: 日報の工程名が工程ルートと合わない（未割当 `no_routing_process`）
+ * - `customer_or_stock`: 日報の顧客先が違う・作り置き（未割当 `no_candidate_order` / `before_order_date`）
+ * - `missing_report`: どれにも当たらない（日報の書き漏れ・取り込み漏れ。名寄せの未照合も含む）
+ */
+export type ShipmentOrderReviewCause =
+  "no_routing" | "process_mismatch" | "customer_or_stock" | "missing_report"
+
+/** 弥生の送品数量が日報で追う最後の工程の良品数を超えている受注（未送品の確定済・生産中） */
+export interface ShipmentOrderReview {
+  order_id: number
+  product_id: number
+  cause: ShipmentOrderReviewCause
+  /** 弥生の送品数量（突合で確定した明細の合計） */
+  shipped_qty: number
+  last_sales_date: string | null
+  /** 日報で追う最後の工程。工程が無ければ null */
+  final_process_name: string | null
+  /** 日報で追う最後の工程の良品数（進捗の行が無ければ0） */
+  final_good_qty: number
+  /** 原因に当たった未割当の実績の数量の合計 */
+  unallocated_qty: number
+  /** 原因に当たった未割当の日報の工程名 */
+  process_names: string[]
+}
+
+export interface ShipmentOrderReviewList {
+  /** 日報の割り付けを最後に計算した日時 */
+  computed_at: string | null
+  counts: Record<ShipmentOrderReviewCause, number>
+  items: ShipmentOrderReview[]
+}

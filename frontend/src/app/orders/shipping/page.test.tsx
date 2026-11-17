@@ -8,7 +8,11 @@ import { jstTodayIso } from "@/lib/order-utils"
 import type { ProcessProgress } from "@/types/daily-report-progress"
 import type { MemberRole } from "@/types/member"
 import type { Order } from "@/types/order"
-import type { ShipmentUnmatchedGroup, ShipmentUnmatchedList } from "@/types/shipment"
+import type {
+  ShipmentOrderReview,
+  ShipmentUnmatchedGroup,
+  ShipmentUnmatchedList,
+} from "@/types/shipment"
 import OrdersShippingPage from "./page"
 
 vi.mock("next/navigation", () => ({
@@ -447,6 +451,144 @@ describe("OrdersShippingPage のカード（Issue #682）", () => {
     expect(await screen.findByRole("button", { name: /^送品の候補/ })).toHaveAttribute(
       "aria-pressed",
       "true",
+    )
+  })
+})
+
+function makeReview(overrides: Partial<ShipmentOrderReview>): ShipmentOrderReview {
+  return {
+    order_id: 1,
+    product_id: 101,
+    cause: "missing_report",
+    shipped_qty: 100,
+    last_sales_date: "2026-10-10",
+    final_process_name: "プレス",
+    final_good_qty: 0,
+    unallocated_qty: 0,
+    process_names: [],
+    ...overrides,
+  }
+}
+
+function mockOrderReviews(items: ShipmentOrderReview[]) {
+  const counts = { no_routing: 0, process_mismatch: 0, customer_or_stock: 0, missing_report: 0 }
+  for (const item of items) counts[item.cause] += 1
+  server.use(
+    http.get(`${API_BASE}/shipments/order-reviews`, () =>
+      HttpResponse.json({ computed_at: "2099-10-01T01:05:00Z", counts, items }),
+    ),
+  )
+}
+
+describe("OrdersShippingPage の日報が追いついていない注文（Issue #683）", () => {
+  beforeEach(() => {
+    window.location.hash = ""
+    mockRole("order_handler")
+    server.use(
+      http.get(`${API_BASE}/customers`, () =>
+        HttpResponse.json([{ id: 1, name: "架空工業株式会社", alias: "架空" }]),
+      ),
+      http.get(`${API_BASE}/products`, () =>
+        HttpResponse.json([
+          { id: 101, name: "品A", code: "DW-1" },
+          { id: 102, name: "品B", code: "DW-2" },
+        ]),
+      ),
+    )
+  })
+
+  it("送品の候補の行に原因を短く出し、送品済みにするは押せる", async () => {
+    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
+    mockProgress([])
+    mockOrderReviews([makeReview({ order_id: 1, cause: "no_routing", final_process_name: null })])
+    render(<OrdersShippingPage />)
+
+    const row = await waitFor(() => getRow("O-1"))
+    expect(within(row).getByText("日報なし")).toBeInTheDocument()
+    expect(await within(row).findByRole("link", { name: "要確認: 工程なし" })).toHaveAttribute(
+      "href",
+      "#review",
+    )
+    expect(await within(row).findByRole("button", { name: "送品済みにする" })).toBeEnabled()
+  })
+
+  it("要確認では原因ごとの見出しの下に製品の単位でまとめ、展開で注文を出す", async () => {
+    window.location.hash = "#review"
+    mockOrders([
+      makeOrder({ id: 1, order_no: "O-1", product_id: 101, quantity: 60 }),
+      makeOrder({ id: 2, order_no: "O-2", product_id: 101, quantity: 40 }),
+      makeOrder({ id: 3, order_no: "O-3", product_id: 102 }),
+    ])
+    mockProgress([])
+    mockUnmatched([makeUnmatched({ status: "no_order" })])
+    mockOrderReviews([
+      makeReview({
+        order_id: 1,
+        product_id: 101,
+        cause: "process_mismatch",
+        shipped_qty: 60,
+        unallocated_qty: 30,
+        process_names: ["ﾌﾟﾚｽ加工"],
+      }),
+      makeReview({ order_id: 2, product_id: 101, cause: "process_mismatch", shipped_qty: 40 }),
+      makeReview({ order_id: 3, product_id: 102, cause: "customer_or_stock", unallocated_qty: 20 }),
+    ])
+    const user = userEvent.setup()
+    render(<OrdersShippingPage />)
+
+    // 受注に当たらない明細1件＋日報が追いついていない注文2製品
+    expect(await screen.findByRole("button", { name: "要確認 3件" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("heading", { name: /工程名が日報と合わない\s*1製品/ }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: /日報の顧客先が違う／作り置き\s*1製品/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "照合状況（工程マスタ未登録）" })).toHaveAttribute(
+      "href",
+      "/master/daily-report-coverage#routing",
+    )
+    expect(screen.queryByRole("heading", { name: /製品に工程が無い/ })).toBeNull()
+
+    const [mismatch, stock] = screen.getAllByTestId("order-review-product-row")
+    expect(within(mismatch).getByText("DW-1 - 品A")).toBeInTheDocument()
+    expect(within(mismatch).getByText("100")).toBeInTheDocument()
+    expect(within(mismatch).getByText("ﾌﾟﾚｽ加工")).toBeInTheDocument()
+    expect(within(mismatch).getByRole("link", { name: "製品マスタで工程を開く" })).toHaveAttribute(
+      "href",
+      "/master/products?highlight=101",
+    )
+    expect(screen.queryByTestId("order-review-order-row")).toBeNull()
+
+    await user.click(within(mismatch).getByRole("button", { name: "2件の注文" }))
+    const orderRows = screen.getAllByTestId("order-review-order-row")
+    expect(orderRows.map((r) => within(r).getAllByRole("link")[0].textContent)).toEqual([
+      "O-1",
+      "O-2",
+    ])
+
+    await user.click(within(stock).getByRole("button", { name: "1件の注文" }))
+    expect(
+      screen.getByRole("link", { name: "受注詳細で作り置きを引き当てる" }),
+    ).toHaveAttribute("href", "/orders/3")
+
+    // 受注に当たらない弥生の明細へ切り替えられる
+    await user.click(screen.getByRole("tab", { name: "受注に当たらない弥生の明細（1）" }))
+    expect(screen.getAllByTestId("unmatched-shipment-row")).toHaveLength(1)
+  })
+
+  it("日報の書き漏れには日報の名寄せへのリンクと未照合が含まれる旨を出す", async () => {
+    window.location.hash = "#review"
+    mockOrders([makeOrder({ id: 1, order_no: "O-1" })])
+    mockProgress([])
+    mockOrderReviews([makeReview({ order_id: 1, cause: "missing_report" })])
+    render(<OrdersShippingPage />)
+
+    expect(
+      await screen.findByRole("heading", { name: /日報の書き漏れ・取り込み漏れ/ }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/未照合の明細も割り付けに使われない/)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "日報の名寄せ（未照合）" })).toHaveAttribute(
+      "href",
+      "/master/daily-report-names",
     )
   })
 })

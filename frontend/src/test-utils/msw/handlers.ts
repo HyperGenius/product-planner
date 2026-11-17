@@ -79,6 +79,14 @@ export const handlers = [
       items: [],
     }),
   ),
+  // 送品の消し込みの「要確認」・送品の候補の行が引く日報の進捗が追いついていない受注（Issue #683）。既定はなし
+  http.get(`${API_BASE}/shipments/order-reviews`, () =>
+    HttpResponse.json({
+      computed_at: null,
+      counts: { no_routing: 0, process_mismatch: 0, customer_or_stock: 0, missing_report: 0 },
+      items: [],
+    }),
+  ),
   http.get(`${API_BASE}/shipments/customers`, () => HttpResponse.json([])),
   http.get(`${API_BASE}/shipments/products`, () => HttpResponse.json([])),
   // 督促・分納の依頼一覧が引く日報の進捗（Issue #635）。既定は進捗なし
