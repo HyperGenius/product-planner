@@ -103,6 +103,49 @@ class ShipmentUnmatchedListResponse(BaseModel):
     items: list[ShipmentUnmatchedGroup] = Field(default_factory=list)
 
 
+OrderReviewCause = Literal[
+    "no_routing", "process_mismatch", "customer_or_stock", "missing_report"
+]
+
+
+class ShipmentOrderReview(BaseModel):
+    """弥生で送品済みなのに日報の進捗が追いついていない受注と原因 (Issue #683)。"""
+
+    order_id: int
+    product_id: int
+    cause: OrderReviewCause
+    shipped_qty: int = Field(description="弥生の送品数量（突合で確定した明細の合計）")
+    last_sales_date: str | None = None
+    final_process_name: str | None = Field(
+        default=None,
+        description="日報で追う最後の工程（工程ルートが無ければ null）",
+    )
+    final_good_qty: int = Field(
+        description="日報で追う最後の工程の良品数（進捗の行が無ければ0）"
+    )
+    unallocated_qty: int = Field(
+        default=0, description="原因に当たった未割当の実績の数量の合計"
+    )
+    process_names: list[str] = Field(
+        default_factory=list, description="原因に当たった未割当の日報の工程名"
+    )
+
+
+class ShipmentOrderReviewCounts(BaseModel):
+    no_routing: int = 0
+    process_mismatch: int = 0
+    customer_or_stock: int = 0
+    missing_report: int = 0
+
+
+class ShipmentOrderReviewListResponse(BaseModel):
+    computed_at: str | None = Field(
+        default=None, description="日報の割り付けを最後に計算した日時（無ければ null）"
+    )
+    counts: ShipmentOrderReviewCounts
+    items: list[ShipmentOrderReview] = Field(default_factory=list)
+
+
 class ShipmentCustomerLinkRef(BaseModel):
     id: str
     customer_id: int
