@@ -206,9 +206,11 @@ cd backend && ruff check . && mypy .
     サイドバーのバッジは①の件数だけにする。分類ルール表は [docs/features/shipment-file-import.md](docs/features/shipment-file-import.md#送品の消し込みの分類issue-691epic-690)
   - **送品の消し込みのハブ（Issue #692）**: `/orders/shipping` は前提バナー＋作業キュー（①②、付随の③、参考の日報）で、件数も一覧の行も
     `useShippingRows()` が返す `classifyShippingWorklist()` の結果から出す（バッジは同じフックに弥生の明細・日報の参考を渡さずに呼ぶので、①の件数は画面と一致する。②③・前提・日報はバッジに数えない。Epic #679）。
-    選んだ作業の一覧はハブの横に出し（ハッシュ `#ship` / `#confirm` / `#register` / `#ambiguous` / `#daily-reports`、`toValidShippingPanel()`。
-    #682 の `#candidates` / `#review` は①に寄せる）、#693 で専用のページへ移す。**②では「送品済みにする」を出さない**（弥生を正とする。`ShippingOrderRow` の
-    `showShipAction`）。取得中は件数を「－」、失敗は「取得できませんでした」にし、途中の件数を出さない。画面の文言は UI文言ガイドライン（下記）の見本で、
+    各作業の一覧は専用のページ `/orders/shipping/{ship,confirm,register,ambiguous,daily-reports}`（#693）で、外枠は `ShippingPageLayout`（戻り先・件数付きの見出し・
+    `ShippingHelp`・データの鮮度）。件数は `useOrdersShipping().counts` をハブとページで共有し、ページの行数と一致させる。#692 の暫定のハッシュ（`#ship` 等）・
+    #682 の `#candidates` でハブを開いたらそのページへ `router.replace` する（`shippingPageFromLegacyHash()`）。**②では「送品済みにする」を出さない**（弥生を正とする。
+    ①②は行を分け、②の `ConfirmOrderRow` には操作の列が無い）。②で弥生に未計上かつ納期が最新の売上日より後の注文は「取り込み待ち」として後ろへ回す
+    （`orderConfirmRows()`。並べ替えだけで行数は変えない）。テストのフィクスチャは `test-utils/shipping.ts`、画面に出さない語は `FORBIDDEN_UI_TEXT`。取得中は件数を「－」、失敗は「取得できませんでした」にし、途中の件数を出さない。画面の文言は UI文言ガイドライン（下記）の見本で、
     判定条件・原因の説明・状態の移り変わりは見出しの横の「?」（`ShippingHelp`、共通部品 `PageHelp` を `ListPageLayout` の `help` に渡す）に置く
     （ページのテストが全一覧の本文に内部語・否定形の説明が無いことを検査している）。2列にするかは画面の幅ではなく本文の幅で決める
     （`@container` ＋ `@[80rem]:`。`lg:` だとサイドバーを開いたタブレットで表が画面の外へはみ出す）
