@@ -1,35 +1,19 @@
 import { describe, expect, it } from "vitest"
 import {
-  countOrderReviewGroups,
-  countShippingReview,
-  countUnmatchedGroups,
   groupOrderReviews,
   groupUnmatchedByStatus,
-  toValidShippingCard,
+  toValidShippingPanel,
 } from "./shipping-review-utils"
 import type { ShipmentOrderReview, ShipmentUnmatchedGroup } from "@/types/shipment"
 
-describe("toValidShippingCard（Issue #682）", () => {
-  it("既知のカードはそのまま、知らない値・空は送品の候補に寄せる", () => {
-    expect(toValidShippingCard("#review")).toBe("review")
-    expect(toValidShippingCard("#candidates")).toBe("candidates")
-    expect(toValidShippingCard("")).toBe("candidates")
-    expect(toValidShippingCard("#unknown")).toBe("candidates")
-  })
-})
-
-describe("countUnmatchedGroups", () => {
-  it("上限で切る前の原因ごとの件数を足す。取得前は null", () => {
-    expect(countUnmatchedGroups(undefined)).toBeNull()
-    expect(
-      countUnmatchedGroups({
-        latest_sales_date: null,
-        since: null,
-        counts: { unmatched_customer: 1, unmatched_product: 2, no_order: 3, ambiguous: 4 },
-        truncated: true,
-        items: [],
-      }),
-    ).toBe(10)
+describe("toValidShippingPanel（Issue #692）", () => {
+  it("既知の一覧はそのまま、知らない値・空・#682 のカードのハッシュは①に寄せる", () => {
+    expect(toValidShippingPanel("#confirm")).toBe("confirm")
+    expect(toValidShippingPanel("#daily-reports")).toBe("daily-reports")
+    expect(toValidShippingPanel("")).toBe("ship")
+    expect(toValidShippingPanel("#unknown")).toBe("ship")
+    expect(toValidShippingPanel("#candidates")).toBe("ship")
+    expect(toValidShippingPanel("#review")).toBe("ship")
   })
 })
 
@@ -80,25 +64,5 @@ describe("groupOrderReviews（Issue #683）", () => {
     expect(grouped.missing_report[0].reviews.map((r) => r.order_id)).toEqual([1, 3])
     expect(grouped.no_routing.map((g) => g.productId)).toEqual([102])
     expect(grouped.process_mismatch).toEqual([])
-  })
-})
-
-describe("countOrderReviewGroups / countShippingReview", () => {
-  it("要確認の件数は製品のまとめの数。取得前は null、片方だけ取れたらその数", () => {
-    expect(countOrderReviewGroups(undefined)).toBeNull()
-    expect(
-      countOrderReviewGroups({
-        computed_at: null,
-        counts: { no_routing: 1, process_mismatch: 0, customer_or_stock: 0, missing_report: 2 },
-        items: [
-          makeReview({ order_id: 1 }),
-          makeReview({ order_id: 2 }),
-          makeReview({ order_id: 3, cause: "no_routing" }),
-        ],
-      }),
-    ).toBe(2)
-    expect(countShippingReview(null, null)).toBeNull()
-    expect(countShippingReview(3, null)).toBe(3)
-    expect(countShippingReview(3, 2)).toBe(5)
   })
 })

@@ -42,7 +42,7 @@ function setup(role: MemberRole) {
   server.use(
     http.get(`${API_BASE}/daily-reports/order-progress`, () => {
       fetchedProgress()
-      // 注文6は最終工程が完了（送品の候補）、注文7は進行中（納期も先なので候補でない）
+      // 注文6は最終工程が完了（②出荷を確かめる）、注文7は進行中（納期も先）
       return HttpResponse.json({
         computed_at: "2099-10-01T00:00:00Z",
         items: [
@@ -51,6 +51,15 @@ function setup(role: MemberRole) {
         ],
       })
     }),
+    // 注文7は弥生で受注数量の送品を確かめられた（①送品済みにする）。バッジは①だけを数える（Issue #692）
+    http.get(`${API_BASE}/shipments/order-matches`, () =>
+      HttpResponse.json({
+        latest_sales_date: "2099-09-20",
+        items: [
+          { order_id: 7, shipped_qty: 10, order_quantity: 10, is_fully_shipped: true, last_sales_date: "2099-09-20", entries: [], ambiguous_entries: [] },
+        ],
+      }),
+    ),
     http.get(`${API_BASE}/tenant/members/me`, () =>
       HttpResponse.json({ user_id: "u-1", email: "member@example.com", full_name: "テスト", role }),
     ),
@@ -112,7 +121,7 @@ describe("AppSidebar（Issue #555 / #556）", () => {
   })
 
   it.each<MemberRole>(["president", "order_handler"])(
-    "%s には送品の消し込みに候補の件数バッジを出す",
+    "%s には送品の消し込みに①送品済みにするの件数バッジを出す（②は数えない）",
     async (role) => {
       setup(role)
 

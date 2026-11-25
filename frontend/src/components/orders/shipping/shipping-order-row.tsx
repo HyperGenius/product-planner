@@ -71,7 +71,7 @@ export function ShippingOrderHeaderRow() {
           <span className="text-xs font-normal text-muted-foreground">数量／最終売上日</span>
         </div>
       </TableHead>
-      <TableHead>候補の理由</TableHead>
+      <TableHead>理由</TableHead>
       <TableHead className="text-right text-foreground">操作</TableHead>
     </TableRow>
   )
@@ -82,8 +82,12 @@ interface ShippingOrderRowProps extends OrderRowActionProps {
   products?: Product[]
   customers?: Customer[]
   currentUserRole: MemberRole | null
-  /** 弥生で送品済みなのに日報の進捗が追いついていないときの原因（Issue #683）。送品済みにする操作は止めない */
-  review?: ShipmentOrderReview
+  /** 弥生の送品数に日報の実績が届いていないときの原因（Issue #683）。送品済みにする操作は止めない */
+  review?: ShipmentOrderReview | null
+  /**
+   * 「送品済みにする」を出すか。②出荷を確かめるは弥生で確かめられていないので出さない（Epic #690。弥生が正）
+   */
+  showShipAction?: boolean
 }
 
 function DaysRemainingLabel({ days }: { days: number }) {
@@ -138,8 +142,8 @@ export function ShipmentCell({ shipment }: { shipment: ShippingRow["shipment"] }
 }
 
 /**
- * 「送品の消し込み」画面（Issue #557）の行。社長・受注担当には「送品済みにする」を出し、
- * それ以外のロールは閲覧のみ。一括の送品は作らない（弥生で1件ずつ確認する運用のため）
+ * 「送品の消し込み」の①②の行（Issue #557 / #692）。①では社長・受注担当に「送品済みにする」を出し、
+ * それ以外のロールは閲覧のみ。②では出さない。一括の送品は作らない（弥生で1件ずつ確認する運用のため）
  */
 export function ShippingOrderRow({
   row,
@@ -147,12 +151,13 @@ export function ShippingOrderRow({
   customers,
   currentUserRole,
   review,
+  showShipAction = true,
   shipIsPending,
   onShip,
 }: ShippingOrderRowProps) {
   const { order, deadline, deadlineSource, daysRemaining, progress, shipment, reasons } = row
   const product = getOrderProductDisplayParts(order, products)
-  const canShip = canShipOrder(order, currentUserRole)
+  const canShip = showShipAction && canShipOrder(order, currentUserRole)
 
   return (
     <TableRow>
@@ -210,10 +215,10 @@ export function ShippingOrderRow({
           )}
           {review && (
             <Link
-              href="#review"
+              href="#daily-reports"
               className="text-xs font-medium text-amber-700 underline-offset-2 hover:underline"
             >
-              要確認: {ORDER_REVIEW_CAUSE_META[review.cause].short}
+              日報: {ORDER_REVIEW_CAUSE_META[review.cause].short}
             </Link>
           )}
         </div>

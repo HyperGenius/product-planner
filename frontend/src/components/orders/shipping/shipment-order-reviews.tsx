@@ -66,9 +66,9 @@ export function ShipmentOrderReviews({
       <ScrollTable
         isLoading={isLoading}
         isError={isError}
-        errorState="日報の進捗が追いついていない注文を取得できませんでした"
+        errorState="弥生の送品数に日報の実績が届いていない注文を取得できませんでした"
         rowCount={data?.items.length ?? 0}
-        emptyState="日報の進捗が追いついていない注文はありません"
+        emptyState="弥生の送品数に日報の実績が届いていない注文はありません"
         header={
           <TableRow>
             <TableHead>製品</TableHead>

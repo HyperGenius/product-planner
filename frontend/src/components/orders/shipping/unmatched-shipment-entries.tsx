@@ -26,7 +26,12 @@ import type { ShipmentUnmatchedGroup, ShipmentUnmatchedList } from "@/types/ship
 const COLUMN_COUNT = 6
 
 interface UnmatchedShipmentEntriesProps {
+  /** `GET /shipments/unmatched-entries` の期間など（行は `items` を使う） */
   data: ShipmentUnmatchedList | undefined
+  /** 出す行（`classifyShippingWorklist()` で振り分けた③または前提のまとまり） */
+  items: readonly ShipmentUnmatchedGroup[]
+  /** 行が無いときの表示 */
+  emptyState: string
   isLoading: boolean
   isError: boolean
   orders: Order[] | undefined
@@ -35,19 +40,21 @@ interface UnmatchedShipmentEntriesProps {
 }
 
 /**
- * 送品の消し込みの「要確認」（Issue #682）。受注に当たらない弥生の明細を、原因ごとの見出しの下に
- * 得意先 × 商品コードでまとめて出し、見出しに直す画面へのリンクを1回だけ置く。
- * 送品の記録は弥生が正なので、ここから受注を起票したり送品済みにしたりはしない
+ * 送品の消し込みの、受注に結び付かない弥生の明細（Issue #682 / #692）。③受注を起票する・前提の送品先の受注を見分けるで使う。
+ * 原因ごとの見出しの下に得意先 × 商品コードでまとめて出し、見出しに直す画面へのリンクを1回だけ置く。
+ * 送品の記録は弥生が正なので、ここから送品済みにはしない
  */
 export function UnmatchedShipmentEntries({
   data,
+  items,
+  emptyState,
   isLoading,
   isError,
   orders,
   products,
   customers,
 }: UnmatchedShipmentEntriesProps) {
-  const grouped = useMemo(() => groupUnmatchedByStatus(data?.items ?? []), [data])
+  const grouped = useMemo(() => groupUnmatchedByStatus(items), [items])
   const orderById = useMemo(() => new Map((orders ?? []).map((o) => [o.id, o])), [orders])
 
   return (
@@ -62,9 +69,9 @@ export function UnmatchedShipmentEntries({
       <ScrollTable
         isLoading={isLoading}
         isError={isError}
-        errorState="受注に当たらない弥生の明細を取得できませんでした"
-        rowCount={data?.items.length ?? 0}
-        emptyState="受注に当たらない弥生の明細はありません"
+        errorState="弥生の明細を取得できませんでした"
+        rowCount={items.length}
+        emptyState={emptyState}
         header={
           <TableRow>
             <TableHead>得意先（弥生）</TableHead>
@@ -72,15 +79,14 @@ export function UnmatchedShipmentEntries({
             <TableHead className="text-right">明細</TableHead>
             <TableHead className="text-right">数量</TableHead>
             <TableHead>最新の売上日</TableHead>
-            <TableHead>照合できた内容・手がかり</TableHead>
+            <TableHead>手がかり</TableHead>
           </TableRow>
         }
       >
         {UNMATCHED_STATUSES.map((status) => {
-          const items = grouped[status]
-          if (items.length === 0) return null
+          const rows = grouped[status]
+          if (rows.length === 0) return null
           const meta = UNMATCHED_STATUS_META[status]
-          const total = data?.counts[status] ?? items.length
           return (
             <Fragment key={status}>
               <TableRow className="bg-muted/50 hover:bg-muted/50">
@@ -90,7 +96,7 @@ export function UnmatchedShipmentEntries({
                       <h3 className="text-sm font-semibold">
                         {meta.label}
                         <span className="ml-2 font-normal text-muted-foreground tabular-nums">
-                          {total}件
+                          {rows.length}商品
                         </span>
                       </h3>
                       <p className="text-xs text-muted-foreground">{meta.hint}</p>
@@ -107,7 +113,7 @@ export function UnmatchedShipmentEntries({
                   </div>
                 </TableCell>
               </TableRow>
-              {items.map((item) => (
+              {rows.map((item) => (
                 <UnmatchedRow
                   key={`${item.status}-${item.customer_code_key}-${item.product_code_key}`}
                   item={item}
@@ -210,7 +216,7 @@ function MatchedDetail({
       )}
       {item.status === "ambiguous" && item.candidate_order_ids.length > 0 && (
         <span className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-muted-foreground">候補の受注:</span>
+          <span className="text-muted-foreground">見比べる受注:</span>
           {item.candidate_order_ids.map((id) => (
             <CandidateOrderLink key={id} orderId={id} order={orderById.get(id)} />
           ))}
