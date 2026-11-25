@@ -2,7 +2,10 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 interface ListPageLayoutProps {
-  title: string
+  /** 見出し。件数などを並べるときは要素を渡す */
+  title: ReactNode
+  /** 見出しの上に置く、親の画面へ戻るリンク */
+  back?: ReactNode
   /** 見出しの下の説明 */
   description?: ReactNode
   /** 見出しの横に置くページのヘルプ（`PageHelp`。画面に書かない仕組みの説明の置き場所） */
@@ -26,6 +29,7 @@ interface ListPageLayoutProps {
  */
 export function ListPageLayout({
   title,
+  back,
   description,
   help,
   actions,
@@ -36,6 +40,7 @@ export function ListPageLayout({
     <div className={cn("container mx-auto flex h-[calc(100dvh-6.75rem)] min-w-0 flex-col gap-4", className)}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
+          {back && <div className="mb-1 text-sm">{back}</div>}
           <div className="flex items-center gap-1.5">
             <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
             {help}

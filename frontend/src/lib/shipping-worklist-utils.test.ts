@@ -12,6 +12,9 @@ import type {
 } from "@/types/shipment"
 import {
   classifyShippingWorklist,
+  formatWorkCount,
+  isAwaitingYayoiImport,
+  orderConfirmRows,
   placeShippingOrder,
   type ShippingWorklist,
 } from "./shipping-worklist-utils"
@@ -347,5 +350,45 @@ describe("classifyShippingWorklist", () => {
     })
     expect(worklist.ship.map((o) => o.order.id)).toEqual([1, 3])
     expect(worklist.confirm.map((o) => o.order.id)).toEqual([4, 2])
+  })
+})
+
+describe("formatWorkCount（Issue #692）", () => {
+  it("単位を付け、取得中は「－」、失敗は「取得できませんでした」、上限で切られたら「以上」", () => {
+    expect(formatWorkCount({ value: 3, isError: false }, "注文")).toBe("3注文")
+    expect(formatWorkCount({ value: 3, isError: false, atLeast: true }, "商品")).toBe("3商品以上")
+    expect(formatWorkCount({ value: null, isError: false }, "注文")).toBe("－")
+    expect(formatWorkCount({ value: 3, isError: true }, "注文")).toBe("取得できませんでした")
+  })
+})
+
+describe("②の取り込み待ち（Issue #693）", () => {
+  const LATEST = "2026-11-10"
+
+  it("弥生に計上が無く、納期が最新の売上日より後なら取り込み待ち", () => {
+    expect(isAwaitingYayoiImport({ deadline: "2026-11-11", shipment: null }, LATEST)).toBe(true)
+    expect(
+      isAwaitingYayoiImport({ deadline: "2026-11-11", shipment: makeMatch(1, 0) }, LATEST),
+    ).toBe(true)
+  })
+
+  it("納期が最新の売上日以前・分納の途中・納期が無い・未取り込みなら取り込み待ちにしない", () => {
+    expect(isAwaitingYayoiImport({ deadline: LATEST, shipment: null }, LATEST)).toBe(false)
+    expect(
+      isAwaitingYayoiImport({ deadline: "2026-11-30", shipment: makeMatch(1, 3) }, LATEST),
+    ).toBe(false)
+    expect(isAwaitingYayoiImport({ deadline: null, shipment: null }, LATEST)).toBe(false)
+    expect(isAwaitingYayoiImport({ deadline: "2026-11-30", shipment: null }, null)).toBe(false)
+  })
+
+  it("取り込み待ちを後ろへ回し、それぞれの中の並びと行数を保つ", () => {
+    const rows = [
+      { id: 1, deadline: "2026-11-01", shipment: null },
+      { id: 2, deadline: "2026-11-20", shipment: null },
+      { id: 3, deadline: "2026-11-05", shipment: null },
+      { id: 4, deadline: "2026-11-28", shipment: null },
+    ]
+    expect(orderConfirmRows(rows, LATEST).map((r) => r.id)).toEqual([1, 3, 2, 4])
+    expect(orderConfirmRows(rows, null).map((r) => r.id)).toEqual([1, 2, 3, 4])
   })
 })

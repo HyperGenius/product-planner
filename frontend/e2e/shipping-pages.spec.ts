@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test"
 
 /**
- * 送品の消し込みのハブ（Issue #692）の見た目を撮る。
+ * 送品の消し込みのハブ（Issue #692）と各作業のページ（Issue #693）の見た目を撮る。
  *
  * 前提:
  * - Supabase (supabase start) と frontend (npm run dev) がローカルで起動していること
@@ -10,7 +10,7 @@ import { test, expect, type Page, type Route } from "@playwright/test"
  * バックエンドの API（`NEXT_PUBLIC_API_URL` の localhost:8000）はすべて page.route() で固定応答にするので、
  * backend は起動しなくてよい。注文番号・顧客名・品名・得意先はダミー値。
  *
- * スクリーンショットは test-results/shipping-hub/ に保存する（gitignore 済み）。
+ * スクリーンショットは test-results/shipping-pages/ に保存する（gitignore 済み）。
  * 1920×1080 とタブレット横向き（1180×820）で撮る。
  */
 const email = process.env.E2E_USER_EMAIL ?? "test@example.com"
@@ -58,6 +58,8 @@ const ORDERS = [
   order(4, { product: 101, customer: 1, qty: 300, deadline: "2026-11-18" }),
   order(5, { product: 102, customer: 2, qty: 80, deadline: "2026-11-29" }),
   order(6, { product: 103, customer: 2, qty: 60, deadline: "2026-12-20", status: "in_progress" }),
+  // ② 納期超過で弥生に未計上（納期が最新の売上日 11/21 以前）
+  order(8, { product: 102, customer: 1, qty: 30, deadline: "2026-11-14" }),
   // 対象外（納期が先で、最終工程も未完了）
   order(7, { product: 101, customer: 2, qty: 40, deadline: "2027-01-15" }),
 ]
@@ -113,6 +115,7 @@ const PROGRESS = [
   progressRow(5, "in_progress", 40, 80),
   progressRow(6, "completed", 60, 60),
   progressRow(7, "not_started", 0, 40),
+  progressRow(8, "in_progress", 10, 30),
 ]
 
 function group(status: string, fields: Record<string, unknown>) {
@@ -198,80 +201,83 @@ async function login(page: Page) {
 
 async function screenshot(page: Page, name: string) {
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" })
-  await page.screenshot({ path: `test-results/shipping-hub/${name}.png` })
+  await page.screenshot({ path: `test-results/shipping-pages/${name}.png` })
 }
 
-async function openHub(page: Page, hash = "") {
+async function open(page: Page, path: string) {
   await page.clock.setFixedTime(NOW)
   await mockApi(page)
   await login(page)
-  await page.goto(`/orders/shipping${hash}`)
-  await expect(page.getByRole("button", { name: "① 送品済みにする 3注文" })).toBeVisible({ timeout: 30000 })
+  await page.goto(path)
 }
 
-test.describe("送品の消し込みのハブ（Issue #692）", () => {
-  test("1920×1080: ①の一覧と前提バナー", async ({ page }) => {
+test.describe("送品の消し込みのハブと各ページ（Issue #692 / #693）", () => {
+  test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 })
-    await openHub(page)
+  })
 
+  test("ハブ: 前提バナーと作業キュー", async ({ page }) => {
+    await open(page, "/orders/shipping")
+    await expect(page.getByRole("link", { name: "① 送品済みにする 3注文" })).toBeVisible({ timeout: 30000 })
     await expect(page.getByRole("region", { name: "先に片付けること" })).toContainText(
       "弥生の得意先1件・商品2件がアプリに未登録です",
     )
-    await expect(page.getByRole("button", { name: "② 出荷を確かめる 3注文" })).toBeVisible()
-    await expect(page.getByRole("button", { name: "③ 受注を起票する 2商品" })).toBeVisible()
-    await expect(
-      page.getByRole("button", { name: "日報が未入力の出荷済み注文 2注文" }),
-    ).toBeVisible()
-    await expect(page.getByRole("region", { name: "① 送品済みにする" }).getByRole("row")).toHaveCount(4)
+    await expect(page.getByRole("link", { name: "② 出荷を確かめる 4注文" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "③ 受注を起票する 2商品" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "日報が未入力の出荷済み注文 2注文" })).toBeVisible()
     // サイドバーのバッジは①の件数だけ（#692）
-    await expect(page.getByRole("link", { name: /送品の消し込み/ })).toContainText("3")
-    await screenshot(page, "hub-ship-1920")
+    await expect(page.getByRole("link", { name: /^送品の消し込み/ }).first()).toContainText("3")
+    await screenshot(page, "hub-1920")
   })
 
-  test("1920×1080: ②出荷を確かめる", async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 })
-    await openHub(page, "#confirm")
-    await expect(page.getByRole("region", { name: "② 出荷を確かめる" }).getByRole("row")).toHaveCount(4)
-    await screenshot(page, "hub-confirm-1920")
+  test("① 送品済みにする（ハブから開く）", async ({ page }) => {
+    await open(page, "/orders/shipping")
+    await page.getByRole("link", { name: "① 送品済みにする 3注文" }).click({ timeout: 30000 })
+    await expect(page).toHaveURL(/\/orders\/shipping\/ship$/)
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("3注文")
+    await expect(page.getByRole("row")).toHaveCount(4)
+    await expect(page.getByRole("button", { name: "送品済みにする" })).toHaveCount(3)
+    await screenshot(page, "ship-1920")
   })
 
-  test("1920×1080: ③受注を起票する", async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 })
-    await openHub(page, "#register")
-    await expect(page.getByTestId("unmatched-shipment-row")).toHaveCount(2)
-    await screenshot(page, "hub-register-1920")
+  test("② 出荷を確かめる", async ({ page }) => {
+    await open(page, "/orders/shipping/confirm")
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("4注文", { timeout: 30000 })
+    await expect(page.getByRole("row")).toHaveCount(5)
+    await expect(page.getByText("取り込み待ち")).toHaveCount(2)
+    await expect(page.getByRole("button", { name: "送品済みにする" })).toHaveCount(0)
+    await screenshot(page, "confirm-1920")
   })
 
-  test("1920×1080: 送り先の受注を確かめる", async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 })
-    await openHub(page)
-    await page.getByRole("button", { name: "受注を確かめる" }).click()
-    await expect(page.getByRole("region", { name: "送り先の受注を確かめる" })).toBeVisible()
+  test("③ 受注を起票する", async ({ page }) => {
+    await open(page, "/orders/shipping/register")
+    await expect(page.getByTestId("unmatched-shipment-row")).toHaveCount(2, { timeout: 30000 })
+    await screenshot(page, "register-1920")
+  })
+
+  test("送り先の受注を確かめる（前提バナーから開く）", async ({ page }) => {
+    await open(page, "/orders/shipping")
+    await page.getByRole("link", { name: "受注を確かめる" }).click({ timeout: 30000 })
+    await expect(page).toHaveURL(/\/orders\/shipping\/ambiguous$/)
     await expect(page.getByTestId("unmatched-shipment-row")).toHaveCount(1)
-    await screenshot(page, "hub-ambiguous-1920")
+    await screenshot(page, "ambiguous-1920")
   })
 
-  test("1920×1080: 日報が未入力の出荷済み注文", async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 })
-    await openHub(page, "#daily-reports")
-    await expect(page.getByTestId("order-review-product-row")).toHaveCount(2)
-    await screenshot(page, "hub-daily-reports-1920")
+  test("日報が未入力の出荷済み注文", async ({ page }) => {
+    await open(page, "/orders/shipping/daily-reports")
+    await expect(page.getByTestId("order-review-product-row")).toHaveCount(2, { timeout: 30000 })
+    await screenshot(page, "daily-reports-1920")
   })
 
-  test("1920×1080: ヘルプ", async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 })
-    await openHub(page)
-    await page.getByRole("button", { name: "ヘルプを開く" }).click()
-    await expect(page.getByRole("dialog")).toContainText("② 出荷を確かめる")
-    // 開くアニメーションの途中を撮らない
-    await page.waitForTimeout(500)
-    await screenshot(page, "hub-help-1920")
+  test("古いハッシュ（#confirm）で開くと②のページへ移る", async ({ page }) => {
+    await open(page, "/orders/shipping#confirm")
+    await expect(page).toHaveURL(/\/orders\/shipping\/confirm$/, { timeout: 30000 })
   })
 
-  test("#review で開いてもハブを出す（タブレット横向き 1180×820）", async ({ page }) => {
+  test("② をタブレット横向き（1180×820）で", async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 820 })
-    await openHub(page, "#review")
-    await expect(page.getByRole("region", { name: "① 送品済みにする" })).toBeVisible()
-    await screenshot(page, "hub-ship-tablet")
+    await open(page, "/orders/shipping/confirm")
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("4注文", { timeout: 30000 })
+    await screenshot(page, "confirm-tablet")
   })
 })

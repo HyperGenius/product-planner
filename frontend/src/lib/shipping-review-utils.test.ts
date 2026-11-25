@@ -1,18 +1,29 @@
 import { describe, expect, it } from "vitest"
 import {
   groupOrderReviews,
-  toValidShippingPanel,
+  shippingPageFromLegacyHash,
+  shippingPageHref,
 } from "./shipping-review-utils"
 import type { ShipmentOrderReview } from "@/types/shipment"
 
-describe("toValidShippingPanel（Issue #692）", () => {
-  it("既知の一覧はそのまま、知らない値・空・#682 のカードのハッシュは①に寄せる", () => {
-    expect(toValidShippingPanel("#confirm")).toBe("confirm")
-    expect(toValidShippingPanel("#daily-reports")).toBe("daily-reports")
-    expect(toValidShippingPanel("")).toBe("ship")
-    expect(toValidShippingPanel("#unknown")).toBe("ship")
-    expect(toValidShippingPanel("#candidates")).toBe("ship")
-    expect(toValidShippingPanel("#review")).toBe("ship")
+describe("shippingPageFromLegacyHash（Issue #693）", () => {
+  it("#692 の暫定の一覧のハッシュはそのページへ、#682 の送品の候補は①へ移す", () => {
+    expect(shippingPageFromLegacyHash("#ship")).toBe("ship")
+    expect(shippingPageFromLegacyHash("#confirm")).toBe("confirm")
+    expect(shippingPageFromLegacyHash("#register")).toBe("register")
+    expect(shippingPageFromLegacyHash("#ambiguous")).toBe("ambiguous")
+    expect(shippingPageFromLegacyHash("#daily-reports")).toBe("daily-reports")
+    expect(shippingPageFromLegacyHash("#candidates")).toBe("ship")
+  })
+
+  it("#682 の要確認・知らない値・空はハブのまま（null）", () => {
+    expect(shippingPageFromLegacyHash("#review")).toBeNull()
+    expect(shippingPageFromLegacyHash("#unknown")).toBeNull()
+    expect(shippingPageFromLegacyHash("")).toBeNull()
+  })
+
+  it("ページの URL はハブの配下", () => {
+    expect(shippingPageHref("daily-reports")).toBe("/orders/shipping/daily-reports")
   })
 })
 

@@ -249,3 +249,50 @@ export function classifyShippingWorklist(sources: ShippingWorklistSources): Ship
     truncated: sources.unmatchedEntries?.truncated ?? false,
   }
 }
+
+// ---------------------------------------------------------------------------
+// 件数の表示・②の並び（Issue #692 / #693）
+// ---------------------------------------------------------------------------
+
+/** 作業の件数。`value` は取得中・取得に失敗したときは null */
+export interface ShippingWorkCount {
+  value: number | null
+  isError: boolean
+  /** 一覧が上限で切られていて、実際はこの件数より多い（「以上」と付ける） */
+  atLeast?: boolean
+}
+
+/** 件数の表示（単位付き）。取得中は「－」、取得に失敗したら「取得できませんでした」 */
+export function formatWorkCount(count: ShippingWorkCount, unit: string): string {
+  if (count.isError) return "取得できませんでした"
+  if (count.value === null) return "－"
+  return `${count.value}${unit}${count.atLeast ? "以上" : ""}`
+}
+
+/**
+ * ②の注文が、弥生の取り込み待ちか（Epic #690 の未決事項「②は次の取り込みを待てば①に移るものが大半か」への対応、#693）。
+ * 弥生に1明細も計上されておらず、納期が取り込んだ明細の最新の売上日より後なら、まだ弥生に載っていないのが当然なので、
+ * 出荷を確かめる必要は薄い。最新の売上日が分からない（未取り込み）なら取り込み待ちにしない
+ */
+export function isAwaitingYayoiImport(
+  row: Pick<ShippingRow, "deadline" | "shipment">,
+  latestSalesDate: string | null,
+): boolean {
+  if (!latestSalesDate || !row.deadline) return false
+  if (row.shipment && row.shipment.entries.length > 0) return false
+  return row.deadline > latestSalesDate
+}
+
+/**
+ * ②の並び。取り込み待ちの注文を後ろへ回し、それぞれの中は分類の並び（`compareShippingRows()`）を保つ。
+ * 行を足し引きしないので、行数はハブの件数と一致する
+ */
+export function orderConfirmRows<T extends Pick<ShippingRow, "deadline" | "shipment">>(
+  rows: readonly T[],
+  latestSalesDate: string | null,
+): T[] {
+  const now: T[] = []
+  const waiting: T[] = []
+  for (const row of rows) (isAwaitingYayoiImport(row, latestSalesDate) ? waiting : now).push(row)
+  return [...now, ...waiting]
+}
