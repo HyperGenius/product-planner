@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import Link from "next/link"
 import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,6 +21,15 @@ export const SHIPPING_PANEL_ID = "shipping-panel"
 export interface ShippingWorkCount {
   value: number | null
   isError: boolean
+  /** 一覧が上限で切られていて、実際はこの件数より多い（「以上」と付ける） */
+  atLeast?: boolean
+}
+
+/** 件数の表示（単位付き）。取得中は「－」、取得に失敗したら「取得できませんでした」 */
+export function formatWorkCount(count: ShippingWorkCount, unit: string): string {
+  if (count.isError) return "取得できませんでした"
+  if (count.value === null) return "－"
+  return `${count.value}${unit}${count.atLeast ? "以上" : ""}`
 }
 
 type QueueWorkKind = Extract<ShippingWorkKind, "ship" | "confirm" | "register">
@@ -27,10 +37,11 @@ type QueueWorkKind = Extract<ShippingWorkKind, "ship" | "confirm" | "register">
 interface QueueStep {
   kind: QueueWorkKind
   panel: ShippingPanel
-  /** 見出し・読み上げに使う番号（①） */
+  /** 読み上げに使う番号（①） */
   no: string
   /** 丸の中に出す数字 */
   digit: number
+  /** 対象を短く。仕組みの説明はヘルプに書く（docs/ui-writing-guidelines.md） */
   description: string
 }
 
@@ -41,15 +52,14 @@ const MAIN_STEPS: readonly QueueStep[] = [
     panel: "ship",
     no: "①",
     digit: 1,
-    description: "弥生で受注数量の送品を確かめられた注文です。内容を見て送品済みにします",
+    description: "弥生で出荷済み。確認して送品済みにする",
   },
   {
     kind: "confirm",
     panel: "confirm",
     no: "②",
     digit: 2,
-    description:
-      "弥生ではまだ受注数量の送品を確かめられていない注文のうち、最終工程が完了した・納期を過ぎた・納期が近いものです。弥生で出荷を確かめます",
+    description: "弥生に未計上。出荷したか確かめる",
   },
 ]
 
@@ -58,12 +68,7 @@ const SUB_STEP: QueueStep = {
   panel: "register",
   no: "③",
   digit: 3,
-  description: "弥生では送品したのに、アプリに受注が無い商品です。注文書を確かめて起票します",
-}
-
-function countText(count: ShippingWorkCount, unit: string): string {
-  if (count.isError) return "取得できませんでした"
-  return count.value === null ? "－" : `${count.value}${unit}`
+  description: "弥生で出荷済みで、受注が無い",
 }
 
 interface PrerequisiteBannerProps {
@@ -72,13 +77,13 @@ interface PrerequisiteBannerProps {
   isError: boolean
   /** 弥生の明細が上限で切られている（件数が実際より少ない） */
   truncated: boolean
-  /** 送品先の受注を見分ける一覧を開く */
+  /** 送り先の受注を確かめる一覧を開く */
   onOpenAmbiguous: () => void
 }
 
 /**
- * 前提バナー（Issue #692）。①②③より先に片付けること（弥生の名寄せ・送品先の受注の見分け）があるときだけ出す。
- * 名寄せが済まない明細は受注と結び付かず、①にも③にも入らないので、下流の件数が変わることを書く
+ * 前提バナー（Issue #692）。①②③より先に片付けること（弥生の名寄せ・送り先の受注）があるときだけ、
+ * 「何が起きているか（1文）＋ボタン」で出す。対処すると件数がどう変わるかはヘルプに書く（docs/ui-writing-guidelines.md 4.5）
  */
 export function ShippingPrerequisiteBanner({
   counts,
@@ -90,62 +95,38 @@ export function ShippingPrerequisiteBanner({
     return (
       <div
         role="alert"
-        className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"
+        className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-900"
       >
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <p>
-          弥生の明細を取得できませんでした。名寄せが済んでいない得意先・商品と、③受注を起票するの件数を出せません
-        </p>
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <p>弥生の明細を取得できませんでした</p>
       </div>
     )
   }
   if (!counts) return null
+  const more = truncated ? "以上" : ""
   const nameParts = (["customer", "product"] as const)
     .filter((kind) => counts[kind] > 0)
-    .map((kind) => `${SHIPPING_PREREQUISITE_META[kind].unit} ${counts[kind]}件`)
+    .map((kind) => `${SHIPPING_PREREQUISITE_META[kind].unit}${counts[kind]}件${more}`)
   if (nameParts.length === 0 && counts.ambiguous === 0) return null
+  // 得意先が決まらないと商品も名寄せできないので、得意先が残っていれば得意先のタブを開く
+  const namesHref = `/orders/shipment-names#${counts.customer > 0 ? "customers" : "products"}`
 
   return (
     <section
       aria-label="先に片付けること"
-      className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+      className="flex flex-col divide-y divide-amber-200 rounded-lg border border-amber-300 bg-amber-50 text-sm text-amber-950"
     >
-      <h2 className="flex items-center gap-1.5 font-semibold">
-        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-        先に片付けること
-      </h2>
       {nameParts.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <p className="min-w-0 flex-1">
-            弥生の{nameParts.join("・")}が、アプリの顧客・製品と結び付いていません。
-            名寄せを済ませると、その明細が受注と結び付き、①送品済みにする・③受注を起票するの件数が変わります
-            {truncated && "（件数が多いため一部だけを数えています）"}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {counts.customer > 0 && (
-              <Button asChild size="sm" variant="outline" className="bg-white">
-                <Link href="/orders/shipment-names#customers">
-                  {SHIPPING_PREREQUISITE_META.customer.label}
-                </Link>
-              </Button>
-            )}
-            {counts.product > 0 && (
-              <Button asChild size="sm" variant="outline" className="bg-white">
-                <Link href="/orders/shipment-names#products">
-                  {SHIPPING_PREREQUISITE_META.product.label}
-                </Link>
-              </Button>
-            )}
-          </div>
-        </div>
+        <BannerLine text={`弥生の${nameParts.join("・")}がアプリに未登録です`}>
+          <Button asChild size="sm" variant="outline" className="bg-white">
+            <Link href={namesHref}>名寄せする</Link>
+          </Button>
+        </BannerLine>
       )}
       {counts.ambiguous > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <p className="min-w-0 flex-1">
-            送品先の受注が1件に決まらない弥生の{SHIPPING_PREREQUISITE_META.ambiguous.unit}が{" "}
-            {counts.ambiguous}件あります。
-            受注の顧客注文番号・希望納期を弥生の備考に合わせると、その数量が受注に入り、①送品済みにするへ進められます
-          </p>
+        <BannerLine
+          text={`送り先の受注を決められない明細があります（${counts.ambiguous}${SHIPPING_PREREQUISITE_META.ambiguous.unit}${more}）`}
+        >
           <Button
             size="sm"
             variant="outline"
@@ -153,18 +134,28 @@ export function ShippingPrerequisiteBanner({
             aria-controls={SHIPPING_PANEL_ID}
             onClick={onOpenAmbiguous}
           >
-            {SHIPPING_PREREQUISITE_META.ambiguous.label}
+            受注を確かめる
           </Button>
-        </div>
+        </BannerLine>
       )}
     </section>
   )
 }
 
+function BannerLine({ text, children }: { text: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
+      <p className="flex min-w-0 flex-1 items-center gap-2">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+        {text}
+      </p>
+      {children}
+    </div>
+  )
+}
+
 interface ShippingWorkQueueProps {
   counts: Record<QueueWorkKind | "dailyReport", ShippingWorkCount>
-  /** ③が上限で切られている（件数が実際より少ない） */
-  registerTruncated: boolean
   selected: ShippingPanel
   onSelect: (panel: ShippingPanel) => void
 }
@@ -173,13 +164,9 @@ interface ShippingWorkQueueProps {
  * 送品の消し込みの作業キュー（Issue #692）。均等なメニューにせず、片付ける順（①→②、付随の③、参考の日報）に並べ、
  * ①を主の作業として強く見せる。件数が0の作業は消さずに「済み」と見せる
  */
-export function ShippingWorkQueue({
-  counts,
-  registerTruncated,
-  selected,
-  onSelect,
-}: ShippingWorkQueueProps) {
+export function ShippingWorkQueue({ counts, selected, onSelect }: ShippingWorkQueueProps) {
   const daily = counts.dailyReport
+  const dailyText = formatWorkCount(daily, SHIPPING_DAILY_REPORT_META.unit)
   return (
     // 2列の画面（本文の幅 80rem 以上、page.tsx）では縦1列、1列の画面では横に並べて一覧の高さを残す
     <nav aria-label="送品の消し込みの作業" className="flex flex-col gap-4">
@@ -203,7 +190,6 @@ export function ShippingWorkQueue({
           <QueueStepButton
             step={SUB_STEP}
             count={counts.register}
-            note={registerTruncated ? "件数が多いため一部だけを数えています" : undefined}
             selected={selected === SUB_STEP.panel}
             onSelect={onSelect}
             compact
@@ -216,7 +202,7 @@ export function ShippingWorkQueue({
             type="button"
             aria-pressed={selected === "daily-reports"}
             aria-controls={SHIPPING_PANEL_ID}
-            aria-label={`${SHIPPING_DAILY_REPORT_META.label} ${countText(daily, SHIPPING_DAILY_REPORT_META.unit)}`}
+            aria-label={`${SHIPPING_DAILY_REPORT_META.label} ${dailyText}`}
             className={cn(
               "flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent",
               selected === "daily-reports" && "bg-accent ring-1 ring-border",
@@ -232,7 +218,7 @@ export function ShippingWorkQueue({
                 daily.isError && "text-red-600",
               )}
             >
-              {countText(daily, SHIPPING_DAILY_REPORT_META.unit)}
+              {dailyText}
               <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
             </span>
           </button>
@@ -247,7 +233,6 @@ function QueueStepButton({
   count,
   primary = false,
   compact = false,
-  note,
   selected,
   onSelect,
 }: {
@@ -255,13 +240,12 @@ function QueueStepButton({
   count: ShippingWorkCount
   primary?: boolean
   compact?: boolean
-  note?: string
   selected: boolean
   onSelect: (panel: ShippingPanel) => void
 }) {
   const meta = SHIPPING_WORK_META[step.kind]
   const done = !count.isError && count.value === 0
-  const text = countText(count, meta.unit)
+  const text = formatWorkCount(count, meta.unit)
   return (
     <button
       type="button"
@@ -315,17 +299,19 @@ function QueueStepButton({
             ) : (
               <>
                 {count.value}
-                <span className="ml-0.5 text-sm font-normal">{meta.unit}</span>
+                <span className="ml-0.5 text-sm font-normal">
+                  {meta.unit}
+                  {count.atLeast && "以上"}
+                </span>
               </>
             )}
           </span>
         </span>
         {done ? (
-          <span className="text-xs font-medium text-green-700">済み（今やることはありません）</span>
+          <span className="text-xs font-medium text-green-700">済み</span>
         ) : (
           <span className="text-xs text-muted-foreground">{step.description}</span>
         )}
-        {note && !done && <span className="text-xs text-amber-700">{note}</span>}
       </span>
     </button>
   )

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
   groupOrderReviews,
-  groupUnmatchedByStatus,
   toValidShippingPanel,
 } from "./shipping-review-utils"
-import type { ShipmentOrderReview, ShipmentUnmatchedGroup } from "@/types/shipment"
+import type { ShipmentOrderReview } from "@/types/shipment"
 
 describe("toValidShippingPanel（Issue #692）", () => {
   it("既知の一覧はそのまま、知らない値・空・#682 のカードのハッシュは①に寄せる", () => {
@@ -14,21 +13,6 @@ describe("toValidShippingPanel（Issue #692）", () => {
     expect(toValidShippingPanel("#unknown")).toBe("ship")
     expect(toValidShippingPanel("#candidates")).toBe("ship")
     expect(toValidShippingPanel("#review")).toBe("ship")
-  })
-})
-
-describe("groupUnmatchedByStatus", () => {
-  it("原因ごとに分け、並びは保つ", () => {
-    const item = (status: ShipmentUnmatchedGroup["status"], code: string) =>
-      ({ status, product_code: code }) as ShipmentUnmatchedGroup
-    const grouped = groupUnmatchedByStatus([
-      item("no_order", "A"),
-      item("ambiguous", "B"),
-      item("no_order", "C"),
-    ])
-    expect(grouped.no_order.map((i) => i.product_code)).toEqual(["A", "C"])
-    expect(grouped.ambiguous).toHaveLength(1)
-    expect(grouped.unmatched_customer).toEqual([])
   })
 })
 

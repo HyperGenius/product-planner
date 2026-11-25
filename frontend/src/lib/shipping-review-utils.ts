@@ -1,8 +1,6 @@
 import type {
   ShipmentOrderReview,
   ShipmentOrderReviewCause,
-  ShipmentUnmatchedGroup,
-  ShipmentUnmatchedStatus,
 } from "@/types/shipment"
 
 /**
@@ -22,58 +20,8 @@ export function toValidShippingPanel(hash: string): ShippingPanel {
   return SHIPPING_PANELS.find((panel) => panel === value) ?? DEFAULT_SHIPPING_PANEL
 }
 
-/** 要確認の原因（見出し）の並び。Backend `UNMATCHED_ENTRY_STATUSES` と揃える */
-export const UNMATCHED_STATUSES: readonly ShipmentUnmatchedStatus[] = [
-  "unmatched_customer",
-  "unmatched_product",
-  "no_order",
-  "ambiguous",
-]
-
-export interface UnmatchedStatusMeta {
-  label: string
-  /** 見出しに1回だけ出す説明（行ごとに繰り返さない） */
-  hint: string
-  /** 直す画面。受注が区別できないときは行ごとに候補の受注へのリンクを出すので null */
-  action: { label: string; href: string } | null
-}
-
-export const UNMATCHED_STATUS_META: Record<ShipmentUnmatchedStatus, UnmatchedStatusMeta> = {
-  unmatched_customer: {
-    label: "得意先の名寄せが済んでいない",
-    hint: "弥生の得意先がアプリのどの顧客か分かりません。弥生の名寄せで得意先に顧客をひも付けてください",
-    action: { label: "得意先を名寄せする", href: "/orders/shipment-names#customers" },
-  },
-  unmatched_product: {
-    label: "商品の名寄せが済んでいない",
-    hint: "弥生の商品コードがアプリのどの製品か分かりません。弥生の名寄せで製品を対応付けるか、送料などは対象外にしてください",
-    action: { label: "商品を名寄せする", href: "/orders/shipment-names#products" },
-  },
-  no_order: {
-    label: "受注が無い（起票漏れ）",
-    hint: "弥生では送品済みですが、対応する受注がありません。注文書を確かめて受注を起票してください",
-    action: { label: "受注を起票する", href: "/orders/new" },
-  },
-  ambiguous: {
-    label: "送品先の受注が1件に決まらない",
-    hint: "同じ顧客・製品の受注が複数あり、弥生の明細がどの受注の送品か決まりません。受注の顧客注文番号・希望納期を弥生の備考に合わせてください",
-    action: null,
-  },
-}
-
-/** まとめた行を原因ごとに分ける（並びは API の順のまま） */
-export function groupUnmatchedByStatus(
-  items: readonly ShipmentUnmatchedGroup[],
-): Record<ShipmentUnmatchedStatus, ShipmentUnmatchedGroup[]> {
-  const grouped = Object.fromEntries(
-    UNMATCHED_STATUSES.map((status) => [status, [] as ShipmentUnmatchedGroup[]]),
-  ) as Record<ShipmentUnmatchedStatus, ShipmentUnmatchedGroup[]>
-  for (const item of items) grouped[item.status]?.push(item)
-  return grouped
-}
-
 // ---------------------------------------------------------------------------
-// 日報の進捗が追いついていない受注（Issue #683）
+// 日報が未入力の出荷済み注文（Issue #683）
 // ---------------------------------------------------------------------------
 
 /** 原因の並び（判定の順）。Backend `REVIEW_CAUSES` と揃える */
@@ -88,7 +36,7 @@ export interface OrderReviewCauseMeta {
   label: string
   /** ①②の行に出す短い表示 */
   short: string
-  /** 見出しに1回だけ出す説明（ツールチップにしない。タブレットでも読めるように） */
+  /** 原因の説明。画面には書かず、ページのヘルプに出す（docs/ui-writing-guidelines.md） */
   hint: string
   /** 直す担当。現場に確認するものは null */
   owner: string | null

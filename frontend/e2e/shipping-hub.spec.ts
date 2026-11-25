@@ -215,12 +215,12 @@ test.describe("送品の消し込みのハブ（Issue #692）", () => {
     await openHub(page)
 
     await expect(page.getByRole("region", { name: "先に片付けること" })).toContainText(
-      "弥生の得意先 1件・商品 2件が、アプリの顧客・製品と結び付いていません",
+      "弥生の得意先1件・商品2件がアプリに未登録です",
     )
     await expect(page.getByRole("button", { name: "② 出荷を確かめる 3注文" })).toBeVisible()
     await expect(page.getByRole("button", { name: "③ 受注を起票する 2商品" })).toBeVisible()
     await expect(
-      page.getByRole("button", { name: "弥生の送品数に日報の実績が届いていない注文 2注文" }),
+      page.getByRole("button", { name: "日報が未入力の出荷済み注文 2注文" }),
     ).toBeVisible()
     await expect(page.getByRole("region", { name: "① 送品済みにする" }).getByRole("row")).toHaveCount(4)
     // サイドバーのバッジは①の件数だけ（#692）
@@ -240,6 +240,32 @@ test.describe("送品の消し込みのハブ（Issue #692）", () => {
     await openHub(page, "#register")
     await expect(page.getByTestId("unmatched-shipment-row")).toHaveCount(2)
     await screenshot(page, "hub-register-1920")
+  })
+
+  test("1920×1080: 送り先の受注を確かめる", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await openHub(page)
+    await page.getByRole("button", { name: "受注を確かめる" }).click()
+    await expect(page.getByRole("region", { name: "送り先の受注を確かめる" })).toBeVisible()
+    await expect(page.getByTestId("unmatched-shipment-row")).toHaveCount(1)
+    await screenshot(page, "hub-ambiguous-1920")
+  })
+
+  test("1920×1080: 日報が未入力の出荷済み注文", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await openHub(page, "#daily-reports")
+    await expect(page.getByTestId("order-review-product-row")).toHaveCount(2)
+    await screenshot(page, "hub-daily-reports-1920")
+  })
+
+  test("1920×1080: ヘルプ", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await openHub(page)
+    await page.getByRole("button", { name: "ヘルプを開く" }).click()
+    await expect(page.getByRole("dialog")).toContainText("② 出荷を確かめる")
+    // 開くアニメーションの途中を撮らない
+    await page.waitForTimeout(500)
+    await screenshot(page, "hub-help-1920")
   })
 
   test("#review で開いてもハブを出す（タブレット横向き 1180×820）", async ({ page }) => {

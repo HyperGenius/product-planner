@@ -208,8 +208,9 @@ cd backend && ruff check . && mypy .
     `useShippingRows()` が返す `classifyShippingWorklist()` の結果から出す（バッジは同じフックに弥生の明細・日報の参考を渡さずに呼ぶので、①の件数は画面と一致する。②③・前提・日報はバッジに数えない。Epic #679）。
     選んだ作業の一覧はハブの横に出し（ハッシュ `#ship` / `#confirm` / `#register` / `#ambiguous` / `#daily-reports`、`toValidShippingPanel()`。
     #682 の `#candidates` / `#review` は①に寄せる）、#693 で専用のページへ移す。**②では「送品済みにする」を出さない**（弥生を正とする。`ShippingOrderRow` の
-    `showShipAction`）。取得中は件数を「－」、失敗は「取得できませんでした」にし、途中の件数を出さない。画面の文言は「当たる」「照合」「候補」を使わず、
-    件数に単位（注文／商品／得意先）を付ける（ページのテストが全一覧の本文を検査している）。2列にするかは画面の幅ではなく本文の幅で決める
+    `showShipAction`）。取得中は件数を「－」、失敗は「取得できませんでした」にし、途中の件数を出さない。画面の文言は UI文言ガイドライン（下記）の見本で、
+    判定条件・原因の説明・状態の移り変わりは見出しの横の「?」（`ShippingHelp`、共通部品 `PageHelp` を `ListPageLayout` の `help` に渡す）に置く
+    （ページのテストが全一覧の本文に内部語・否定形の説明が無いことを検査している）。2列にするかは画面の幅ではなく本文の幅で決める
     （`@container` ＋ `@[80rem]:`。`lg:` だとサイドバーを開いたタブレットで表が画面の外へはみ出す）
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
@@ -693,6 +694,14 @@ cd backend && ruff check . && mypy .
   - `/{id}` のような単一動的セグメントの静的パス（例: `/unconfirmed-routing-queue`）は、Starlette がパステンプレートを**登録順**に評価するため、動的ルートを持つサブルーターより**先に** `include_router()` すること。route 衝突は HTTP メソッド・パスのセグメント数が同じ場合のみ起こるので、全組み合わせを気にする必要はない
   - 上記の回帰はテストで担保する（`test_orders.py` の `test_unconfirmed_routing_queue_route_resolves_before_order_id` 参照）
   - サブモジュールを跨いで `monkeypatch.setattr()` する既存テストがある場合、パッチ対象は**実際にその関数を呼び出しているモジュール**を import すること。パッケージの `__init__.py` で再エクスポートした名前をパッチしても、各サブモジュール自身の名前空間で解決される呼び出しには影響しない
+
+## UI文言
+
+- 画面に表示するテキストを追加・変更するときは [docs/ui-writing-guidelines.md](docs/ui-writing-guidelines.md) に従う
+- 説明文を足したくなったら、まずUIの振る舞い(ボタンを置かない・並び順・トースト)で表現できないかを検討する
+- 仕組み・判定条件・抽出条件・状態の移り変わりは画面に書かない。必要ならページのヘルプに書く
+- 「〜しません」という否定形でシステムの振る舞いを説明しない
+- 同じ説明を2か所以上に書かない
 
 ## 本番 Supabase への接続（マイグレーション適用・一時的なSQL実行）
 
