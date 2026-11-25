@@ -190,21 +190,28 @@ cd backend && ruff check . && mypy .
     （`unit/` をまとめて流せば通る。CI と同じ）
   - **送品の消し込みの「要確認」（Issue #682）**: 受注に当たらない明細は `GET /shipments/unmatched-entries`（純粋関数 `group_unmatched_entries()`）で、
     突合は**全件の明細で行い、まとめるときだけ期間で絞る**（期間で先に絞ると他の受注と候補が重なるかの判定が変わる）。期間の基準は今日ではなく
-    取り込んだ明細の最新の売上日。`limit` は原因ごと。画面はカード（`#candidates` / `#review`、`toValidShippingCard()`）で、**要確認の件数はサイドバーの
-    バッジに出さず `useShippingRows()` も変えない**（Epic #679）。原因の見出しに直す画面へのリンクを1回だけ置き、行に繰り返さない。弥生の名寄せは
+    取り込んだ明細の最新の売上日。`limit` は原因ごと。画面の構成は #692 のハブ（下記）。原因の見出しに直す画面へのリンクを1回だけ置き、行に繰り返さない。弥生の名寄せは
     `#products` / `#customers` で開くとその種別のタブを出す。`/orders/new` は初期値のクエリを受け取らない。送品の消し込みを描画するテストは
     MSW の既定ハンドラ `GET /shipments/unmatched-entries` に依存する
   - **日報の進捗が追いついていない受注（Issue #683）**: `GET /shipments/order-reviews`（純粋関数 `shipment_review.review_orders()`）。原因は保存せず
     参照のたびに求める。比べるのは**日報で追う最後の工程**（#681 の日報で追わない工程を除く）の良品数で、工程がすべて追わない工程の製品は対象外。
     未割当を見る期間は受注日以降だが、`before_order_date`（作り置き）だけは受注日より前にしか無いので `STOCK_EXPIRY_MONTHS` 遡る（受注日で切ると
     作り置きの原因が出なくなる）。`order_process_progress` には `id` 列が無い（主キーは (order_id, process_routing_id)）ので `fetch_all_rows()` の
-    `.order()` は主キーで並べる。画面の要確認は2種類をタブで切り替え（列が違う）、カードの件数は両方の取得が終わってから出す。送品の消し込みを
+    `.order()` は主キーで並べる。画面ではハブの「参考」（#692）。送品の消し込みを
     描画するテストは MSW の既定ハンドラ `GET /shipments/order-reviews` に依存する
   - **送品の消し込みの分類（Issue #691、Epic #690）**: 注文・弥生の明細は ①送品済みにする・②出荷を確かめる・③受注を起票する・前提・対象外の
     **どれか1か所にだけ**置く。振り分けは純粋関数 `classifyShippingWorklist()`（`lib/shipping-worklist-utils.ts`）で、ハブの件数と各ページの行は
     必ずこの結果から出す（別々に数えない）。行き先・見出し・単位は同ファイルの定数1か所。判定や突合の状態を足すときは行き先を1つに決め、
     テストの `expectEachPlacedOnce()` が通ることを確かめる。`ambiguous` は前提（直さないと①に進めない）、日報の参考は振り分けず行の印として重ね、
     サイドバーのバッジは①の件数だけにする。分類ルール表は [docs/features/shipment-file-import.md](docs/features/shipment-file-import.md#送品の消し込みの分類issue-691epic-690)
+  - **送品の消し込みのハブ（Issue #692）**: `/orders/shipping` は前提バナー＋作業キュー（①②、付随の③、参考の日報）で、件数も一覧の行も
+    `useShippingRows()` が返す `classifyShippingWorklist()` の結果から出す（バッジは同じフックに弥生の明細・日報の参考を渡さずに呼ぶので、①の件数は画面と一致する。②③・前提・日報はバッジに数えない。Epic #679）。
+    選んだ作業の一覧はハブの横に出し（ハッシュ `#ship` / `#confirm` / `#register` / `#ambiguous` / `#daily-reports`、`toValidShippingPanel()`。
+    #682 の `#candidates` / `#review` は①に寄せる）、#693 で専用のページへ移す。**②では「送品済みにする」を出さない**（弥生を正とする。`ShippingOrderRow` の
+    `showShipAction`）。取得中は件数を「－」、失敗は「取得できませんでした」にし、途中の件数を出さない。画面の文言は UI文言ガイドライン（下記）の見本で、
+    判定条件・原因の説明・状態の移り変わりは見出しの横の「?」（`ShippingHelp`、共通部品 `PageHelp` を `ListPageLayout` の `help` に渡す）に置く
+    （ページのテストが全一覧の本文に内部語・否定形の説明が無いことを検査している）。2列にするかは画面の幅ではなく本文の幅で決める
+    （`@container` ＋ `@[80rem]:`。`lg:` だとサイドバーを開いたタブレットで表が画面の外へはみ出す）
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は
@@ -687,6 +694,14 @@ cd backend && ruff check . && mypy .
   - `/{id}` のような単一動的セグメントの静的パス（例: `/unconfirmed-routing-queue`）は、Starlette がパステンプレートを**登録順**に評価するため、動的ルートを持つサブルーターより**先に** `include_router()` すること。route 衝突は HTTP メソッド・パスのセグメント数が同じ場合のみ起こるので、全組み合わせを気にする必要はない
   - 上記の回帰はテストで担保する（`test_orders.py` の `test_unconfirmed_routing_queue_route_resolves_before_order_id` 参照）
   - サブモジュールを跨いで `monkeypatch.setattr()` する既存テストがある場合、パッチ対象は**実際にその関数を呼び出しているモジュール**を import すること。パッケージの `__init__.py` で再エクスポートした名前をパッチしても、各サブモジュール自身の名前空間で解決される呼び出しには影響しない
+
+## UI文言
+
+- 画面に表示するテキストを追加・変更するときは [docs/ui-writing-guidelines.md](docs/ui-writing-guidelines.md) に従う
+- 説明文を足したくなったら、まずUIの振る舞い(ボタンを置かない・並び順・トースト)で表現できないかを検討する
+- 仕組み・判定条件・抽出条件・状態の移り変わりは画面に書かない。必要ならページのヘルプに書く
+- 「〜しません」という否定形でシステムの振る舞いを説明しない
+- 同じ説明を2か所以上に書かない
 
 ## 本番 Supabase への接続（マイグレーション適用・一時的なSQL実行）
 

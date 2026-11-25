@@ -45,8 +45,15 @@ const REASON_CLASS: Record<ShippingCandidateReason, string> = {
   due_soon: STATUS_CLASS.due_soon,
 }
 
+/**
+ * ①送品済みにする・②出荷を確かめるの一覧の作り分け（Issue #692）。
+ * - ship: 理由の列を出さない（全行が「弥生で送品済み」で、その一覧に入っている理由そのものなので）。操作の列に「送品済みにする」
+ * - confirm: 理由（最終工程完了・納期超過・納期間近）は行ごとに違うので出す。弥生でまだ確かめられていないので操作の列を出さない
+ */
+export type ShippingOrderRowVariant = "ship" | "confirm"
+
 /** `ShippingOrderRow` の列に対応する見出しの行 */
-export function ShippingOrderHeaderRow() {
+export function ShippingOrderHeaderRow({ variant }: { variant: ShippingOrderRowVariant }) {
   return (
     <TableRow>
       <TableHead>
@@ -71,8 +78,8 @@ export function ShippingOrderHeaderRow() {
           <span className="text-xs font-normal text-muted-foreground">数量／最終売上日</span>
         </div>
       </TableHead>
-      <TableHead>候補の理由</TableHead>
-      <TableHead className="text-right text-foreground">操作</TableHead>
+      {variant === "confirm" && <TableHead>理由</TableHead>}
+      {variant === "ship" && <TableHead className="text-right text-foreground">操作</TableHead>}
     </TableRow>
   )
 }
@@ -82,8 +89,10 @@ interface ShippingOrderRowProps extends OrderRowActionProps {
   products?: Product[]
   customers?: Customer[]
   currentUserRole: MemberRole | null
-  /** 弥生で送品済みなのに日報の進捗が追いついていないときの原因（Issue #683）。送品済みにする操作は止めない */
-  review?: ShipmentOrderReview
+  /** 弥生の送品数に日報の実績が届いていないときの原因（Issue #683）。送品済みにする操作は止めない */
+  review?: ShipmentOrderReview | null
+  /** ①（「送品済みにする」あり・理由なし）か②（理由あり・操作なし）か。見出しの行と同じ値を渡す */
+  variant: ShippingOrderRowVariant
 }
 
 function DaysRemainingLabel({ days }: { days: number }) {
@@ -129,17 +138,15 @@ export function ShipmentCell({ shipment }: { shipment: ShippingRow["shipment"] }
         </span>
       )}
       {ambiguousCount > 0 && (
-        <span className="text-xs text-amber-700">
-          他の受注と区別できない明細 {ambiguousCount}件
-        </span>
+        <span className="text-xs text-amber-700">送り先未定 {ambiguousCount}明細</span>
       )}
     </div>
   )
 }
 
 /**
- * 「送品の消し込み」画面（Issue #557）の行。社長・受注担当には「送品済みにする」を出し、
- * それ以外のロールは閲覧のみ。一括の送品は作らない（弥生で1件ずつ確認する運用のため）
+ * 「送品の消し込み」の①②の行（Issue #557 / #692）。①では社長・受注担当に「送品済みにする」を出し、
+ * それ以外のロールは閲覧のみ。②には操作の列が無い。一括の送品は作らない（弥生で1件ずつ確認する運用のため）
  */
 export function ShippingOrderRow({
   row,
@@ -147,12 +154,13 @@ export function ShippingOrderRow({
   customers,
   currentUserRole,
   review,
+  variant,
   shipIsPending,
   onShip,
 }: ShippingOrderRowProps) {
   const { order, deadline, deadlineSource, daysRemaining, progress, shipment, reasons } = row
   const product = getOrderProductDisplayParts(order, products)
-  const canShip = canShipOrder(order, currentUserRole)
+  const canShip = variant === "ship" && canShipOrder(order, currentUserRole)
 
   return (
     <TableRow>
@@ -210,10 +218,10 @@ export function ShippingOrderRow({
           )}
           {review && (
             <Link
-              href="#review"
+              href="#daily-reports"
               className="text-xs font-medium text-amber-700 underline-offset-2 hover:underline"
             >
-              要確認: {ORDER_REVIEW_CAUSE_META[review.cause].short}
+              日報: {ORDER_REVIEW_CAUSE_META[review.cause].short}
             </Link>
           )}
         </div>
@@ -221,28 +229,32 @@ export function ShippingOrderRow({
       <TableCell>
         <ShipmentCell shipment={shipment} />
       </TableCell>
-      <TableCell>
-        <div className="flex flex-wrap gap-1">
-          {SHIPPING_CANDIDATE_REASONS.filter((r) => reasons.includes(r)).map((reason) => (
-            <Badge key={reason} className={REASON_CLASS[reason]}>
-              {REASON_LABEL[reason]}
-            </Badge>
-          ))}
-        </div>
-      </TableCell>
-      <TableCell className="text-right">
-        {canShip && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onShip(order.id, String(order.order_no ?? order.id))}
-            disabled={shipIsPending}
-          >
-            <Truck className="mr-1.5 h-3.5 w-3.5" />
-            送品済みにする
-          </Button>
-        )}
-      </TableCell>
+      {variant === "confirm" && (
+        <TableCell>
+          <div className="flex flex-wrap gap-1">
+            {SHIPPING_CANDIDATE_REASONS.filter((r) => reasons.includes(r)).map((reason) => (
+              <Badge key={reason} className={REASON_CLASS[reason]}>
+                {REASON_LABEL[reason]}
+              </Badge>
+            ))}
+          </div>
+        </TableCell>
+      )}
+      {variant === "ship" && (
+        <TableCell className="text-right">
+          {canShip && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onShip(order.id, String(order.order_no ?? order.id))}
+              disabled={shipIsPending}
+            >
+              <Truck className="mr-1.5 h-3.5 w-3.5" />
+              送品済みにする
+            </Button>
+          )}
+        </TableCell>
+      )}
     </TableRow>
   )
 }

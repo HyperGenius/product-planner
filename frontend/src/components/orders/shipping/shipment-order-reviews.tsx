@@ -7,7 +7,6 @@ import { ScrollTable } from "@/components/scroll-table"
 import { Button } from "@/components/ui/button"
 import { TableCell, TableHead, TableRow } from "@/components/ui/table"
 import {
-  formatDateTimeShort,
   formatDeadlineShort,
   getCustomerDisplayName,
   getProductName,
@@ -40,9 +39,9 @@ interface ShipmentOrderReviewsProps {
 }
 
 /**
- * 送品の消し込みの「要確認」のうち、弥生で送品済みなのに日報の進捗が追いついていない受注（Issue #683）。
- * 原因ごとの見出しの下に製品の単位でまとめ、受注の一覧は展開で見せる。原因の説明と直す画面は見出しに1回だけ置く。
- * 送品の記録は弥生が正なので、ここからは送品済みにしない（送品の候補の「送品済みにする」は止めない）
+ * 送品の消し込みの参考「日報が未入力の出荷済み注文」（Issue #683 / #692）。弥生の送品数量が、日報で追う最後の工程の良品数を
+ * 超えている注文を、原因ごとの見出しの下に製品の単位でまとめ、受注の一覧は展開で見せる。直す画面は見出しに1回だけ置く。
+ * 原因の説明・対象の条件はページのヘルプに書き、画面には書かない（docs/ui-writing-guidelines.md）
  */
 export function ShipmentOrderReviews({
   data,
@@ -54,21 +53,15 @@ export function ShipmentOrderReviews({
 }: ShipmentOrderReviewsProps) {
   const grouped = useMemo(() => groupOrderReviews(data?.items ?? []), [data])
   const orderById = useMemo(() => new Map((orders ?? []).map((o) => [o.id, o])), [orders])
-  const computedAt = formatDateTimeShort(data?.computed_at ?? null)
 
   return (
     <>
-      <p className="text-xs text-muted-foreground">
-        確定済・生産中の注文のうち、弥生の送品数量が日報で追う最後の工程の良品数を超えているものを、製品ごとにまとめています。
-        直したマスタは次の日報の集計の後に反映されます
-        {computedAt && `（日報の進捗: ${computedAt} 時点）`}
-      </p>
       <ScrollTable
         isLoading={isLoading}
         isError={isError}
-        errorState="日報の進捗が追いついていない注文を取得できませんでした"
+        errorState="日報が未入力の出荷済み注文を取得できませんでした"
         rowCount={data?.items.length ?? 0}
-        emptyState="日報の進捗が追いついていない注文はありません"
+        emptyState="日報が未入力の出荷済み注文はありません"
         header={
           <TableRow>
             <TableHead>製品</TableHead>
@@ -125,7 +118,6 @@ function CauseHeadingRow({
                 担当: {meta.owner ?? "現場に確認"}
               </span>
             </h3>
-            <p className="text-xs text-muted-foreground">{meta.hint}</p>
           </div>
           {meta.action && (
             <Link

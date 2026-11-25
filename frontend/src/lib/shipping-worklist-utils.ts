@@ -54,7 +54,7 @@ export const SHIPPING_WORK_META: Record<Exclude<ShippingWorkKind, "prerequisite"
 export const SHIPPING_PREREQUISITE_META: Record<ShippingPrerequisiteKind, ShippingWorkMeta> = {
   customer: { label: "得意先を名寄せする", unit: "得意先" },
   product: { label: "商品を名寄せする", unit: "商品" },
-  ambiguous: { label: "送品先の受注を見分ける", unit: "商品" },
+  ambiguous: { label: "送り先の受注を確かめる", unit: "商品" },
 }
 
 /** 前提の並び（片付ける順） */
@@ -66,7 +66,8 @@ export const SHIPPING_PREREQUISITE_KINDS: readonly ShippingPrerequisiteKind[] = 
 
 /** 日報の参考（振り分けの対象にせず、件数とリンクだけを置く） */
 export const SHIPPING_DAILY_REPORT_META: ShippingWorkMeta = {
-  label: "弥生の送品数に日報の実績が届いていない注文",
+  // 弥生の送品数量が、日報で追う最後の工程の良品数を超えている注文
+  label: "日報が未入力の出荷済み注文",
   unit: "注文",
 }
 

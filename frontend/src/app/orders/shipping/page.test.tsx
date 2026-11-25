@@ -9,6 +9,8 @@ import type { ProcessProgress } from "@/types/daily-report-progress"
 import type { MemberRole } from "@/types/member"
 import type { Order } from "@/types/order"
 import type {
+  ShipmentEntryRef,
+  ShipmentOrderMatch,
   ShipmentOrderReview,
   ShipmentUnmatchedGroup,
   ShipmentUnmatchedList,
@@ -100,194 +102,51 @@ function getRow(orderNo: string): HTMLElement {
   return row
 }
 
-describe("OrdersShippingPage（Issue #557）", () => {
-  beforeEach(() => {
-    window.location.hash = ""
-    mockRole("order_handler")
-  })
+function makeEntry(id: number, quantity: number, candidates: number[] = []): ShipmentEntryRef {
+  return {
+    id,
+    sales_date: "2026-10-15",
+    slip_no: "1",
+    quantity,
+    note: null,
+    product_name: "品A",
+    method: candidates.length ? null : "deadline",
+    candidate_order_ids: candidates,
+  }
+}
 
-  it("既定では候補だけを、A かつ B を先頭に納期の古い順で出し、すべてに切り替えると候補でない注文も出す", async () => {
-    const soon = addDaysToIsoDate(jstTodayIso(), 3)
-    mockOrders([
-      makeOrder({ id: 1, order_no: "SOON", desired_deadline: soon }),
-      makeOrder({ id: 2, order_no: "OVERDUE", desired_deadline: PAST, status: "in_progress" }),
-      makeOrder({ id: 3, order_no: "DONE-OVERDUE", desired_deadline: "2000-02-01" }),
-      makeOrder({ id: 4, order_no: "DONE", desired_deadline: FUTURE }),
-      makeOrder({ id: 5, order_no: "NOT-YET", desired_deadline: FUTURE }),
-      makeOrder({ id: 6, order_no: "SHIPPED", desired_deadline: PAST, status: "shipped" }),
-      makeOrder({ id: 7, order_no: "DRAFT", desired_deadline: PAST, status: "draft" }),
-    ])
-    const requested = mockProgress([
-      makeProcess({ order_id: 3, status: "completed", completed_by: "quantity" }),
-      makeProcess({ order_id: 4, status: "completed", completed_by: "quantity" }),
-      makeProcess({ order_id: 5, status: "in_progress" }),
-    ])
-    const user = userEvent.setup()
-    render(<OrdersShippingPage />)
+function makeMatch(overrides: Partial<ShipmentOrderMatch>): ShipmentOrderMatch {
+  return {
+    order_id: 1,
+    shipped_qty: 10,
+    order_quantity: 10,
+    is_fully_shipped: true,
+    last_sales_date: "2026-10-15",
+    entries: [makeEntry(1, 10)],
+    ambiguous_entries: [],
+    ...overrides,
+  }
+}
 
-    await screen.findByRole("link", { name: "DONE-OVERDUE" })
-    // 進捗は対象（確定済・生産中）の注文だけをまとめて引く
-    expect(requested).toEqual([[1, 2, 3, 4, 5]])
-    expect(getBodyRows().map((r) => within(r).getAllByRole("link")[0].textContent)).toEqual([
-      "DONE-OVERDUE",
-      "OVERDUE",
-      "SOON",
-      "DONE",
-    ])
-    expect(screen.queryByText("NOT-YET")).toBeNull()
-    expect(screen.queryByText("SHIPPED")).toBeNull()
-    expect(screen.queryByText("DRAFT")).toBeNull()
+function mockMatches(items: ShipmentOrderMatch[]): void {
+  server.use(
+    http.get(`${API_BASE}/shipments/order-matches`, ({ request }) => {
+      const ids = new URL(request.url).searchParams.getAll("order_id").map(Number)
+      return HttpResponse.json({
+        latest_sales_date: "2026-10-15",
+        items: items.filter((m) => ids.includes(m.order_id)),
+      })
+    }),
+  )
+}
 
-    await user.click(screen.getByRole("tab", { name: "すべて（5）" }))
-    expect(getBodyRows()).toHaveLength(5)
-    expect(within(getRow("NOT-YET")).getByText("0 / 1")).toBeInTheDocument()
-  })
-
-  it("候補の理由と工程の進捗・納期の超過日数を出し、進捗の無い注文は「日報なし」と出す", async () => {
-    mockOrders([
-      makeOrder({ id: 1, order_no: "DONE-OVERDUE", desired_deadline: PAST }),
-      makeOrder({ id: 2, order_no: "NO-REPORT", desired_deadline: undefined, confirmed_deadline: PAST }),
-    ])
-    mockProgress([
-      makeProcess({ order_id: 1, process_routing_id: 1, sequence_order: 1, status: "completed", completed_by: "later_process" }),
-      makeProcess({ order_id: 1, process_routing_id: 2, sequence_order: 2, status: "completed", completed_by: "quantity" }),
-    ])
-    render(<OrdersShippingPage />)
-
-    const done = await waitFor(() => getRow("DONE-OVERDUE"))
-    expect(within(done).getByText("最終工程完了")).toBeInTheDocument()
-    expect(within(done).getByText("納期超過")).toBeInTheDocument()
-    expect(within(done).getByText("2 / 2")).toBeInTheDocument()
-    expect(within(done).getByText(/日超過$/)).toBeInTheDocument()
-
-    const noReport = getRow("NO-REPORT")
-    expect(within(noReport).getByText("日報なし")).toBeInTheDocument()
-    expect(within(noReport).getByText("納期超過")).toBeInTheDocument()
-    expect(within(noReport).queryByText("最終工程完了")).toBeNull()
-    // 希望納期が無いので完成見込み（確定納期）で判定している
-    expect(within(noReport).getByText("（完成見込み）")).toBeInTheDocument()
-  })
-
-  it("弥生で送品が確認できた注文を先頭に候補として出し、一部送品・区別できない明細も示す（Issue #667）", async () => {
-    mockOrders([
-      makeOrder({ id: 1, order_no: "OVERDUE", desired_deadline: PAST, quantity: 10 }),
-      makeOrder({ id: 2, order_no: "YAYOI-DONE", desired_deadline: FUTURE, quantity: 100 }),
-      makeOrder({ id: 3, order_no: "YAYOI-PART", desired_deadline: FUTURE, quantity: 100 }),
-    ])
-    mockProgress([])
-    const entry = (id: number, quantity: number, candidates: number[] = []) => ({
-      id,
-      sales_date: "2026-10-15",
-      slip_no: "1",
-      quantity,
-      note: null,
-      product_name: "品A",
-      method: candidates.length ? null : "deadline",
-      candidate_order_ids: candidates,
-    })
-    server.use(
-      http.get(`${API_BASE}/shipments/order-matches`, () =>
-        HttpResponse.json({
-          latest_sales_date: "2026-10-15",
-          items: [
-            {
-              order_id: 2,
-              shipped_qty: 100,
-              order_quantity: 100,
-              is_fully_shipped: true,
-              last_sales_date: "2026-10-15",
-              entries: [entry(1, 60), entry(2, 40)],
-              ambiguous_entries: [],
-            },
-            {
-              order_id: 3,
-              shipped_qty: 30,
-              order_quantity: 100,
-              is_fully_shipped: false,
-              last_sales_date: "2026-10-15",
-              entries: [entry(3, 30)],
-              ambiguous_entries: [entry(4, 5, [3, 9])],
-            },
-          ],
-        }),
-      ),
-    )
-    const user = userEvent.setup()
-    render(<OrdersShippingPage />)
-
-    await screen.findByRole("link", { name: "YAYOI-DONE" })
-    expect(getBodyRows().map((r) => within(r).getAllByRole("link")[0].textContent)).toEqual([
-      "YAYOI-DONE",
-      "OVERDUE",
-    ])
-    const done = getRow("YAYOI-DONE")
-    expect(within(done).getByText("弥生で送品済み")).toBeInTheDocument()
-    expect(within(done).getByText("/ 100", { exact: false })).toBeInTheDocument()
-    // 自動では送品済みにしない（ボタンで担当者が確定する）
-    expect(within(done).getByRole("button", { name: /送品済みにする/ })).toBeInTheDocument()
-
-    await user.click(screen.getByRole("tab", { name: "すべて（3）" }))
-    const part = getRow("YAYOI-PART")
-    expect(within(part).getByText("一部送品")).toBeInTheDocument()
-    expect(within(part).getByText("他の受注と区別できない明細 1件")).toBeInTheDocument()
-    expect(screen.getByText(/弥生の売上明細: .*売上分まで/)).toBeInTheDocument()
-  })
-
-  it("弥生が正である旨を常に出し、候補が無ければその旨を出す", async () => {
-    mockOrders([])
-    mockProgress([])
-    render(<OrdersShippingPage />)
-
-    expect(
-      await screen.findByText(/送品の記録は弥生が正です。弥生で送品を確認してから「送品済みにする」を押してください/),
-    ).toBeInTheDocument()
-    expect(await screen.findByText("送品済みにする候補の注文はありません")).toBeInTheDocument()
-    // 対象が無ければ進捗を取得しない
-    expect(screen.getByText("日報の進捗はまだ集計されていません")).toBeInTheDocument()
-  })
-
-  it("進捗の最終計算日時を JST で出す", async () => {
-    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
-    mockProgress([], "2099-10-01T01:05:00Z")
-    render(<OrdersShippingPage />)
-
-    expect(await screen.findByText("日報の進捗: 99/10/1 10:05 時点")).toBeInTheDocument()
-  })
-
-  it.each<MemberRole>(["order_handler", "president"])("%s は1件ずつ送品済みにできる", async (role) => {
-    mockRole(role)
-    const shipped = vi.fn()
-    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
-    mockProgress([])
-    server.use(
-      http.post(`${API_BASE}/orders/1/ship`, () => {
-        shipped()
-        return HttpResponse.json(makeOrder({ id: 1, status: "shipped" }))
-      }),
-    )
-    const user = userEvent.setup()
-    render(<OrdersShippingPage />)
-
-    const row = await waitFor(() => getRow("O-1"))
-    await user.click(await within(row).findByRole("button", { name: "送品済みにする" }))
-    await waitFor(() => expect(shipped).toHaveBeenCalledTimes(1))
-    // 一括で送品済みにする操作は無い
-    expect(screen.queryByRole("checkbox")).toBeNull()
-  })
-
-  it.each<MemberRole>(["iso_officer", "platform_admin"])("%s は閲覧のみ", async (role) => {
-    mockRole(role)
-    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
-    mockProgress([])
-    render(<OrdersShippingPage />)
-
-    const row = await waitFor(() => getRow("O-1"))
-    // ロールの取得を待ってから、操作が出ていないことを確かめる
-    await waitFor(() => expect(within(row).getByText("納期超過")).toBeInTheDocument())
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(within(row).queryByRole("button", { name: "送品済みにする" })).toBeNull()
-  })
-})
+/** ハブの作業のボタン（aria-label は「① 送品済みにする 2注文」のように番号・見出し・件数） */
+function getStep(name: RegExp): HTMLElement {
+  return within(screen.getByRole("navigation", { name: "送品の消し込みの作業" })).getByRole(
+    "button",
+    { name },
+  )
+}
 
 function makeUnmatched(overrides: Partial<ShipmentUnmatchedGroup>): ShipmentUnmatchedGroup {
   return {
@@ -327,134 +186,6 @@ function mockUnmatched(items: ShipmentUnmatchedGroup[], extra?: Partial<Shipment
   )
 }
 
-describe("OrdersShippingPage のカード（Issue #682）", () => {
-  beforeEach(() => {
-    window.location.hash = ""
-    mockRole("order_handler")
-    server.use(
-      http.get(`${API_BASE}/customers`, () =>
-        HttpResponse.json([{ id: 1, name: "架空工業株式会社", alias: "架空" }]),
-      ),
-      http.get(`${API_BASE}/products`, () =>
-        HttpResponse.json([{ id: 101, name: "品A", code: "DW-1" }]),
-      ),
-    )
-  })
-
-  it("既定は送品の候補を出し、要確認を押すとハッシュに残して受注に当たらない明細だけを出す", async () => {
-    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
-    mockProgress([])
-    mockUnmatched([
-      makeUnmatched({ status: "unmatched_customer", customer_code: "009", customer_name: "未登録商事" }),
-      makeUnmatched({ status: "no_order", product_code: "X2" }),
-    ])
-    const user = userEvent.setup()
-    render(<OrdersShippingPage />)
-
-    expect(await screen.findByRole("button", { name: "送品の候補 1件" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    )
-    await waitFor(() => getRow("O-1"))
-    const review = await screen.findByRole("button", { name: "要確認 2件" })
-
-    await user.click(review)
-
-    expect(window.location.hash).toBe("#review")
-    expect(await screen.findByText("未登録商事")).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "O-1" })).toBeNull()
-    expect(screen.queryByRole("tab", { name: /候補のみ/ })).toBeNull()
-    expect(screen.getAllByTestId("unmatched-shipment-row")).toHaveLength(2)
-  })
-
-  it("原因ごとの見出しに直す画面へのリンクを1回だけ出す", async () => {
-    window.location.hash = "#review"
-    mockOrders([])
-    mockProgress([])
-    mockUnmatched([
-      makeUnmatched({ status: "unmatched_customer" }),
-      makeUnmatched({ status: "unmatched_product", product_code: "P1", customer_ids: [1] }),
-      makeUnmatched({ status: "unmatched_product", product_code: "P2", customer_ids: [1] }),
-      makeUnmatched({ status: "no_order", product_code: "X3" }),
-    ])
-    render(<OrdersShippingPage />)
-
-    expect(await screen.findByRole("heading", { name: /得意先が未照合\s*1件/ })).toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: /商品コードが未照合\s*2件/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "弥生の名寄せ（得意先）" })).toHaveAttribute(
-      "href",
-      "/orders/shipment-names#customers",
-    )
-    expect(screen.getAllByRole("link", { name: "弥生の名寄せ（商品）" })).toHaveLength(1)
-    expect(screen.getByRole("link", { name: "弥生の名寄せ（商品）" })).toHaveAttribute(
-      "href",
-      "/orders/shipment-names#products",
-    )
-    expect(screen.getByRole("link", { name: "受注の新規作成" })).toHaveAttribute("href", "/orders/new")
-    // 受注が区別できない明細が無ければ見出しを出さない
-    expect(screen.queryByRole("heading", { name: /受注が区別できない/ })).toBeNull()
-  })
-
-  it("受注が無い明細に照合できた顧客・製品と備考の納期分を、区別できない明細に候補の受注を出す", async () => {
-    window.location.hash = "#review"
-    mockOrders([
-      makeOrder({ id: 11, order_no: "O-11", desired_deadline: "2026-10-20", customer_order_no: "PO-9" }),
-      makeOrder({ id: 12, order_no: "O-12", desired_deadline: "2026-10-20", status: "shipped" }),
-    ])
-    mockProgress([])
-    mockUnmatched([
-      makeUnmatched({
-        status: "no_order",
-        customer_ids: [1],
-        product_ids: [101],
-        note_deadlines: ["2026-11-30"],
-        entry_count: 2,
-        total_qty: 120,
-      }),
-      makeUnmatched({
-        status: "ambiguous",
-        product_code: "X9",
-        customer_ids: [1],
-        product_ids: [101],
-        candidate_order_ids: [11, 12],
-      }),
-    ])
-    render(<OrdersShippingPage />)
-
-    const [noOrder, ambiguous] = await screen.findAllByTestId("unmatched-shipment-row")
-    expect(within(noOrder).getByText("架空")).toBeInTheDocument()
-    expect(within(noOrder).getByText("DW-1 - 品A")).toBeInTheDocument()
-    expect(within(noOrder).getByText(/11\/30/)).toBeInTheDocument()
-    expect(within(noOrder).getByText("2件")).toBeInTheDocument()
-    expect(within(noOrder).getByText("120")).toBeInTheDocument()
-    expect(within(ambiguous).getByRole("link", { name: "O-11" })).toHaveAttribute("href", "/orders/11")
-    expect(within(ambiguous).getByText(/注番 PO-9/)).toBeInTheDocument()
-    expect(within(ambiguous).getByRole("link", { name: "O-12" })).toHaveAttribute("href", "/orders/12")
-  })
-
-  it("受注に当たらない明細が無ければその旨を出す", async () => {
-    window.location.hash = "#review"
-    mockOrders([])
-    mockProgress([])
-    render(<OrdersShippingPage />)
-
-    expect(await screen.findByText("受注に当たらない弥生の明細はありません")).toBeInTheDocument()
-    expect(await screen.findByRole("button", { name: "要確認 0件" })).toBeInTheDocument()
-  })
-
-  it("知らないハッシュは送品の候補に寄せる", async () => {
-    window.location.hash = "#unknown"
-    mockOrders([])
-    mockProgress([])
-    render(<OrdersShippingPage />)
-
-    expect(await screen.findByRole("button", { name: /^送品の候補/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    )
-  })
-})
-
 function makeReview(overrides: Partial<ShipmentOrderReview>): ShipmentOrderReview {
   return {
     order_id: 1,
@@ -480,47 +211,508 @@ function mockOrderReviews(items: ShipmentOrderReview[]) {
   )
 }
 
-describe("OrdersShippingPage の日報が追いついていない注文（Issue #683）", () => {
+function mockMasters(): void {
+  server.use(
+    http.get(`${API_BASE}/customers`, () =>
+      HttpResponse.json([{ id: 1, name: "架空工業株式会社", alias: "架空" }]),
+    ),
+    http.get(`${API_BASE}/products`, () =>
+      HttpResponse.json([
+        { id: 101, name: "品A", code: "DW-1" },
+        { id: 102, name: "品B", code: "DW-2" },
+      ]),
+    ),
+  )
+}
+
+describe("OrdersShippingPage のハブ（Issue #692）", () => {
   beforeEach(() => {
     window.location.hash = ""
     mockRole("order_handler")
+    mockMasters()
+  })
+
+  it("①②③と日報の参考を片付ける順に並べ、件数に単位を付ける", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "YAYOI-DONE", desired_deadline: FUTURE }),
+      makeOrder({ id: 2, order_no: "OVERDUE", desired_deadline: PAST }),
+      makeOrder({ id: 3, order_no: "SOON", desired_deadline: addDaysToIsoDate(jstTodayIso(), 3) }),
+      makeOrder({ id: 4, order_no: "NOT-YET", desired_deadline: FUTURE }),
+    ])
+    mockProgress([])
+    mockMatches([makeMatch({ order_id: 1 })])
+    mockUnmatched([
+      makeUnmatched({ status: "no_order", product_code: "X1" }),
+      makeUnmatched({ status: "no_order", product_code: "X2" }),
+    ])
+    mockOrderReviews([makeReview({ order_id: 1 })])
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByRole("button", { name: "① 送品済みにする 1注文" })).toBeInTheDocument()
+    expect(getStep(/^② 出荷を確かめる 2注文$/)).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "③ 受注を起票する 2商品" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", {
+        name: "日報が未入力の出荷済み注文 1注文",
+      }),
+    ).toBeInTheDocument()
+    // 並びは ① → ② → ③ → 参考
+    const nav = screen.getByRole("navigation", { name: "送品の消し込みの作業" })
+    expect(
+      within(nav)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")?.split(" ")[0]),
+    ).toEqual(["①", "②", "③", "日報が未入力の出荷済み注文"])
+    // 既定は①の一覧を出す
+    expect(getStep(/^①/)).toHaveAttribute("aria-pressed", "true")
+    expect(getBodyRows().map((r) => within(r).getAllByRole("link")[0].textContent)).toEqual([
+      "YAYOI-DONE",
+    ])
+  })
+
+  it("件数が0の作業は消さずに済みと出す", async () => {
+    mockOrders([])
+    mockProgress([])
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByRole("button", { name: "① 送品済みにする 済み" })).toBeInTheDocument()
+    expect(getStep(/^② 出荷を確かめる 済み$/)).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "③ 受注を起票する 済み" })).toBeInTheDocument()
+    expect(screen.getAllByText("済み")).toHaveLength(3)
+    expect(await screen.findByText("送品済みにする注文はありません")).toBeInTheDocument()
+  })
+
+  it("弥生の明細の取得に失敗したら③を取得できなかったと出し、前提も出せない旨を出す", async () => {
+    mockOrders([])
+    mockProgress([])
     server.use(
-      http.get(`${API_BASE}/customers`, () =>
-        HttpResponse.json([{ id: 1, name: "架空工業株式会社", alias: "架空" }]),
+      http.get(`${API_BASE}/shipments/unmatched-entries`, () =>
+        HttpResponse.json({ detail: "error" }, { status: 500 }),
       ),
-      http.get(`${API_BASE}/products`, () =>
-        HttpResponse.json([
-          { id: 101, name: "品A", code: "DW-1" },
-          { id: 102, name: "品B", code: "DW-2" },
-        ]),
+    )
+    render(<OrdersShippingPage />)
+
+    expect(
+      await screen.findByRole("button", { name: "③ 受注を起票する 取得できませんでした" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("弥生の明細を取得できませんでした")
+  })
+
+  it("弥生の送品の取得に失敗したら①②の件数を出さない", async () => {
+    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
+    mockProgress([])
+    server.use(
+      http.get(`${API_BASE}/shipments/order-matches`, () =>
+        HttpResponse.json({ detail: "error" }, { status: 500 }),
       ),
+    )
+    render(<OrdersShippingPage />)
+
+    expect(
+      await screen.findByRole("button", { name: "① 送品済みにする 取得できませんでした" }),
+    ).toBeInTheDocument()
+    expect(getStep(/^② 出荷を確かめる 取得できませんでした$/)).toBeInTheDocument()
+    expect(screen.getByText("弥生の送品を取得できませんでした")).toBeInTheDocument()
+  })
+
+  it("作業を選ぶとハッシュに残して、その一覧だけを出す", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "YAYOI-DONE" }),
+      makeOrder({ id: 2, order_no: "OVERDUE", desired_deadline: PAST }),
+    ])
+    mockProgress([])
+    mockMatches([makeMatch({ order_id: 1 })])
+    const user = userEvent.setup()
+    render(<OrdersShippingPage />)
+
+    await waitFor(() => getRow("YAYOI-DONE"))
+    await user.click(getStep(/^②/))
+
+    expect(window.location.hash).toBe("#confirm")
+    expect(await screen.findByRole("link", { name: "OVERDUE" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "YAYOI-DONE" })).toBeNull()
+    expect(screen.getByRole("region", { name: "② 出荷を確かめる" })).toBeInTheDocument()
+  })
+
+  it.each(["#candidates", "#review", "#unknown"])(
+    "#682 のカードのハッシュ・知らないハッシュ（%s）で開いてもハブと①の一覧を出す",
+    async (hash) => {
+      window.location.hash = hash
+      mockOrders([])
+      mockProgress([])
+      render(<OrdersShippingPage />)
+
+      expect(await screen.findByRole("navigation", { name: "送品の消し込みの作業" })).toBeInTheDocument()
+      expect(getStep(/^①/)).toHaveAttribute("aria-pressed", "true")
+      expect(screen.getByRole("region", { name: "① 送品済みにする" })).toBeInTheDocument()
+    },
+  )
+
+  it("画面に内部の言葉・仕組みの説明を出さない（docs/ui-writing-guidelines.md）", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "YAYOI-DONE" }),
+      makeOrder({ id: 2, order_no: "OVERDUE", desired_deadline: PAST }),
+    ])
+    mockProgress([])
+    mockMatches([
+      makeMatch({ order_id: 1 }),
+      makeMatch({
+        order_id: 2,
+        shipped_qty: 3,
+        is_fully_shipped: false,
+        ambiguous_entries: [makeEntry(4, 5, [2, 9])],
+      }),
+    ])
+    mockUnmatched([
+      makeUnmatched({ status: "unmatched_customer", customer_code: "009" }),
+      makeUnmatched({ status: "unmatched_product", product_code: "P1", customer_ids: [1] }),
+      makeUnmatched({ status: "no_order", product_code: "X3", customer_ids: [1], product_ids: [101] }),
+      makeUnmatched({ status: "ambiguous", product_code: "X9", candidate_order_ids: [2, 9] }),
+    ])
+    mockOrderReviews([makeReview({ order_id: 1, cause: "process_mismatch" })])
+    render(<OrdersShippingPage />)
+
+    await screen.findByRole("region", { name: "先に片付けること" })
+    // 用語集の内部語と、否定形・因果の連鎖でシステムの振る舞いを説明する文
+    const forbidden = /当た|照合|候補|追いついていない|起票漏れ|自動では|しません|件数が変わ/
+    const panels: [string, string][] = [
+      ["#ship", "① 送品済みにする"],
+      ["#confirm", "② 出荷を確かめる"],
+      ["#register", "③ 受注を起票する"],
+      ["#ambiguous", "送り先の受注を確かめる"],
+      ["#daily-reports", "日報が未入力の出荷済み注文"],
+    ]
+    for (const [hash, title] of panels) {
+      window.location.hash = hash
+      window.dispatchEvent(new HashChangeEvent("hashchange"))
+      await screen.findByRole("region", { name: title })
+      await waitFor(() => expect(screen.queryByText("読み込み中...")).toBeNull())
+      expect(document.body.textContent).not.toMatch(forbidden)
+    }
+  })
+})
+
+describe("OrdersShippingPage の前提バナー（Issue #692）", () => {
+  beforeEach(() => {
+    window.location.hash = ""
+    mockRole("order_handler")
+    mockMasters()
+    mockProgress([])
+  })
+
+  it("名寄せが済んでいない得意先・商品が無ければ出さない", async () => {
+    mockOrders([])
+    mockUnmatched([makeUnmatched({ status: "no_order" })])
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByRole("button", { name: "③ 受注を起票する 1商品" })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "先に片付けること" })).toBeNull()
+  })
+
+  it("得意先は得意先の数・商品は (得意先, 商品コード) の数を1文で出し、名寄せの画面へ移る", async () => {
+    mockOrders([])
+    mockUnmatched([
+      // 同じ得意先の別の商品は得意先1件と数える
+      makeUnmatched({ status: "unmatched_customer", customer_code_key: "009", product_code: "A" }),
+      makeUnmatched({ status: "unmatched_customer", customer_code_key: "009", product_code: "B" }),
+      makeUnmatched({ status: "unmatched_product", product_code: "P1" }),
+      makeUnmatched({ status: "unmatched_product", product_code: "P2" }),
+    ])
+    render(<OrdersShippingPage />)
+
+    const banner = await screen.findByRole("region", { name: "先に片付けること" })
+    expect(banner).toHaveTextContent("弥生の得意先1件・商品2件がアプリに未登録です")
+    // 得意先が残っていれば得意先のタブを開く
+    expect(within(banner).getByRole("link", { name: "名寄せする" })).toHaveAttribute(
+      "href",
+      "/orders/shipment-names#customers",
+    )
+    // 前提は①②③に数えない
+    expect(screen.getByRole("button", { name: "③ 受注を起票する 済み" })).toBeInTheDocument()
+  })
+
+  it("未登録が商品だけなら商品のタブを開く", async () => {
+    mockOrders([])
+    mockUnmatched([makeUnmatched({ status: "unmatched_product", product_code: "P1" })])
+    render(<OrdersShippingPage />)
+
+    const banner = await screen.findByRole("region", { name: "先に片付けること" })
+    expect(banner).toHaveTextContent("弥生の商品1件がアプリに未登録です")
+    expect(within(banner).getByRole("link", { name: "名寄せする" })).toHaveAttribute(
+      "href",
+      "/orders/shipment-names#products",
     )
   })
 
-  it("送品の候補の行に原因を短く出し、送品済みにするは押せる", async () => {
-    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
+  it("送り先の受注を決められない明細を並べ、確かめる一覧に受注を出す", async () => {
+    mockOrders([
+      makeOrder({ id: 11, order_no: "O-11", desired_deadline: "2026-10-20", customer_order_no: "PO-9" }),
+      makeOrder({ id: 12, order_no: "O-12", desired_deadline: "2026-10-20", status: "shipped" }),
+    ])
+    mockUnmatched([
+      makeUnmatched({
+        status: "ambiguous",
+        product_code: "X9",
+        customer_ids: [1],
+        product_ids: [101],
+        candidate_order_ids: [11, 12],
+      }),
+    ])
+    const user = userEvent.setup()
+    render(<OrdersShippingPage />)
+
+    const banner = await screen.findByRole("region", { name: "先に片付けること" })
+    expect(banner).toHaveTextContent("送り先の受注を決められない明細があります（1商品）")
+    expect(within(banner).queryByRole("link", { name: "名寄せする" })).toBeNull()
+    await user.click(within(banner).getByRole("button", { name: "受注を確かめる" }))
+
+    expect(window.location.hash).toBe("#ambiguous")
+    const [row] = await screen.findAllByTestId("unmatched-shipment-row")
+    expect(within(row).getByRole("link", { name: "O-11" })).toHaveAttribute("href", "/orders/11")
+    expect(within(row).getByText(/注番 PO-9/)).toBeInTheDocument()
+    expect(within(row).getByRole("link", { name: "O-12" })).toHaveAttribute("href", "/orders/12")
+  })
+})
+
+describe("OrdersShippingPage の① 送品済みにする（Issue #557 / #692）", () => {
+  beforeEach(() => {
+    window.location.hash = "#ship"
+    mockRole("order_handler")
+    mockMasters()
+  })
+
+  it("弥生で受注数量の送品を確かめられた注文だけを出す", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "OVERDUE", desired_deadline: PAST }),
+      makeOrder({ id: 2, order_no: "YAYOI-DONE", quantity: 100 }),
+      makeOrder({ id: 3, order_no: "SHIPPED", status: "shipped" }),
+    ])
     mockProgress([])
+    mockMatches([
+      makeMatch({
+        order_id: 2,
+        shipped_qty: 100,
+        order_quantity: 100,
+        entries: [makeEntry(1, 60), makeEntry(2, 40)],
+      }),
+    ])
+    render(<OrdersShippingPage />)
+
+    const done = await waitFor(() => getRow("YAYOI-DONE"))
+    expect(getBodyRows()).toHaveLength(1)
+    expect(within(done).getByText("/ 100", { exact: false })).toBeInTheDocument()
+    // 全行に共通する理由（弥生で送品済み）は出さない
+    expect(within(done).queryByText("弥生で送品済み")).toBeNull()
+    expect(screen.queryByRole("columnheader", { name: "理由" })).toBeNull()
+    expect(screen.getByText(/^弥生 .*売上分まで$/)).toBeInTheDocument()
+  })
+
+  it.each<MemberRole>(["order_handler", "president"])("%s は1件ずつ送品済みにできる", async (role) => {
+    mockRole(role)
+    const shipped = vi.fn()
+    mockOrders([makeOrder({ id: 1, order_no: "O-1" })])
+    mockProgress([])
+    mockMatches([makeMatch({ order_id: 1 })])
+    server.use(
+      http.post(`${API_BASE}/orders/1/ship`, () => {
+        shipped()
+        return HttpResponse.json(makeOrder({ id: 1, status: "shipped" }))
+      }),
+    )
+    const user = userEvent.setup()
+    render(<OrdersShippingPage />)
+
+    const row = await waitFor(() => getRow("O-1"))
+    await user.click(await within(row).findByRole("button", { name: "送品済みにする" }))
+    await waitFor(() => expect(shipped).toHaveBeenCalledTimes(1))
+    // 一括で送品済みにする操作は無い
+    expect(screen.queryByRole("checkbox")).toBeNull()
+  })
+
+  it.each<MemberRole>(["iso_officer", "platform_admin"])("%s は閲覧のみ", async (role) => {
+    mockRole(role)
+    mockOrders([makeOrder({ id: 1, order_no: "O-1" })])
+    mockProgress([])
+    mockMatches([makeMatch({ order_id: 1 })])
+    render(<OrdersShippingPage />)
+
+    const row = await waitFor(() => getRow("O-1"))
+    await waitFor(() => expect(within(row).getByText(/売上$/)).toBeInTheDocument())
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(within(row).queryByRole("button", { name: "送品済みにする" })).toBeNull()
+  })
+
+  it("日報の実績が届いていない注文には原因を短く出し、送品済みにするは押せる", async () => {
+    mockOrders([makeOrder({ id: 1, order_no: "O-1" })])
+    mockProgress([])
+    mockMatches([makeMatch({ order_id: 1 })])
     mockOrderReviews([makeReview({ order_id: 1, cause: "no_routing", final_process_name: null })])
     render(<OrdersShippingPage />)
 
     const row = await waitFor(() => getRow("O-1"))
-    expect(within(row).getByText("日報なし")).toBeInTheDocument()
-    expect(await within(row).findByRole("link", { name: "要確認: 工程なし" })).toHaveAttribute(
+    expect(await within(row).findByRole("link", { name: "日報: 工程なし" })).toHaveAttribute(
       "href",
-      "#review",
+      "#daily-reports",
     )
     expect(await within(row).findByRole("button", { name: "送品済みにする" })).toBeEnabled()
   })
+})
 
-  it("要確認では原因ごとの見出しの下に製品の単位でまとめ、展開で注文を出す", async () => {
-    window.location.hash = "#review"
+describe("OrdersShippingPage の② 出荷を確かめる（Issue #557 / #692）", () => {
+  beforeEach(() => {
+    window.location.hash = "#confirm"
+    mockRole("order_handler")
+    mockMasters()
+  })
+
+  it("最終工程完了かつ納期超過を先頭に納期の古い順で出し、どれにも当てはまらない注文は出さない", async () => {
+    const soon = addDaysToIsoDate(jstTodayIso(), 3)
+    mockOrders([
+      makeOrder({ id: 1, order_no: "SOON", desired_deadline: soon }),
+      makeOrder({ id: 2, order_no: "OVERDUE", desired_deadline: PAST, status: "in_progress" }),
+      makeOrder({ id: 3, order_no: "DONE-OVERDUE", desired_deadline: "2000-02-01" }),
+      makeOrder({ id: 4, order_no: "DONE", desired_deadline: FUTURE }),
+      makeOrder({ id: 5, order_no: "NOT-YET", desired_deadline: FUTURE }),
+      makeOrder({ id: 6, order_no: "SHIPPED", desired_deadline: PAST, status: "shipped" }),
+      makeOrder({ id: 7, order_no: "DRAFT", desired_deadline: PAST, status: "draft" }),
+    ])
+    const requested = mockProgress([
+      makeProcess({ order_id: 3, status: "completed", completed_by: "quantity" }),
+      makeProcess({ order_id: 4, status: "completed", completed_by: "quantity" }),
+      makeProcess({ order_id: 5, status: "in_progress" }),
+    ])
+    render(<OrdersShippingPage />)
+
+    await screen.findByRole("link", { name: "DONE-OVERDUE" })
+    // 進捗は対象（確定済・生産中）の注文だけをまとめて引く
+    expect(requested).toEqual([[1, 2, 3, 4, 5]])
+    expect(getBodyRows().map((r) => within(r).getAllByRole("link")[0].textContent)).toEqual([
+      "DONE-OVERDUE",
+      "OVERDUE",
+      "SOON",
+      "DONE",
+    ])
+    expect(screen.queryByText("NOT-YET")).toBeNull()
+    expect(screen.queryByText("SHIPPED")).toBeNull()
+    expect(screen.queryByText("DRAFT")).toBeNull()
+  })
+
+  it("理由と工程の進捗・納期の超過日数を出し、進捗の無い注文は「日報なし」と出す", async () => {
+    mockOrders([
+      makeOrder({ id: 1, order_no: "DONE-OVERDUE", desired_deadline: PAST }),
+      makeOrder({ id: 2, order_no: "NO-REPORT", desired_deadline: undefined, confirmed_deadline: PAST }),
+    ])
+    mockProgress([
+      makeProcess({ order_id: 1, process_routing_id: 1, sequence_order: 1, status: "completed", completed_by: "later_process" }),
+      makeProcess({ order_id: 1, process_routing_id: 2, sequence_order: 2, status: "completed", completed_by: "quantity" }),
+    ])
+    render(<OrdersShippingPage />)
+
+    const done = await waitFor(() => getRow("DONE-OVERDUE"))
+    expect(within(done).getByText("最終工程完了")).toBeInTheDocument()
+    expect(within(done).getByText("納期超過")).toBeInTheDocument()
+    expect(within(done).getByText("2 / 2")).toBeInTheDocument()
+    expect(within(done).getByText(/日超過$/)).toBeInTheDocument()
+
+    const noReport = getRow("NO-REPORT")
+    expect(within(noReport).getByText("日報なし")).toBeInTheDocument()
+    expect(within(noReport).getByText("納期超過")).toBeInTheDocument()
+    expect(within(noReport).queryByText("最終工程完了")).toBeNull()
+    // 希望納期が無いので完成見込み（確定納期）で判定している
+    expect(within(noReport).getByText("（完成見込み）")).toBeInTheDocument()
+  })
+
+  it("分納の途中・送り先未定の明細を示し、操作の列を出さない", async () => {
+    mockOrders([makeOrder({ id: 3, order_no: "YAYOI-PART", desired_deadline: PAST, quantity: 100 })])
+    mockProgress([])
+    mockMatches([
+      makeMatch({
+        order_id: 3,
+        shipped_qty: 30,
+        order_quantity: 100,
+        is_fully_shipped: false,
+        entries: [makeEntry(3, 30)],
+        ambiguous_entries: [makeEntry(4, 5, [3, 9])],
+      }),
+    ])
+    render(<OrdersShippingPage />)
+
+    const part = await waitFor(() => getRow("YAYOI-PART"))
+    expect(within(part).getByText("一部送品")).toBeInTheDocument()
+    expect(within(part).getByText("送り先未定 1明細")).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "操作" })).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(within(part).queryByRole("button", { name: "送品済みにする" })).toBeNull()
+  })
+
+  it("進捗の最終計算日時を JST で出す", async () => {
+    mockOrders([makeOrder({ id: 1, order_no: "O-1", desired_deadline: PAST })])
+    mockProgress([], "2099-10-01T01:05:00Z")
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByText("日報 99/10/1 10:05")).toBeInTheDocument()
+  })
+})
+
+describe("OrdersShippingPage の③ 受注を起票する（Issue #682 / #692）", () => {
+  beforeEach(() => {
+    window.location.hash = "#register"
+    mockRole("order_handler")
+    mockMasters()
+    mockOrders([])
+    mockProgress([])
+  })
+
+  it("受注が無い明細だけを出し、行ごとに受注を起票するを置く", async () => {
+    mockUnmatched([
+      makeUnmatched({ status: "unmatched_customer", customer_name: "未登録商事" }),
+      makeUnmatched({
+        status: "no_order",
+        product_code: "X3",
+        customer_ids: [1],
+        product_ids: [101],
+        note_deadlines: ["2026-11-30"],
+        entry_count: 2,
+        total_qty: 120,
+      }),
+    ])
+    render(<OrdersShippingPage />)
+
+    const [row, ...rest] = await screen.findAllByTestId("unmatched-shipment-row")
+    expect(rest).toHaveLength(0)
+    expect(screen.queryByText("未登録商事")).toBeNull()
+    expect(within(row).getByRole("link", { name: "受注を起票する" })).toHaveAttribute(
+      "href",
+      "/orders/new",
+    )
+    expect(within(row).getByText("架空")).toBeInTheDocument()
+    expect(within(row).getByText("DW-1 - 品A")).toBeInTheDocument()
+    expect(within(row).getByText(/11\/30/)).toBeInTheDocument()
+    expect(within(row).getByText("2明細")).toBeInTheDocument()
+    expect(within(row).getByText("120")).toBeInTheDocument()
+  })
+
+  it("受注が無い明細が無ければその旨を出す", async () => {
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByText("起票する受注はありません")).toBeInTheDocument()
+  })
+})
+
+describe("OrdersShippingPage の日報の参考（Issue #683 / #692）", () => {
+  beforeEach(() => {
+    window.location.hash = "#daily-reports"
+    mockRole("order_handler")
+    mockMasters()
+  })
+
+  it("原因ごとの見出しの下に製品の単位でまとめ、展開で注文を出す", async () => {
     mockOrders([
       makeOrder({ id: 1, order_no: "O-1", product_id: 101, quantity: 60 }),
       makeOrder({ id: 2, order_no: "O-2", product_id: 101, quantity: 40 }),
       makeOrder({ id: 3, order_no: "O-3", product_id: 102 }),
     ])
     mockProgress([])
-    mockUnmatched([makeUnmatched({ status: "no_order" })])
     mockOrderReviews([
       makeReview({
         order_id: 1,
@@ -536,13 +728,15 @@ describe("OrdersShippingPage の日報が追いついていない注文（Issue 
     const user = userEvent.setup()
     render(<OrdersShippingPage />)
 
-    // 受注に当たらない明細1件＋日報が追いついていない注文2製品
-    expect(await screen.findByRole("button", { name: "要確認 3件" })).toBeInTheDocument()
+    // 件数は注文の数
+    expect(
+      await screen.findByRole("button", { name: "日報が未入力の出荷済み注文 3注文" }),
+    ).toBeInTheDocument()
     expect(
       await screen.findByRole("heading", { name: /工程名が日報と合わない\s*1製品/ }),
     ).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: /日報の顧客先が違う／作り置き\s*1製品/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "照合状況（工程マスタ未登録）" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "工程マスタ未登録の実績を見る" })).toHaveAttribute(
       "href",
       "/master/daily-report-coverage#routing",
     )
@@ -569,14 +763,9 @@ describe("OrdersShippingPage の日報が追いついていない注文（Issue 
     expect(
       screen.getByRole("link", { name: "受注詳細で作り置きを引き当てる" }),
     ).toHaveAttribute("href", "/orders/3")
-
-    // 受注に当たらない弥生の明細へ切り替えられる
-    await user.click(screen.getByRole("tab", { name: "受注に当たらない弥生の明細（1）" }))
-    expect(screen.getAllByTestId("unmatched-shipment-row")).toHaveLength(1)
   })
 
-  it("日報の書き漏れには日報の名寄せへのリンクと未照合が含まれる旨を出す", async () => {
-    window.location.hash = "#review"
+  it("日報の書き漏れには日報の名寄せへのリンクを出し、原因の説明はヘルプに置く", async () => {
     mockOrders([makeOrder({ id: 1, order_no: "O-1" })])
     mockProgress([])
     mockOrderReviews([makeReview({ order_id: 1, cause: "missing_report" })])
@@ -585,10 +774,17 @@ describe("OrdersShippingPage の日報が追いついていない注文（Issue 
     expect(
       await screen.findByRole("heading", { name: /日報の書き漏れ・取り込み漏れ/ }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/未照合の明細も割り付けに使われない/)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "日報の名寄せ（未照合）" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "日報の名寄せをする" })).toHaveAttribute(
       "href",
       "/master/daily-report-names",
     )
+    expect(screen.queryByText(/日報の名寄せが済んでいない明細も受注に充てられない/)).toBeNull()
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "ヘルプを開く" }))
+    expect(
+      await within(screen.getByRole("dialog")).findByText(
+        /日報の名寄せが済んでいない明細も受注に充てられない/,
+      ),
+    ).toBeInTheDocument()
   })
 })
