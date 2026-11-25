@@ -200,6 +200,11 @@ cd backend && ruff check . && mypy .
     作り置きの原因が出なくなる）。`order_process_progress` には `id` 列が無い（主キーは (order_id, process_routing_id)）ので `fetch_all_rows()` の
     `.order()` は主キーで並べる。画面の要確認は2種類をタブで切り替え（列が違う）、カードの件数は両方の取得が終わってから出す。送品の消し込みを
     描画するテストは MSW の既定ハンドラ `GET /shipments/order-reviews` に依存する
+  - **送品の消し込みの分類（Issue #691、Epic #690）**: 注文・弥生の明細は ①送品済みにする・②出荷を確かめる・③受注を起票する・前提・対象外の
+    **どれか1か所にだけ**置く。振り分けは純粋関数 `classifyShippingWorklist()`（`lib/shipping-worklist-utils.ts`）で、ハブの件数と各ページの行は
+    必ずこの結果から出す（別々に数えない）。行き先・見出し・単位は同ファイルの定数1か所。判定や突合の状態を足すときは行き先を1つに決め、
+    テストの `expectEachPlacedOnce()` が通ることを確かめる。`ambiguous` は前提（直さないと①に進めない）、日報の参考は振り分けず行の印として重ね、
+    サイドバーのバッジは①の件数だけにする。分類ルール表は [docs/features/shipment-file-import.md](docs/features/shipment-file-import.md#送品の消し込みの分類issue-691epic-690)
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は
