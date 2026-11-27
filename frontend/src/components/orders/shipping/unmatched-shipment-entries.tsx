@@ -13,6 +13,7 @@ import {
   getProductName,
   getStatusLabel,
 } from "@/lib/order-utils"
+import { newOrderHrefForUnmatchedGroup } from "@/lib/shipping-worklist-utils"
 import type { Customer } from "@/types/customer"
 import type { Order } from "@/types/order"
 import type { Product } from "@/types/product"
@@ -20,6 +21,7 @@ import type { ShipmentUnmatchedGroup } from "@/types/shipment"
 
 /**
  * - register: ③受注を起票する。起票に要る、アプリの顧客・製品と備考の納期分を列に出し、行に「受注を起票する」を置く
+ *   （行の値を初期値にして受注作成を開き、作成したら③へ戻る。#694）
  * - ambiguous: 送り先の受注を確かめる。弥生の備考と、見比べる受注（希望納期・顧客注文番号）を並べる
  */
 export type UnmatchedEntriesVariant = "register" | "ambiguous"
@@ -133,9 +135,8 @@ function RegisterRow({
         {deadlines.length > 0 ? deadlines.join("・") : "－"}
       </TableCell>
       <TableCell className="text-right align-top">
-        {/* 初期値を入れて開くのは #694 */}
         <Button asChild size="sm" variant="outline">
-          <Link href="/orders/new">
+          <Link href={newOrderHrefForUnmatchedGroup(item)}>
             <FilePlus2 className="mr-1.5 h-3.5 w-3.5" />
             受注を起票する
           </Link>

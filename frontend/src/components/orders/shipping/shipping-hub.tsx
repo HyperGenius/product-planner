@@ -2,8 +2,10 @@
 
 import type { ReactNode } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react"
+import { AlertTriangle, ArrowRight, CheckCircle2, History } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { shipmentNamesHref } from "@/lib/shipment-utils"
+import type { ShippingCountChange } from "@/lib/shipping-count-history"
 import { shippingPageHref, type ShippingPage } from "@/lib/shipping-review-utils"
 import {
   SHIPPING_DAILY_REPORT_META,
@@ -90,7 +92,10 @@ export function ShippingPrerequisiteBanner({
     .map((kind) => `${SHIPPING_PREREQUISITE_META[kind].unit}${counts[kind]}件${more}`)
   if (nameParts.length === 0 && counts.ambiguous === 0) return null
   // 得意先が決まらないと商品も名寄せできないので、得意先が残っていれば得意先のタブを開く
-  const namesHref = `/orders/shipment-names#${counts.customer > 0 ? "customers" : "products"}`
+  // 送品の消し込みから開いたことを渡し、名寄せの画面に戻るリンクを出してこの画面と同じ期間に絞る（#694）
+  const namesHref = shipmentNamesHref(counts.customer > 0 ? "customers" : "products", {
+    fromShipping: true,
+  })
 
   return (
     <section
@@ -126,6 +131,33 @@ function BannerLine({ text, children }: { text: string; children: ReactNode }) {
       </p>
       {children}
     </div>
+  )
+}
+
+/**
+ * 前回ハブを見たときからの件数の増減（Issue #694）。名寄せ・起票・送品済みにするの結果が①③・前提に効いたことを見せる。
+ * 変わった件数だけを出し、何も変わっていなければ出さない
+ */
+export function ShippingCountChanges({ changes }: { changes: readonly ShippingCountChange[] }) {
+  if (changes.length === 0) return null
+  return (
+    <section
+      aria-label="前回からの件数の変化"
+      className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground"
+    >
+      <span className="inline-flex items-center gap-1 font-medium text-foreground">
+        <History className="h-4 w-4 self-center" />
+        前回から
+      </span>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        {changes.map((change) => (
+          <li key={change.kind} className="tabular-nums">
+            {change.label} {change.from} →{" "}
+            <span className="font-semibold text-foreground">{change.to}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

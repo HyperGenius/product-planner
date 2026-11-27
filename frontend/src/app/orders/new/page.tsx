@@ -2,13 +2,14 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import {
   AlertTriangle,
   BookOpen,
   Calculator,
   Check,
+  ChevronLeft,
   Mail,
   Paperclip,
   Pencil,
@@ -54,22 +55,35 @@ import {
   ORDER_TYPE_LABELS,
 } from "@/lib/order-utils"
 import { ApiError } from "@/lib/api-client"
+import {
+  NEW_ORDER_DEFAULT_RETURN_PATH,
+  NEW_ORDER_RETURN_PATHS,
+  parseNewOrderPrefill,
+} from "@/lib/order-prefill-utils"
 import type { ConflictingOrder, OrderSimulateResponse, OrderType } from "@/types/order"
 import type { Product } from "@/types/product"
 
 /**
  * 注文登録・納期回答シミュレーション画面
  * URL: /orders/new
+ *
+ * クエリで初期値（`customer_id` / `product_id` / `quantity` / `desired_deadline`）と作成後の戻り先（`return_to`）を受け取る
+ * （送品の消し込みの③から開く。Issue #694）。値は `parseNewOrderPrefill()` で検証し、知らない値は空欄にする。
+ * 初期値は生産のフォームにだけ入れる（修理等のフォームには渡さない）
  */
 export default function NewOrderPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  // 初期値はマウント時のクエリだけを使う（入力を始めた後にクエリで書き換えない）
+  const [prefill] = useState(() => parseNewOrderPrefill(searchParams))
+  const returnPath = prefill.returnTo ?? NEW_ORDER_DEFAULT_RETURN_PATH
   // 注文の種別。修理・メンテナンス・洗浄などは製品・数量・シミュレーションを使わない別フォーム（Issue #494）
   const [orderType, setOrderType] = useState<OrderType>("production")
   const [orderNo, setOrderNo] = useState("")
-  const [productId, setProductId] = useState("")
-  const [customerId, setCustomerId] = useState("")
-  const [quantity, setQuantity] = useState("")
-  const [desiredDeadline, setDesiredDeadline] = useState("")
+  const [productId, setProductId] = useState(() => prefill.productId?.toString() ?? "")
+  const [customerId, setCustomerId] = useState(() => prefill.customerId?.toString() ?? "")
+  const [quantity, setQuantity] = useState(() => prefill.quantity?.toString() ?? "")
+  const [desiredDeadline, setDesiredDeadline] = useState(() => prefill.desiredDeadline ?? "")
   // 作業開始日（工場が着手する日）。初期値は翌日（JST、Issue #477）。
   // ユーザーが空欄に戻した場合は実行日時から着手（Issue #372）
   const [schedulingStartDate, setSchedulingStartDate] = useState(jstTomorrowIso)
@@ -190,7 +204,7 @@ export default function NewOrderPage() {
       })
       setNoRoutingDialogOpen(false)
       toast.success("下書き保存しました。工程登録後に専門家キューから確定できます")
-      router.push("/orders")
+      router.push(returnPath)
     } catch (error) {
       if (error instanceof ApiError && error.errorCode === "duplicate_order") {
         openDuplicateDialog(error)
@@ -239,7 +253,7 @@ export default function NewOrderPage() {
       await confirmMutation.mutateAsync(createdOrder.id)
 
       toast.success("注文を確定し、スケジュールを作成しました")
-      router.push("/orders")
+      router.push(returnPath)
     } catch (error) {
       if (error instanceof ApiError && error.errorCode === "duplicate_order") {
         openDuplicateDialog(error)
@@ -322,7 +336,7 @@ export default function NewOrderPage() {
       toast.success(
         `メール起票で${result.created_orders.length}件の下書きを登録しました`,
       )
-      router.push("/orders")
+      router.push(returnPath)
     } catch (error) {
       if (error instanceof ApiError && error.errorCode === "duplicate_order") {
         openDuplicateDialog(error, error.lineItemIndex)
@@ -360,9 +374,21 @@ export default function NewOrderPage() {
     </div>
   )
 
+  // 戻り先から開いたときだけ、戻るリンクを出す
+  const backLink = prefill.returnTo && (
+    <Link
+      href={prefill.returnTo}
+      className="mb-1 inline-flex items-center gap-0.5 text-sm text-muted-foreground hover:text-foreground"
+    >
+      <ChevronLeft className="h-4 w-4" />
+      {NEW_ORDER_RETURN_PATHS[prefill.returnTo]}
+    </Link>
+  )
+
   if (orderType === "repair") {
     return (
       <div className="container mx-auto py-6 px-4">
+        {backLink}
         <div className="mb-6">
           <h1 className="text-3xl font-bold">注文登録</h1>
           <p className="text-muted-foreground mt-2">
@@ -377,6 +403,7 @@ export default function NewOrderPage() {
 
   return (
     <div className="container mx-auto py-6 px-4">
+      {backLink}
       <div className="mb-6">
         <h1 className="text-3xl font-bold">注文登録・納期回答シミュレーション</h1>
         <p className="text-muted-foreground mt-2">

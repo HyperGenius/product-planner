@@ -1,3 +1,4 @@
+import { buildNewOrderHref, type NewOrderReturnPath } from "@/lib/order-prefill-utils"
 import { jstTodayIso } from "@/lib/order-utils"
 import { buildShippingRows, type ShippingRow } from "@/lib/shipping-candidate-utils"
 import type { ProcessProgress } from "@/types/daily-report-progress"
@@ -295,4 +296,29 @@ export function orderConfirmRows<T extends Pick<ShippingRow, "deadline" | "shipm
   const waiting: T[] = []
   for (const row of rows) (isAwaitingYayoiImport(row, latestSalesDate) ? waiting : now).push(row)
   return [...now, ...waiting]
+}
+
+// ---------------------------------------------------------------------------
+// ③ → 受注作成（Issue #694）
+// ---------------------------------------------------------------------------
+
+/** ③の行から開く受注作成の戻り先 */
+export const REGISTER_RETURN_PATH: NewOrderReturnPath = "/orders/shipping/register"
+
+/**
+ * ③の行（(得意先, 商品コード) のまとまり）から開く受注作成の URL。1つに決まる値だけを初期値にする。
+ *
+ * - 顧客・製品: 照合できたものが1つのとき（商流で複数の顧客にひも付く得意先は空欄にして選ばせる）
+ * - 数量: まとまりの数量の合計（赤伝を差し引いて0以下なら空欄）
+ * - 希望納期: 備考の納期分が1つのとき
+ */
+export function newOrderHrefForUnmatchedGroup(group: ShipmentUnmatchedGroup): string {
+  const single = (ids: readonly number[]) => (ids.length === 1 ? ids[0] : null)
+  return buildNewOrderHref({
+    customerId: single(group.customer_ids),
+    productId: single(group.product_ids),
+    quantity: group.total_qty > 0 ? group.total_qty : null,
+    desiredDeadline: group.note_deadlines.length === 1 ? group.note_deadlines[0] : null,
+    returnTo: REGISTER_RETURN_PATH,
+  })
 }
