@@ -55,9 +55,9 @@ describe("日報が未入力の出荷済み注文（Issue #683 / #693）", () =>
     expect(getPageHeading()).toHaveTextContent("日報が未入力の出荷済み注文3注文")
     expect(screen.getByRole("heading", { name: /日報の顧客先が違う／作り置き\s*1製品/ })).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: /日報の書き漏れ/ })).toBeNull()
-    expect(screen.getByRole("link", { name: "工程マスタ未登録の実績を見る" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "製品の工程を日報に合わせる" })).toHaveAttribute(
       "href",
-      "/master/daily-report-coverage#routing",
+      "/master/daily-reports/processes",
     )
 
     const [mismatch, stock] = screen.getAllByTestId("order-review-product-row")
@@ -83,7 +83,7 @@ describe("日報が未入力の出荷済み注文（Issue #683 / #693）", () =>
     expect(screen.queryByRole("button", { name: "送品済みにする" })).toBeNull()
   })
 
-  it("日報の書き漏れには日報の名寄せへのリンクを出し、原因の説明はヘルプに置く", async () => {
+  it("日報の書き漏れには日報の実績へのリンクを出し、原因の説明はヘルプに置く", async () => {
     mockOrders([makeOrder({ id: 1, order_no: "O-1" })])
     mockOrderReviews([makeReview({ order_id: 1, cause: "missing_report" })])
     render(<ShippingDailyReportsPage />)
@@ -91,16 +91,16 @@ describe("日報が未入力の出荷済み注文（Issue #683 / #693）", () =>
     expect(
       await screen.findByRole("heading", { name: /日報の書き漏れ・取り込み漏れ/ }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "日報の名寄せをする" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "日報の実績を確かめる" })).toHaveAttribute(
       "href",
-      "/master/daily-report-names",
+      "/master/daily-reports",
     )
-    expect(screen.queryByText(/日報の名寄せが済んでいない明細も受注に充てられない/)).toBeNull()
+    expect(screen.queryByText(/日報の顧客先・製品がアプリに結び付いていない明細も受注に充てられない/)).toBeNull()
 
     await userEvent.setup().click(screen.getByRole("button", { name: "ヘルプを開く" }))
     expect(
       await within(screen.getByRole("dialog")).findByText(
-        /日報の名寄せが済んでいない明細も受注に充てられない/,
+        /日報の顧客先・製品がアプリに結び付いていない明細も受注に充てられない/,
       ),
     ).toBeInTheDocument()
   })

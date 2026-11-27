@@ -5,9 +5,6 @@ import {
   formatPercent,
   matchesCategoryFilter,
   productLabel,
-  productsWithoutRoutings,
-  sumProductsWithoutRoutings,
-  toValidCoverageCard,
 } from "./daily-report-coverage-utils"
 
 function group(overrides: Partial<UnallocatedGroup>): UnallocatedGroup {
@@ -28,55 +25,6 @@ function group(overrides: Partial<UnallocatedGroup>): UnallocatedGroup {
     ...overrides,
   }
 }
-
-describe("productsWithoutRoutings", () => {
-  it("工程ルートが無い製品の no_routing_process を製品ごとに集め、数量の多い順に並べる", () => {
-    const groups = [
-      group({
-        product_id: 2,
-        category: "no_routing_process",
-        reason: "no_routing_process",
-        product_has_routings: false,
-        process_name: "溶接",
-        qty: 50,
-        row_count: 3,
-      }),
-      group({
-        product_id: 3,
-        category: "no_routing_process",
-        reason: "no_routing_process",
-        product_has_routings: false,
-        process_name: "プレス",
-        qty: 40,
-      }),
-      group({
-        product_id: 2,
-        category: "no_routing_process",
-        reason: "no_routing_process",
-        product_has_routings: false,
-        process_name: "プレス",
-        qty: 30,
-        row_count: 2,
-      }),
-      // 工程ルートはあるが、その工程が無い製品は含めない
-      group({
-        product_id: 4,
-        category: "no_routing_process",
-        reason: "no_routing_process",
-        product_has_routings: true,
-        qty: 999,
-      }),
-      group({ product_id: 5, qty: 999 }),
-    ]
-
-    const result = productsWithoutRoutings(groups)
-
-    expect(result.map((p) => [p.product_id, p.qty, p.row_count, p.process_names])).toEqual([
-      [2, 80, 5, ["溶接", "プレス"]],
-      [3, 40, 1, ["プレス"]],
-    ])
-  })
-})
 
 describe("matchesCategoryFilter", () => {
   it("要確認は出荷済みの受注のみの実績を除く", () => {
@@ -119,34 +67,5 @@ describe("productLabel", () => {
   it("図番があれば添え、品名が無ければ製品 ID を出す", () => {
     expect(productLabel(group({ product_code: "P-001" }))).toBe("テスト製品A（P-001）")
     expect(productLabel(group({ product_id: 9, product_name: null }))).toBe("製品 #9")
-  })
-})
-
-describe("toValidCoverageCard", () => {
-  it("既知のカードはそのまま返し、空・未知の値は未割当に寄せる", () => {
-    expect(toValidCoverageCard("#unmatched")).toBe("unmatched")
-    expect(toValidCoverageCard("routing")).toBe("routing")
-    expect(toValidCoverageCard("#stock")).toBe("stock")
-    expect(toValidCoverageCard("")).toBe("unallocated")
-    expect(toValidCoverageCard("#unknown")).toBe("unallocated")
-  })
-})
-
-describe("sumProductsWithoutRoutings", () => {
-  it("製品数・数量・行数を合計する", () => {
-    const product = (qty: number, row_count: number) => ({
-      product_id: qty,
-      product_name: null,
-      product_code: null,
-      qty,
-      row_count,
-      process_names: [],
-    })
-    expect(sumProductsWithoutRoutings([product(10, 2), product(5, 1)])).toEqual({
-      productCount: 2,
-      qty: 15,
-      rowCount: 3,
-    })
-    expect(sumProductsWithoutRoutings([])).toEqual({ productCount: 0, qty: 0, rowCount: 0 })
   })
 })

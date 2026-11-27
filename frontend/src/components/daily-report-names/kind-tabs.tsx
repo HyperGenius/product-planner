@@ -25,6 +25,9 @@ export function kindColorStyle(kind: NameKind): CSSProperties {
 export const KIND_PANEL_CLASS =
   "min-h-0 flex-1 overflow-y-auto rounded-lg border border-t-4 border-t-[var(--kind-color)] bg-card"
 
+/** スクロールをページ側に任せる行リスト（1ページに一覧を2つ並べるとき。Issue #707） */
+export const KIND_LIST_CLASS = "rounded-lg border border-t-4 border-t-[var(--kind-color)] bg-card"
+
 /**
  * 種別（設備・工程・顧客・製品）を選ぶカード型のタブ。
  * 外側の作業モードのタブ（下線）と見分けがつくよう、色付きの上辺と件数を持たせる。

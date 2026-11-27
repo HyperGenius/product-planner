@@ -3,12 +3,27 @@ import { http, HttpResponse } from "msw"
 import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
-import type { UnmatchedName } from "@/types/daily-report-names"
-import { UnmatchedNameQueue } from "./unmatched-name-queue"
+import { useUnmatchedNames } from "@/hooks/use-daily-report-names"
+import { NAME_KIND_LABELS, type NameKind, type UnmatchedName } from "@/types/daily-report-names"
+import { UnmatchedNameList } from "./unmatched-name-list"
 
 /**
- * 未照合キュー (Issue #489)。表記はダミー値（実データを含めない）。
+ * 日報の表記の一覧 (Issue #489 / #707)。表記はダミー値（実データを含めない）。
  */
+
+/** ページと同じく、表記の一覧を取得して1つの種別の行を並べる（ページごとの振り分けは daily-report-worklist-utils のテスト） */
+function Queue({ kind = "equipment", canEdit = false }: { kind?: NameKind; canEdit?: boolean }) {
+  const { data } = useUnmatchedNames()
+  if (!data) return null
+  return (
+    <UnmatchedNameList
+      items={data.filter((i) => i.kind === kind)}
+      kind={kind}
+      canEdit={canEdit}
+      emptyMessage={`未照合の${NAME_KIND_LABELS[kind]}はありません`}
+    />
+  )
+}
 
 function unmatched(overrides: Partial<UnmatchedName>): UnmatchedName {
   return {
@@ -60,23 +75,17 @@ async function confirmDialog(button: string) {
   await userEvent.click(within(dialog).getByRole("button", { name: button }))
 }
 
-async function openTab(name: RegExp) {
-  await userEvent.click(await screen.findByRole("tab", { name }))
-}
-
-describe("UnmatchedNameQueue", () => {
-  it("種別ごとの件数をタブに出し、出現件数順に並べる", async () => {
+describe("UnmatchedNameList", () => {
+  it("出現件数順に並べる", async () => {
     mockQueue([
       unmatched({ raw_text: "組立機B", entry_count: 30 }),
       unmatched({ raw_text: "試作機", entry_count: 2 }),
       unmatched({ kind: "process", raw_text: "カシメ加工", entry_count: 10 }),
     ])
 
-    render(<UnmatchedNameQueue canEdit />)
+    render(<Queue canEdit />)
 
-    expect(await screen.findByRole("tab", { name: /設備\s*2/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /工程\s*1/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /製品\s*0/ })).toBeInTheDocument()
+    await screen.findByRole("button", { name: "組立機B" })
     const names = screen
       .getAllByRole("button", { expanded: false })
       .map((b) => b.textContent)
@@ -107,7 +116,7 @@ describe("UnmatchedNameQueue", () => {
       ),
     )
 
-    render(<UnmatchedNameQueue canEdit />)
+    render(<Queue canEdit />)
     await userEvent.click(await screen.findByRole("button", { name: "組立機B" }))
 
     const table = await screen.findByRole("table")
@@ -120,7 +129,7 @@ describe("UnmatchedNameQueue", () => {
   it("設備を選ぶと別名を登録し、キューから消える", async () => {
     const posts = mockQueue([unmatched({ raw_text: "組立機B" })])
 
-    render(<UnmatchedNameQueue canEdit />)
+    render(<Queue canEdit />)
     await openPicker("「組立機B」の設備を選択")
     await userEvent.click(await screen.findByRole("option", { name: /組立.*台帳No\.12/ }))
     expect(posts).toEqual([])
@@ -144,8 +153,7 @@ describe("UnmatchedNameQueue", () => {
   it("工程は複数選択して登録できる（1:N）", async () => {
     const posts = mockQueue([unmatched({ kind: "process", raw_text: "カシメ、仕上げ加工" })])
 
-    render(<UnmatchedNameQueue canEdit />)
-    await openTab(/工程/)
+    render(<Queue kind="process" canEdit />)
     await openPicker("「カシメ、仕上げ加工」の工程を選択")
     await userEvent.click(await screen.findByRole("option", { name: "カシメ" }))
     await userEvent.click(screen.getByRole("option", { name: "クグシ" }))
@@ -181,8 +189,7 @@ describe("UnmatchedNameQueue", () => {
       }),
     )
 
-    render(<UnmatchedNameQueue canEdit />)
-    await openTab(/製品/)
+    render(<Queue kind="product" canEdit />)
     await userEvent.click(
       await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×20」に対応付ける" }),
     )
@@ -216,8 +223,7 @@ describe("UnmatchedNameQueue", () => {
       }),
     )
 
-    render(<UnmatchedNameQueue canEdit />)
-    await openTab(/製品/)
+    render(<Queue kind="product" canEdit />)
     await userEvent.click(
       await screen.findByRole("button", { name: "「ピンA」を「ピンA 製品」に対応付ける" }),
     )
@@ -230,7 +236,7 @@ describe("UnmatchedNameQueue", () => {
     expect(candidateRequests.sort()).toEqual(["ピンA", "ピンB"])
   })
 
-  it("顧客先が未照合の製品は、候補を出さずに先に顧客の対応付けを促す", async () => {
+  it("顧客先が決まっていない製品は候補を出さず、理由を行ごとに繰り返さない（見出しに1回だけ、#707）", async () => {
     let candidateRequested = false
     mockQueue([
       unmatched({
@@ -247,13 +253,13 @@ describe("UnmatchedNameQueue", () => {
       }),
     )
 
-    render(<UnmatchedNameQueue canEdit />)
-    await openTab(/製品/)
+    render(<Queue kind="product" canEdit />)
 
-    expect(
-      await screen.findByText("顧客先「未登録の顧客」を先に「顧客」で対応付けてください"),
-    ).toBeInTheDocument()
+    expect(await screen.findByText("顧客先: 未登録の顧客")).toBeInTheDocument()
+    expect(screen.queryByText(/を先に「顧客」で対応付けてください/)).not.toBeInTheDocument()
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    // 対象外にはできる
+    expect(screen.getByRole("button", { name: "「ピン6x20」を対象外にする" })).toBeInTheDocument()
     expect(candidateRequested).toBe(false)
   })
 
@@ -262,8 +268,7 @@ describe("UnmatchedNameQueue", () => {
       unmatched({ kind: "product", raw_text: "試作品", customer_raw: null, customer_id: null }),
     ])
 
-    render(<UnmatchedNameQueue canEdit />)
-    await openTab(/製品/)
+    render(<Queue kind="product" canEdit />)
     await userEvent.click(await screen.findByRole("button", { name: "「試作品」を対象外にする" }))
     expect(posts).toEqual([])
     expect(await screen.findByText(/元に戻すには「対象外」タブから解除します/)).toBeInTheDocument()
@@ -281,7 +286,7 @@ describe("UnmatchedNameQueue", () => {
   it("キャンセルすると何も登録せず、行も残る", async () => {
     const posts = mockQueue([unmatched({ raw_text: "組立機B" })])
 
-    render(<UnmatchedNameQueue canEdit />)
+    render(<Queue canEdit />)
     await openPicker("「組立機B」の設備を選択")
     await userEvent.click(await screen.findByRole("option", { name: /組立.*台帳No\.12/ }))
     await confirmDialog("キャンセル")
@@ -294,7 +299,7 @@ describe("UnmatchedNameQueue", () => {
   it("「対象外」もキャンセルすると登録しない", async () => {
     const posts = mockQueue([unmatched({ raw_text: "試作機" })])
 
-    render(<UnmatchedNameQueue canEdit />)
+    render(<Queue canEdit />)
     await userEvent.click(await screen.findByRole("button", { name: "「試作機」を対象外にする" }))
     await confirmDialog("キャンセル")
 
@@ -310,7 +315,7 @@ describe("UnmatchedNameQueue", () => {
       ),
     )
 
-    render(<UnmatchedNameQueue canEdit />)
+    render(<Queue canEdit />)
     await openPicker("「組立機B」の設備を選択")
     await userEvent.click(await screen.findByRole("option", { name: /組立.*台帳No\.12/ }))
     await confirmDialog("登録する")
@@ -381,8 +386,7 @@ describe("UnmatchedNameQueue", () => {
       mockQueue([PRODUCT_ROW])
       const customerId = mockOrderApis()
 
-      render(<UnmatchedNameQueue canEdit />)
-      await openTab(/製品/)
+      render(<Queue kind="product" canEdit />)
 
       const withOrders = await screen.findByRole("button", {
         name: "「ピン6x20」を「ピン φ6×20」に対応付ける",
@@ -401,8 +405,7 @@ describe("UnmatchedNameQueue", () => {
       mockQueue([PRODUCT_ROW])
       mockOrderApis()
 
-      render(<UnmatchedNameQueue canEdit />)
-      await openTab(/製品/)
+      render(<Queue kind="product" canEdit />)
       await userEvent.click(
         await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×20」に対応付ける" }),
       )
@@ -421,8 +424,7 @@ describe("UnmatchedNameQueue", () => {
       const posts = mockQueue([PRODUCT_ROW])
       mockOrderApis()
 
-      render(<UnmatchedNameQueue canEdit />)
-      await openTab(/製品/)
+      render(<Queue kind="product" canEdit />)
       // 製品101 の受注は下書きのみ（割り付け対象外）
       await userEvent.click(
         await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×25」に対応付ける" }),
@@ -446,8 +448,7 @@ describe("UnmatchedNameQueue", () => {
         ),
       )
 
-      render(<UnmatchedNameQueue canEdit />)
-      await openTab(/製品/)
+      render(<Queue kind="product" canEdit />)
       await userEvent.click(
         await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×20」に対応付ける" }),
       )
@@ -465,8 +466,7 @@ describe("UnmatchedNameQueue", () => {
         http.get(`${API_BASE}/daily-reports/name-entries`, () => HttpResponse.json([])),
       )
 
-      render(<UnmatchedNameQueue canEdit />)
-      await openTab(/製品/)
+      render(<Queue kind="product" canEdit />)
       await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
 
       expect(await screen.findByText("この顧客の未出荷の受注（2 件）")).toBeInTheDocument()
@@ -487,8 +487,7 @@ describe("UnmatchedNameQueue", () => {
         }),
       )
 
-      render(<UnmatchedNameQueue canEdit />)
-      await openTab(/製品/)
+      render(<Queue kind="product" canEdit />)
       await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
 
       await waitFor(() => expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument())
@@ -500,7 +499,7 @@ describe("UnmatchedNameQueue", () => {
   it("編集できないロールには操作を出さない", async () => {
     mockQueue([unmatched({ raw_text: "組立機B" })])
 
-    render(<UnmatchedNameQueue canEdit={false} />)
+    render(<Queue />)
 
     expect(await screen.findByRole("button", { name: "組立機B" })).toBeInTheDocument()
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument()

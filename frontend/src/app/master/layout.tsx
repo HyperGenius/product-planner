@@ -16,7 +16,8 @@ export default function MasterLayout({ children }: { children: React.ReactNode }
       {!isIndexPage && (
         <nav className="flex flex-wrap gap-2 py-4">
           {masterItems.map((item) => {
-            const isActive = pathname === item.href
+            // ハブから開くページ（`/master/daily-reports/products` 等）でも、そのマスタを選択中にする
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
             return (
               <Link
                 key={item.href}

@@ -1,5 +1,6 @@
-import { DailyReportNameMatching } from "@/components/daily-report-names/daily-report-name-matching"
+import { LegacyDailyReportRedirect } from "@/components/daily-reports/legacy-redirect"
 
+/** 旧「日報の名寄せ」（Issue #489）。日報の実績のハブへ移す（Issue #707） */
 export default function DailyReportNamesPage() {
-  return <DailyReportNameMatching />
+  return <LegacyDailyReportRedirect from="names" />
 }

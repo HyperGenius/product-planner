@@ -1,5 +1,6 @@
 import { buildNewOrderHref, type NewOrderReturnPath } from "@/lib/order-prefill-utils"
 import { jstTodayIso } from "@/lib/order-utils"
+import { formatWorkCount, type WorkCount } from "@/lib/work-count"
 import { buildShippingRows, type ShippingRow } from "@/lib/shipping-candidate-utils"
 import type { ProcessProgress } from "@/types/daily-report-progress"
 import type { Order } from "@/types/order"
@@ -255,20 +256,9 @@ export function classifyShippingWorklist(sources: ShippingWorklistSources): Ship
 // 件数の表示・②の並び（Issue #692 / #693）
 // ---------------------------------------------------------------------------
 
-/** 作業の件数。`value` は取得中・取得に失敗したときは null */
-export interface ShippingWorkCount {
-  value: number | null
-  isError: boolean
-  /** 一覧が上限で切られていて、実際はこの件数より多い（「以上」と付ける） */
-  atLeast?: boolean
-}
-
-/** 件数の表示（単位付き）。取得中は「－」、取得に失敗したら「取得できませんでした」 */
-export function formatWorkCount(count: ShippingWorkCount, unit: string): string {
-  if (count.isError) return "取得できませんでした"
-  if (count.value === null) return "－"
-  return `${count.value}${unit}${count.atLeast ? "以上" : ""}`
-}
+/** 作業の件数（`lib/work-count.ts` と共通） */
+export type ShippingWorkCount = WorkCount
+export { formatWorkCount }
 
 /**
  * ②の注文が、弥生の取り込み待ちか（Epic #690 の未決事項「②は次の取り込みを待てば①に移るものが大半か」への対応、#693）。

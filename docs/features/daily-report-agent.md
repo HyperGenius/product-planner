@@ -442,6 +442,9 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
 
 ## 未照合キューの画面（Issue #489）
 
+> #707 で「日報の実績」のハブ（`/master/daily-reports`）に再編した。今の画面の構成・URL は
+> [daily-report-hub.md](daily-report-hub.md)。以下は #489 当時の画面（`/master/daily-report-names`。今はハブへ移る）の記録。
+
 画面は `/master/daily-report-names`（マスタ配下。設備・顧客・製品マスタと並べて置き、マスタのナビから辿れる）。
 事務担当者が照合できなかった表記を、別名辞書への登録（対応付け）か「対象外」で片付ける。1回対応付ければ
 照合は都度解決なので、過去・今後の明細にも反映される。割り付け・進捗（#490）は次回の再計算で反映される。
@@ -673,7 +676,9 @@ SELECT のみ（書き込みは RPC 経由の service role のみ。RPC の実�
 
 日報の実績が受注の工程にどこまでつながっているか（割り付け済み・未割当・未照合）と、つながっていない実績を
 (製品, 工程名, 理由) ごとに数量の多い順で出す。現場ヒアリングで聞く項目の一覧として使う（回答の記録・印刷は #543）。
-画面は `/master/daily-report-coverage`（`components/daily-report-coverage/`）。
+画面は `/master/daily-report-coverage`（`components/daily-report-coverage/`）。#707 で「日報の実績」のハブに再編し、
+未割当は②③のページ、作り置きは参考のページに移した（旧 URL・カードのハッシュは対応するページへ移る）。今の構成は
+[daily-report-hub.md](daily-report-hub.md)。
 
 ### 照合状況の数え方（`services/daily_report_coverage.py`）
 
@@ -790,10 +795,10 @@ DB から切り離した純粋関数 `estimate_stock()`。割り付けと同じ�
 - `DELETE /daily-reports/stock-feedback/{product_id}`: 指摘の取り消し（無ければ 404）
 - 指摘は次の cron（10〜15分ごと）で推定に反映される（画面から再計算しない。#490 の方針）
 
-### 画面（照合状況 `/master/daily-report-coverage`）
+### 画面（作り置き `/master/daily-reports/stock`。#707 までは照合状況 `/master/daily-report-coverage`）
 
 - 「作り置き（推定）」の区画（`components/daily-report-coverage/stock-estimates.tsx`）: 製品・「○○の後」・推定数・最後の動き・
-  指摘の内容（何で減るかはグループの見出し）。推定も指摘も無ければ出さない。「違う」で指摘のダイアログ（`stock-feedback-dialog.tsx`）を開く。工程はタップしやすいよう
+  指摘の内容（何で減るかはグループの見出し）。推定も指摘も無ければその旨だけを出す（#707。見出し・件数はページの外枠、推定の見方はヘルプ）。「違う」で指摘のダイアログ（`stock-feedback-dialog.tsx`）を開く。工程はタップしやすいよう
   ボタンで選ぶ（製品の工程ルートの順）。推定が出ていない製品の指摘（「作り置きしていない」等）は別の一覧で直す・取り消す
 - 照合状況の未割当では、作り置きの推定が出ている製品の「受注日より前」を分類 `stocked`（作り置き、要確認から外す）にする。
   「作り置きしていない」と指摘した製品は推定が出ないので「受注日より前」（要確認）に戻る

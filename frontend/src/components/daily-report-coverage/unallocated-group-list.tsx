@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   CATEGORY_META,
-  COVERAGE_LIST_SCROLL_CLASS,
   CATEGORY_ORDER,
   matchesCategoryFilter,
   productLabel,
@@ -25,6 +24,7 @@ const PAGE_SIZE = 50
  * 未割当の実績の (製品, 工程名, 理由) ごとのまとめ (Issue #542)。数量の多い順に、
  * 現場にそのまま聞ける問いかけを添えて並べる。行を開くと元の日報の行を確認できる。
  * 表示件数は絞り込み・期間を変えたら戻したいので、呼び出し側でそれらを `key` に入れる。
+ * 見出し・件数はページの外枠（`DailyReportPageLayout`）が持つ（Issue #707）。
  */
 export function UnallocatedGroupList({
   groups,
@@ -38,8 +38,9 @@ export function UnallocatedGroupList({
   months: number | null
   filter: CategoryFilter
   onFilterChange: (filter: CategoryFilter) => void
-  canOpenRouting: (productId: number) => boolean
-  onEditRouting: (productId: number) => void
+  /** 工程ルートに無い工程の行に「工程を編集」を出すとき（③では②に移したので出さない） */
+  canOpenRouting?: (productId: number) => boolean
+  onEditRouting?: (productId: number) => void
 }) {
   const [visible, setVisible] = React.useState(PAGE_SIZE)
 
@@ -60,16 +61,7 @@ export function UnallocatedGroupList({
   ]
 
   return (
-    <section className="space-y-2" aria-labelledby="unallocated-groups">
-      <div>
-        <h2 id="unallocated-groups" className="text-lg font-semibold">
-          未割当の実績
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          製品・工程・理由ごとに、数量の多い順に並べています。上から順に現場で確認すると、少ない手間で割り付けできる実績が増えます。
-        </p>
-      </div>
-
+    <section className="flex min-h-0 flex-1 flex-col gap-2" aria-label="未割当の実績">
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="理由で絞り込む">
         {options.map((option) => (
           <Button
@@ -93,14 +85,14 @@ export function UnallocatedGroupList({
         </p>
       ) : (
         <>
-          <ul className={`divide-y rounded-lg border bg-card ${COVERAGE_LIST_SCROLL_CLASS}`}>
+          <ul className="min-h-0 flex-1 divide-y overflow-y-auto rounded-lg border bg-card">
             {filtered.slice(0, visible).map((group) => (
               <UnallocatedGroupRow
                 key={unallocatedGroupKey(group)}
                 group={group}
                 months={months}
-                canOpenRouting={canOpenRouting(group.product_id)}
-                onEditRouting={() => onEditRouting(group.product_id)}
+                canOpenRouting={canOpenRouting?.(group.product_id) ?? false}
+                onEditRouting={onEditRouting && (() => onEditRouting(group.product_id))}
               />
             ))}
           </ul>
@@ -125,16 +117,17 @@ function formatRange(group: UnallocatedGroup): string {
     : `${formatWorkDate(first)} 〜 ${formatWorkDate(last)}`
 }
 
-function UnallocatedGroupRow({
+/** まとめの1行。工程の編集は、②では製品の行に置くので `onEditRouting` を省略する */
+export function UnallocatedGroupRow({
   group,
   months,
-  canOpenRouting,
+  canOpenRouting = false,
   onEditRouting,
 }: {
   group: UnallocatedGroup
   months: number | null
-  canOpenRouting: boolean
-  onEditRouting: () => void
+  canOpenRouting?: boolean
+  onEditRouting?: () => void
 }) {
   const [expanded, setExpanded] = React.useState(false)
   const meta = CATEGORY_META[group.category]
@@ -192,7 +185,7 @@ function UnallocatedGroupRow({
               {group.row_count.toLocaleString()} 行
             </span>
           </span>
-          {group.category === "no_routing_process" && (
+          {group.category === "no_routing_process" && onEditRouting && (
             <Button variant="outline" size="sm" disabled={!canOpenRouting} onClick={onEditRouting}>
               <ListPlus />
               工程を編集
