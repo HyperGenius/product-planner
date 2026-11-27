@@ -191,7 +191,7 @@ cd backend && ruff check . && mypy .
   - **送品の消し込みの「要確認」（Issue #682）**: 受注に当たらない明細は `GET /shipments/unmatched-entries`（純粋関数 `group_unmatched_entries()`）で、
     突合は**全件の明細で行い、まとめるときだけ期間で絞る**（期間で先に絞ると他の受注と候補が重なるかの判定が変わる）。期間の基準は今日ではなく
     取り込んだ明細の最新の売上日。`limit` は原因ごと。画面の構成は #692 のハブ（下記）。原因の見出しに直す画面へのリンクを1回だけ置き、行に繰り返さない。弥生の名寄せは
-    `#products` / `#customers` で開くとその種別のタブを出す。`/orders/new` は初期値のクエリを受け取らない。送品の消し込みを描画するテストは
+    `#products` / `#customers` で開くとその種別のタブを出す（行き帰りは #694、下記）。送品の消し込みを描画するテストは
     MSW の既定ハンドラ `GET /shipments/unmatched-entries` に依存する
   - **日報の進捗が追いついていない受注（Issue #683）**: `GET /shipments/order-reviews`（純粋関数 `shipment_review.review_orders()`）。原因は保存せず
     参照のたびに求める。比べるのは**日報で追う最後の工程**（#681 の日報で追わない工程を除く）の良品数で、工程がすべて追わない工程の製品は対象外。
@@ -214,6 +214,14 @@ cd backend && ruff check . && mypy .
     判定条件・原因の説明・状態の移り変わりは見出しの横の「?」（`ShippingHelp`、共通部品 `PageHelp` を `ListPageLayout` の `help` に渡す）に置く
     （ページのテストが全一覧の本文に内部語・否定形の説明が無いことを検査している）。2列にするかは画面の幅ではなく本文の幅で決める
     （`@container` ＋ `@[80rem]:`。`lg:` だとサイドバーを開いたタブレットで表が画面の外へはみ出す）
+  - **名寄せ・受注作成との行き帰り（Issue #694）**: ハブの前提バナーは `shipmentNamesHref(kind, { fromShipping: true })`（`?from=shipping#customers`）で名寄せを開き、
+    名寄せの画面は `isFromShipping()` のときだけ戻るリンクを出して期間を「直近60日」（ハブと同じ `GET /shipments/unmatched-entries` の `since`）で開く。
+    `/orders/new` は `parseNewOrderPrefill()`（`lib/order-prefill-utils.ts`）で検証したクエリだけを初期値にし（1以上の整数・実在する `YYYY-MM-DD`）、作成後の戻り先は
+    `NEW_ORDER_RETURN_PATHS` のキーだけを受け取る（任意の URL へ移らない。戻り先を足すときはここに足す）。③の初期値は `newOrderHrefForUnmatchedGroup()` で1つに決まる値だけ。
+    **受注を変えるミューテーションを足すときは `invalidateOrdersAndShipments()`（`hooks/use-orders.ts`）で `["shipments"]` も無効化する**（突合は受注から都度求めるので、
+    無効化しないと戻ったハブ・③が staleTime の間古い件数のまま）。ハブの前回からの件数の変化は sessionStorage（`useShippingCountChanges()`）で、前回の値は
+    開いたときに1回だけ読む。`/orders/new`・名寄せの画面を描画するテストは `next/navigation` のモックに `useSearchParams` が要る。sessionStorage が使えないときの
+    テストは `vi.spyOn(window, "sessionStorage", "get")` で投げさせる（`Storage.prototype` を差し替えると localStorage まで壊れて画面が描画されない）
 - **日報Excelのパースと明細（`daily_report_entries`、Issue #487）**: 同じブックが保存のたびに別ファイルとして届くので、
   明細は**足し込まず (テナント, シート名) 単位で最新版に丸ごと置き換える**（RPC `replace_daily_report_sheet_entries`。
   版の新旧は RPC が `daily_report_files` から引いた `file_modified_at`→`received_at` で判定）。明細を読む後続処理（名寄せ・割り付け）は
