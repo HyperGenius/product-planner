@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw"
 import { render, screen, userEvent, waitFor } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
+import { DAILY_REPORT_FORBIDDEN_UI_TEXT } from "@/test-utils/daily-report"
 import type { IgnoredName } from "@/types/daily-report-names"
 import { IgnoredNameList } from "./ignored-name-list"
 
@@ -35,7 +36,8 @@ describe("IgnoredNameList", () => {
     render(<IgnoredNameList canEdit />)
 
     expect(await screen.findByText("顧客先: 顧客A")).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: "「段取り」を未照合キューに戻す" }))
+    expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
+    await userEvent.click(screen.getByRole("button", { name: "「段取り」を対象外から戻す" }))
 
     await waitFor(() => expect(deleted).toEqual(["i-2"]))
     await waitFor(() => expect(screen.queryByText("段取り")).not.toBeInTheDocument())

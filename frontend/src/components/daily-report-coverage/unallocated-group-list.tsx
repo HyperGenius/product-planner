@@ -61,7 +61,7 @@ export function UnallocatedGroupList({
   ]
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-2" aria-label="未割当の実績">
+    <section className="flex min-h-0 flex-1 flex-col gap-2" aria-label="受注の無い製造">
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="理由で絞り込む">
         {options.map((option) => (
           <Button
@@ -80,7 +80,7 @@ export function UnallocatedGroupList({
       {filtered.length === 0 ? (
         <p className="rounded-lg border bg-card py-8 text-center text-sm text-muted-foreground">
           {groups.length === 0
-            ? "割り付けできなかった実績はありません"
+            ? "確かめる製造はありません"
             : "該当する実績はありません"}
         </p>
       ) : (

@@ -1,6 +1,5 @@
 "use client"
 
-import { Badge } from "@/components/ui/badge"
 import {
   Table,
   TableBody,
@@ -19,7 +18,10 @@ function orderLabel(order: CustomerOpenOrder): string {
   return order.order_number ?? order.customer_order_no ?? `#${order.order_id}`
 }
 
-/** 受注の表。割り付けの候補でない受注（下書き・承認待ち）には実績が充当されないことを併記する */
+/**
+ * 受注の表。承認前（下書き・承認待ち）の受注には実績が充当されないが、状態の列で分かるので
+ * 別のバッジは付けない（その扱いはヘルプに書く。Issue #702）
+ */
 export function OpenOrdersTable({ orders }: { orders: CustomerOpenOrder[] }) {
   return (
     <Table>
@@ -41,14 +43,7 @@ export function OpenOrdersTable({ orders }: { orders: CustomerOpenOrder[] }) {
               {order.quantity === null ? "－" : order.quantity.toLocaleString()}
             </TableCell>
             <TableCell>{formatWorkDate(order.desired_deadline)}</TableCell>
-            <TableCell className="space-x-1">
-              <span>{getStatusLabel(order.status)}</span>
-              {!order.allocatable && (
-                <Badge variant="outline" className="text-xs font-normal">
-                  割り付け対象外
-                </Badge>
-              )}
-            </TableCell>
+            <TableCell>{getStatusLabel(order.status)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -57,7 +52,7 @@ export function OpenOrdersTable({ orders }: { orders: CustomerOpenOrder[] }) {
 }
 
 /**
- * 行の展開部: 顧客先が照合済みの製品の行に、その顧客の未出荷の受注を一覧で見せる (Issue #646)。
+ * 行の展開部: 顧客先が決まっている製品の行に、その顧客の未出荷の受注を一覧で見せる (Issue #646)。
  * 類似度の低い候補しかないとき、人が見て対応付け先を選ぶための材料。表示だけで自動確定はしない。
  */
 export function CustomerOpenOrdersPanel({ customerId }: { customerId: number }) {
@@ -66,7 +61,7 @@ export function CustomerOpenOrdersPanel({ customerId }: { customerId: number }) 
     <div className="space-y-1 border-t">
       <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
         この顧客の未出荷の受注
-        {orders && `（${orders.length} 件）`}
+        {orders && `（${orders.length.toLocaleString()}注文）`}
       </p>
       {isLoading ? (
         <p className="px-3 pb-2 text-sm text-muted-foreground">読み込み中...</p>
@@ -84,8 +79,9 @@ export function CustomerOpenOrdersPanel({ customerId }: { customerId: number }) 
 }
 
 /**
- * 確認ダイアログ: 選んだ製品の、その顧客の割り付け対象の受注を出す (Issue #646)。
- * 0件なら、登録しても実績は未割当に残ることを警告する（登録自体は止めない）。
+ * 確認ダイアログ: 選んだ製品の、その顧客の確定済み・生産中の受注を出す (Issue #646)。
+ * 0件なら何が起きているかを1文で出す（登録自体は止めない。その後の行き先は #706）。
+ * 承認前の受注しかないときは、受注が無いときと分けて伝える（Issue #702）
  */
 export function ProductOrderStatus({
   customerId,
@@ -99,26 +95,27 @@ export function ProductOrderStatus({
   if (isError || !orders) {
     return <p className="text-xs text-muted-foreground">受注の状況を取得できませんでした</p>
   }
-  const allocatable = orders.filter((o) => o.product_id === productId && o.allocatable)
-  return <AllocatableOrders orders={allocatable} />
-}
-
-function AllocatableOrders({ orders }: { orders: CustomerOpenOrder[] }) {
-  if (orders.length === 0) {
+  const productOrders = orders.filter((o) => o.product_id === productId)
+  const allocatable = productOrders.filter((o) => o.allocatable)
+  if (allocatable.length === 0) {
     return (
       <p
         role="alert"
         className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
       >
-        この顧客に、この製品の確定済み・生産中の受注がありません。割り付け先がないため、実績は未割当に残ります。
+        {productOrders.length > 0
+          ? "この顧客のこの製品の受注は承認前です"
+          : "この顧客にこの製品の受注がありません"}
       </p>
     )
   }
   return (
     <div className="space-y-1">
-      <p className="text-xs text-muted-foreground">割り付け先の受注（{orders.length} 件）</p>
+      <p className="text-xs text-muted-foreground">
+        この製品の受注（{allocatable.length.toLocaleString()}注文）
+      </p>
       <div className="max-h-40 overflow-y-auto rounded-md border">
-        <OpenOrdersTable orders={orders} />
+        <OpenOrdersTable orders={allocatable} />
       </div>
     </div>
   )

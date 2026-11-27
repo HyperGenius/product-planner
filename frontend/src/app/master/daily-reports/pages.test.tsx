@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw"
 import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
-import { FORBIDDEN_UI_TEXT } from "@/test-utils/shipping"
+import { DAILY_REPORT_FORBIDDEN_UI_TEXT } from "@/test-utils/daily-report"
 import type {
   DailyReportCoverage as Coverage,
   UnallocatedActual,
@@ -256,11 +256,18 @@ describe("日報の実績のハブ（Issue #707）", () => {
     render(<DailyReportHubPage />)
 
     await screen.findByRole("link", { name: /^① 日報の製品をつなぐ 2品名/ })
-    expect(document.body.textContent).not.toMatch(FORBIDDEN_UI_TEXT)
+    expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
 
     await userEvent.click(screen.getByRole("button", { name: "ヘルプを開く" }))
     const help = await screen.findByRole("dialog", { name: "日報の実績" })
     expect(within(help).getByText(/前提 → ① → ② → ③/)).toBeInTheDocument()
+    // 各ページの行・ダイアログから外した説明（Issue #702）
+    expect(within(help).getByText(/過去・今後の日報にも反映されます/)).toBeInTheDocument()
+    expect(within(help).getByText(/10〜15分ごとに集計します/)).toBeInTheDocument()
+    expect(within(help).getByText(/製品は顧客ごとに結び付けます/)).toBeInTheDocument()
+    expect(within(help).getByText(/明細の多い順に並べています/)).toBeInTheDocument()
+    expect(within(help).getByText(/承認前（下書き・承認待ち）の受注には/)).toBeInTheDocument()
+    expect(within(help).getByText(/「対象外」タブの「戻す」/)).toBeInTheDocument()
   })
 })
 
@@ -284,6 +291,15 @@ describe("日報の実績の各ページ（Issue #707）", () => {
       "/master/daily-reports",
     )
     expect(await screen.findByText("日報 11/25 09:15")).toBeInTheDocument()
+  })
+
+  it.each(PAGES)("%s: 画面に内部の言葉を出さない（Issue #702）", async (title, Page) => {
+    mockSources()
+    render(<Page />)
+
+    await waitFor(() => expect(getPageHeading()).toHaveTextContent(title))
+    await waitFor(() => expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument())
+    expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
   })
 
   it("前提: 未登録の顧客先と、顧客先が決まっていない製品を分けて出す（バナーと同じ件数）", async () => {
@@ -351,7 +367,7 @@ describe("日報の実績の各ページ（Issue #707）", () => {
     await waitFor(() =>
       expect(getPageHeading()).toHaveTextContent("③ 受注の無い製造を確かめる2件"),
     )
-    const region = await screen.findByRole("region", { name: "未割当の実績" })
+    const region = await screen.findByRole("region", { name: "受注の無い製造" })
     const rows = within(region)
       .getAllByRole("button", { expanded: false })
       .map((b) => b.textContent)
@@ -364,7 +380,7 @@ describe("日報の実績の各ページ（Issue #707）", () => {
     await userEvent.click(screen.getByRole("button", { name: /^要確認\s*1$/ }))
     // 絞り込みを変えると一覧を作り直すので、領域を引き直す
     expect(
-      within(screen.getByRole("region", { name: "未割当の実績" }))
+      within(screen.getByRole("region", { name: "受注の無い製造" }))
         .getAllByRole("button", { expanded: false })
         .map((b) => b.textContent),
     ).toEqual([expect.stringContaining("テスト製品C")])
@@ -441,7 +457,7 @@ describe("日報の実績の各ページ（Issue #707）", () => {
     render(<DailyReportUnorderedPage />)
 
     const period = await screen.findByRole("group", { name: "加工日の期間" })
-    await screen.findByRole("region", { name: "未割当の実績" })
+    await screen.findByRole("region", { name: "受注の無い製造" })
     await userEvent.click(within(period).getByRole("button", { name: "すべて" }))
 
     await waitFor(() => expect(requests.some((r) => !r.searchParams.has("months"))).toBe(true))

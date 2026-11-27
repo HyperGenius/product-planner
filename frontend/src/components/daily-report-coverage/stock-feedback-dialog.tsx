@@ -143,7 +143,7 @@ function StockFeedbackDialogForm({
       <DialogHeader>
         <DialogTitle>{STOCK_LABEL}の推定が違う</DialogTitle>
         <DialogDescription className="break-all">
-          {target.productLabel}。現場で確かめた内容を入力してください。次の集計（10〜15分ごと）で推定に反映されます。
+          {target.productLabel}。現場で確かめた内容を入力してください。
         </DialogDescription>
       </DialogHeader>
 
@@ -192,7 +192,7 @@ function StockFeedbackDialogForm({
                 />
               </div>
               <div className="w-44 space-y-1.5">
-                <Label htmlFor={ids.date}>いつの時点の数か</Label>
+                <Label htmlFor={ids.date}>数えた日（作業の後）</Label>
                 <Input
                   id={ids.date}
                   type="date"
@@ -202,9 +202,6 @@ function StockFeedbackDialogForm({
                 />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              数を入れると、その日の作業を終えた時点の数として、以降の日報で増減させます。
-            </p>
           </>
         )}
 

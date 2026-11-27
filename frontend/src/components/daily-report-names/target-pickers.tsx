@@ -206,10 +206,12 @@ export function ProductPicker({
   const options = (products ?? [])
     .filter((p) => p.is_active)
     .map((p) => ({ id: p.id, label: p.name, hint: p.code ?? undefined }))
+  // 似ている製品も、すべての製品と同じく品番を添える（類似度の数値は出さない。Issue #702）
+  const codeById = new Map(options.map((o) => [o.id, o.hint]))
   const candidateOptions = candidates.map((c) => ({
     id: c.product_id,
     label: c.name,
-    hint: `類似度 ${Math.round(c.score * 100)}%`,
+    hint: codeById.get(c.product_id),
   }))
   return (
     <TargetCombobox
@@ -227,7 +229,7 @@ export function ProductPicker({
 }
 
 interface ProcessPickerProps {
-  /** 現在の対応先（変更時）。未照合キューでは空 */
+  /** 現在の対応先（変更時）。日報の表記の一覧では空 */
   initialNames?: string[]
   onSubmit: (names: string[]) => void
   disabled?: boolean

@@ -201,7 +201,7 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
   test("③ 受注の無い製造を確かめる", async ({ page }) => {
     await open(page, "/master/daily-reports/unordered")
     await expect(page.getByRole("heading", { level: 1 })).toContainText("4件", { timeout: 30000 })
-    await expect(page.getByRole("region", { name: "未割当の実績" }).getByRole("listitem")).toHaveCount(4)
+    await expect(page.getByRole("region", { name: "受注の無い製造" }).getByRole("listitem")).toHaveCount(4)
     await screenshot(page, "unordered-1920")
   })
 

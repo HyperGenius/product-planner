@@ -2,7 +2,7 @@ import { format, parseISO } from "date-fns"
 import { ApiError } from "@/lib/api-client"
 import type { UnmatchedName } from "@/types/daily-report-names"
 
-/** 未照合キューの1行のキー（製品は顧客先との組で1行） */
+/** 日報の表記の一覧の1行のキー（製品は顧客先との組で1行） */
 export function unmatchedNameKey(
   item: Pick<UnmatchedName, "kind" | "raw_text" | "customer_raw">,
 ): string {
@@ -18,7 +18,7 @@ export function formatWorkDate(value: string | null): string {
 export function nameMutationErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.errorCode === "duplicate_alias") {
-      return "この表記は既に登録されています（「登録済みの対応付け」で変更できます）"
+      return "この表記は既に対応付けてあります（「登録済みの対応付け」で変更できます）"
     }
     if (error.errorCode === "duplicate_ignored_name") return "この表記は既に対象外です"
     if (error.status === 403) {

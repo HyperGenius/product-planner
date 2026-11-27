@@ -40,6 +40,7 @@ const PRODUCT_ALIAS_SOURCE_LABELS: Record<ProductNameAlias["source"], string> = 
 /**
  * 登録済みの対応付け（別名辞書）の一覧・変更・削除 (Issue #489)。
  * 照合は都度解決なので、変更・削除はそのまま過去の明細の照合結果にも反映される。
+ * 製品の別名がメール起票と共通なこと・削除後の行き先はヘルプに書く（Issue #702）
  */
 export function NameAliasList({ canEdit }: { canEdit: boolean }) {
   const [kind, setKind] = React.useState<NameKind>("equipment")
@@ -72,9 +73,6 @@ export function NameAliasList({ canEdit }: { canEdit: boolean }) {
         <CustomerAliases canEdit={canEdit} query={query} />
       </TabsContent>
       <TabsContent value="product" className={ALIAS_CONTENT_CLASS}>
-        <p className="text-xs text-muted-foreground">
-          製品の別名はメール起票と共通です（顧客ごと）。変更・削除はメール起票の照合にも反映されます。
-        </p>
         <ProductAliases canEdit={canEdit} query={query} />
       </TabsContent>
     </Tabs>
@@ -158,7 +156,7 @@ function AliasRow({
               <AlertDialogHeader>
                 <AlertDialogTitle>対応付けを削除しますか？</AlertDialogTitle>
                 <AlertDialogDescription>
-                  「{rawText}」の対応付けを削除します。照合できなくなった表記は未照合キューに戻ります。
+                  「{rawText}」の対応付けを削除します。
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

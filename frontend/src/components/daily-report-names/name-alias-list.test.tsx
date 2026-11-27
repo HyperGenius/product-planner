@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw"
 import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE, sampleCustomers, sampleProducts } from "@/test-utils/msw/handlers"
+import { DAILY_REPORT_FORBIDDEN_UI_TEXT } from "@/test-utils/daily-report"
 import { NameAliasList } from "./name-alias-list"
 
 /** 登録済みの対応付けの一覧・変更・削除 (Issue #489)。値はダミー */
@@ -104,7 +105,9 @@ describe("NameAliasList", () => {
     expect(requests).toEqual([])
 
     const dialog = await screen.findByRole("alertdialog")
-    expect(within(dialog).getByText(/未照合キューに戻ります/)).toBeInTheDocument()
+    // 削除した後の行き先はヘルプに置く（Issue #702）
+    expect(dialog).toHaveTextContent("「組立機B」の対応付けを削除します。")
+    expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
     await userEvent.click(within(dialog).getByRole("button", { name: "削除" }))
 
     await waitFor(() =>

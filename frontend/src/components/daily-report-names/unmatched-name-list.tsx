@@ -9,12 +9,14 @@ import {
   useCreateNameAlias,
   useIgnoreName,
   useProductCandidates,
+  useUnignoreName,
 } from "@/hooks/use-daily-report-names"
 import {
   formatWorkDate,
   nameMutationErrorMessage,
   unmatchedNameKey,
 } from "@/lib/daily-report-name-utils"
+import { DAILY_REPORT_ALIASES_LABEL } from "@/lib/daily-report-worklist-utils"
 import {
   type NameKind,
   type ProductCandidate,
@@ -30,7 +32,7 @@ import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from ".
 const INLINE_CANDIDATE_COUNT = 3
 
 /**
- * 日報の表記の一覧 (Issue #489 / #707)。照合できなかった表記を出現件数の多い順に並べ、
+ * 日報の表記の一覧 (Issue #489 / #707)。マスタに結び付いていない表記を明細の多い順に並べ、
  * 確認ダイアログを経て別名辞書に登録（対応付け）するか「対象外」にする (Issue #645)。
  * どの表記をどのページに出すかは呼び出し側が `classifyDailyReportWorklist()` の結果で決める。
  * 一覧の領域は残りの高さを使ってスクロールする（`scroll={false}` ならページ側に任せる）
@@ -84,6 +86,7 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
   const [pending, setPending] = React.useState<PendingOperation | null>(null)
   const createAlias = useCreateNameAlias()
   const ignore = useIgnoreName()
+  const unignore = useUnignoreName()
   const busy = createAlias.isPending || ignore.isPending
 
   const onError = (fallback: string) => (error: unknown) =>
@@ -92,7 +95,6 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
   const requestMap = (
     variables: AliasVariables,
     targetLabel: string,
-    score?: number,
     productRef?: { customerId: number; productId: number },
   ) =>
     setPending({
@@ -102,7 +104,6 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
         rawText: item.raw_text,
         customerRaw: item.customer_raw,
         targetLabel,
-        score,
         productRef,
       },
       variables,
@@ -130,14 +131,24 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
       })
     } else {
       ignore.mutate(item, {
-        onSuccess: () => {
+        onSuccess: (ignored) => {
           setPending(null)
-          toast.success(`「${item.raw_text}」を対象外にしました`)
+          toast.success(`「${item.raw_text}」を対象外にしました`, {
+            description: `「${DAILY_REPORT_ALIASES_LABEL}」の対象外からも戻せます`,
+            action: { label: "元に戻す", onClick: () => undoIgnore(ignored.id) },
+          })
         },
         onError: onError("対象外にできませんでした"),
       })
     }
   }
+
+  // 対象外にした行は一覧から消えて unmount するので、mutate のコールバックではなく mutateAsync の結果で知らせる
+  const undoIgnore = (id: string) =>
+    unignore.mutateAsync(id).then(
+      () => toast.success(`「${item.raw_text}」を対象外から戻しました`),
+      (error: unknown) => toast.error(nameMutationErrorMessage(error, "対象外から戻せませんでした")),
+    )
 
   return (
     <li className="space-y-2 px-3 py-2">
@@ -166,7 +177,7 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
             顧客先: {item.customer_raw ?? "（空欄）"}
           </span>
         )}
-        <span className="text-sm tabular-nums">{item.entry_count.toLocaleString()} 件</span>
+        <span className="text-sm tabular-nums">{item.entry_count.toLocaleString()}明細</span>
         <span className="text-xs text-muted-foreground">
           最終 {formatWorkDate(item.last_work_date)}
         </span>
@@ -213,7 +224,7 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
               <ProductMapping
                 item={item}
                 disabled={busy}
-                onSelect={(productId, customerId, label, score) =>
+                onSelect={(productId, customerId, label) =>
                   requestMap(
                     {
                       kind: "product",
@@ -224,7 +235,6 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
                       },
                     },
                     label,
-                    score,
                     { customerId, productId },
                   )
                 }
@@ -255,7 +265,10 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
   )
 }
 
-/** 製品: 類似候補（pg_trgm）を行内に並べ、選ぶだけで対応付けられるようにする */
+/**
+ * 製品: 似ている製品（pg_trgm）を似ている順に行内に並べ、選ぶだけで対応付けられるようにする。
+ * 類似度の数値は出さない（品名を見比べて選ぶ。Issue #702）
+ */
 function ProductMapping({
   item,
   disabled,
@@ -263,7 +276,7 @@ function ProductMapping({
 }: {
   item: UnmatchedName
   disabled: boolean
-  onSelect: (productId: number, customerId: number, label: string, score?: number) => void
+  onSelect: (productId: number, customerId: number, label: string) => void
 }) {
   // 顧客先が決まっていない製品は前提のページにまとめて置き、見出しに1回だけ理由を出す（#707）
   if (item.customer_id === null) return null
@@ -286,7 +299,7 @@ function ProductCandidates({
   item: UnmatchedName
   customerId: number
   disabled: boolean
-  onSelect: (productId: number, customerId: number, label: string, score?: number) => void
+  onSelect: (productId: number, customerId: number, label: string) => void
 }) {
   const { data: candidates } = useProductCandidates(item.raw_text, customerId)
   return (
@@ -299,9 +312,7 @@ function ProductCandidates({
           disabled={disabled}
           title={candidateTitle(candidate)}
           aria-label={`「${item.raw_text}」を「${candidate.name}」に対応付ける`}
-          onClick={() =>
-            onSelect(candidate.product_id, customerId, candidate.name, candidate.score)
-          }
+          onClick={() => onSelect(candidate.product_id, customerId, candidate.name)}
         >
           <span className="max-w-[10rem] truncate">{candidate.name}</span>
           <OrderBadge candidate={candidate} />
@@ -317,23 +328,21 @@ function ProductCandidates({
   )
 }
 
-function candidateTitle(candidate: ProductCandidate): string {
-  const parts = [`類似度 ${Math.round(candidate.score * 100)}%`]
-  if (candidate.nearest_deadline) {
-    parts.push(`最寄りの希望納期 ${formatWorkDate(candidate.nearest_deadline)}`)
-  }
-  return parts.join("・")
+function candidateTitle(candidate: ProductCandidate): string | undefined {
+  return candidate.nearest_deadline
+    ? `直近の希望納期 ${formatWorkDate(candidate.nearest_deadline)}`
+    : undefined
 }
 
 /**
- * 候補に、その顧客の割り付け対象の受注の有無を出す (Issue #646)。受注なしでも選べる
- * （登録しても実績は未割当に残るので、確認ダイアログで警告する）。
+ * 似ている製品に、その顧客の確定済み・生産中の受注の有無を出す (Issue #646)。受注なしでも選べる
+ * （確認ダイアログで受注が無いことを伝える）。
  */
 function OrderBadge({ candidate }: { candidate: ProductCandidate }) {
   if (candidate.open_order_count === undefined) return null
   return candidate.open_order_count > 0 ? (
     <Badge variant="secondary" className="bg-emerald-100 text-xs font-normal text-emerald-800">
-      受注あり {candidate.open_order_count}件
+      受注あり {candidate.open_order_count.toLocaleString()}注文
     </Badge>
   ) : (
     <Badge variant="outline" className="text-xs font-normal text-amber-700">
