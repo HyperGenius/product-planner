@@ -1,3 +1,4 @@
+import { DAILY_REPORT_HUB_HREF, dailyReportPageHref } from "@/lib/daily-report-worklist-utils"
 import type {
   ShipmentOrderReview,
   ShipmentOrderReviewCause,
@@ -64,11 +65,11 @@ export const ORDER_REVIEW_CAUSE_META: Record<ShipmentOrderReviewCause, OrderRevi
   process_mismatch: {
     label: "工程名が日報と合わない",
     short: "工程名の不一致",
-    hint: "日報の工程名が製品の工程ルートに無く、実績が割り付けられずに残っています。工程ルートを直すか、日報の名寄せで工程を対応付けてください",
+    hint: "日報の工程名が製品の工程ルートに無く、実績が割り付けられずに残っています。工程ルートを直すか、日報の工程名を工程マスタに結び付けてください",
     owner: "社長",
     action: {
-      label: "工程マスタ未登録の実績を見る",
-      href: "/master/daily-report-coverage#routing",
+      label: "製品の工程を日報に合わせる",
+      href: dailyReportPageHref("processes"),
     },
   },
   customer_or_stock: {
@@ -81,9 +82,9 @@ export const ORDER_REVIEW_CAUSE_META: Record<ShipmentOrderReviewCause, OrderRevi
   missing_report: {
     label: "日報の書き漏れ・取り込み漏れ",
     short: "日報の漏れ",
-    hint: "受注に充てられる日報の実績が見つかりません。現場に日報の記入・取り込みを確認してください。日報の名寄せが済んでいない明細も受注に充てられないので、ここに含まれます",
+    hint: "受注に充てられる日報の実績が見つかりません。現場に日報の記入・取り込みを確認してください。日報の顧客先・製品がアプリに結び付いていない明細も受注に充てられないので、ここに含まれます",
     owner: null,
-    action: { label: "日報の名寄せをする", href: "/master/daily-report-names" },
+    action: { label: "日報の実績を確かめる", href: DAILY_REPORT_HUB_HREF },
   },
 }
 

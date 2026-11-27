@@ -237,7 +237,7 @@ cd backend && ruff check . && mypy .
   （`match_products()` は未照合キューの候補表示専用）。日報の商品名の別名は既存の `product_name_aliases`（顧客単位）に
   `source='daily_report'` で登録する（確認済みの由来として `auto_match_unreviewed` に格下げされない）。
   マスタ・辞書を全件読むときは PostgREST の `max_rows`（1000）で切られないよう `fetch_all_rows()`（`.range()` でページング）を使う
-  - **未照合キュー（Issue #489）**: 画面は `/master/daily-report-names`（`components/daily-report-names/`）。「対象外」は別名辞書に
+  - **未照合キュー（Issue #489）**: 画面は #707 のハブの各ページ（下記）で、行は `components/daily-report-names/` の `UnmatchedNameList`。「対象外」は別名辞書に
     列を足さず `daily_report_ignored_names`（4種別共通、製品は (顧客先, 商品名) の組。顧客先 NULL も `UNIQUE NULLS NOT DISTINCT`）に持つ
     （製品の別名辞書 `product_name_aliases` は `product_id` NOT NULL でメール起票と共有のため）。対象外は照合結果に影響させず、
     `list_unmatched_names()` で除外するだけにする。書き込めるロールは Backend `_ALIAS_EDITOR_ROLES` と Frontend
@@ -256,6 +256,15 @@ cd backend && ruff check . && mypy .
     顧客単位に1リクエストにしてダイアログと展開部で共有し、キーは `["daily-report-names"]` の外に置く。`/product-candidates` は
     `response_model_exclude_none=True` で、`customer_id` 省略時は新しいフィールドを返さない。名寄せ画面の MSW 既定ハンドラに
     `GET /daily-reports/customer-open-orders` がある（無いと確認ダイアログ・展開部のテストが `onUnhandledRequest: "error"` になる）
+  - **日報の実績のハブ（Issue #707、Epic #701）**: 旧「日報の名寄せ」「日報の照合状況」は `/master/daily-reports`（ハブ）と
+    `/master/daily-reports/{customers,products,processes,unordered,stock,aliases}` に置き換えた（旧 URL・照合状況のカードのハッシュは
+    `legacy-redirect.tsx` が移す。ハッシュは `useLocationHash()` だとハイドレーション前の `""` で先にハブへ移るので、エフェクトで
+    `window.location.hash` を読む）。表記・未割当のまとめは前提・①②③・対象外の**どれか1か所にだけ**置き、振り分けは純粋関数
+    `classifyDailyReportWorklist()`（`lib/daily-report-worklist-utils.ts`。行き先・見出し・単位の定数も同ファイル）。ハブの件数と各ページの行は
+    `useDailyReportWorklist()` の結果から出す（別々に数えない）。表記の種別や未割当の分類を足すときは行き先を1つ決め、`expectEachPlacedOnce()` を通す。
+    設備は割り付けに使わないのでハブに数えない（#709 まで登録済みの対応付けのページのタブ）。件数の型・表示は送品の消し込みと共通の
+    `lib/work-count.ts`。ページの外枠は `DailyReportPageLayout`、説明は `DailyReportHelp`。マスタのタブはハブ配下のページでも選択中にする
+    （`app/master/layout.tsx`）。詳細は [docs/features/daily-report-hub.md](docs/features/daily-report-hub.md)
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は
@@ -283,7 +292,7 @@ cd backend && ruff check . && mypy .
     未割当と数字が合わなくなる）。未割当の reason は工程ルートに無い工程（`no_routing_process`）を受注の有無より先に判定する。
     `no_candidate_order` の「承認前の受注のみ／出荷済みの受注のみ／受注なし」は保存せず読み出し時に `orders` から分類する。
     加工日の無い明細は期間の絞り込みにかかわらず含める
-  - **照合状況の画面構成（Issue #639）**: 画面はタブではなく**関心事のカード**（未割当・未照合・工程マスタ未登録＝赤・作り置き＝参考）で、
+  - **照合状況の画面構成（Issue #639。#707 でハブに再編し、カードは廃止）**: 画面はタブではなく**関心事のカード**（未割当・未照合・工程マスタ未登録＝赤・作り置き＝参考）で、
     選んだカードの詳細パネルだけを出す（他のカードの情報は出さない）。選択は URL のハッシュで持ち（`useCoverageCard()` /
     `toValidCoverageCard()`）、カードの並び・色は3色バーに合わせる。長いリストは**リストだけ**を `COVERAGE_LIST_SCROLL_CLASS` で
     スクロールさせ、見出し・フィルタ・「さらに表示」は領域の外に置く（ページ全体を縦に伸ばさない）。同じ文言を行ごとに繰り返さず、

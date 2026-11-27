@@ -14,20 +14,6 @@ export function formatWorkDate(value: string | null): string {
   return value ? format(parseISO(value), "yyyy/MM/dd") : "－"
 }
 
-/**
- * 製品の別名を登録できない理由（登録できるなら null）。
- * 製品の別名辞書は顧客単位なので、顧客先が照合できている必要がある。
- */
-export function productAliasBlockedReason(
-  item: Pick<UnmatchedName, "customer_raw" | "customer_id">,
-): string | null {
-  if (item.customer_raw === null) return "顧客先が空欄のため、製品の別名を登録できません"
-  if (item.customer_id === null) {
-    return `顧客先「${item.customer_raw}」を先に「顧客」で対応付けてください`
-  }
-  return null
-}
-
 /** 別名・対象外の登録/変更/削除に失敗したときのトースト文言 */
 export function nameMutationErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {

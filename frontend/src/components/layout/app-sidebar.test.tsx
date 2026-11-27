@@ -170,14 +170,13 @@ describe("AppSidebar のマスタデータ", () => {
     expect(screen.getByRole("link", { name: "顧客マスタ" })).toHaveAttribute("href", "/master/customers")
     expect(screen.getByRole("link", { name: "設備マスタ" })).toHaveAttribute("href", "/master/equipments")
     expect(screen.getByRole("link", { name: "稼働カレンダー" })).toHaveAttribute("href", "/master/calendar")
-    expect(screen.getByRole("link", { name: "日報の名寄せ" })).toHaveAttribute(
+    // 日報の名寄せ・照合状況は1つのハブ（Issue #707）
+    expect(screen.getByRole("link", { name: "日報の実績" })).toHaveAttribute(
       "href",
-      "/master/daily-report-names",
+      "/master/daily-reports",
     )
-    expect(screen.getByRole("link", { name: "日報の照合状況" })).toHaveAttribute(
-      "href",
-      "/master/daily-report-coverage",
-    )
+    expect(screen.queryByRole("link", { name: "日報の名寄せ" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "日報の照合状況" })).toBeNull()
   })
 
   it("マスタ配下の画面では初めから展開し、その画面のマスタを選択中にする", async () => {

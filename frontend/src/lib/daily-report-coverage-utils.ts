@@ -1,4 +1,3 @@
-import { format } from "date-fns"
 import type {
   CoverageSummary,
   UnallocatedCategory,
@@ -99,45 +98,6 @@ export function matchesCategoryFilter(
   return group.category === filter
 }
 
-/**
- * 照合状況の関心事カード (Issue #639)。カードを選ぶと、その関心事の詳細パネルだけを出す。
- * 並びは3色バー（未割当 → 未照合）に合わせ、要対応の工程マスタ未登録、参考の作り置きの順。
- */
-export type CoverageCard = "unallocated" | "unmatched" | "routing" | "stock"
-
-export const COVERAGE_CARDS: readonly CoverageCard[] = [
-  "unallocated",
-  "unmatched",
-  "routing",
-  "stock",
-]
-
-export const DEFAULT_COVERAGE_CARD: CoverageCard = "unallocated"
-
-/**
- * URL のハッシュ（`#routing` 等）からカードを求める。ハッシュは外部入力なので、
- * 既知のカード以外（空・未知の値）は既定のカードへ寄せる。
- */
-export function toValidCoverageCard(hash: string): CoverageCard {
-  const value = hash.replace(/^#/, "")
-  return COVERAGE_CARDS.find((card) => card === value) ?? DEFAULT_COVERAGE_CARD
-}
-
-/** 工程マスタ未登録の製品の合計（カードの表示用） */
-export function sumProductsWithoutRoutings(products: readonly ProductWithoutRoutings[]) {
-  return {
-    productCount: products.length,
-    qty: products.reduce((sum, p) => sum + p.qty, 0),
-    rowCount: products.reduce((sum, p) => sum + p.row_count, 0),
-  }
-}
-
-/**
- * 詳細パネルの長いリストのスクロール領域 (Issue #639)。ページ全体が縦に伸びないよう、
- * フィルタ・見出し・「さらに表示」は領域の外に置き、リストだけをスクロールさせる。
- */
-export const COVERAGE_LIST_SCROLL_CLASS = "max-h-[60dvh] overflow-y-auto"
-
 /** 期間（直近 N か月、今月を含む）。null はすべての期間 */
 export const PERIOD_OPTIONS: { months: number | null; label: string }[] = [
   { months: 1, label: "今月" },
@@ -163,45 +123,6 @@ export function allocatedRatio(summary: CoverageSummary): number | null {
   return ratio(summary.allocated_qty, summary.total_qty)
 }
 
-export interface ProductWithoutRoutings {
-  product_id: number
-  product_name: string | null
-  product_code: string | null
-  qty: number
-  row_count: number
-  /** 日報に出てきた工程名（数量の多い順） */
-  process_names: string[]
-}
-
-/**
- * 日報に実績があるのに工程ルートが1件も無い製品（数量の多い順）。
- * 工程ルートが無い製品の実績はすべて `no_routing_process` になるので、それを製品ごとに集める。
- */
-export function productsWithoutRoutings(
-  groups: readonly UnallocatedGroup[],
-): ProductWithoutRoutings[] {
-  const byProduct = new Map<number, ProductWithoutRoutings>()
-  for (const group of groups) {
-    if (group.category !== "no_routing_process" || group.product_has_routings) continue
-    const product = byProduct.get(group.product_id) ?? {
-      product_id: group.product_id,
-      product_name: group.product_name,
-      product_code: group.product_code,
-      qty: 0,
-      row_count: 0,
-      process_names: [],
-    }
-    product.qty += group.qty
-    product.row_count += group.row_count
-    // groups は数量の多い順に来るので、そのまま足せば工程名も数量の多い順になる
-    if (!product.process_names.includes(group.process_name)) {
-      product.process_names.push(group.process_name)
-    }
-    byProduct.set(group.product_id, product)
-  }
-  return [...byProduct.values()].sort((a, b) => b.qty - a.qty || a.product_id - b.product_id)
-}
-
 /** 未割当のまとめ1行のキー */
 export function unallocatedGroupKey(
   group: Pick<UnallocatedGroup, "product_id" | "process_name" | "reason">,
@@ -215,9 +136,4 @@ export function productLabel(
 ): string {
   const name = group.product_name ?? `製品 #${group.product_id}`
   return group.product_code ? `${name}（${group.product_code}）` : name
-}
-
-/** 計算時刻（タイムスタンプ）の表示 */
-export function formatComputedAt(value: string): string {
-  return format(new Date(value), "M/d HH:mm")
 }

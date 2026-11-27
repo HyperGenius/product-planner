@@ -3,7 +3,6 @@ import { ApiError } from "@/lib/api-client"
 import {
   formatWorkDate,
   nameMutationErrorMessage,
-  productAliasBlockedReason,
   unmatchedNameKey,
 } from "./daily-report-name-utils"
 
@@ -32,24 +31,6 @@ describe("formatWorkDate", () => {
 
   it("null は「－」", () => {
     expect(formatWorkDate(null)).toBe("－")
-  })
-})
-
-describe("productAliasBlockedReason", () => {
-  it("顧客先が照合できていれば登録できる", () => {
-    expect(productAliasBlockedReason({ customer_raw: "顧客A", customer_id: 1 })).toBeNull()
-  })
-
-  it("顧客先が未照合なら先に顧客の対応付けを促す", () => {
-    expect(productAliasBlockedReason({ customer_raw: "顧客A", customer_id: null })).toBe(
-      "顧客先「顧客A」を先に「顧客」で対応付けてください",
-    )
-  })
-
-  it("顧客先が空欄なら登録できない", () => {
-    expect(productAliasBlockedReason({ customer_raw: null, customer_id: null })).toContain(
-      "顧客先が空欄",
-    )
   })
 })
 

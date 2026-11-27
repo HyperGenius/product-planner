@@ -5,29 +5,24 @@ import { ChevronDown, ChevronRight, EyeOff } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   useCreateNameAlias,
   useIgnoreName,
   useProductCandidates,
-  useUnmatchedNames,
 } from "@/hooks/use-daily-report-names"
 import {
   formatWorkDate,
   nameMutationErrorMessage,
-  productAliasBlockedReason,
   unmatchedNameKey,
 } from "@/lib/daily-report-name-utils"
 import {
-  NAME_KIND_LABELS,
-  NAME_KINDS,
   type NameKind,
   type ProductCandidate,
   type UnmatchedName,
 } from "@/types/daily-report-names"
 import { CustomerOpenOrdersPanel } from "./customer-open-orders"
 import { ConfirmMappingDialog, type PendingNameAction } from "./confirm-mapping-dialog"
-import { KIND_PANEL_CLASS, KindTabsList, kindColorStyle } from "./kind-tabs"
+import { KIND_LIST_CLASS, KIND_PANEL_CLASS, kindColorStyle } from "./kind-tabs"
 import { NameEntriesTable } from "./name-entries-table"
 import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from "./target-pickers"
 
@@ -35,54 +30,44 @@ import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from ".
 const INLINE_CANDIDATE_COUNT = 3
 
 /**
- * 未照合キュー (Issue #489)。照合できなかった表記を種別ごとに出現件数の多い順で並べ、
+ * 日報の表記の一覧 (Issue #489 / #707)。照合できなかった表記を出現件数の多い順に並べ、
  * 確認ダイアログを経て別名辞書に登録（対応付け）するか「対象外」にする (Issue #645)。
+ * どの表記をどのページに出すかは呼び出し側が `classifyDailyReportWorklist()` の結果で決める。
+ * 一覧の領域は残りの高さを使ってスクロールする（`scroll={false}` ならページ側に任せる）
  */
-export function UnmatchedNameQueue({ canEdit }: { canEdit: boolean }) {
-  const { data: items, isLoading, isError } = useUnmatchedNames()
-  const [kind, setKind] = React.useState<NameKind>("equipment")
-
-  if (isLoading) return <p className="py-6 text-sm text-muted-foreground">読み込み中...</p>
-  if (isError || !items) {
-    return <p className="py-6 text-sm text-destructive">未照合の表記を取得できませんでした</p>
+export function UnmatchedNameList({
+  items,
+  kind,
+  canEdit,
+  emptyMessage,
+  scroll = true,
+}: {
+  items: readonly UnmatchedName[]
+  /** 一覧の上辺の色に使う種別 */
+  kind: NameKind
+  canEdit: boolean
+  emptyMessage: string
+  scroll?: boolean
+}) {
+  if (items.length === 0) {
+    return (
+      <p
+        className="rounded-lg border border-t-4 border-t-[var(--kind-color)] bg-card py-8 text-center text-sm text-muted-foreground"
+        style={kindColorStyle(kind)}
+      >
+        {emptyMessage}
+      </p>
+    )
   }
-
-  const counts = Object.fromEntries(
-    NAME_KINDS.map((k) => [k, items.filter((i) => i.kind === k).length]),
-  ) as Record<NameKind, number>
-
   return (
-    <Tabs value={kind} onValueChange={(v) => setKind(v as NameKind)} className="min-h-0 flex-1">
-      <KindTabsList counts={counts} />
-      {NAME_KINDS.map((k) => {
-        const kindItems = items.filter((i) => i.kind === k)
-        return (
-          <TabsContent
-            key={k}
-            value={k}
-            className="flex min-h-0 flex-1 flex-col gap-2"
-            style={kindColorStyle(k)}
-          >
-            <p className="text-xs text-muted-foreground">
-              {k === "product"
-                ? "製品の別名は顧客ごとに登録します。顧客先が未照合の行は、先に「顧客」で対応付けてください。"
-                : "出現件数の多い順に並んでいます。"}
-            </p>
-            {kindItems.length === 0 ? (
-              <p className="rounded-lg border border-t-4 border-t-[var(--kind-color)] bg-card py-8 text-center text-sm text-muted-foreground">
-                未照合の{NAME_KIND_LABELS[k]}はありません
-              </p>
-            ) : (
-              <ul className={`divide-y ${KIND_PANEL_CLASS}`}>
-                {kindItems.map((item) => (
-                  <UnmatchedNameRow key={unmatchedNameKey(item)} item={item} canEdit={canEdit} />
-                ))}
-              </ul>
-            )}
-          </TabsContent>
-        )
-      })}
-    </Tabs>
+    <ul
+      className={scroll ? `divide-y ${KIND_PANEL_CLASS}` : `divide-y ${KIND_LIST_CLASS}`}
+      style={kindColorStyle(kind)}
+    >
+      {items.map((item) => (
+        <UnmatchedNameRow key={unmatchedNameKey(item)} item={item} canEdit={canEdit} />
+      ))}
+    </ul>
   )
 }
 
@@ -94,7 +79,7 @@ interface PendingOperation {
   variables: AliasVariables | null
 }
 
-function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boolean }) {
+export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boolean }) {
   const [expanded, setExpanded] = React.useState(false)
   const [pending, setPending] = React.useState<PendingOperation | null>(null)
   const createAlias = useCreateNameAlias()
@@ -280,10 +265,8 @@ function ProductMapping({
   disabled: boolean
   onSelect: (productId: number, customerId: number, label: string, score?: number) => void
 }) {
-  const blockedReason = productAliasBlockedReason(item)
-  if (blockedReason !== null || item.customer_id === null) {
-    return <span className="text-xs text-amber-700">{blockedReason}</span>
-  }
+  // 顧客先が決まっていない製品は前提のページにまとめて置き、見出しに1回だけ理由を出す（#707）
+  if (item.customer_id === null) return null
   return (
     <ProductCandidates
       item={item}

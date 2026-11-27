@@ -1,4 +1,5 @@
-import { Calendar, ChartPie, Cpu, FileSpreadsheet, Package, Users } from "lucide-react"
+import { Calendar, Cpu, FileSpreadsheet, Package, Users } from "lucide-react"
+import { DAILY_REPORT_HUB_HREF, DAILY_REPORT_HUB_TITLE } from "@/lib/daily-report-worklist-utils"
 
 export const masterItems = [
   {
@@ -38,21 +39,13 @@ export const masterItems = [
     iconColor: "text-teal-600",
   },
   {
-    title: "日報の名寄せ",
-    href: "/master/daily-report-names",
+    // 旧「日報の名寄せ」「日報の照合状況」を1つのハブにまとめた（Issue #707）。名前は仮称
+    title: DAILY_REPORT_HUB_TITLE,
+    href: DAILY_REPORT_HUB_HREF,
     icon: FileSpreadsheet,
-    description: "日報の表記とマスタの対応付け",
+    description: "日報の実績を受注の進捗に結び付ける",
     accent: "border-t-violet-500",
     iconBg: "bg-violet-50",
     iconColor: "text-violet-600",
-  },
-  {
-    title: "日報の照合状況",
-    href: "/master/daily-report-coverage",
-    icon: ChartPie,
-    description: "日報の実績と受注・工程のつながり",
-    accent: "border-t-amber-500",
-    iconBg: "bg-amber-50",
-    iconColor: "text-amber-600",
   },
 ]

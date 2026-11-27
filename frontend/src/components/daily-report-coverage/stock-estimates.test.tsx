@@ -66,7 +66,7 @@ function mockStock(data: StockEstimatesData = DATA) {
   return writes
 }
 
-const section = () => screen.getByRole("region", { name: /作り置き（推定）/ })
+const section = () => screen.getByRole("region", { name: "作り置きの推定" })
 
 describe("StockEstimates", () => {
   it("推定数と、推定を出していない製品の指摘を出す", async () => {
@@ -102,7 +102,7 @@ describe("StockEstimates", () => {
     expect(within(section()).getByText("1 製品")).toBeInTheDocument()
   })
 
-  it("推定も指摘も無ければ出さない", async () => {
+  it("推定も指摘も無ければ一覧を出さず、その旨だけを出す", async () => {
     let requested = false
     server.use(
       http.get(`${API_BASE}/daily-reports/stock-estimates`, () => {
@@ -113,6 +113,7 @@ describe("StockEstimates", () => {
     render(<StockEstimates canEdit />)
 
     await waitFor(() => expect(requested).toBe(true))
+    expect(await screen.findByText("推定が出ている作り置きはありません")).toBeInTheDocument()
     expect(screen.queryByRole("region", { name: /作り置き/ })).not.toBeInTheDocument()
   })
 
