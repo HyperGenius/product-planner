@@ -12,7 +12,10 @@ import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { useProducts } from "@/hooks/use-products"
 import { useCustomers } from "@/hooks/use-customers"
 import { isShippingTarget } from "@/lib/shipping-candidate-utils"
-import { classifyShippingWorklist } from "@/lib/shipping-worklist-utils"
+import {
+  classifyShippingWorklist,
+  type ShippingWorkCount,
+} from "@/lib/shipping-worklist-utils"
 import type { Order } from "@/types/order"
 import type { ShipmentOrderReviewList, ShipmentUnmatchedList } from "@/types/shipment"
 
@@ -63,8 +66,13 @@ export function useShippingRows(
   }
 }
 
+/** ハブ・各ページに出す件数の種類 */
+export type ShippingCountKind = "ship" | "confirm" | "register" | "ambiguous" | "dailyReport"
+
 /**
- * 「送品の消し込み」画面（Issue #557 / #692）のデータ。行操作（送品）は `useOrderActions()` を使う
+ * 「送品の消し込み」のハブと各ページ（Issue #557 / #692 / #693）のデータ。どの画面も同じクエリキーで取るので、
+ * ハブとページを行き来しても取り直さない。行操作（送品）は `useOrderActions()` を使う。
+ * 件数（`counts`）は `classifyShippingWorklist()` の結果から出し、ハブの件数と各ページの行数を一致させる
  */
 export function useOrdersShipping() {
   const { data: orders, isLoading: ordersLoading } = useOrders()
@@ -79,15 +87,44 @@ export function useOrdersShipping() {
     orderReviews: orderReviews.data,
   })
 
+  // 進捗が届く前に出すと、最終工程が完了した注文が②から漏れて見える
+  const isLoading =
+    ordersLoading || productsLoading || customersLoading || shipping.isProgressLoading
+  const { worklist, isShipmentError } = shipping
+
+  // 取得中は件数を出さない（途中の件数を出さない）。取得に失敗した作業は「取得できませんでした」
+  const orderCount = (value: number): ShippingWorkCount => ({
+    value: isLoading || isShipmentError ? null : value,
+    isError: isShipmentError,
+  })
+  const counts: Record<ShippingCountKind, ShippingWorkCount> = {
+    ship: orderCount(worklist.counts.ship),
+    confirm: orderCount(worklist.counts.confirm),
+    register: {
+      value: worklist.counts.register,
+      isError: unmatched.isError,
+      atLeast: worklist.truncated,
+    },
+    ambiguous: {
+      value: worklist.counts.prerequisite?.ambiguous ?? null,
+      isError: unmatched.isError,
+      atLeast: worklist.truncated,
+    },
+    dailyReport: {
+      value: isLoading ? null : worklist.counts.dailyReport,
+      isError: orderReviews.isError,
+    },
+  }
+
   return {
     orders,
     products,
     customers,
-    // 進捗が届く前に出すと、最終工程が完了した注文が②から漏れて見える
-    isLoading: ordersLoading || productsLoading || customersLoading || shipping.isProgressLoading,
+    isLoading,
     currentUserRole,
     unmatched,
     orderReviews,
+    counts,
     ...shipping,
   }
 }

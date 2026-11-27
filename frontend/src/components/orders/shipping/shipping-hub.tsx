@@ -4,39 +4,23 @@ import type { ReactNode } from "react"
 import Link from "next/link"
 import { AlertTriangle, ArrowRight, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { ShippingPanel } from "@/lib/shipping-review-utils"
+import { shippingPageHref, type ShippingPage } from "@/lib/shipping-review-utils"
 import {
   SHIPPING_DAILY_REPORT_META,
   SHIPPING_PREREQUISITE_META,
   SHIPPING_WORK_META,
+  formatWorkCount,
   type ShippingPrerequisiteKind,
+  type ShippingWorkCount,
   type ShippingWorkKind,
 } from "@/lib/shipping-worklist-utils"
 import { cn } from "@/lib/utils"
-
-/** 選択中の作業の一覧の要素 ID。作業のボタンの `aria-controls` に使う */
-export const SHIPPING_PANEL_ID = "shipping-panel"
-
-/** 作業の件数。`value` は取得中・取得に失敗したときは null */
-export interface ShippingWorkCount {
-  value: number | null
-  isError: boolean
-  /** 一覧が上限で切られていて、実際はこの件数より多い（「以上」と付ける） */
-  atLeast?: boolean
-}
-
-/** 件数の表示（単位付き）。取得中は「－」、取得に失敗したら「取得できませんでした」 */
-export function formatWorkCount(count: ShippingWorkCount, unit: string): string {
-  if (count.isError) return "取得できませんでした"
-  if (count.value === null) return "－"
-  return `${count.value}${unit}${count.atLeast ? "以上" : ""}`
-}
 
 type QueueWorkKind = Extract<ShippingWorkKind, "ship" | "confirm" | "register">
 
 interface QueueStep {
   kind: QueueWorkKind
-  panel: ShippingPanel
+  page: ShippingPage
   /** 読み上げに使う番号（①） */
   no: string
   /** 丸の中に出す数字 */
@@ -49,14 +33,14 @@ interface QueueStep {
 const MAIN_STEPS: readonly QueueStep[] = [
   {
     kind: "ship",
-    panel: "ship",
+    page: "ship",
     no: "①",
     digit: 1,
     description: "弥生で出荷済み。確認して送品済みにする",
   },
   {
     kind: "confirm",
-    panel: "confirm",
+    page: "confirm",
     no: "②",
     digit: 2,
     description: "弥生に未計上。出荷したか確かめる",
@@ -65,7 +49,7 @@ const MAIN_STEPS: readonly QueueStep[] = [
 
 const SUB_STEP: QueueStep = {
   kind: "register",
-  panel: "register",
+  page: "register",
   no: "③",
   digit: 3,
   description: "弥生で出荷済みで、受注が無い",
@@ -77,8 +61,6 @@ interface PrerequisiteBannerProps {
   isError: boolean
   /** 弥生の明細が上限で切られている（件数が実際より少ない） */
   truncated: boolean
-  /** 送り先の受注を確かめる一覧を開く */
-  onOpenAmbiguous: () => void
 }
 
 /**
@@ -89,7 +71,6 @@ export function ShippingPrerequisiteBanner({
   counts,
   isError,
   truncated,
-  onOpenAmbiguous,
 }: PrerequisiteBannerProps) {
   if (isError) {
     return (
@@ -127,14 +108,8 @@ export function ShippingPrerequisiteBanner({
         <BannerLine
           text={`送り先の受注を決められない明細があります（${counts.ambiguous}${SHIPPING_PREREQUISITE_META.ambiguous.unit}${more}）`}
         >
-          <Button
-            size="sm"
-            variant="outline"
-            className="bg-white"
-            aria-controls={SHIPPING_PANEL_ID}
-            onClick={onOpenAmbiguous}
-          >
-            受注を確かめる
+          <Button asChild size="sm" variant="outline" className="bg-white">
+            <Link href={shippingPageHref("ambiguous")}>受注を確かめる</Link>
           </Button>
         </BannerLine>
       )}
@@ -156,58 +131,38 @@ function BannerLine({ text, children }: { text: string; children: ReactNode }) {
 
 interface ShippingWorkQueueProps {
   counts: Record<QueueWorkKind | "dailyReport", ShippingWorkCount>
-  selected: ShippingPanel
-  onSelect: (panel: ShippingPanel) => void
 }
 
 /**
- * 送品の消し込みの作業キュー（Issue #692）。均等なメニューにせず、片付ける順（①→②、付随の③、参考の日報）に並べ、
- * ①を主の作業として強く見せる。件数が0の作業は消さずに「済み」と見せる
+ * 送品の消し込みの作業キュー（Issue #692 / #693）。均等なメニューにせず、片付ける順（①→②、付随の③、参考の日報）に並べ、
+ * ①を主の作業として強く見せる。件数が0の作業は消さずに「済み」と見せる。各作業は専用のページへ移る
  */
-export function ShippingWorkQueue({ counts, selected, onSelect }: ShippingWorkQueueProps) {
+export function ShippingWorkQueue({ counts }: ShippingWorkQueueProps) {
   const daily = counts.dailyReport
   const dailyText = formatWorkCount(daily, SHIPPING_DAILY_REPORT_META.unit)
   return (
-    // 2列の画面（本文の幅 80rem 以上、page.tsx）では縦1列、1列の画面では横に並べて一覧の高さを残す
-    <nav aria-label="送品の消し込みの作業" className="flex flex-col gap-4">
-      <ol className="grid grid-cols-1 gap-2 @[48rem]:grid-cols-2 @[80rem]:grid-cols-1">
+    // 本文の幅が広ければ2列（画面の幅ではなく本文の幅で決める。サイドバーを開いたタブレットでは1列）
+    <nav aria-label="送品の消し込みの作業" className="@container flex flex-col gap-4">
+      <ol className="grid grid-cols-1 gap-3 @[40rem]:grid-cols-2">
         {MAIN_STEPS.map((step) => (
           <li key={step.kind} className="flex">
-            <QueueStepButton
-              step={step}
-              count={counts[step.kind]}
-              primary={step.kind === "ship"}
-              selected={selected === step.panel}
-              onSelect={onSelect}
-            />
+            <QueueStepLink step={step} count={counts[step.kind]} primary={step.kind === "ship"} />
           </li>
         ))}
       </ol>
 
-      <div className="grid grid-cols-1 gap-4 @[48rem]:grid-cols-2 @[80rem]:grid-cols-1">
+      <div className="grid grid-cols-1 gap-4 @[40rem]:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xs font-semibold text-muted-foreground">あわせてやること</h2>
-          <QueueStepButton
-            step={SUB_STEP}
-            count={counts.register}
-            selected={selected === SUB_STEP.panel}
-            onSelect={onSelect}
-            compact
-          />
+          <QueueStepLink step={SUB_STEP} count={counts.register} compact />
         </div>
 
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xs font-semibold text-muted-foreground">参考</h2>
-          <button
-            type="button"
-            aria-pressed={selected === "daily-reports"}
-            aria-controls={SHIPPING_PANEL_ID}
+          <Link
+            href={shippingPageHref("daily-reports")}
             aria-label={`${SHIPPING_DAILY_REPORT_META.label} ${dailyText}`}
-            className={cn(
-              "flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent",
-              selected === "daily-reports" && "bg-accent ring-1 ring-border",
-            )}
-            onClick={() => onSelect("daily-reports")}
+            className="flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
           >
             <span className="min-w-0 text-muted-foreground">
               {SHIPPING_DAILY_REPORT_META.label}
@@ -221,45 +176,37 @@ export function ShippingWorkQueue({ counts, selected, onSelect }: ShippingWorkQu
               {dailyText}
               <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
             </span>
-          </button>
+          </Link>
         </div>
       </div>
     </nav>
   )
 }
 
-function QueueStepButton({
+function QueueStepLink({
   step,
   count,
   primary = false,
   compact = false,
-  selected,
-  onSelect,
 }: {
   step: QueueStep
   count: ShippingWorkCount
   primary?: boolean
   compact?: boolean
-  selected: boolean
-  onSelect: (panel: ShippingPanel) => void
 }) {
   const meta = SHIPPING_WORK_META[step.kind]
   const done = !count.isError && count.value === 0
   const text = formatWorkCount(count, meta.unit)
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      aria-controls={SHIPPING_PANEL_ID}
+    <Link
+      href={shippingPageHref(step.page)}
       aria-label={`${step.no} ${meta.label} ${done ? "済み" : text}`}
       className={cn(
         "flex h-full w-full items-start gap-3 rounded-lg border bg-card text-left transition-colors hover:bg-accent",
         compact ? "px-3 py-2" : "px-4 py-3",
         primary && !done && "border-blue-300 bg-blue-50/60 hover:bg-blue-50",
         done && "bg-muted/40",
-        selected && (primary && !done ? "ring-2 ring-blue-500" : "ring-2 ring-foreground/30"),
       )}
-      onClick={() => onSelect(step.panel)}
     >
       <span
         aria-hidden
@@ -313,6 +260,6 @@ function QueueStepButton({
           <span className="text-xs text-muted-foreground">{step.description}</span>
         )}
       </span>
-    </button>
+    </Link>
   )
 }

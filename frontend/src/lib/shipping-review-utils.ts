@@ -3,21 +3,30 @@ import type {
   ShipmentOrderReviewCause,
 } from "@/types/shipment"
 
-/**
- * 送品の消し込みのハブ（Issue #692、Epic #690）で選んだ作業の一覧。選択は URL のハッシュで持つ。
- * 一覧の中身は #693 で専用のページへ移す（それまではハブの横に出す）
- */
-export const SHIPPING_PANELS = ["ship", "confirm", "register", "ambiguous", "daily-reports"] as const
-export type ShippingPanel = (typeof SHIPPING_PANELS)[number]
-export const DEFAULT_SHIPPING_PANEL: ShippingPanel = "ship"
+/** 送品の消し込みのハブ（Issue #692） */
+export const SHIPPING_HUB_HREF = "/orders/shipping"
 
 /**
- * URL のハッシュ（外部入力）を既知の一覧に寄せる。知らない値と、#682 のカードのハッシュ
- * （`#candidates` / `#review`。古いブックマーク・リンク）は既定の一覧（①）にする
+ * ハブから開く作業の一覧のページ（Issue #693、Epic #690）。`/orders/shipping/<page>` に置く。
+ * 値は #692 の暫定の一覧のハッシュ（`#ship` 等）と同じにして、古いハッシュをそのままページへ移せるようにしている
  */
-export function toValidShippingPanel(hash: string): ShippingPanel {
+export const SHIPPING_PAGES = ["ship", "confirm", "register", "ambiguous", "daily-reports"] as const
+export type ShippingPage = (typeof SHIPPING_PAGES)[number]
+
+export function shippingPageHref(page: ShippingPage): string {
+  return `${SHIPPING_HUB_HREF}/${page}`
+}
+
+/**
+ * ハブを古いハッシュで開いたときの移り先（ハッシュは外部入力）。
+ * - #692 の暫定の一覧（`#ship` / `#confirm` / `#register` / `#ambiguous` / `#daily-reports`）→ そのページ
+ * - #682 の「送品の候補」カード（`#candidates`）→ ①
+ * - それ以外（#682 の「要確認」`#review`・知らない値・空）→ null（ハブを出す）
+ */
+export function shippingPageFromLegacyHash(hash: string): ShippingPage | null {
   const value = hash.replace(/^#/, "")
-  return SHIPPING_PANELS.find((panel) => panel === value) ?? DEFAULT_SHIPPING_PANEL
+  if (value === "candidates") return "ship"
+  return SHIPPING_PAGES.find((page) => page === value) ?? null
 }
 
 // ---------------------------------------------------------------------------

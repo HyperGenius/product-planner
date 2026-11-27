@@ -516,31 +516,43 @@ frontend/src/
 
 Epic #553 の3画面目。確定済・生産中の注文のうち、送品済みになっていそうなものを候補として上に出す。**送品の記録は弥生が正**で、この画面は候補を示すだけで自動では送品済みにしない（担当者が弥生で確認してから1件ずつ押す）。Backend の変更は無く、`GET /orders` と `GET /daily-reports/order-progress`（Issue #490）で判定する。
 
-### ハブの構成（Issue #692、Epic #690）
+### ハブの構成（Issue #692 / #693、Epic #690）
 
-画面は**順番と前提が見える作業キュー（ハブ）**。件数と一覧の行は、どちらも `classifyShippingWorklist()`（#691、`lib/shipping-worklist-utils.ts`）の結果から出す
-（`useShippingRows()` が返す `worklist`。ハブで別に数えない）。
+`/orders/shipping` は**順番と前提が見える作業キュー（ハブ）**で、各作業の一覧は専用のページ（`/orders/shipping/<page>`、#693）に置く。
+ハブの件数と各ページの行は、どちらも `classifyShippingWorklist()`（#691、`lib/shipping-worklist-utils.ts`）の結果から出す
+（`useOrdersShipping()` が返す `worklist` と `counts`。ハブ・ページで別に数えない）。ハブとページは同じクエリキーで取るので、行き来しても取り直さない。
 
 ```
+/orders/shipping（ハブ）
 [前提バナー] 先に片付けること（0件なら出さない）
    ├─ 得意先・商品の名寄せ → 弥生の名寄せ（#customers / #products）
-   └─ 送り先の受注を決められない明細 → #ambiguous の一覧
-[作業キュー]                     [選んだ作業の一覧]
-   ① 送品済みにする（主）            ①②: ShippingOrderRow
-   ② 出荷を確かめる                  ③・見分ける: UnmatchedShipmentEntries
-   あわせてやること: ③ 受注を起票する  参考: ShipmentOrderReviews
-   参考: 日報が未入力の出荷済み注文
+   └─ 送り先の受注を決められない明細 → /orders/shipping/ambiguous
+[作業キュー]（各作業はページへのリンク）
+   ① 送品済みにする（主）              → /orders/shipping/ship
+   ② 出荷を確かめる                    → /orders/shipping/confirm
+   あわせてやること: ③ 受注を起票する    → /orders/shipping/register
+   参考: 日報が未入力の出荷済み注文      → /orders/shipping/daily-reports
 ```
 
-| 作業 | 件数（単位） | 一覧 | 操作 |
-|---|---|---|---|
-| 前提: 得意先を名寄せする | 得意先の数 | なし（弥生の名寄せ `#customers` へ） | ― |
-| 前提: 商品を名寄せする | (得意先, 商品コード) の数（商品） | なし（弥生の名寄せ `#products` へ） | ― |
-| 前提: 送り先の受注を確かめる | (得意先, 商品コード) の数（商品） | `#ambiguous`（見比べる受注の注文番号・希望納期・注番） | 受注詳細へ |
-| ① 送品済みにする | 注文 | `#ship` | 「送品済みにする」（社長・受注担当） |
-| ② 出荷を確かめる | 注文 | `#confirm` | **なし**（弥生でまだ確かめられていないので、ここでは送品済みにしない） |
-| ③ 受注を起票する | (得意先, 商品コード) の数（商品） | `#register` | 行ごとに「受注を起票する」（`/orders/new`） |
-| 参考: 日報が未入力の出荷済み注文 | 注文 | `#daily-reports` | 原因ごとの直す画面へ |
+| 作業 | 件数（単位） | ページ | 列 | 操作 |
+|---|---|---|---|---|
+| 前提: 得意先を名寄せする | 得意先の数 | なし（弥生の名寄せ `#customers` へ） | ― | ― |
+| 前提: 商品を名寄せする | (得意先, 商品コード) の数（商品） | なし（弥生の名寄せ `#products` へ） | ― | ― |
+| 前提: 送り先の受注を確かめる | (得意先, 商品コード) の数（商品） | `ambiguous` | 得意先（弥生）・商品（弥生）・数量（明細数）・最後の売上日・弥生の備考・見比べる受注 | 受注詳細へ |
+| ① 送品済みにする | 注文 | `ship` | 注文番号・顧客・品名・受注数量・弥生の送品（数量／最後の売上日）・納期 | 「送品済みにする」（社長・受注担当） |
+| ② 出荷を確かめる | 注文 | `confirm` | 注文番号・顧客・品名・理由・弥生の送品・工程の進捗・納期 | **なし**（弥生でまだ確かめられていないので、ここでは送品済みにしない） |
+| ③ 受注を起票する | (得意先, 商品コード) の数（商品） | `register` | 得意先（弥生）・顧客・品名・数量（明細数）・最後の売上日・備考の納期分 | 行ごとに「受注を起票する」（`/orders/new`） |
+| 参考: 日報が未入力の出荷済み注文 | 注文 | `daily-reports` | 原因ごと・製品の単位（下記） | 原因ごとの直す画面へ |
+
+各ページ（#693）:
+
+- 外枠は共通の `ShippingPageLayout`（`components/orders/shipping/shipping-page-layout.tsx`）。ハブへ戻るリンク（`ListPageLayout` の `back`）・件数付きの見出し・
+  見出しの横のヘルプ（ハブと共有の `ShippingHelp`）・データの鮮度を置く。見出しの件数はハブと同じ `counts`（取得中は「－」、失敗は「取得できませんでした」）
+- 1ページで扱う行動は1種類にし、列もその行動に要るものに絞る。①②は行を分けた（`ShipOrderRow` / `ConfirmOrderRow`。#692 の `ShippingOrderRow` の `variant` は廃止）。
+  ③と送り先の受注は `UnmatchedShipmentEntries` の `variant: "register" | "ambiguous"` で列を作り分ける
+- 「送り先の受注を確かめる」は専用のページにした（ハブに一覧を残すと、ハブだけ一覧を持つ形になるため）。前提バナーの「受注を確かめる」と、①②の行の「送り先未定 n明細」から開く
+- ハブを #692 の暫定の一覧のハッシュ（`#ship` / `#confirm` / `#register` / `#ambiguous` / `#daily-reports`）・#682 の `#candidates`（→①）で開いたら、
+  そのページへ `router.replace` で移る（`shippingPageFromLegacyHash()`）。#682 の `#review`・知らない値はハブを出す
 
 - 作業キューは均等なメニューにしない。①を主の作業として強く見せ（青い番号・大きい件数）、③は「あわせてやること」、日報は「参考」に分ける。
   件数が0の作業は消さずに「済み」と出す。カードの説明は対象を短く書くだけ（①「弥生で出荷済み。確認して送品済みにする」②「弥生に未計上。出荷したか確かめる」）
@@ -550,13 +562,12 @@ Epic #553 の3画面目。確定済・生産中の注文のうち、送品済み
   （「弥生の得意先1件・商品2件がアプリに未登録です［名寄せする］」「送り先の受注を決められない明細があります（1商品）［受注を確かめる］」）。
   「名寄せする」は得意先が残っていれば `#customers`、無ければ `#products` を開く。片付けると件数がどう変わるかはヘルプに書く。前提の件数は①②③に含めない
 - データの鮮度はタイトルの下に1行で「弥生 11/21売上分まで・日報 11/25 09:15」と出し、取得に失敗したときだけ赤くする（弥生の取り込みは不定期なので日数の警告は出さない）
-- 選んだ作業の一覧はハブの横に出す（選択は URL のハッシュ、`toValidShippingPanel()`）。#682 の `#candidates` / `#review`・知らない値は①に寄せる
-  （古いブックマークでもハブが出る）。一覧は #693 で専用のページへ移す
-- 2列（作業キュー 22rem ＋ 一覧）にするかは画面の幅ではなく本文の幅（`@container` ＋ `@[80rem]:`）で決める。1列のときは作業キューを2列のグリッドにして一覧の高さを残す
+- 作業キューを2列のグリッドにするかは画面の幅ではなく本文の幅（`@container` ＋ `@[40rem]:`）で決める
 - 文言は [UI文言ガイドライン](../ui-writing-guidelines.md) に従う。副題・情報ボックス（「送品の記録は弥生が正」）・一覧の見出しの補足・抽出条件の説明は画面に出さず、
   判定条件・データの出どころ・状態の移り変わり・原因の説明（`ORDER_REVIEW_CAUSE_META.hint`）は見出しの横の「?」のヘルプ（`ShippingHelp`、共通部品 `PageHelp`）に書く。
-  「②では送品済みにしない」は②にボタンを置かないことで表す。ページのテストで、全一覧の本文に内部語・否定形の説明（「当た」「照合」「候補」「しません」等）が無いことを確かめている
-- 外枠は `ListPageLayout`。①②は `OrdersTable` の `fill`、③・見分ける・参考は `ScrollTable` で表の中だけをスクロールさせる
+  「②では送品済みにしない」は②にボタンを置かないことで表す。テスト（`app/orders/shipping/pages.test.tsx`）で、ハブと全ページの本文に内部語・否定形の説明
+  （「当た」「照合」「候補」「しません」等、`FORBIDDEN_UI_TEXT`）が無いこと・「送品済みにする」が①にだけあることを確かめている
+- 外枠は `ListPageLayout`。①②は `OrdersTable` の `fill`、③・送り先の受注・参考は `ScrollTable` で表の中だけをスクロールさせる
 
 ### ③・送り先の受注を確かめる: 受注に結び付かない弥生の明細（Issue #682 / #692）
 
@@ -595,7 +606,7 @@ Epic #553 の3画面目。確定済・生産中の注文のうち、送品済み
 
 - #692 からはハブの「参考」に置き、一覧には `classifyShippingWorklist()` の `dailyReportOrders`（①②・対象外に振り分けた注文）の分だけを渡す（件数と行を揃える）
 - 原因の説明（`hint`）は画面に書かず、ページのヘルプに出す（タブレットで読めるようツールチップにせず、ダイアログで開く）。見出しには原因・件数・担当・直す画面へのリンクだけを置く
-- ①②の行の「工程の進捗」の下に `日報: 工程なし` のように原因を1つだけ出す（`#daily-reports` へのリンク）。**「送品済みにする」は止めない**
+- ①②の行の注文番号の下に `日報: 工程なし` のように原因を1つだけ出す（日報の参考のページへのリンク）。**「送品済みにする」は止めない**
 - 進捗の行が無い注文を遅れにしない方針（#491）は変えない。要確認は遅れとは別の表示
 
 ### 理由の判定（①②への振り分けの元）
@@ -605,9 +616,9 @@ Epic #553 の3画面目。確定済・生産中の注文のうち、送品済み
 
 | 理由 | 条件 | バッジの色 |
 |---|---|---|
-| A 最終工程完了（`final_process_completed`） | 日報の進捗で `sequence_order` が最大の工程の `status` が `completed` | 緑 |
-| B 納期超過（`overdue`） | 納期が今日（JST）より前 | 赤（納期の状態の超過と同じ） |
-| C 納期まで1週間（`due_soon`） | 納期まで残り7日未満（当日を含む） | amber（納期の状態の間近と同じ） |
+| A 最終工程完了（`final_process_completed`） | 日報の進捗で `sequence_order` が最大の工程の `status` が `completed` | 緑（②の表示「最終工程が完了」） |
+| B 納期超過（`overdue`） | 納期が今日（JST）より前 | 赤（納期の状態の超過と同じ。②の表示「納期を n日過ぎた」） |
+| C 納期まで1週間（`due_soon`） | 納期まで残り7日未満（当日を含む） | amber（納期の状態の間近と同じ。②の表示「納期まで n日」「納期は今日」） |
 
 - **納期の基準は希望納期（`desired_deadline`）**。送品は顧客の納期に合わせるため。希望納期が無い注文は完成見込み（`getEffectiveDeadline()`＝確定納期 → シミュ納期）に落とし、納期の列に「（完成見込み）」と添える。現場ダッシュボードは完成見込みを基準にしているので、両画面で超過・間近の注文が一致しないことがある
 - B・C の閾値は現場ダッシュボードと同じ `getDeadlineStatus()` / `DEADLINE_DUE_SOON_THRESHOLD_DAYS`（`lib/floor-dashboard-utils.ts`）。「今日」は `jstTodayIso()`
@@ -619,14 +630,18 @@ Epic #553 の3画面目。確定済・生産中の注文のうち、送品済み
 
 - #682 までの「候補のみ／すべて」のタブは廃止した（対象外の注文は出さない）
 - 並びは A かつ B を先頭に、次に納期の古い順（納期の無い注文は末尾、同順位は注文 ID 順。`compareShippingRows()`）
-- 列: 注文番号（ステータス）・顧客・製品・数量・納期（「N日超過」/「今日」/「残りN日」）・工程の進捗（完了した工程数 / 工程数）・弥生の送品、
-  ①は操作（「送品済みにする」）、②は理由。①の理由（全行が「弥生で送品済み」）は一覧に入っている理由そのものなので出さない。
-  専用の行 `ShippingOrderRow`（`variant: "ship" | "confirm"`、見出しの行と同じ値）に `useOrderActions().getRowProps()` を展開する
-- 例外だけを行に出す: 一部送品・送り先未定の明細（「送り先未定 1明細」）・日報の漏れ（「日報: 工程なし」）
+- ①の列: 注文番号・顧客・品名・受注数量・弥生の送品（数量／最後の売上日）・納期（「N日超過」/「今日」/「残りN日」）・操作（「送品済みにする」）。
+  ①の理由（全行が「弥生で送品済み」）は一覧に入っている理由そのものなので出さない。行 `ShipOrderRow` に `useOrderActions().getRowProps()` を展開する
+- ②の列: 注文番号・顧客・品名・理由・弥生の送品・工程の進捗（完了した工程数 / 工程数、無ければ「日報なし」）・納期。理由に日数を出すので、納期の列には日数を繰り返さない
+- 例外だけを行に出す: 一部送品・送り先未定の明細（「送り先未定 1明細」、送り先の受注のページへ）・日報の漏れ（「日報: 工程なし」、日報の参考のページへ）。
+  受注のステータス（確定済・生産中）は送品の判断に関わらないので出さない
+- ②の弥生の送品は、弥生に1明細も無ければ「未計上」と出す。そのうち納期が取り込んだ明細の最新の売上日より後のものは、まだ弥生に載っていないのが当然なので
+  「取り込み待ち」と出し、一覧の後ろへ回す（`isAwaitingYayoiImport()` / `orderConfirmRows()`。並べ替えるだけで行数は変えない。Epic #690 の未決事項
+  「②は次の取り込みを待てば①に移るものが大半か」への対応）。送り先の受注を決められない明細が候補にある注文は「送り先未定」の印で区別する
 
 ### 操作
 
-- 「送品済みにする」（`POST /orders/{id}/ship`）は①の一覧だけで、1件ずつ・社長・受注担当だけ（②では出さない。`ShippingOrderRow` の `showShipAction`）。他のロールは閲覧のみ。権限の判定は `canShipOrder()`（`lib/order-utils.ts`）に切り出し、注文一覧の `OrderTableRow` と共有する
+- 「送品済みにする」（`POST /orders/{id}/ship`）は①のページだけで、1件ずつ・社長・受注担当だけ（②の行 `ConfirmOrderRow` には操作の列が無い）。他のロールは閲覧のみ。権限の判定は `canShipOrder()`（`lib/order-utils.ts`）に切り出し、注文一覧の `OrderTableRow` と共有する
 - 一括で送品済みにする操作は作らない（弥生で1件ずつ確認する運用のため）
 - 送品済みにした注文は対象から外れるので、注文の再取得でこの画面から外れる
 
@@ -634,14 +649,17 @@ Epic #553 の3画面目。確定済・生産中の注文のうち、送品済み
 
 ```
 frontend/src/
-  app/orders/shipping/page.tsx                  # 下記を組み合わせる
-  hooks/use-orders-shipping.ts                  # useShippingRows（振り分けの結果。画面とサイドバーで共有）/ useOrdersShipping
+  app/orders/shipping/page.tsx                  # ハブ（前提バナー・作業キュー）
+  app/orders/shipping/{ship,confirm,register,ambiguous,daily-reports}/page.tsx  # 各作業のページ（Issue #693）
+  hooks/use-orders-shipping.ts                  # useShippingRows（振り分けの結果。画面とサイドバーで共有）/ useOrdersShipping（件数 counts も）
   lib/shipping-candidate-utils.ts               # 理由の判定・並び（純粋関数）
-  lib/shipping-worklist-utils.ts                # ①②③・前提・対象外への振り分け（純粋関数、Issue #691）
-  lib/shipping-review-utils.ts                  # 一覧のハッシュ・原因の表示（Issue #682 / #692）
+  lib/shipping-worklist-utils.ts                # ①②③・前提・対象外への振り分け・件数の表示・②の取り込み待ち（純粋関数、Issue #691 / #693）
+  lib/shipping-review-utils.ts                  # ページの URL・古いハッシュの移り先・原因の表示（Issue #682 / #692 / #693）
+  test-utils/shipping.ts                        # ハブ・各ページのテストで共有するフィクスチャ
   components/orders/shipping/
     shipping-hub.tsx                            # 前提バナー・作業キュー（Issue #692）
-    shipping-order-row.tsx                      # ShippingOrderHeaderRow / ShippingOrderRow（①②）
+    shipping-page-layout.tsx                    # 各ページの外枠・データの鮮度（Issue #693）
+    shipping-order-row.tsx                      # ShipOrderRow（①）/ ConfirmOrderRow（②）と見出しの行
     unmatched-shipment-entries.tsx              # ③・送り先の受注を確かめる（Issue #682）
     shipping-help.tsx                           # ページのヘルプ（画面に書かない説明の置き場所）
     shipment-order-reviews.tsx                  # 参考: 日報の実績が届いていない注文（Issue #683）
