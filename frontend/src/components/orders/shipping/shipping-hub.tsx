@@ -143,10 +143,10 @@ export function ShippingCountChanges({ changes }: { changes: readonly ShippingCo
   return (
     <section
       aria-label="前回からの件数の変化"
-      className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground"
     >
       <span className="inline-flex items-center gap-1 font-medium text-foreground">
-        <History className="h-4 w-4 self-center" />
+        <History className="h-4 w-4" />
         前回から
       </span>
       <ul className="flex flex-wrap gap-x-4 gap-y-1">
