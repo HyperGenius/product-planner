@@ -1,6 +1,7 @@
 "use client"
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { SHIPMENTS_QUERY_KEY } from "@/hooks/use-shipments"
 import { ApiError, apiClient } from "@/lib/api-client"
 import { createClient } from "@/utils/supabase/client"
 import type {
@@ -26,6 +27,16 @@ import type {
 
 // クエリキーを定数化
 const ORDERS_QUERY_KEY = ["orders"]
+
+/**
+ * 注文を変えたあとに、注文の一覧と弥生の突合（`["shipments"]`）を取り直す。
+ * 突合は受注の顧客・製品・納期・注文番号・ステータスから参照のたびに求めるので、注文を作る・直す・送品済みにすると
+ * 送品の消し込みの件数（①③・前提）が変わる。無効化しないと staleTime の間は古い件数のまま出る（Issue #694）
+ */
+function invalidateOrdersAndShipments(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+  queryClient.invalidateQueries({ queryKey: SHIPMENTS_QUERY_KEY })
+}
 
 /**
  * 注文一覧を取得するフック
@@ -70,7 +81,7 @@ export function useCreateOrder() {
       }),
     onSuccess: () => {
       // 注文一覧を再取得
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -146,7 +157,7 @@ export function useCreateEmailOrderIntake() {
       return response.json()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -164,7 +175,7 @@ export function useUpdateOrder() {
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -197,7 +208,7 @@ export function useLinkOrderCustomer() {
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -216,7 +227,7 @@ export function useConfirmOrder() {
       }),
     onSuccess: () => {
       // 注文一覧とスケジュール一覧を再取得
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
     },
   })
@@ -235,7 +246,7 @@ export function useRequestApproval() {
         method: "POST",
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -254,7 +265,7 @@ export function useRejectOrder() {
         body: JSON.stringify({ reason: reason ?? null }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -272,7 +283,7 @@ export function useWithdrawApproval() {
         method: "POST",
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -290,7 +301,7 @@ export function useShipOrder() {
         method: "POST",
       }),
     onSuccess: (_data, orderId) => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
       queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
     },
   })
@@ -308,7 +319,7 @@ export function useShipOrderWithoutRouting() {
         method: "POST",
       }),
     onSuccess: (_data, orderId) => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
       queryClient.invalidateQueries({ queryKey: ["orders", orderId] })
     },
   })
@@ -327,7 +338,7 @@ export function useConvertOrderToRepair() {
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -345,7 +356,7 @@ export function useShipOverdueDrafts() {
         method: "POST",
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }
@@ -363,7 +374,7 @@ export function useApproveOrdersBulk() {
         body: JSON.stringify({ order_ids: orderIds }),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
     },
   })
@@ -448,7 +459,7 @@ export function useDeleteOrder() {
     mutationFn: (orderId: number) =>
       apiClient(`/orders/${orderId}`, { method: "DELETE" }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
       queryClient.invalidateQueries({ queryKey: ["schedules"] })
     },
   })
@@ -507,7 +518,7 @@ export function useSplitOrder() {
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY })
+      invalidateOrdersAndShipments(queryClient)
     },
   })
 }

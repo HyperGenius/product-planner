@@ -84,3 +84,49 @@ export const NAME_STATE_LABELS: Record<ShipmentNameState, string> = {
   unmatched: "未照合",
   ignored: "対象外",
 }
+
+// ---------------------------------------------------------------------------
+// 送品の消し込み ⇄ 弥生の名寄せ（Issue #694）
+// ---------------------------------------------------------------------------
+
+export const SHIPMENT_NAMES_HREF = "/orders/shipment-names"
+
+/** 名寄せの種別のタブ（URL のハッシュ `#customers` / `#products`） */
+export type ShipmentNameKind = "customers" | "products"
+
+/** ハッシュ（外部入力）を種別に寄せる。知らない値は得意先 */
+export function toValidNameKind(value: string): ShipmentNameKind {
+  return value.replace(/^#/, "") === "products" ? "products" : "customers"
+}
+
+/** 送品の消し込みから開いたことを表すクエリ（`?from=shipping`） */
+const FROM_PARAM = "from"
+const FROM_SHIPPING = "shipping"
+
+/**
+ * 弥生の名寄せの URL。`fromShipping` なら、名寄せの画面に送品の消し込みへ戻るリンクを出し、
+ * 一覧を送品の消し込みと同じ期間（直近の明細）に絞って開く
+ */
+export function shipmentNamesHref(
+  kind: ShipmentNameKind,
+  options?: { fromShipping?: boolean },
+): string {
+  const query = options?.fromShipping ? `?${FROM_PARAM}=${FROM_SHIPPING}` : ""
+  return `${SHIPMENT_NAMES_HREF}${query}#${kind}`
+}
+
+/** 送品の消し込みから開いたか（クエリは外部入力なので既知の値とだけ比べる） */
+export function isFromShipping(params: Pick<URLSearchParams, "get"> | null | undefined): boolean {
+  return params?.get(FROM_PARAM) === FROM_SHIPPING
+}
+
+/**
+ * 名寄せの一覧を期間で絞るか。`recent` は送品の消し込みと同じ期間
+ * （`GET /shipments/unmatched-entries` の `since` 以降に売上がある得意先・商品）
+ */
+export type ShipmentNamePeriod = "recent" | "all"
+
+/** 最後の売上日が期間の始まり以降か。期間の始まりが分からない（未取り込み）なら絞らない */
+export function isWithinShipmentPeriod(lastSalesDate: string, since: string | null): boolean {
+  return since === null || lastSalesDate >= since
+}

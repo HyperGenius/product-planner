@@ -45,10 +45,17 @@ describe("③ 受注を起票する（Issue #682 / #693）", () => {
     expect(rest).toHaveLength(0)
     expect(getPageHeading()).toHaveTextContent("③ 受注を起票する1商品")
     expect(screen.queryByText("未登録商事")).toBeNull()
-    expect(within(row).getByRole("link", { name: "受注を起票する" })).toHaveAttribute(
-      "href",
-      "/orders/new",
-    )
+    // 行の顧客・製品・数量・納期分を初期値にして受注作成を開き、作成したら③へ戻る（#694）
+    const href = within(row).getByRole("link", { name: "受注を起票する" }).getAttribute("href")!
+    const url = new URL(href, "http://localhost")
+    expect(url.pathname).toBe("/orders/new")
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      customer_id: "1",
+      product_id: "101",
+      quantity: "120",
+      desired_deadline: "2026-11-30",
+      return_to: "/orders/shipping/register",
+    })
     expect(
       screen.getAllByRole("columnheader").map((h) => h.textContent),
     ).toEqual(["得意先（弥生）", "顧客", "品名", "数量", "最後の売上日", "備考の納期分", "操作"])
@@ -57,6 +64,25 @@ describe("③ 受注を起票する（Issue #682 / #693）", () => {
     expect(within(row).getByText("11/30")).toBeInTheDocument()
     expect(within(row).getByText("2明細")).toBeInTheDocument()
     expect(within(row).getByText("120")).toBeInTheDocument()
+  })
+
+  it("顧客・製品・納期分が1つに決まらない値は初期値にしない", async () => {
+    mockUnmatched([
+      makeUnmatched({
+        status: "no_order",
+        customer_ids: [1, 2],
+        product_ids: [],
+        note_deadlines: ["2026-11-20", "2026-11-30"],
+        total_qty: 0,
+      }),
+    ])
+    render(<ShippingRegisterPage />)
+
+    const [row] = await screen.findAllByTestId("unmatched-shipment-row")
+    expect(within(row).getByRole("link", { name: "受注を起票する" })).toHaveAttribute(
+      "href",
+      "/orders/new?return_to=%2Forders%2Fshipping%2Fregister",
+    )
   })
 
   it("受注が無い明細が無ければその旨を出す", async () => {

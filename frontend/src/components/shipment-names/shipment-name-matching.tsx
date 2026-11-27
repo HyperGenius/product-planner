@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { Info, Plus, X } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { ChevronLeft, Info, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,16 +23,24 @@ import {
   useSetShipmentProductLink,
   useShipmentCustomers,
   useShipmentProducts,
+  useShipmentUnmatchedEntries,
+  SHIPMENT_UNMATCHED_DAYS,
 } from "@/hooks/use-shipments"
 import { useCurrentMember } from "@/hooks/use-tenant-members"
 import { formatDeadlineShort, getCustomerDisplayName } from "@/lib/order-utils"
 import {
   customerItemState,
+  isFromShipping,
+  isWithinShipmentPeriod,
   NAME_STATE_LABELS,
   PRODUCT_AUTO_METHOD_LABELS,
   productItemState,
+  toValidNameKind,
+  type ShipmentNameKind,
+  type ShipmentNamePeriod,
   type ShipmentNameState,
 } from "@/lib/shipment-utils"
+import { SHIPPING_HUB_HREF } from "@/lib/shipping-review-utils"
 import { cn } from "@/lib/utils"
 import type { Customer } from "@/types/customer"
 import type { Product } from "@/types/product"
@@ -380,12 +389,6 @@ function ProductRow({
 // 画面
 // ---------------------------------------------------------------------------
 
-type NameKind = "customers" | "products"
-
-function toValidNameKind(value: string): NameKind {
-  return value.replace(/^#/, "") === "products" ? "products" : "customers"
-}
-
 /** 種別のタブの中身。一覧（`ScrollTable`）が残りの高さを使ってスクロールする（Issue #671） */
 const TAB_CONTENT_CLASS = "flex min-h-0 flex-col"
 
@@ -408,18 +411,53 @@ export function ShipmentNameMatching() {
   // 送品の消し込みの「要確認」から `#products` / `#customers` で開いたときはその種別を出す（Issue #682）。
   // ハッシュは外部入力なので既知の値だけを受け取る。タブを切り替えたら以降は選んだ種別を出す
   const [hash] = useLocationHash()
-  const [selectedKind, setSelectedKind] = useState<NameKind | null>(null)
+  const [selectedKind, setSelectedKind] = useState<ShipmentNameKind | null>(null)
   const kind = selectedKind ?? toValidNameKind(hash)
 
-  const customerItems = useMemo(() => customersQuery.data ?? [], [customersQuery.data])
-  const productItems = useMemo(() => productsQuery.data ?? [], [productsQuery.data])
+  // 送品の消し込みから開いたときは戻るリンクを出し、送品の消し込みと同じ期間（直近の明細）に絞って開く（Issue #694）。
+  // 期間の始まりは送品の消し込みと同じクエリ（`GET /shipments/unmatched-entries` の `since`）から取る
+  const fromShipping = isFromShipping(useSearchParams())
+  const [selectedPeriod, setSelectedPeriod] = useState<ShipmentNamePeriod | null>(null)
+  const period = selectedPeriod ?? (fromShipping ? "recent" : "all")
+  const since = useShipmentUnmatchedEntries().data?.since ?? null
+
+  const customerItems = useMemo(
+    () =>
+      (customersQuery.data ?? []).filter(
+        (i) => period === "all" || isWithinShipmentPeriod(i.last_sales_date, since),
+      ),
+    [customersQuery.data, period, since],
+  )
+  const productItems = useMemo(
+    () =>
+      (productsQuery.data ?? []).filter(
+        (i) => period === "all" || isWithinShipmentPeriod(i.last_sales_date, since),
+      ),
+    [productsQuery.data, period, since],
+  )
   const unmatchedCustomers = customerItems.filter((i) => customerItemState(i) === "unmatched")
   const unmatchedProducts = productItems.filter((i) => productItemState(i) === "unmatched")
   const visibleCustomers = filter === "unmatched" ? unmatchedCustomers : customerItems
   const visibleProducts = filter === "unmatched" ? unmatchedProducts : productItems
 
+  const allEmptyState =
+    period === "recent"
+      ? `直近${SHIPMENT_UNMATCHED_DAYS}日の売上明細はありません`
+      : "弥生の売上明細はまだありません"
+
   return (
     <ListPageLayout
+      back={
+        fromShipping && (
+          <Link
+            href={SHIPPING_HUB_HREF}
+            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            送品の消し込みに戻る
+          </Link>
+        )
+      }
       title="弥生の名寄せ"
       description="弥生の売上明細の得意先・商品を、アプリの顧客・製品に対応付けます"
     >
@@ -448,12 +486,23 @@ export function ShipmentNameMatching() {
             <TabsTrigger value="customers">得意先（未照合 {unmatchedCustomers.length}）</TabsTrigger>
             <TabsTrigger value="products">商品（未照合 {unmatchedProducts.length}）</TabsTrigger>
           </TabsList>
-          <Tabs value={filter} onValueChange={(v) => setFilter(v as ViewFilter)}>
-            <TabsList>
-              <TabsTrigger value="unmatched">未照合のみ</TabsTrigger>
-              <TabsTrigger value="all">すべて</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tabs
+              value={period}
+              onValueChange={(v) => setSelectedPeriod(v === "recent" ? "recent" : "all")}
+            >
+              <TabsList aria-label="期間">
+                <TabsTrigger value="recent">直近{SHIPMENT_UNMATCHED_DAYS}日</TabsTrigger>
+                <TabsTrigger value="all">全期間</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Tabs value={filter} onValueChange={(v) => setFilter(v as ViewFilter)}>
+              <TabsList>
+                <TabsTrigger value="unmatched">未照合のみ</TabsTrigger>
+                <TabsTrigger value="all">すべて</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
 
         <TabsContent value="customers" className={TAB_CONTENT_CLASS}>
@@ -461,7 +510,7 @@ export function ShipmentNameMatching() {
             isLoading={customersQuery.isLoading}
             isError={customersQuery.isError}
             rowCount={visibleCustomers.length}
-            emptyState={filter === "unmatched" ? "未照合の得意先はありません" : "弥生の売上明細はまだありません"}
+            emptyState={filter === "unmatched" ? "未照合の得意先はありません" : allEmptyState}
             header={
               <TableRow>
                 <TableHead>得意先</TableHead>
@@ -484,7 +533,7 @@ export function ShipmentNameMatching() {
             isLoading={productsQuery.isLoading}
             isError={productsQuery.isError}
             rowCount={visibleProducts.length}
-            emptyState={filter === "unmatched" ? "未照合の商品はありません" : "弥生の売上明細はまだありません"}
+            emptyState={filter === "unmatched" ? "未照合の商品はありません" : allEmptyState}
             header={
               <TableRow>
                 <TableHead>商品</TableHead>

@@ -21,6 +21,7 @@ import {
   mockRole,
   mockUnmatched,
 } from "@/test-utils/shipping"
+import { SHIPPING_COUNT_STORAGE_KEY } from "@/hooks/use-shipping-count-changes"
 import OrdersShippingPage from "./page"
 
 const replace = vi.fn()
@@ -41,6 +42,7 @@ function getStep(name: RegExp): HTMLElement {
 describe("OrdersShippingPage のハブ（Issue #692 / #693）", () => {
   beforeEach(() => {
     window.location.hash = ""
+    window.sessionStorage.clear()
     replace.mockClear()
     mockRole("order_handler")
     mockMasters()
@@ -174,6 +176,7 @@ describe("OrdersShippingPage のハブ（Issue #692 / #693）", () => {
 describe("OrdersShippingPage の前提バナー（Issue #692 / #693）", () => {
   beforeEach(() => {
     window.location.hash = ""
+    window.sessionStorage.clear()
     mockRole("order_handler")
     mockMasters()
     mockProgress([])
@@ -204,7 +207,7 @@ describe("OrdersShippingPage の前提バナー（Issue #692 / #693）", () => {
     // 得意先が残っていれば得意先のタブを開く
     expect(within(banner).getByRole("link", { name: "名寄せする" })).toHaveAttribute(
       "href",
-      "/orders/shipment-names#customers",
+      "/orders/shipment-names?from=shipping#customers",
     )
     // 前提は①②③に数えない
     expect(screen.getByRole("link", { name: "③ 受注を起票する 済み" })).toBeInTheDocument()
@@ -219,7 +222,7 @@ describe("OrdersShippingPage の前提バナー（Issue #692 / #693）", () => {
     expect(banner).toHaveTextContent("弥生の商品1件がアプリに未登録です")
     expect(within(banner).getByRole("link", { name: "名寄せする" })).toHaveAttribute(
       "href",
-      "/orders/shipment-names#products",
+      "/orders/shipment-names?from=shipping#products",
     )
   })
 
@@ -235,5 +238,98 @@ describe("OrdersShippingPage の前提バナー（Issue #692 / #693）", () => {
       "href",
       "/orders/shipping/ambiguous",
     )
+  })
+})
+
+describe("OrdersShippingPage の前回からの件数の変化（Issue #694）", () => {
+  beforeEach(() => {
+    window.location.hash = ""
+    window.sessionStorage.clear()
+    mockRole("order_handler")
+    mockMasters()
+    mockProgress([])
+  })
+
+  function storedCounts(): Record<string, { value: number; atLeast: boolean }> | null {
+    const raw = window.sessionStorage.getItem(SHIPPING_COUNT_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  }
+
+  it("初めて開いたときは出さず、件数を保存する", async () => {
+    mockOrders([])
+    mockUnmatched([makeUnmatched({ status: "no_order" })])
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByRole("link", { name: "③ 受注を起票する 1商品" })).toBeInTheDocument()
+    await waitFor(() => expect(storedCounts()?.register).toEqual({ value: 1, atLeast: false }))
+    expect(screen.queryByRole("region", { name: "前回からの件数の変化" })).toBeNull()
+  })
+
+  it("名寄せ・起票の後に開き直すと、変わった件数だけを前回 → 今の順に出す", async () => {
+    // 前回: 得意先1件が未登録・③が2商品
+    mockOrders([])
+    mockUnmatched([
+      makeUnmatched({ status: "unmatched_customer", customer_code_key: "009" }),
+      makeUnmatched({ status: "no_order", product_code: "X1" }),
+      makeUnmatched({ status: "no_order", product_code: "X2" }),
+    ])
+    const first = render(<OrdersShippingPage />)
+    await screen.findByRole("link", { name: "③ 受注を起票する 2商品" })
+    await waitFor(() => expect(storedCounts()?.register.value).toBe(2))
+    first.unmount()
+
+    // 今: 得意先を名寄せし、③を1件起票した
+    mockUnmatched([makeUnmatched({ status: "no_order", product_code: "X2" })])
+    render(<OrdersShippingPage />)
+
+    const changes = await screen.findByRole("region", { name: "前回からの件数の変化" })
+    const items = within(changes)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent)
+    expect(items).toEqual(["未登録の得意先 1得意先 → 0得意先", "③ 受注を起票する 2商品 → 1商品"])
+    expect(document.body.textContent).not.toMatch(FORBIDDEN_UI_TEXT)
+    await waitFor(() => expect(storedCounts()?.register.value).toBe(1))
+  })
+
+  it("件数が変わっていなければ出さない", async () => {
+    mockOrders([])
+    mockUnmatched([makeUnmatched({ status: "no_order" })])
+    const first = render(<OrdersShippingPage />)
+    await screen.findByRole("link", { name: "③ 受注を起票する 1商品" })
+    await waitFor(() => expect(storedCounts()).not.toBeNull())
+    first.unmount()
+
+    render(<OrdersShippingPage />)
+    await screen.findByRole("link", { name: "③ 受注を起票する 1商品" })
+    expect(screen.queryByRole("region", { name: "前回からの件数の変化" })).toBeNull()
+  })
+
+  it("保存した値の形が合わなければ出さず、画面は崩さない", async () => {
+    window.sessionStorage.setItem(SHIPPING_COUNT_STORAGE_KEY, '{"register":{"value":"x"}}')
+    mockOrders([])
+    mockUnmatched([makeUnmatched({ status: "no_order" })])
+    render(<OrdersShippingPage />)
+
+    expect(await screen.findByRole("link", { name: "③ 受注を起票する 1商品" })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "前回からの件数の変化" })).toBeNull()
+    // 正しい形で保存し直す
+    await waitFor(() => expect(storedCounts()?.register).toEqual({ value: 1, atLeast: false }))
+  })
+
+  it("sessionStorage が使えなくても画面は崩さない", async () => {
+    // サイトデータをブロックしたブラウザでは sessionStorage を参照しただけで例外になる
+    const storage = vi.spyOn(window, "sessionStorage", "get").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError")
+    })
+    try {
+      mockOrders([])
+      mockUnmatched([makeUnmatched({ status: "no_order" })])
+      render(<OrdersShippingPage />)
+
+      expect(await screen.findByRole("link", { name: "③ 受注を起票する 1商品" })).toBeInTheDocument()
+      expect(screen.queryByRole("region", { name: "前回からの件数の変化" })).toBeNull()
+    } finally {
+      storage.mockRestore()
+    }
   })
 })

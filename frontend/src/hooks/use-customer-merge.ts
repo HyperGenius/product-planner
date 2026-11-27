@@ -1,6 +1,7 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { SHIPMENTS_QUERY_KEY } from "@/hooks/use-shipments"
 import { apiClient } from "@/lib/api-client"
 import { DAILY_REPORT_NAMES_QUERY_KEY } from "@/hooks/use-daily-report-names"
 import type {
@@ -70,6 +71,8 @@ export function useMergeCustomers() {
       })
       queryClient.invalidateQueries({ queryKey: ["orders"] })
       queryClient.invalidateQueries({ queryKey: DAILY_REPORT_NAMES_QUERY_KEY })
+      // 弥生の突合は受注の顧客・製品から求めるので、統合で付け替えたら取り直す（Issue #694）
+      queryClient.invalidateQueries({ queryKey: SHIPMENTS_QUERY_KEY })
     },
   })
 }

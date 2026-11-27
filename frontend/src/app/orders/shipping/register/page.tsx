@@ -10,7 +10,7 @@ import { SHIPPING_WORK_META } from "@/lib/shipping-worklist-utils"
  * URL: /orders/shipping/register
  *
  * 名寄せは済んでいるのに、対応する受注が無い弥生の明細（`no_order`）。行は (得意先, 商品コード) のまとまり。
- * 行の「受注を起票する」は受注作成画面を初期値なしで開く（初期値・戻り先は #694）
+ * 行の「受注を起票する」は、行の顧客・製品・数量・納期分を初期値にして受注作成を開き、作成したらこのページへ戻る（#694）
  */
 export default function ShippingRegisterPage() {
   const shipping = useOrdersShipping()
