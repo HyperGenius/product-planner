@@ -108,6 +108,24 @@ class CustomerOpenOrderResponse(BaseModel):
     allocatable: bool
 
 
+class OrderedProductCandidateResponse(BaseModel):
+    """顧客の受注のうち、日報の実績が1つも割り付いていない受注の製品 (Issue #704)。
+
+    受注の情報は代表の受注（希望納期の近い受注）のもの。`nearest_deadline` の DB 列は
+    `orders.deadline_date`（無ければ確定納期）。
+    """
+
+    product_id: int
+    name: str
+    code: str | None = None
+    # 実績の付いていない割り付けの候補（confirmed / in_progress）の受注の数
+    order_count: int
+    nearest_deadline: str | None = None
+    order_number: str | None = None
+    customer_order_no: str | None = None
+    quantity: int | None = None
+
+
 class IgnoredNameCreate(_RawTextSchema):
     """未照合キューの表記を「対象外」にする (Issue #489)。"""
 

@@ -131,12 +131,38 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
 - ヘルプ（`DailyReportHelp`）には、製品は顧客ごとに結び付けること・メール起票と共通なこと・承認前の受注の扱い・並び順（明細の多い順）・
   対象外の戻し方・対応付けの削除後の行き先・作り置きの実際の数の扱いを足した
 
+## ①の行の候補（Issue #704）
+
+①の製品の行は「この日報の製品は、受注済みの製品のどれか」を最初に選べるよう、その顧客の受注のうち**日報の実績がまだ1つも結び付いていない
+受注の製品**を行内に並べる。操作の並びは「受注の製品（行内）→ 他の製品から選択 → 対象外」（「製品を登録する」は #705）。
+
+- 取得は `GET /daily-reports/customer-ordered-products?customer_id=`（`useCustomerOrderedProducts()`）。**顧客単位で1リクエスト**にして
+  同じ顧客の行で共有し、クエリキー `["daily-report-ordered-products", customerId]` は `["daily-report-names"]` の外に置く（別名の登録で取り直さない。PR #498）
+- 対象は割り付けの候補（`confirmed` / `in_progress`）の受注のうち、`order_process_progress` の行がすべて `not_started`・良品数0のもの
+  （純粋関数 `daily_report_open_order_service.group_unstarted_ordered_products()`）
+  - **承認前（下書き・承認待ち）の受注の製品は含めない**: 結び付けても実績は未割当「承認前の受注のみ」に残るので、行内に並べると誤った結び付けを誘う。
+    承認前の受注しかない製品は「似ている製品」「すべての製品」から選べ、確認ダイアログで承認前であることを伝える（#646）
+  - 「実績が結び付いていない」は**実績が1つも無い受注だけ**（受注数量に届いていない受注は含めない）。本番の行で足りるかを見て広げる
+  - 進捗の行が無い受注（工程がすべて日報で追わない工程の製品＝#681、まだ再計算されていない受注）は実績が付くことが無い／分からないので含めない
+  - 割り付けの再計算は10〜15分ごとなので、結び付けた直後はその製品が他の行に残る。同じ製品に別の書き方を結び付けるのは正常なので妨げない
+- 並べ替えは画面側の純粋関数 `rankOrderedProducts()`（`lib/ordered-product-utils.ts`）。pg_trgm と同じ考え方の3文字の組の重なりで、
+  品名・品番の近いほうを使う。**近さで自動確定はしない**（#488）。全製品の類似検索の閾値で切ると近さの低い受注の製品が落ちるので、
+  顧客の受注の製品の集合の中で並べる。同じ近さなら API の並び（希望納期の近い順）
+- 行内は上位3件（`INLINE_CANDIDATE_COUNT`）。ボタンに受注の情報を添える（1注文なら注文番号・数量・希望納期、複数なら注文の数と直近の希望納期。
+  `orderedProductSummary()`）。4件目からは「他の製品から選択」の先頭のグループ「受注の製品」
+- 全製品の似ている製品（`GET /daily-reports/product-candidates`）と受注の有無（「受注あり n注文」「受注なし」）は**ピッカーの「似ている製品」にだけ**出し、
+  ピッカーを開いたときに取得する（行内は受注の製品だけなので、全行に同じバッジが付く形にしない）
+- 行の展開部の「この顧客の未出荷の受注」の表は行内の候補と重なるので外した（明細の表は残す）
+- 対象が0件の顧客の行には候補を出さない（「他の製品から選択」「対象外」は残る）
+
 ## テスト
 
 - 振り分け: `lib/daily-report-worklist-utils.test.ts`
 - 画面に出さない語: `DAILY_REPORT_FORBIDDEN_UI_TEXT`（`test-utils/daily-report.ts`。送品の消し込みの `FORBIDDEN_UI_TEXT` に
   「割り付け・未割当・類似度・キュー」を足したもの）を、ハブ・各ページ（`pages.test.tsx`）・表記の行・対象外・登録済みの対応付けのテストで検査する
 - ハブ・各ページ・旧 URL: `app/master/daily-reports/pages.test.tsx`
+- ①の行の候補（#704）: `lib/ordered-product-utils.test.ts`（並べ替え・受注の情報）・`components/daily-report-names/unmatched-name-list.test.tsx`、
+  Backend `__tests__/unit/services/test_daily_report_open_order_service.py`（`group_unstarted_ordered_products()`）
 - 前提のページのまとまり: `lib/daily-report-name-utils.test.ts`（`groupProductsByCustomerRaw()`）・
   `components/daily-report-names/customer-raw-groups.test.tsx`（顧客を選ぶと①へ移り、トーストで知らせる）
 - 見た目: `e2e/daily-report-hub.spec.ts`（API は `page.route()` の固定応答。スクリーンショットは `frontend/test-results/daily-report-hub/`）

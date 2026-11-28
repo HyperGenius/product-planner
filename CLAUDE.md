@@ -275,6 +275,12 @@ cd backend && ruff check . && mypy .
     対象外の取り消しはトーストの「元に戻す」で、対象外にした行は一覧から消えて unmount するので、`mutate` に渡したコールバックは呼ばれない
     （`mutateAsync()` の Promise で結果を出す）。`lib/daily-report-name-utils.ts` から `daily-report-worklist-utils` を import しない
     （`stock-utils` 経由で循環 import になる）
+  - **①の行の候補＝受注の製品（Issue #704）**: 行内に並べるのは顧客の確定済み・生産中の受注のうち `order_process_progress` がすべて未着手（良品数0）の受注の製品
+    （`GET /daily-reports/customer-ordered-products`、純粋関数 `group_unstarted_ordered_products()`）で、承認前の受注・進捗の行が無い受注は含めない。
+    取得は**顧客単位で1リクエスト**（`useCustomerOrderedProducts()`、キーは `["daily-report-names"]` の外）にし、日報の品名に近い順の並べ替えは画面側の
+    `rankOrderedProducts()`（`lib/ordered-product-utils.ts`）で行う（行ごとの問い合わせにしない）。全製品の似ている製品（pg_trgm）は `ProductPicker` を
+    **開いたときだけ**取得し、受注の有無もピッカーの中だけに出す。名寄せの行を描画するテストは MSW の既定ハンドラ
+    `GET /daily-reports/customer-ordered-products`・`GET /daily-reports/product-candidates` に依存する
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は

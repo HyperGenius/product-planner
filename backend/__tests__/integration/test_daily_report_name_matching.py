@@ -562,3 +562,83 @@ class TestProductOrderStatus:
             ("2026-12-20", "confirmed", True),
         ]
         assert res.json()[0]["product_name"] == "ピン φ6×20"
+
+
+@pytest.mark.integration
+class TestCustomerOrderedProducts:
+    """受注済みで日報の実績が結び付いていない製品 (Issue #704)。
+
+    `order_process_progress` は主キーが (order_id, process_routing_id) で `id` 列が無い。
+    実際のクエリ（`.in_("order_id", ...)` と主キーでの並べ替え）を実 DB で確かめる。
+    """
+
+    def test_lists_products_of_orders_without_actuals(
+        self, admin_db, auth_token, tenants
+    ):
+        own = tenants["own"]
+        routing_id = _rows(
+            admin_db.table("process_routings")
+            .select("id")
+            .eq("product_id", own["product_id"])
+            .execute()
+        )[0]["id"]
+
+        def order(status, deadline, number):
+            return _rows(
+                admin_db.table("orders")
+                .insert(
+                    {
+                        "tenant_id": own["id"],
+                        "customer_id": own["customer_id"],
+                        "product_id": own["product_id"],
+                        "quantity": 10,
+                        "status": status,
+                        "deadline_date": deadline,
+                        "order_number": f"{number}-{uuid.uuid4().hex[:8]}",
+                    }
+                )
+                .execute()
+            )[0]
+
+        started = order("confirmed", "2026-12-01", "A")
+        unstarted = order("in_progress", "2026-12-10", "B")
+        order("draft", "2026-11-20", "C")
+
+        def progress(order_id, good_qty, status):
+            admin_db.table("order_process_progress").insert(
+                {
+                    "tenant_id": own["id"],
+                    "order_id": order_id,
+                    "process_routing_id": routing_id,
+                    "good_qty": good_qty,
+                    "status": status,
+                    "completed_by": None,
+                    "computed_at": "2026-11-28T00:00:00+00:00",
+                }
+            ).execute()
+
+        progress(started["id"], 5, "in_progress")
+        progress(unstarted["id"], 0, "not_started")
+
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {auth_token}", "x-tenant-id": own["id"]}
+        res = client.get(
+            "/daily-reports/customer-ordered-products",
+            params={"customer_id": own["customer_id"]},
+            headers=headers,
+        )
+
+        assert res.status_code == 200, res.text
+        # 実績のある受注・承認前の受注は数えない
+        assert res.json() == [
+            {
+                "product_id": own["product_id"],
+                "name": "ピン φ6×20",
+                "code": None,
+                "order_count": 1,
+                "nearest_deadline": "2026-12-10",
+                "order_number": unstarted["order_number"],
+                "customer_order_no": None,
+                "quantity": 10,
+            }
+        ]

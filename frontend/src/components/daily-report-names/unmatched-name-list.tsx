@@ -3,12 +3,11 @@
 import * as React from "react"
 import { ChevronDown, ChevronRight, EyeOff } from "lucide-react"
 import { toast } from "sonner"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   useCreateNameAlias,
+  useCustomerOrderedProducts,
   useIgnoreName,
-  useProductCandidates,
   useUnignoreName,
 } from "@/hooks/use-daily-report-names"
 import {
@@ -17,18 +16,14 @@ import {
   unmatchedNameKey,
 } from "@/lib/daily-report-name-utils"
 import { DAILY_REPORT_ALIASES_LABEL } from "@/lib/daily-report-worklist-utils"
-import {
-  type NameKind,
-  type ProductCandidate,
-  type UnmatchedName,
-} from "@/types/daily-report-names"
-import { CustomerOpenOrdersPanel } from "./customer-open-orders"
+import { orderedProductSummary, rankOrderedProducts } from "@/lib/ordered-product-utils"
+import { type NameKind, type UnmatchedName } from "@/types/daily-report-names"
 import { ConfirmMappingDialog, type PendingNameAction } from "./confirm-mapping-dialog"
 import { KIND_LIST_CLASS, KIND_PANEL_CLASS, kindColorStyle } from "./kind-tabs"
 import { NameEntriesTable } from "./name-entries-table"
 import { CustomerPicker, EquipmentPicker, ProcessPicker, ProductPicker } from "./target-pickers"
 
-/** 行内に並べる類似候補の数。残りは「他の製品から選択」に出す */
+/** 行内に並べる受注の製品の数。残りは「他の製品から選択」の「受注の製品」に出す (Issue #704) */
 const INLINE_CANDIDATE_COUNT = 3
 
 /**
@@ -274,9 +269,6 @@ export function UnmatchedNameRow({
       {expanded && (
         <div className="rounded-md border bg-muted/30">
           <NameEntriesTable item={item} />
-          {item.kind === "product" && item.customer_id !== null && (
-            <CustomerOpenOrdersPanel customerId={item.customer_id} />
-          )}
         </div>
       )}
     </li>
@@ -284,8 +276,9 @@ export function UnmatchedNameRow({
 }
 
 /**
- * 製品: 似ている製品（pg_trgm）を似ている順に行内に並べ、選ぶだけで対応付けられるようにする。
- * 類似度の数値は出さない（品名を見比べて選ぶ。Issue #702）
+ * 製品: その顧客の受注のうち、日報の実績がまだ結び付いていない受注の製品を、日報の品名に近い順に
+ * 行内に並べ、選ぶだけで対応付けられるようにする (Issue #704)。近さの数値は出さず、自動確定もしない。
+ * 全製品の似ている製品は「他の製品から選択」の中だけに出す（行内は受注の製品だけ）
  */
 function ProductMapping({
   item,
@@ -319,52 +312,41 @@ function ProductCandidates({
   disabled: boolean
   onSelect: (productId: number, customerId: number, label: string) => void
 }) {
-  const { data: candidates } = useProductCandidates(item.raw_text, customerId)
+  const { data: orderedProducts } = useCustomerOrderedProducts(customerId)
+  const ranked = React.useMemo(
+    () => rankOrderedProducts(item.raw_text, orderedProducts ?? []),
+    [item.raw_text, orderedProducts],
+  )
   return (
     <>
-      {(candidates ?? []).slice(0, INLINE_CANDIDATE_COUNT).map((candidate) => (
-        <Button
-          key={candidate.product_id}
-          variant="secondary"
-          size="sm"
-          disabled={disabled}
-          title={candidateTitle(candidate)}
-          aria-label={`「${item.raw_text}」を「${candidate.name}」に対応付ける`}
-          onClick={() => onSelect(candidate.product_id, customerId, candidate.name)}
-        >
-          <span className="max-w-[10rem] truncate">{candidate.name}</span>
-          <OrderBadge candidate={candidate} />
-        </Button>
-      ))}
+      {ranked.slice(0, INLINE_CANDIDATE_COUNT).map((product) => {
+        const summary = orderedProductSummary(product)
+        return (
+          <Button
+            key={product.product_id}
+            variant="secondary"
+            size="sm"
+            disabled={disabled}
+            className="h-auto flex-col items-start gap-0 py-1 text-left"
+            aria-label={`「${item.raw_text}」を「${product.name}」に対応付ける`}
+            onClick={() => onSelect(product.product_id, customerId, product.name)}
+          >
+            <span className="max-w-[14rem] truncate">{product.name}</span>
+            {summary && (
+              <span className="max-w-[14rem] truncate text-xs font-normal text-muted-foreground">
+                {summary}
+              </span>
+            )}
+          </Button>
+        )
+      })}
       <ProductPicker
         ariaLabel={`「${item.raw_text}」の製品を選択`}
         disabled={disabled}
-        candidates={candidates}
+        orderedProducts={ranked.slice(INLINE_CANDIDATE_COUNT)}
+        similarTo={{ rawText: item.raw_text, customerId }}
         onSelect={(id, label) => onSelect(id, customerId, label)}
       />
     </>
-  )
-}
-
-function candidateTitle(candidate: ProductCandidate): string | undefined {
-  return candidate.nearest_deadline
-    ? `直近の希望納期 ${formatWorkDate(candidate.nearest_deadline)}`
-    : undefined
-}
-
-/**
- * 似ている製品に、その顧客の確定済み・生産中の受注の有無を出す (Issue #646)。受注なしでも選べる
- * （確認ダイアログで受注が無いことを伝える）。
- */
-function OrderBadge({ candidate }: { candidate: ProductCandidate }) {
-  if (candidate.open_order_count === undefined) return null
-  return candidate.open_order_count > 0 ? (
-    <Badge variant="secondary" className="bg-emerald-100 text-xs font-normal text-emerald-800">
-      受注あり {candidate.open_order_count.toLocaleString()}注文
-    </Badge>
-  ) : (
-    <Badge variant="outline" className="text-xs font-normal text-amber-700">
-      受注なし
-    </Badge>
   )
 }

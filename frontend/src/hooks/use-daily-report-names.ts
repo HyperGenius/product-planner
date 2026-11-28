@@ -10,6 +10,7 @@ import type {
   NameEntry,
   CustomerOpenOrder,
   NameKind,
+  OrderedProductCandidate,
   ProductCandidate,
   UnmatchedName,
 } from "@/types/daily-report-names"
@@ -71,10 +72,10 @@ export const PRODUCT_CANDIDATES_QUERY_KEY = ["daily-report-product-candidates"]
 const PRODUCT_CANDIDATES_STALE_TIME_MS = 5 * 60 * 1000
 
 /**
- * 日報の商品名に似た製品の候補（pg_trgm）。提示専用。
- * 未照合の製品の行ごとに呼ばれる（候補を行内に出して押すだけで対応付けるため）。
+ * 日報の商品名に似た製品の候補（pg_trgm、全製品）。提示専用。
+ * 製品のピッカーの「似ている製品」に出す。行ごとの検索になるので、ピッカーを開いたときだけ取得する（Issue #704）
  */
-export function useProductCandidates(rawText: string, customerId?: number) {
+export function useProductCandidates(rawText: string, customerId?: number, enabled = true) {
   return useQuery<ProductCandidate[]>({
     queryKey: [...PRODUCT_CANDIDATES_QUERY_KEY, rawText, customerId ?? null],
     queryFn: () => {
@@ -83,12 +84,13 @@ export function useProductCandidates(rawText: string, customerId?: number) {
       if (customerId !== undefined) params.set("customer_id", String(customerId))
       return apiClient<ProductCandidate[]>(`${BASE}/product-candidates?${params}`)
     },
+    enabled,
     staleTime: PRODUCT_CANDIDATES_STALE_TIME_MS,
   })
 }
 
 /**
- * 顧客の未出荷の受注 (Issue #646)。確認ダイアログと行の展開部で共有する（顧客単位で1リクエスト、
+ * 顧客の未出荷の受注 (Issue #646)。製品の確認ダイアログで使う（顧客単位で1リクエスト、
  * 同じ顧客の行はキャッシュを共有）。別名の登録では変わらないので `DAILY_REPORT_NAMES_QUERY_KEY` の
  * 配下に置かない（PR #498）。受注の承認などで変わるため短めに古くする。
  */
@@ -102,6 +104,26 @@ export function useCustomerOpenOrders(customerId: number | null, enabled = true)
         `${BASE}/customer-open-orders?${new URLSearchParams({ customer_id: String(customerId) })}`,
       ),
     enabled: enabled && customerId !== null,
+    staleTime: 60 * 1000,
+  })
+}
+
+/**
+ * 顧客の受注のうち、日報の実績がまだ結び付いていない受注の製品 (Issue #704)。名寄せの製品の行で最初に選ぶ候補。
+ * 顧客単位で1リクエストにして同じ顧客の行で共有し、日報の品名に近い順の並べ替えは行ごとに画面側で行う
+ * （`rankOrderedProducts()`）。別名の登録では変わらない（実績は次の集計で付く）ので
+ * `DAILY_REPORT_NAMES_QUERY_KEY` の配下に置かない（PR #498）
+ */
+export const CUSTOMER_ORDERED_PRODUCTS_QUERY_KEY = ["daily-report-ordered-products"]
+
+export function useCustomerOrderedProducts(customerId: number | null) {
+  return useQuery<OrderedProductCandidate[]>({
+    queryKey: [...CUSTOMER_ORDERED_PRODUCTS_QUERY_KEY, customerId],
+    queryFn: () =>
+      apiClient<OrderedProductCandidate[]>(
+        `${BASE}/customer-ordered-products?${new URLSearchParams({ customer_id: String(customerId) })}`,
+      ),
+    enabled: customerId !== null,
     staleTime: 60 * 1000,
   })
 }

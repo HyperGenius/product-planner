@@ -59,6 +59,23 @@ export interface ProductCandidate {
   nearest_deadline?: string
 }
 
+/**
+ * 顧客の受注のうち、日報の実績がまだ1つも結び付いていない受注の製品 (Issue #704)。
+ * Backend `OrderedProductCandidateResponse` と揃える。受注の情報は代表の受注（希望納期の近い受注）のもの
+ */
+export interface OrderedProductCandidate {
+  product_id: number
+  name: string
+  code: string | null
+  /** 実績の付いていない確定済み・生産中の受注の数 */
+  order_count: number
+  /** 日付のみ ("YYYY-MM-DD")。受注の希望納期（無ければ確定納期）の最小 */
+  nearest_deadline: string | null
+  order_number: string | null
+  customer_order_no: string | null
+  quantity: number | null
+}
+
 /** 顧客の未出荷の受注（名寄せ画面の表示専用、Issue #646） */
 export interface CustomerOpenOrder {
   order_id: number
