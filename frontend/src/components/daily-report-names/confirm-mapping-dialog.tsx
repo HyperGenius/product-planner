@@ -22,8 +22,6 @@ export type PendingNameAction =
       /** 製品のときだけ。別名は顧客単位なので、どの顧客先の表記かを見せる */
       customerRaw?: string | null
       targetLabel: string
-      /** 類似候補から選んだときだけ（0〜1） */
-      score?: number
       /** 製品のときだけ。選んだ製品の、その顧客の受注状況を見せる (Issue #646) */
       productRef?: { customerId: number; productId: number }
     }
@@ -38,7 +36,8 @@ interface ConfirmMappingDialogProps {
 }
 
 /**
- * 未照合キューの対応付け・対象外の確認ダイアログ (Issue #645)。
+ * 日報の表記の対応付け・対象外の確認ダイアログ (Issue #645)。
+ * 反映のタイミングはヘルプ、対象外の戻し方は登録後のトーストで伝える（Issue #702）。
  * 確定ボタンは `AlertDialogAction` ではなく通常の `Button`（クリックで勝手に閉じず、
  * ミューテーションの完了後に呼び出し側が閉じる。失敗時は開いたまま）。
  */
@@ -75,11 +74,6 @@ export function ConfirmMappingDialog({
                       <>
                         <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                         <span className="break-all font-medium">{pending.targetLabel}</span>
-                        {pending.score !== undefined && (
-                          <span className="text-xs text-muted-foreground">
-                            類似度 {Math.round(pending.score * 100)}%
-                          </span>
-                        )}
                       </>
                     ) : (
                       <span className="text-xs text-muted-foreground">→ 対象外</span>
@@ -93,11 +87,6 @@ export function ConfirmMappingDialog({
                   productId={pending.productRef.productId}
                 />
               )}
-              <p>
-                {isMap
-                  ? "過去・今後の日報にも自動で反映されます（集計は10〜15分ごと）。"
-                  : "未照合の一覧に出なくなります。元に戻すには「対象外」タブから解除します。"}
-              </p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

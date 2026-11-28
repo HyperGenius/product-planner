@@ -3,11 +3,15 @@
 import { PageHelp, PageHelpSection } from "@/components/page-help"
 import { DEFAULT_PERIOD_MONTHS } from "@/lib/daily-report-coverage-utils"
 import { STOCK_LABEL } from "@/lib/daily-report-stock-utils"
-import { DAILY_REPORT_HUB_TITLE } from "@/lib/daily-report-worklist-utils"
+import {
+  DAILY_REPORT_ALIASES_LABEL,
+  DAILY_REPORT_HUB_TITLE,
+} from "@/lib/daily-report-worklist-utils"
 
 /**
- * 日報の実績のヘルプ（Issue #707）。判定条件・データの出どころ・状態の移り変わり・設計上の原則は画面に書かず、
- * ここにまとめる（docs/ui-writing-guidelines.md の2章・7章）。ハブと各ページで共有する
+ * 日報の実績のヘルプ（Issue #707 / #702）。判定条件・データの出どころ・状態の移り変わり・設計上の原則は画面に書かず、
+ * ここにまとめる（docs/ui-writing-guidelines.md の2章・7章）。ハブと各ページで共有する。
+ * 各ページの行・ダイアログから外した説明（結び付けの単位・並び順・承認前の受注・対象外の戻し方）もここに置く
  */
 export function DailyReportHelp() {
   return (
@@ -31,6 +35,19 @@ export function DailyReportHelp() {
           顧客先が決まっている日報の製品の表記のうち、製品マスタに結び付いていないものです。顧客先と商品名の組ごとに1行です。
           1回結び付けると、過去・今後の日報にも反映されます。
         </p>
+        <p>
+          製品は顧客ごとに結び付けます。同じ商品名でも顧客先が違えば、それぞれ結び付けます。顧客先が未登録の製品は、
+          先に顧客先を顧客に結び付けてください。製品の結び付けはメール起票と共通で、変更・削除はメール起票の読み取りにも効きます。
+        </p>
+        <p>
+          製品を選ぶと、その顧客のその製品の確定済み・生産中の受注を出します。承認前（下書き・承認待ち）の受注には実績を結び付けず、
+          承認後の集計で結び付けます。似ている製品は品名の似ている順に並べています。
+        </p>
+      </PageHelpSection>
+      <PageHelpSection title="並び順">
+        <p>
+          日報の表記は、その表記が書かれた日報の明細の多い順に並べています（同じ数なら最後に書かれた日が新しい順）。
+        </p>
       </PageHelpSection>
       <PageHelpSection title="② 製品の工程を日報に合わせる">
         <p>
@@ -42,7 +59,7 @@ export function DailyReportHelp() {
       </PageHelpSection>
       <PageHelpSection title="③ 受注の無い製造を確かめる">
         <p>
-          製品・工程まで結び付いたのに、受注に割り付けられなかった実績です。製品・工程名・理由ごとに1行で、
+          製品・工程まで結び付いたのに、受注に結び付かなかった実績です。製品・工程名・理由ごとに1行で、
           現場に聞くことを添えています。
         </p>
       </PageHelpSection>
@@ -54,19 +71,31 @@ export function DailyReportHelp() {
       </PageHelpSection>
       <PageHelpSection title={`${STOCK_LABEL}（参考）`}>
         <p>
-          受注に割り付いていない、作っておいた品物の推定数です。日報からの推定で、正確な数は目指していません。
+          受注に結び付いていない、作っておいた品物の推定数です。日報からの推定で、正確な数は目指していません。
           工程ごとに、次の工程で使われたら減り、最後の工程なら送品で減るとみなしています。現場の実態と違うところは「違う」で直してください。
+        </p>
+        <p>
+          「違う」で実際の数を入れると、数えた日の作業を終えた時点の数として、それ以降の日報で増減させます。
         </p>
       </PageHelpSection>
       <PageHelpSection title="結び付いた割合（参考）">
         <p>
-          日報の良品数のうち、受注の工程に割り付けられた数の割合です。1行が2つの工程にまたがる表記（「カシメ、仕上げ加工」など）は工程ごとに数えます。
+          日報の良品数のうち、受注の工程に結び付いた数の割合です。1行が2つの工程にまたがる表記（「カシメ、仕上げ加工」など）は工程ごとに数えます。
         </p>
       </PageHelpSection>
       <PageHelpSection title="反映のタイミング">
         <p>
           日報の取り込み後、10〜15分ごとに集計します。結び付け・工程の変更・{STOCK_LABEL}の指摘は、次の集計で②③と{STOCK_LABEL}に反映されます。
           ①・前提は結び付けたときにすぐ変わります。
+        </p>
+      </PageHelpSection>
+      <PageHelpSection title="対象外・登録済みの対応付け">
+        <p>
+          結び付ける必要のない表記（試作・社内の作業など）は「対象外」にすると、前提・①②に出なくなります。
+          戻すには、対象外にした直後のお知らせの「元に戻す」か、「{DAILY_REPORT_ALIASES_LABEL}」の「対象外」タブの「戻す」を押します。
+        </p>
+        <p>
+          登録済みの対応付けを削除すると、マスタに結び付かなくなった表記は前提・①②に戻ります。
         </p>
       </PageHelpSection>
       <PageHelpSection title="日報の設備">

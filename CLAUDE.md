@@ -265,6 +265,12 @@ cd backend && ruff check . && mypy .
     設備は割り付けに使わないのでハブに数えない（#709 まで登録済みの対応付けのページのタブ）。件数の型・表示は送品の消し込みと共通の
     `lib/work-count.ts`。ページの外枠は `DailyReportPageLayout`、説明は `DailyReportHelp`。マスタのタブはハブ配下のページでも選択中にする
     （`app/master/layout.tsx`）。詳細は [docs/features/daily-report-hub.md](docs/features/daily-report-hub.md)
+  - **日報の実績の文言（Issue #702）**: 画面に出さない語は `DAILY_REPORT_FORBIDDEN_UI_TEXT`（`test-utils/daily-report.ts`。送品の
+    `FORBIDDEN_UI_TEXT` ＋「割り付け・未割当・類似度・キュー」）で、ページ・部品のテストで本文を検査する。反映のタイミング・結び付けの単位・
+    並び順・対象外の戻し方は `DailyReportHelp` に置き、行・ダイアログに戻さない。件数の単位は表記の行が「明細」、受注が「注文」。
+    対象外の取り消しはトーストの「元に戻す」で、対象外にした行は一覧から消えて unmount するので、`mutate` に渡したコールバックは呼ばれない
+    （`mutateAsync()` の Promise で結果を出す）。`lib/daily-report-name-utils.ts` から `daily-report-worklist-utils` を import しない
+    （`stock-utils` 経由で循環 import になる）
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は

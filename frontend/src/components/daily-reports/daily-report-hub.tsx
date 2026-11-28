@@ -52,7 +52,7 @@ const STEPS: readonly QueueStep[] = [
     page: "unordered",
     no: "③",
     digit: 3,
-    description: "受注に割り付けられなかった日報の実績",
+    description: "受注に結び付かなかった日報の実績",
   },
 ]
 

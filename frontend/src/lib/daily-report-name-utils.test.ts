@@ -43,7 +43,7 @@ describe("nameMutationErrorMessage", () => {
         new ApiError(409, { detail: { error: "duplicate_alias", message: "x" } }),
         fallback,
       ),
-    ).toContain("既に登録されています")
+    ).toContain("既に対応付けてあります")
     expect(
       nameMutationErrorMessage(
         new ApiError(409, { detail: { error: "duplicate_ignored_name", message: "x" } }),

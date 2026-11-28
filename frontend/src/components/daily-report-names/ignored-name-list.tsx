@@ -8,7 +8,7 @@ import { useIgnoredNames, useUnignoreName } from "@/hooks/use-daily-report-names
 import { nameMutationErrorMessage } from "@/lib/daily-report-name-utils"
 import { NAME_KIND_LABELS } from "@/types/daily-report-names"
 
-/** 「対象外」にした表記の一覧。戻すと（照合できていなければ）未照合キューに再び出る (Issue #489) */
+/** 「対象外」にした表記の一覧。戻すと（マスタに結び付いていなければ）日報の実績の各ページに再び出る (Issue #489) */
 export function IgnoredNameList({ canEdit }: { canEdit: boolean }) {
   const { data: ignored, isLoading, isError } = useIgnoredNames()
   const unignore = useUnignoreName()
@@ -42,7 +42,7 @@ export function IgnoredNameList({ canEdit }: { canEdit: boolean }) {
               variant="ghost"
               size="sm"
               disabled={unignore.isPending}
-              aria-label={`「${item.raw_text}」を未照合キューに戻す`}
+              aria-label={`「${item.raw_text}」を対象外から戻す`}
               onClick={() =>
                 unignore.mutate(item.id, {
                   onSuccess: () => toast.success(`「${item.raw_text}」を対象外から戻しました`),

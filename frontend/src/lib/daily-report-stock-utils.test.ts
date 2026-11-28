@@ -164,7 +164,7 @@ describe("daily-report-stock-utils", () => {
       [{ processName: " " }, "工程を選んでください"],
       [{ baselineQty: "-1" }, "数は0以上の整数で入力してください"],
       [{ baselineQty: "1.5" }, "数は0以上の整数で入力してください"],
-      [{ baselineQty: "3", baselineDate: "" }, "いつの時点の数かを入力してください"],
+      [{ baselineQty: "3", baselineDate: "" }, "数えた日を入力してください"],
     ])("入力の誤り %o", (patch, error) => {
       expect(toStockFeedbackInput({ ...FORM, ...patch })).toEqual({ error })
     })

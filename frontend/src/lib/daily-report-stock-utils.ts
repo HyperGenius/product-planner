@@ -116,7 +116,7 @@ export function toStockFeedbackInput(
     }
   }
   if (!/^\d+$/.test(qtyText)) return { error: "数は0以上の整数で入力してください" }
-  if (!form.baselineDate) return { error: "いつの時点の数かを入力してください" }
+  if (!form.baselineDate) return { error: "数えた日を入力してください" }
   return {
     input: {
       kind: "stock_process",

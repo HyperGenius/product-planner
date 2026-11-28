@@ -30,50 +30,30 @@ export const KIND_LIST_CLASS = "rounded-lg border border-t-4 border-t-[var(--kin
 
 /**
  * 種別（設備・工程・顧客・製品）を選ぶカード型のタブ。
- * 外側の作業モードのタブ（下線）と見分けがつくよう、色付きの上辺と件数を持たせる。
+ * 外側の作業モードのタブ（下線）と見分けがつくよう、色付きの上辺を持たせる。
+ * 件数は出さない（作業の件数は日報の実績のハブに単位付きで出す。Issue #707 / #702）。
  * `Tabs` の中に置く（`role="tab"` は維持）。
  */
-export function KindTabsList({
-  counts,
-  className,
-}: {
-  /** 種別ごとの件数。省略すると件数を出さない */
-  counts?: Record<NameKind, number>
-  className?: string
-}) {
+export function KindTabsList({ className }: { className?: string }) {
   return (
     <TabsList
       variant="line"
       className={cn("grid h-auto w-full grid-cols-2 gap-2 p-0 sm:grid-cols-4", className)}
     >
-      {NAME_KINDS.map((k) => {
-        const count = counts?.[k]
-        return (
-          <TabsTrigger
-            key={k}
-            value={k}
-            style={kindColorStyle(k)}
-            className={cn(
-              "h-auto flex-none justify-between rounded-lg border border-t-[5px] border-border border-t-[var(--kind-color)] bg-card px-3 py-1.5 hover:bg-accent",
-              "data-[state=active]:border-border data-[state=active]:border-t-[var(--kind-color)] data-[state=active]:bg-accent data-[state=active]:ring-2 data-[state=active]:ring-[var(--kind-color)]",
-              "after:hidden",
-              count === 0 && "text-muted-foreground",
-            )}
-          >
-            <span className="text-xs">{NAME_KIND_LABELS[k]}</span>
-            {count !== undefined && (
-              <span
-                className={cn(
-                  "text-xl tabular-nums",
-                  count === 0 ? "font-medium" : "font-bold text-foreground",
-                )}
-              >
-                {count.toLocaleString()}
-              </span>
-            )}
-          </TabsTrigger>
-        )
-      })}
+      {NAME_KINDS.map((k) => (
+        <TabsTrigger
+          key={k}
+          value={k}
+          style={kindColorStyle(k)}
+          className={cn(
+            "h-auto flex-none justify-between rounded-lg border border-t-[5px] border-border border-t-[var(--kind-color)] bg-card px-3 py-1.5 hover:bg-accent",
+            "data-[state=active]:border-border data-[state=active]:border-t-[var(--kind-color)] data-[state=active]:bg-accent data-[state=active]:ring-2 data-[state=active]:ring-[var(--kind-color)]",
+            "after:hidden",
+          )}
+        >
+          <span className="text-xs">{NAME_KIND_LABELS[k]}</span>
+        </TabsTrigger>
+      ))}
     </TabsList>
   )
 }

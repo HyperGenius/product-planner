@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { http, HttpResponse } from "msw"
+import { toast } from "sonner"
 import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import { useUnmatchedNames } from "@/hooks/use-daily-report-names"
 import { NAME_KIND_LABELS, type NameKind, type UnmatchedName } from "@/types/daily-report-names"
+import { DAILY_REPORT_FORBIDDEN_UI_TEXT } from "@/test-utils/daily-report"
 import { UnmatchedNameList } from "./unmatched-name-list"
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 /**
  * 日報の表記の一覧 (Issue #489 / #707)。表記はダミー値（実データを含めない）。
@@ -20,7 +24,7 @@ function Queue({ kind = "equipment", canEdit = false }: { kind?: NameKind; canEd
       items={data.filter((i) => i.kind === kind)}
       kind={kind}
       canEdit={canEdit}
-      emptyMessage={`未照合の${NAME_KIND_LABELS[kind]}はありません`}
+      emptyMessage={`結び付ける${NAME_KIND_LABELS[kind]}はありません`}
     />
   )
 }
@@ -37,10 +41,14 @@ function unmatched(overrides: Partial<UnmatchedName>): UnmatchedName {
   }
 }
 
-/** 未照合一覧を返し、別名・対象外が POST されたらその表記の行を消す（照合済み・対象外になった想定） */
+/** 対象外の取り消し（DELETE）を受けた ID。`mockQueue()` のたびに空にする */
+let ignoredDeletes: string[] = []
+
+/** 表記の一覧を返し、別名・対象外が POST されたらその表記の行を消す（結び付いた・対象外になった想定） */
 function mockQueue(initial: UnmatchedName[]) {
   let items = initial
   const posts: { path: string; body: unknown }[] = []
+  ignoredDeletes = []
   server.use(
     http.get(`${API_BASE}/daily-reports/unmatched-names`, () => HttpResponse.json(items)),
     http.get(`${API_BASE}/equipments`, () =>
@@ -56,7 +64,11 @@ function mockQueue(initial: UnmatchedName[]) {
       const body = (await request.json()) as { raw_text: string }
       posts.push({ path: new URL(request.url).pathname, body })
       items = items.filter((i) => i.raw_text !== body.raw_text)
-      return HttpResponse.json({}, { status: 201 })
+      return HttpResponse.json({ id: "ignored-1", ...body }, { status: 201 })
+    }),
+    http.delete(`${API_BASE}/daily-reports/ignored-names/:id`, ({ params }) => {
+      ignoredDeletes.push(String(params.id))
+      return HttpResponse.json({})
     }),
   )
   return posts
@@ -76,7 +88,12 @@ async function confirmDialog(button: string) {
 }
 
 describe("UnmatchedNameList", () => {
-  it("出現件数順に並べる", async () => {
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear()
+    vi.mocked(toast.error).mockClear()
+  })
+
+  it("明細の多い順に並べ、件数に単位を付ける", async () => {
     mockQueue([
       unmatched({ raw_text: "組立機B", entry_count: 30 }),
       unmatched({ raw_text: "試作機", entry_count: 2 }),
@@ -90,7 +107,7 @@ describe("UnmatchedNameList", () => {
       .getAllByRole("button", { expanded: false })
       .map((b) => b.textContent)
     expect(names).toEqual(["組立機B", "試作機"])
-    expect(screen.getByText("30 件")).toBeInTheDocument()
+    expect(screen.getByText("30明細")).toBeInTheDocument()
   })
 
   it("表記をクリックすると、その表記が使われている日報の行を表示する", async () => {
@@ -123,7 +140,7 @@ describe("UnmatchedNameList", () => {
     expect(within(table).getByText("2026/09/02")).toBeInTheDocument()
     expect(within(table).getByText("ピンA")).toBeInTheDocument()
     expect(within(table).getAllByText("1,200")).toHaveLength(2)
-    expect(screen.getByText(/新しい順に 1 件を表示しています（全 2 件）/)).toBeInTheDocument()
+    expect(screen.getByText("全2明細のうち新しい1明細")).toBeInTheDocument()
   })
 
   it("設備を選ぶと別名を登録し、キューから消える", async () => {
@@ -136,7 +153,8 @@ describe("UnmatchedNameList", () => {
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText("組立機B")).toBeInTheDocument()
     expect(within(dialog).getByText("組立")).toBeInTheDocument()
-    expect(within(dialog).getByText(/過去・今後の日報にも自動で反映されます/)).toBeInTheDocument()
+    // 反映のタイミングはヘルプに置き、ダイアログには書かない（Issue #702）
+    expect(dialog.textContent).not.toMatch(/反映|集計/)
     await confirmDialog("登録する")
 
     await waitFor(() =>
@@ -147,7 +165,8 @@ describe("UnmatchedNameList", () => {
         },
       ]),
     )
-    expect(await screen.findByText("未照合の設備はありません")).toBeInTheDocument()
+    expect(await screen.findByText("結び付ける設備はありません")).toBeInTheDocument()
+    expect(toast.success).toHaveBeenCalledWith("「組立機B」を対応付けました")
   })
 
   it("工程は複数選択して登録できる（1:N）", async () => {
@@ -169,7 +188,7 @@ describe("UnmatchedNameList", () => {
     )
   })
 
-  it("製品は類似候補を選ぶだけで、顧客単位の別名として登録できる", async () => {
+  it("製品は似ている製品を選ぶだけで、顧客単位の別名として登録できる", async () => {
     const posts = mockQueue([
       unmatched({
         kind: "product",
@@ -198,8 +217,9 @@ describe("UnmatchedNameList", () => {
     expect(posts).toEqual([])
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText("ピン φ6×20")).toBeInTheDocument()
-    expect(within(dialog).getByText("類似度 82%")).toBeInTheDocument()
     expect(within(dialog).getByText(/顧客先: 顧客A/)).toBeInTheDocument()
+    // 類似度の数値は判断材料にならないので出さない（Issue #702）
+    expect(document.body.textContent).not.toMatch(/類似度/)
     await confirmDialog("登録する")
     await waitFor(() =>
       expect(posts[0]).toEqual({
@@ -263,7 +283,7 @@ describe("UnmatchedNameList", () => {
     expect(candidateRequested).toBe(false)
   })
 
-  it("「対象外」にした表記はキューから消える", async () => {
+  it("「対象外」にした表記は一覧から消え、お知らせから元に戻せる", async () => {
     const posts = mockQueue([
       unmatched({ kind: "product", raw_text: "試作品", customer_raw: null, customer_id: null }),
     ])
@@ -271,7 +291,8 @@ describe("UnmatchedNameList", () => {
     render(<Queue kind="product" canEdit />)
     await userEvent.click(await screen.findByRole("button", { name: "「試作品」を対象外にする" }))
     expect(posts).toEqual([])
-    expect(await screen.findByText(/元に戻すには「対象外」タブから解除します/)).toBeInTheDocument()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog.textContent).not.toMatch(/元に戻す|解除/)
     await confirmDialog("対象外にする")
 
     await waitFor(() =>
@@ -280,7 +301,19 @@ describe("UnmatchedNameList", () => {
         body: { kind: "product", raw_text: "試作品", customer_raw: null },
       }),
     )
-    expect(await screen.findByText("未照合の製品はありません")).toBeInTheDocument()
+    expect(await screen.findByText("結び付ける製品はありません")).toBeInTheDocument()
+
+    // 戻し方は対象外にしたときのお知らせで伝え、「元に戻す」で取り消せる（Issue #702）
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    const [message, options] = vi.mocked(toast.success).mock.calls[0]
+    expect(message).toBe("「試作品」を対象外にしました")
+    const action = (options as { action: { label: string; onClick: () => void } }).action
+    expect(action.label).toBe("元に戻す")
+    action.onClick()
+    await waitFor(() => expect(ignoredDeletes).toEqual(["ignored-1"]))
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenLastCalledWith("「試作品」を対象外から戻しました"),
+    )
   })
 
   it("キャンセルすると何も登録せず、行も残る", async () => {
@@ -382,7 +415,7 @@ describe("UnmatchedNameList", () => {
       return () => candidateCustomerId
     }
 
-    it("候補に受注の有無を出し、受注なしでも選べる", async () => {
+    it("似ている製品に受注の有無を出し、受注なしでも選べる", async () => {
       mockQueue([PRODUCT_ROW])
       const customerId = mockOrderApis()
 
@@ -395,13 +428,13 @@ describe("UnmatchedNameList", () => {
         name: "「ピン6x20」を「ピン φ6×25」に対応付ける",
       })
       expect(customerId()).toBe("10")
-      expect(within(withOrders).getByText("受注あり 2件")).toBeInTheDocument()
+      expect(within(withOrders).getByText("受注あり 2注文")).toBeInTheDocument()
       expect(withOrders).toHaveAttribute("title", expect.stringContaining("2026/12/05"))
       expect(within(withoutOrders).getByText("受注なし")).toBeInTheDocument()
       expect(withoutOrders).toBeEnabled()
     })
 
-    it("確認ダイアログに割り付け先の受注を出す", async () => {
+    it("確認ダイアログに、その製品の確定済み・生産中の受注を出す", async () => {
       mockQueue([PRODUCT_ROW])
       mockOrderApis()
 
@@ -415,28 +448,50 @@ describe("UnmatchedNameList", () => {
       expect(within(dialog).getByText("500")).toBeInTheDocument()
       expect(within(dialog).getByText("2026/12/05")).toBeInTheDocument()
       expect(within(dialog).getByText("確定")).toBeInTheDocument()
-      // 別の製品の受注や割り付け対象外の受注は出さない
+      expect(within(dialog).getByText("この製品の受注（1注文）")).toBeInTheDocument()
+      // 別の製品の受注や承認前の受注は出さない
       expect(within(dialog).queryByText("PO-9")).not.toBeInTheDocument()
       expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument()
     })
 
-    it("割り付け先が無い製品は警告するが、登録はできる", async () => {
+    it("承認前の受注しかない製品は、そのことを1文で伝えるが、登録はできる", async () => {
       const posts = mockQueue([PRODUCT_ROW])
       mockOrderApis()
 
       render(<Queue kind="product" canEdit />)
-      // 製品101 の受注は下書きのみ（割り付け対象外）
+      // 製品101 の受注は下書きのみ（承認前）
       await userEvent.click(
         await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×25」に対応付ける" }),
       )
 
       const dialog = await screen.findByRole("alertdialog")
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-        "割り付け先がないため、実績は未割当に残ります",
+        /^この顧客のこの製品の受注は承認前です$/,
       )
       await confirmDialog("登録する")
       await waitFor(() => expect(posts).toHaveLength(1))
       expect(posts[0].body).toEqual({ raw_text: "ピン6x20", customer_id: 10, product_id: 101 })
+    })
+
+    it("受注が1つも無い製品は、受注が無いことを1文で伝える", async () => {
+      mockQueue([PRODUCT_ROW])
+      server.use(
+        http.get(`${API_BASE}/daily-reports/product-candidates`, () =>
+          HttpResponse.json([{ product_id: 102, name: "ピン φ8×30", score: 0.5, open_order_count: 0 }]),
+        ),
+        http.get(`${API_BASE}/daily-reports/customer-open-orders`, () => HttpResponse.json(ORDERS)),
+      )
+
+      render(<Queue kind="product" canEdit />)
+      await userEvent.click(
+        await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ8×30」に対応付ける" }),
+      )
+
+      const dialog = await screen.findByRole("alertdialog")
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        /^この顧客にこの製品の受注がありません$/,
+      )
+      expect(dialog.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
     })
 
     it("受注の取得に失敗したら警告は出さず、登録は続けられる", async () => {
@@ -469,14 +524,15 @@ describe("UnmatchedNameList", () => {
       render(<Queue kind="product" canEdit />)
       await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
 
-      expect(await screen.findByText("この顧客の未出荷の受注（2 件）")).toBeInTheDocument()
+      expect(await screen.findByText("この顧客の未出荷の受注（2注文）")).toBeInTheDocument()
       expect(screen.getByText("A-001")).toBeInTheDocument()
-      // 注文番号が無い受注は顧客の注文番号を出し、割り付け対象外は印を付ける
+      // 注文番号が無い受注は顧客の注文番号を出す。承認前かは状態の列で分かるので別の印は付けない
       expect(screen.getByText("PO-9")).toBeInTheDocument()
-      expect(screen.getByText("割り付け対象外")).toBeInTheDocument()
+      expect(screen.getByText("下書き")).toBeInTheDocument()
+      expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
     })
 
-    it("顧客先が未照合の行の展開部では受注を取得しない", async () => {
+    it("顧客先が決まっていない行の展開部では受注を取得しない", async () => {
       mockQueue([{ ...PRODUCT_ROW, customer_id: null, customer_raw: "未登録の顧客" }])
       let requested = false
       server.use(
