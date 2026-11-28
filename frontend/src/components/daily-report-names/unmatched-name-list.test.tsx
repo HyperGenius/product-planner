@@ -11,6 +11,7 @@ import {
   type OrderedProductCandidate,
   type UnmatchedName,
 } from "@/types/daily-report-names"
+import type { SimilarProduct } from "@/types/product"
 import { DAILY_REPORT_FORBIDDEN_UI_TEXT } from "@/test-utils/daily-report"
 import { UnmatchedNameList } from "./unmatched-name-list"
 
@@ -623,6 +624,208 @@ describe("UnmatchedNameList", () => {
       await waitFor(() => expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument())
       expect(screen.queryByText(/この顧客の未出荷の受注/)).not.toBeInTheDocument()
       expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
+    })
+  })
+
+  describe("製品を登録する (Issue #705)", () => {
+    /** 製品の作成と類似製品の問い合わせ。作った製品の ID は 500 */
+    function mockCreateProduct({
+      similar = [],
+      fail = false,
+    }: { similar?: SimilarProduct[]; fail?: boolean } = {}) {
+      const created: unknown[] = []
+      server.use(
+        http.get(`${API_BASE}/products/similar`, () => HttpResponse.json({ products: similar })),
+        http.post(`${API_BASE}/products`, async ({ request }) => {
+          if (fail) return HttpResponse.json({ detail: "error" }, { status: 500 })
+          const body = (await request.json()) as { name: string; code: string }
+          created.push(body)
+          return HttpResponse.json({ id: 500, ...body }, { status: 201 })
+        }),
+      )
+      return created
+    }
+
+    const productRow = unmatched({
+      kind: "product",
+      raw_text: "フィルター 123456",
+      customer_raw: "顧客A",
+      customer_id: 10,
+    })
+
+    async function openCreateDialog() {
+      await userEvent.click(
+        await screen.findByRole("button", { name: "「フィルター 123456」を製品マスタに登録する" }),
+      )
+      return screen.findByRole("dialog", { name: "製品を登録する" })
+    }
+
+    it("受注の製品の後・他の製品から選択の前に置く", async () => {
+      mockQueue([productRow])
+      server.use(
+        http.get(`${API_BASE}/daily-reports/customer-ordered-products`, () =>
+          HttpResponse.json([orderedProduct({ product_id: 100, name: "フィルター" })]),
+        ),
+      )
+
+      render(<Queue kind="product" canEdit />)
+
+      const create = await screen.findByRole("button", {
+        name: "「フィルター 123456」を製品マスタに登録する",
+      })
+      const ordered = await screen.findByRole("button", {
+        name: "「フィルター 123456」を「フィルター」に対応付ける",
+      })
+      const picker = screen.getByRole("combobox", { name: "「フィルター 123456」の製品を選択" })
+      expect(ordered.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(create.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it("日報の品名を初期値に製品を作り、そのまま日報の品名を結び付けて1回で知らせる", async () => {
+      const posts = mockQueue([productRow])
+      const created = mockCreateProduct()
+
+      render(<Queue kind="product" canEdit />)
+      const dialog = await openCreateDialog()
+
+      expect(within(dialog).getByLabelText("品名 *")).toHaveValue("フィルター 123456")
+      // 品名に図番らしき番号が1つだけあるので初期値にする
+      expect(within(dialog).getByLabelText("図番 *")).toHaveValue("123456")
+      expect(within(dialog).getByText(/顧客先: 顧客A/)).toBeInTheDocument()
+      expect(dialog.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
+
+      await userEvent.click(within(dialog).getByRole("button", { name: "登録して結び付ける" }))
+
+      await waitFor(() =>
+        expect(toast.success).toHaveBeenCalledWith(
+          "製品「フィルター 123456」を登録し、日報の品名を結び付けました",
+        ),
+      )
+      expect(created).toEqual([{ name: "フィルター 123456", code: "123456" }])
+      expect(posts).toEqual([
+        {
+          path: "/daily-reports/name-aliases/product",
+          body: { raw_text: "フィルター 123456", customer_id: 10, product_id: 500 },
+        },
+      ])
+      expect(toast.success).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+      expect(screen.queryByText("フィルター 123456")).not.toBeInTheDocument()
+    })
+
+    it("品名から図番を読み取れなければ図番を空にし、入れるまで作らない", async () => {
+      mockQueue([
+        unmatched({ kind: "product", raw_text: "ピン6x20", customer_raw: "顧客A", customer_id: 10 }),
+      ])
+      const created = mockCreateProduct()
+
+      render(<Queue kind="product" canEdit />)
+      await userEvent.click(
+        await screen.findByRole("button", { name: "「ピン6x20」を製品マスタに登録する" }),
+      )
+      const dialog = await screen.findByRole("dialog", { name: "製品を登録する" })
+
+      expect(within(dialog).getByLabelText("図番 *")).toHaveValue("")
+      await userEvent.click(within(dialog).getByRole("button", { name: "登録して結び付ける" }))
+      expect(toast.error).toHaveBeenCalledWith("図番を入力してください")
+      expect(created).toEqual([])
+    })
+
+    it("結び付けだけ失敗したら、製品が残ったことと次の操作を伝え、行は一覧に残す", async () => {
+      mockQueue([productRow])
+      const created = mockCreateProduct()
+      server.use(
+        http.post(`${API_BASE}/daily-reports/name-aliases/product`, () =>
+          HttpResponse.json({ detail: "error" }, { status: 500 }),
+        ),
+      )
+
+      render(<Queue kind="product" canEdit />)
+      const dialog = await openCreateDialog()
+      await userEvent.click(within(dialog).getByRole("button", { name: "登録して結び付ける" }))
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "製品「フィルター 123456」を登録しました。日報の品名は結び付けられませんでした",
+          { description: "「他の製品から選択」で結び付けられます" },
+        ),
+      )
+      expect(created).toHaveLength(1)
+      expect(toast.success).not.toHaveBeenCalled()
+      // 製品は作れたので、もう一度作らないようダイアログは閉じる
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+      expect(screen.getByRole("button", { name: "フィルター 123456" })).toBeInTheDocument()
+    })
+
+    it("製品の作成に失敗したら、結び付けず、ダイアログを開いたままにする", async () => {
+      const posts = mockQueue([productRow])
+      mockCreateProduct({ fail: true })
+
+      render(<Queue kind="product" canEdit />)
+      const dialog = await openCreateDialog()
+      await userEvent.click(within(dialog).getByRole("button", { name: "登録して結び付ける" }))
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("製品の作成に失敗しました"))
+      expect(posts).toEqual([])
+      expect(screen.getByRole("dialog", { name: "製品を登録する" })).toBeInTheDocument()
+    })
+
+    it("似た製品があれば、作らずにその製品へ確認ダイアログを経て結び付けられる", async () => {
+      const posts = mockQueue([productRow])
+      const created = mockCreateProduct({
+        similar: [
+          {
+            id: 77,
+            name: "フィルター φ10×20L",
+            code: "123456",
+            is_active: true,
+            prefix: "",
+            prefix_differs: false,
+            has_process: true,
+            has_unconfirmed_process: false,
+          },
+        ],
+      })
+
+      render(<Queue kind="product" canEdit />)
+      const dialog = await openCreateDialog()
+      await userEvent.click(
+        await within(dialog).findByRole("button", { name: "「フィルター φ10×20L」に結び付ける" }),
+      )
+
+      expect(screen.queryByRole("dialog", { name: "製品を登録する" })).not.toBeInTheDocument()
+      const confirm = await screen.findByRole("alertdialog")
+      expect(within(confirm).getByText("フィルター φ10×20L")).toBeInTheDocument()
+      await confirmDialog("登録する")
+      await waitFor(() =>
+        expect(posts).toEqual([
+          {
+            path: "/daily-reports/name-aliases/product",
+            body: { raw_text: "フィルター 123456", customer_id: 10, product_id: 77 },
+          },
+        ]),
+      )
+      expect(created).toEqual([])
+    })
+
+    it("顧客先が決まっていない製品・編集できないロールには出さない", async () => {
+      mockQueue([
+        unmatched({ kind: "product", raw_text: "ピン6x20", customer_raw: "未登録の顧客先", customer_id: null }),
+        unmatched({ kind: "product", raw_text: "カラー", customer_raw: "顧客A", customer_id: 10 }),
+      ])
+
+      const { unmount } = render(<Queue kind="product" canEdit />)
+      expect(
+        await screen.findByRole("button", { name: "「カラー」を製品マスタに登録する" }),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "「ピン6x20」を製品マスタに登録する" }),
+      ).not.toBeInTheDocument()
+      unmount()
+
+      render(<Queue kind="product" />)
+      expect(await screen.findByRole("button", { name: "カラー" })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /製品マスタに登録する/ })).not.toBeInTheDocument()
     })
   })
 

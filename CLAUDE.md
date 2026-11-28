@@ -281,6 +281,11 @@ cd backend && ruff check . && mypy .
     `rankOrderedProducts()`（`lib/ordered-product-utils.ts`）で行う（行ごとの問い合わせにしない）。全製品の似ている製品（pg_trgm）は `ProductPicker` を
     **開いたときだけ**取得し、受注の有無もピッカーの中だけに出す。名寄せの行を描画するテストは MSW の既定ハンドラ
     `GET /daily-reports/customer-ordered-products`・`GET /daily-reports/product-candidates` に依存する
+  - **①の行から製品を登録する（Issue #705）**: 作成ダイアログは製品マスタ画面と共通の `CreateProductDialog`（`components/products/`。作成の API まで持ち、
+    `onCreated(product)` が Promise を返すと終わるまで待って閉じる）で、製品を作る入口を足すときもこれを使う。作成と別名の登録は1つの RPC にせず順に呼び、
+    別名だけ失敗したら製品は残してダイアログを閉じる（再度押すと同じ製品を作ろうとする）。類似製品の警告の「この製品に結び付ける」（`SimilarProductsWarning` の
+    `onSelect`）は登録せず確認ダイアログ（#645）へ移す。作成ダイアログは**開いている行の分だけ描画する**（中の類似製品の警告が初期値の品名で行ごとに問い合わせる）。
+    図番の初期値 `guessProductCode()` は送品の照合と同じ「数字5桁以上が1つだけ」。製品の作成はロールの制限が無く、別名のロールの部分集合なので `canEdit` だけで出す
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は

@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import {
   useProducts,
-  useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
   useToggleProductActive,
@@ -50,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ProductRoutingsDialog } from "@/components/product-routings-dialog"
+import { CreateProductDialog } from "@/components/products/create-product-dialog"
 import { SimilarProductsWarning } from "@/components/similar-products-warning"
 import { ProductNameAliasHistoryDialog } from "@/components/product-name-alias-history-dialog"
 import { MasterPagination } from "@/components/master-pagination"
@@ -110,7 +110,6 @@ export default function ProductsPage() {
   const canMergeProducts =
     currentMember != null && PRODUCT_MERGE_ROLES.includes(currentMember.role)
 
-  const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
   const toggleActiveMutation = useToggleProductActive()
@@ -187,8 +186,6 @@ export default function ProductsPage() {
   }, [highlightId, pagedProducts])
 
   const handleOpenCreateDialog = () => {
-    setProductName("")
-    setProductCode("")
     setIsCreateDialogOpen(true)
   }
 
@@ -235,29 +232,6 @@ export default function ProductsPage() {
       setToggleActiveTarget(null)
     } catch {
       toast.error("状態の更新に失敗しました")
-    }
-  }
-
-  const handleCreate = async () => {
-    if (!productCode.trim()) {
-      toast.error("図番を入力してください")
-      return
-    }
-    if (!productName.trim()) {
-      toast.error("品名を入力してください")
-      return
-    }
-
-    try {
-      await createMutation.mutateAsync({
-        name: productName.trim(),
-        code: productCode.trim(),
-      })
-      toast.success("製品を作成しました")
-      setIsCreateDialogOpen(false)
-    } catch (error) {
-      toast.error("製品の作成に失敗しました")
-      console.error(error)
     }
   }
 
@@ -489,45 +463,13 @@ export default function ProductsPage() {
       <MasterPagination totalCount={filteredProducts.length} pageSize={PAGE_SIZE} />
 
       {/* 作成ダイアログ */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>製品の新規作成</DialogTitle>
-            <DialogDescription>
-              新しい製品を作成します。必要な情報を入力してください。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="create-code">図番 *</Label>
-              <Input
-                id="create-code"
-                value={productCode}
-                onChange={(e) => setProductCode(e.target.value)}
-                placeholder="例: A-001"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="create-name">品名 *</Label>
-              <Input
-                id="create-name"
-                value={productName}
-                onChange={(e) => setProductName(e.target.value)}
-                placeholder="例: 製品A"
-              />
-            </div>
-            <SimilarProductsWarning name={productName} />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-              キャンセル
-            </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
-              {createMutation.isPending ? "作成中..." : "作成"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateProductDialog
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+        onCreated={() => {
+          toast.success("製品を作成しました")
+        }}
+      />
 
       {/* 編集ダイアログ */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { http, HttpResponse } from "msw"
-import { render, screen, waitFor } from "@/test-utils/render"
+import { render, screen, userEvent, waitFor } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import type { SimilarProduct } from "@/types/product"
@@ -47,6 +47,27 @@ describe("SimilarProductsWarning", () => {
       "href",
       "/master/products?highlight=7",
     )
+  })
+
+  it("製品マスタ画面では選ぶ操作を出さない", async () => {
+    mockSimilar([similar({ id: 7 })])
+
+    render(<SimilarProductsWarning name="10φ×20L SUS100" />)
+
+    await screen.findByRole("alert")
+    expect(screen.queryByRole("button", { name: /に結び付ける$/ })).not.toBeInTheDocument()
+  })
+
+  it("onSelect を渡すと、似た製品ごとに結び付ける操作を出す（Issue #705）", async () => {
+    mockSimilar([similar({ id: 7 }), similar({ id: 8, name: "φ10×20L SUS100", code: "A-002" })])
+    const onSelect = vi.fn()
+
+    render(<SimilarProductsWarning name="10φ×20L SUS100" onSelect={onSelect} />)
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "「φ10×20L SUS100」に結び付ける" }),
+    )
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 8 }))
   })
 
   it("接頭辞が違う製品は接頭辞を目立たせ、無効な製品はその旨を示す", async () => {

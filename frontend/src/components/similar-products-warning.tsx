@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { AlertTriangle, ExternalLink } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 import { useSimilarProducts } from "@/hooks/use-products"
 import type { SimilarProduct } from "@/types/product"
@@ -17,6 +18,11 @@ interface Props {
   excludeId?: number | null
   /** 編集時の元の品名。品名を変更していない間は警告しない */
   originalName?: string
+  /**
+   * 渡すと、似た製品ごとに「この製品に結び付ける」を出す（日報の品名から製品を登録するとき。Issue #705）。
+   * 作らずに既存の製品へ結び付けられるようにして、重複製品を増やさない
+   */
+  onSelect?: (product: SimilarProduct) => void
 }
 
 function routingStatus(product: SimilarProduct): string {
@@ -33,6 +39,7 @@ export function SimilarProductsWarning({
   name,
   excludeId = null,
   originalName,
+  onSelect,
 }: Props) {
   const trimmed = name.trim()
   const debounced = useDebouncedValue(trimmed, SIMILAR_PRODUCTS_DEBOUNCE_MS)
@@ -87,6 +94,18 @@ export function SimilarProductsWarning({
               製品マスタで開く
               <ExternalLink className="h-3 w-3" />
             </Link>
+            {onSelect && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                aria-label={`「${product.name}」に結び付ける`}
+                onClick={() => onSelect(product)}
+              >
+                この製品に結び付ける
+              </Button>
+            )}
           </li>
         ))}
       </ul>

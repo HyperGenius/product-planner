@@ -399,6 +399,15 @@ cron `compute-daily-report-progress` の次回の再計算で反映される（�
 - `SimilarProductsWarning`（`components/similar-products-warning.tsx`）を作成・編集ダイアログに置く。取得は `useSimilarProducts(name, excludeId, enabled)`（クエリキーは `["products", "similar", name, excludeId]`）
 - 編集ダイアログは**品名を変更していない間は警告しない**（元の品名と一致するときは問い合わせない。自身は `exclude_id` でも除くが、同じ仕様の別製品が元々ある場合に開いた直後から警告が出ないようにするため）
 - 問い合わせの可否はデバウンス後の品名で決める。入力中の値で決めると、デバウンス待ちの間に元の品名で問い合わせてしまう
+- `onSelect` を渡すと、似た製品ごとに「この製品に結び付ける」を出す（日報の名寄せの製品の行から登録するときだけ。製品マスタ画面では渡さない。Issue #705）
+
+## 作成ダイアログの共通部品（Issue #705）
+
+製品の作成ダイアログは `CreateProductDialog`（`components/products/create-product-dialog.tsx`）で、製品マスタ画面と日報の名寄せの製品の行
+（[daily-report-hub.md](daily-report-hub.md) の「①の行から製品を登録する」）で共有する。図番・品名の入力・必須チェック・類似製品の警告・
+`POST /products` を持ち、初期値（`initialValues`）・作成後の処理（`onCreated(product)`。Promise を返すと終わるまで待ってから閉じる）・
+類似製品を選んだとき（`onSelectSimilar`）を受け取る。成功のトーストは呼び出し側で出す（製品マスタ画面は「製品を作成しました」）。
+入力欄は開いている間だけ描画されるので、開くたびに初期値から始まる。製品を作る入口を足すときはこの部品を使う。
 
 ---
 
@@ -421,3 +430,4 @@ cron `compute-daily-report-progress` の次回の再計算で反映される（�
 | #515 | 表記ゆれで重複登録された製品の統合画面（`/master/products/merge`）を追加。品名から (接頭辞, 直径, 長さ, 材質) を読み取る `product_spec_parser`、候補検索・事前チェック（受注の重複キーの衝突・工程の対応）の `product_merge_service`、1トランザクションで付け替え・削除する RPC `merge_products`。`product_name_alias_history` の `product_id` 列だけ president / platform_admin に UPDATE を許可（Issue #515） |
 | #515 (追加) | 「候補を抽出」で直径・長さ・材質が同じ製品の組を一覧にする `GET /products/merge-groups` を追加。ボタンを押したときだけ取得し、組を選ぶと候補一覧を開く（Issue #515） |
 | #516 | 製品の新規作成・編集ダイアログに類似製品の警告を追加。`GET /products/similar`・`product_similarity_service`・`SimilarProductsWarning`。警告は登録を妨げない（Issue #516） |
+| #705 | 作成ダイアログを共通の `CreateProductDialog` に切り出し、日報の名寄せの製品の行から登録できるように。類似製品の警告に「この製品に結び付ける」（`onSelect`）を追加。製品マスタ画面の作成ダイアログの説明文を削除（Issue #705） |
