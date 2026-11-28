@@ -134,7 +134,7 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
 ## ①の行の候補（Issue #704）
 
 ①の製品の行は「この日報の製品は、受注済みの製品のどれか」を最初に選べるよう、その顧客の受注のうち**日報の実績がまだ1つも結び付いていない
-受注の製品**を行内に並べる。操作の並びは「受注の製品（行内）→ 他の製品から選択 → 対象外」（「製品を登録する」は #705）。
+受注の製品**を行内に並べる。操作の並びは「受注の製品（行内）→ 製品を登録する（#705）→ 他の製品から選択 → 対象外」。
 
 - 取得は `GET /daily-reports/customer-ordered-products?customer_id=`（`useCustomerOrderedProducts()`）。**顧客単位で1リクエスト**にして
   同じ顧客の行で共有し、クエリキー `["daily-report-ordered-products", customerId]` は `["daily-report-names"]` の外に置く（別名の登録で取り直さない。PR #498）
@@ -155,6 +155,35 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
 - 行の展開部の「この顧客の未出荷の受注」の表は行内の候補と重なるので外した（明細の表は残す）
 - 対象が0件の顧客の行には候補を出さない（「他の製品から選択」「対象外」は残る）
 
+## ①の行から製品を登録する（Issue #705）
+
+受注にも製品マスタにも無い新しい製品を、①のページの中で片付けられるようにした。操作の並びは
+「受注の製品（行内）→ [製品を登録する] → 他の製品から選択 → 対象外」（Epic #701 の流れの順）。
+
+- 作成ダイアログは製品マスタ画面と共通の `CreateProductDialog`（`components/products/create-product-dialog.tsx`）。
+  図番・品名の入力・必須チェック・類似製品の警告（#516）・作成の API 呼び出し（`useCreateProduct()`）を持ち、`initialValues`・
+  `onCreated(product)`（Promise を返すと終わるまで「登録中」のまま待ってから閉じる）・`onSelectSimilar` を受け取る。
+  製品マスタ画面では説明文「新しい製品を作成します。…」を消した（ほかの見た目・動きは同じ）
+- 初期値: 品名は日報の品名。図番は `guessProductCode()`（`lib/product-code-utils.ts`）で、品名に図番らしき番号（数字5桁以上、
+  送品の照合 `shipment_matcher._DRAWING_NO` と同じ）が**1つだけ**あるときだけ入れる。2つ以上なら決めずに空（図番は必須なので利用者が入れる）。
+  Backend の `parse_product_spec()` は図番を返さないので、読み取りはフロントだけで行う
+- 作成と別名の登録は**1つの RPC にまとめず**、既存の `POST /products` → `POST /daily-reports/name-aliases/product` を順に呼ぶ
+  （`useLinkNameToNewProduct()`）。どちらも既存の API で、別名だけ失敗しても製品は使える状態で残り、行から結び付け直せるため
+  - 両方成功: トースト「製品「…」を登録し、日報の品名を結び付けました」1回。行は一覧から消える（unmount するので `mutateAsync()` の結果で知らせる）
+  - 別名だけ失敗: 製品は残し、ダイアログは閉じる（もう一度押すと同じ製品を作ろうとするため）。トースト「製品「…」を登録しました。日報の品名は結び付けられませんでした」
+    ＋「「他の製品から選択」で結び付けられます」。行は一覧に残る
+  - 作成に失敗: 結び付けず、ダイアログを開いたままトースト「製品の作成に失敗しました」
+- 似た製品があれば警告の製品ごとに「この製品に結び付ける」を出す（`SimilarProductsWarning` の `onSelect`。製品マスタ画面では出さない）。
+  選ぶと作成ダイアログを閉じ、他の製品を選んだときと同じ確認ダイアログ（#645。その製品の受注状況つき）を経て結び付ける
+- ダイアログは行の保留 state（`PendingOperation` の `create-product`）で開き、確認ダイアログと同じく行ごとに1つだけ。作成ダイアログは
+  **開いている行の分だけ描画する**（中の類似製品の警告が品名の初期値で問い合わせるので、閉じた行まで描画すると行数分問い合わせる）
+- 作成後は `["products"]`（`useCreateProduct()`）、結び付けの成功で `["daily-report-names"]`・`["products"]`、成否によらず似ている製品の
+  候補 `["daily-report-product-candidates"]` を無効化する（結び付けに失敗した行のピッカーに作った製品を出すため）
+- ロール: 製品の作成は RLS（`is_tenant_member()`）だけでロールの制限が無く、別名を登録できるロール（`DAILY_REPORT_NAME_EDITOR_ROLES`）は
+  その部分集合なので、ボタンは既存の `canEdit` の行にだけ出す。顧客先が決まっていない製品（前提のページ）には出さない
+- 作った製品には受注も工程ルートも無い。工程ルートは次の集計の後に②（工程ルートが無い製品）で合わせ、受注が無い実績は③に出る（#706 と同じ扱い）。
+  トーストから工程の登録へはつながない（②が受け持つ）
+
 ## テスト
 
 - 振り分け: `lib/daily-report-worklist-utils.test.ts`
@@ -165,4 +194,6 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
   Backend `__tests__/unit/services/test_daily_report_open_order_service.py`（`group_unstarted_ordered_products()`）
 - 前提のページのまとまり: `lib/daily-report-name-utils.test.ts`（`groupProductsByCustomerRaw()`）・
   `components/daily-report-names/customer-raw-groups.test.tsx`（顧客を選ぶと①へ移り、トーストで知らせる）
+- ①の行から製品を登録する（#705）: `components/products/create-product-dialog.test.tsx`・`components/similar-products-warning.test.tsx`・
+  `components/daily-report-names/unmatched-name-list.test.tsx`・`lib/product-code-utils.test.ts`
 - 見た目: `e2e/daily-report-hub.spec.ts`（API は `page.route()` の固定応答。スクリーンショットは `frontend/test-results/daily-report-hub/`）

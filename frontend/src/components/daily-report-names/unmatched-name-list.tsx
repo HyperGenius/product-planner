@@ -1,13 +1,15 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, ChevronRight, EyeOff } from "lucide-react"
+import { ChevronDown, ChevronRight, EyeOff, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { CreateProductDialog } from "@/components/products/create-product-dialog"
 import {
   useCreateNameAlias,
   useCustomerOrderedProducts,
   useIgnoreName,
+  useLinkNameToNewProduct,
   useUnignoreName,
 } from "@/hooks/use-daily-report-names"
 import {
@@ -17,6 +19,8 @@ import {
 } from "@/lib/daily-report-name-utils"
 import { DAILY_REPORT_ALIASES_LABEL } from "@/lib/daily-report-worklist-utils"
 import { orderedProductSummary, rankOrderedProducts } from "@/lib/ordered-product-utils"
+import { guessProductCode } from "@/lib/product-code-utils"
+import type { Product, SimilarProduct } from "@/types/product"
 import { type NameKind, type UnmatchedName } from "@/types/daily-report-names"
 import { ConfirmMappingDialog, type PendingNameAction } from "./confirm-mapping-dialog"
 import { KIND_LIST_CLASS, KIND_PANEL_CLASS, kindColorStyle } from "./kind-tabs"
@@ -70,11 +74,13 @@ export function UnmatchedNameList({
 
 type AliasVariables = Parameters<ReturnType<typeof useCreateNameAlias>["mutate"]>[0]
 
-/** 確認待ちの操作。登録する中身（variables）は対応付けのときだけ */
-interface PendingOperation {
-  view: PendingNameAction
-  variables: AliasVariables | null
-}
+/**
+ * 確認待ちの操作。行ごとに1つだけ持ち、確認ダイアログか製品の作成ダイアログを1つ開く (Issue #645 / #705)。
+ * 登録する中身（variables）は対応付けのときだけ
+ */
+type PendingOperation =
+  | { type: "confirm"; view: PendingNameAction; variables: AliasVariables | null }
+  | { type: "create-product"; customerId: number }
 
 export function UnmatchedNameRow({
   item,
@@ -95,9 +101,11 @@ export function UnmatchedNameRow({
   const [expanded, setExpanded] = React.useState(false)
   const [pending, setPending] = React.useState<PendingOperation | null>(null)
   const createAlias = useCreateNameAlias()
+  const linkNewProduct = useLinkNameToNewProduct()
   const ignore = useIgnoreName()
   const unignore = useUnignoreName()
-  const busy = createAlias.isPending || ignore.isPending
+  const busy = createAlias.isPending || ignore.isPending || linkNewProduct.isPending
+  const confirming = pending?.type === "confirm" ? pending : null
 
   const onError = (fallback: string) => (error: unknown) =>
     toast.error(nameMutationErrorMessage(error, fallback))
@@ -108,6 +116,7 @@ export function UnmatchedNameRow({
     productRef?: { customerId: number; productId: number },
   ) =>
     setPending({
+      type: "confirm",
       view: {
         type: "map",
         kind: item.kind,
@@ -120,6 +129,7 @@ export function UnmatchedNameRow({
     })
   const requestIgnore = () =>
     setPending({
+      type: "confirm",
       view: {
         type: "ignore",
         kind: item.kind,
@@ -130,10 +140,10 @@ export function UnmatchedNameRow({
     })
   // 成功したら閉じる。失敗時は開いたままトーストを出す
   const confirm = () => {
-    if (!pending) return
-    if (pending.variables) {
-      const targetLabel = pending.view.type === "map" ? pending.view.targetLabel : ""
-      createAlias.mutate(pending.variables, {
+    if (!confirming) return
+    if (confirming.variables) {
+      const targetLabel = confirming.view.type === "map" ? confirming.view.targetLabel : ""
+      createAlias.mutate(confirming.variables, {
         onSuccess: () => {
           setPending(null)
           if (onMapped) onMapped(targetLabel)
@@ -155,6 +165,36 @@ export function UnmatchedNameRow({
     }
   }
 
+  // 製品を作ったら、そのまま日報の品名をその製品の別名にする (Issue #705)。製品の作成と別名の登録は別の API なので、
+  // 別名だけ失敗したら製品は残し、行も一覧に残る（「他の製品から選択」で結び付け直せる）。
+  // 結び付くと行は一覧から消えて unmount するので、mutateAsync の結果で知らせる
+  const linkCreatedProduct = (customerId: number) => async (product: Product) => {
+    try {
+      await linkNewProduct.mutateAsync({
+        raw_text: item.raw_text,
+        customer_id: customerId,
+        product_id: product.id,
+      })
+      if (onMapped) onMapped(product.name)
+      else toast.success(`製品「${product.name}」を登録し、日報の品名を結び付けました`)
+    } catch (error) {
+      console.error(error)
+      toast.error(`製品「${product.name}」を登録しました。日報の品名は結び付けられませんでした`, {
+        description: "「他の製品から選択」で結び付けられます",
+      })
+    }
+  }
+  // 似た製品を選んだら作らずに、他の製品を選んだときと同じ確認ダイアログを経て結び付ける
+  const selectSimilar = (customerId: number) => (product: SimilarProduct) =>
+    requestMap(
+      {
+        kind: "product",
+        data: { raw_text: item.raw_text, customer_id: customerId, product_id: product.id },
+      },
+      product.name,
+      { customerId, productId: product.id },
+    )
+
   // 対象外にした行は一覧から消えて unmount するので、mutate のコールバックではなく mutateAsync の結果で知らせる
   const undoIgnore = (id: string) =>
     unignore.mutateAsync(id).then(
@@ -165,11 +205,34 @@ export function UnmatchedNameRow({
   return (
     <li className="space-y-2 px-3 py-2">
       <ConfirmMappingDialog
-        pending={pending?.view ?? null}
+        pending={confirming?.view ?? null}
         busy={busy}
         onConfirm={confirm}
         onCancel={() => setPending(null)}
       />
+      {/* 開いている行の分だけ描画する（中の類似製品の警告が行ごとに問い合わせないように） */}
+      {pending?.type === "create-product" && (
+        <CreateProductDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPending(null)
+          }}
+          title="製品を登録する"
+          submitLabel="登録して結び付ける"
+          submittingLabel="登録中..."
+          initialValues={{ name: item.raw_text, code: guessProductCode(item.raw_text) }}
+          context={
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-foreground">
+              <p className="text-xs text-muted-foreground">
+                日報の品名（顧客先: {item.customer_raw ?? "空欄"}）
+              </p>
+              <p className="break-all font-medium">{item.raw_text}</p>
+            </div>
+          }
+          onCreated={linkCreatedProduct(pending.customerId)}
+          onSelectSimilar={selectSimilar(pending.customerId)}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <button
           type="button"
@@ -237,6 +300,7 @@ export function UnmatchedNameRow({
               <ProductMapping
                 item={item}
                 disabled={busy}
+                onCreate={(customerId) => setPending({ type: "create-product", customerId })}
                 onSelect={(productId, customerId, label) =>
                   requestMap(
                     {
@@ -283,10 +347,13 @@ export function UnmatchedNameRow({
 function ProductMapping({
   item,
   disabled,
+  onCreate,
   onSelect,
 }: {
   item: UnmatchedName
   disabled: boolean
+  /** 製品マスタに無い製品を登録する (Issue #705) */
+  onCreate: (customerId: number) => void
   onSelect: (productId: number, customerId: number, label: string) => void
 }) {
   // 顧客先が決まっていない製品は前提のページにまとめて置き、見出しに1回だけ理由を出す（#707）
@@ -296,6 +363,7 @@ function ProductMapping({
       item={item}
       customerId={item.customer_id}
       disabled={disabled}
+      onCreate={() => onCreate(item.customer_id!)}
       onSelect={onSelect}
     />
   )
@@ -305,11 +373,13 @@ function ProductCandidates({
   item,
   customerId,
   disabled,
+  onCreate,
   onSelect,
 }: {
   item: UnmatchedName
   customerId: number
   disabled: boolean
+  onCreate: () => void
   onSelect: (productId: number, customerId: number, label: string) => void
 }) {
   const { data: orderedProducts } = useCustomerOrderedProducts(customerId)
@@ -340,6 +410,17 @@ function ProductCandidates({
           </Button>
         )
       })}
+      {/* 並びは流れの順: 受注の製品 → 製品を登録する → 他の製品から選択 → 対象外 (Epic #701) */}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={disabled}
+        aria-label={`「${item.raw_text}」を製品マスタに登録する`}
+        onClick={onCreate}
+      >
+        <Plus />
+        製品を登録する
+      </Button>
       <ProductPicker
         ariaLabel={`「${item.raw_text}」の製品を選択`}
         disabled={disabled}

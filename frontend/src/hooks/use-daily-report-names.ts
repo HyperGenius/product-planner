@@ -178,6 +178,26 @@ export function useCreateNameAlias() {
   })
 }
 
+/**
+ * 名寄せの製品の行で作ったばかりの製品に、日報の品名（顧客先との組）を結び付ける (Issue #705)。
+ * 製品が増えたので、成否によらず似ている製品の候補（`PRODUCT_CANDIDATES_QUERY_KEY`）も取り直す
+ * （結び付けに失敗した行で「他の製品から選択」を開いたときに、作った製品が候補に出るように）。
+ * `["products"]` と日報のキーを両方無効化するが、`use-products.ts` には置かない（循環 import になる）
+ */
+export function useLinkNameToNewProduct() {
+  const queryClient = useQueryClient()
+  const invalidate = useInvalidateNames(true)
+  return useMutation({
+    mutationFn: (data: NameAliasCreateByKind["product"]) =>
+      apiClient(`${BASE}/name-aliases/product`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: invalidate,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: PRODUCT_CANDIDATES_QUERY_KEY }),
+  })
+}
+
 type NameAliasUpdateVariables =
   | { kind: "equipment"; id: string; data: { equipment_id: number } }
   | { kind: "process"; id: string; data: { process_names: string[] } }
