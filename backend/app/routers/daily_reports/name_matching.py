@@ -37,6 +37,7 @@ from app.models.daily_report_names import (
     IgnoredNameResponse,
     NameEntryResponse,
     NameKindParam,
+    OrderedProductCandidateResponse,
     ProcessNameAliasCreate,
     ProcessNameAliasUpdate,
     ProductCandidateResponse,
@@ -51,6 +52,7 @@ from app.services.daily_report_name_matching_service import (
 )
 from app.services.daily_report_open_order_service import (
     list_customer_open_orders,
+    list_unstarted_ordered_products,
     summarize_candidate_orders,
 )
 from app.services.product_alias_service import register_daily_report_alias
@@ -305,6 +307,23 @@ def get_customer_open_orders(
     `allocatable`。表示専用。
     """
     return list_customer_open_orders(client, tenant_id, customer_id)
+
+
+@daily_report_names_router.get(
+    "/customer-ordered-products",
+    response_model=list[OrderedProductCandidateResponse],
+)
+def get_customer_ordered_products(
+    customer_id: int = Query(),
+    tenant_id: str = Depends(get_current_tenant_id),
+    client: Client = Depends(get_supabase_client),
+):
+    """顧客の受注のうち、日報の実績がまだ1つも割り付いていない受注の製品を返す (Issue #704)。
+
+    名寄せの製品の行で最初に選ぶ候補。顧客単位の1リクエストにして同じ顧客の行で共有し、
+    日報の品名に近い順の並べ替えは画面側で行う（行ごとに問い合わせない）。近さで自動確定はしない。
+    """
+    return list_unstarted_ordered_products(client, tenant_id, customer_id)
 
 
 @daily_report_names_router.get("/name-entries", response_model=list[NameEntryResponse])

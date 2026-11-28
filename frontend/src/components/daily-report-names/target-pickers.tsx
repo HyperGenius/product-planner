@@ -15,15 +15,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useCustomers } from "@/hooks/use-customers"
 import { useEquipments } from "@/hooks/use-equipments"
 import { useProducts } from "@/hooks/use-products"
-import { useMasterProcessNames } from "@/hooks/use-daily-report-names"
+import { useMasterProcessNames, useProductCandidates } from "@/hooks/use-daily-report-names"
 import {
   equipmentDetailLabel,
   equipmentDisplayName,
   equipmentSearchKeywords,
   sortEquipments,
 } from "@/lib/equipment-utils"
+import { orderedProductSummary } from "@/lib/ordered-product-utils"
 import { cn } from "@/lib/utils"
-import type { ProductCandidate } from "@/types/daily-report-names"
+import type { OrderedProductCandidate, ProductCandidate } from "@/types/daily-report-names"
 
 /**
  * 日報の表記の対応付け先（設備・顧客・製品・工程）を選ぶコンボボックス (Issue #489)。
@@ -56,6 +57,8 @@ interface TargetComboboxProps {
   loading?: boolean
   /** 一覧の行ごとに置くので、どの表記の操作かを読み上げで分かるようにする */
   ariaLabel: string
+  /** 開いた・閉じたとき（開いたときだけ候補を取得する等） */
+  onOpenChange?: (open: boolean) => void
 }
 
 export function TargetCombobox({
@@ -68,11 +71,18 @@ export function TargetCombobox({
   disabled = false,
   loading = false,
   ariaLabel,
+  onOpenChange,
 }: TargetComboboxProps) {
   const [open, setOpen] = React.useState(false)
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        onOpenChange?.(next)
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -199,24 +209,45 @@ export function CustomerPicker({
 
 export function ProductPicker({
   triggerLabel = "他の製品から選択",
-  candidates = [],
+  orderedProducts = [],
+  similarTo,
   ...props
-}: SinglePickerProps & { candidates?: ProductCandidate[] }) {
+}: SinglePickerProps & {
+  /** 先頭の「受注の製品」に出す、その顧客の受注の製品（行内に並べた分を除く。Issue #704） */
+  orderedProducts?: readonly OrderedProductCandidate[]
+  /** 渡すと「似ている製品」（全製品の類似検索）を出す。開いたときだけ検索する */
+  similarTo?: { rawText: string; customerId: number }
+}) {
+  const [opened, setOpened] = React.useState(false)
   const { data: products, isLoading } = useProducts()
+  const { data: candidates } = useProductCandidates(
+    similarTo?.rawText ?? "",
+    similarTo?.customerId,
+    opened && similarTo !== undefined,
+  )
   const options = (products ?? [])
     .filter((p) => p.is_active)
     .map((p) => ({ id: p.id, label: p.name, hint: p.code ?? undefined }))
+  const orderedOptions = orderedProducts.map((p) => ({
+    id: p.product_id,
+    label: p.name,
+    hint: p.code ?? undefined,
+    description: orderedProductSummary(p) || undefined,
+    keywords: [p.order_number ?? "", p.customer_order_no ?? ""],
+  }))
   // 似ている製品も、すべての製品と同じく品番を添える（類似度の数値は出さない。Issue #702）
   const codeById = new Map(options.map((o) => [o.id, o.hint]))
-  const candidateOptions = candidates.map((c) => ({
+  const candidateOptions = (candidates ?? []).map((c) => ({
     id: c.product_id,
     label: c.name,
     hint: codeById.get(c.product_id),
+    description: candidateOrderLabel(c),
   }))
   return (
     <TargetCombobox
       {...props}
       groups={[
+        { heading: "受注の製品", options: orderedOptions },
         { heading: "似ている製品", options: candidateOptions },
         { heading: "すべての製品", options },
       ]}
@@ -224,8 +255,22 @@ export function ProductPicker({
       loading={isLoading}
       searchPlaceholder="製品名・品番で検索..."
       emptyText="製品が見つかりません"
+      onOpenChange={(next) => {
+        if (next) setOpened(true)
+      }}
     />
   )
+}
+
+/**
+ * 似ている製品（全製品が対象）に、その顧客の確定済み・生産中の受注の有無を添える (Issue #646)。
+ * 受注なしでも選べる（確認ダイアログで受注が無いことを伝える）
+ */
+function candidateOrderLabel(candidate: ProductCandidate): string | undefined {
+  if (candidate.open_order_count === undefined) return undefined
+  return candidate.open_order_count > 0
+    ? `受注あり ${candidate.open_order_count.toLocaleString()}注文`
+    : "受注なし"
 }
 
 interface ProcessPickerProps {

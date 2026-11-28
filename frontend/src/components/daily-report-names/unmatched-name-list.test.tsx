@@ -5,7 +5,12 @@ import { render, screen, userEvent, waitFor, within } from "@/test-utils/render"
 import { server } from "@/test-utils/msw/server"
 import { API_BASE } from "@/test-utils/msw/handlers"
 import { useUnmatchedNames } from "@/hooks/use-daily-report-names"
-import { NAME_KIND_LABELS, type NameKind, type UnmatchedName } from "@/types/daily-report-names"
+import {
+  NAME_KIND_LABELS,
+  type NameKind,
+  type OrderedProductCandidate,
+  type UnmatchedName,
+} from "@/types/daily-report-names"
 import { DAILY_REPORT_FORBIDDEN_UI_TEXT } from "@/test-utils/daily-report"
 import { UnmatchedNameList } from "./unmatched-name-list"
 
@@ -37,6 +42,20 @@ function unmatched(overrides: Partial<UnmatchedName>): UnmatchedName {
     customer_id: null,
     entry_count: 1,
     last_work_date: "2026-09-01",
+    ...overrides,
+  }
+}
+
+function orderedProduct(overrides: Partial<OrderedProductCandidate>): OrderedProductCandidate {
+  return {
+    product_id: 100,
+    name: "ピン φ6×20",
+    code: null,
+    order_count: 1,
+    nearest_deadline: "2026-12-05",
+    order_number: "A-001",
+    customer_order_no: null,
+    quantity: 100,
     ...overrides,
   }
 }
@@ -188,7 +207,7 @@ describe("UnmatchedNameList", () => {
     )
   })
 
-  it("製品は似ている製品を選ぶだけで、顧客単位の別名として登録できる", async () => {
+  it("製品は受注の製品を選ぶだけで、顧客単位の別名として登録できる（Issue #704）", async () => {
     const posts = mockQueue([
       unmatched({
         kind: "product",
@@ -197,14 +216,11 @@ describe("UnmatchedNameList", () => {
         customer_id: 10,
       }),
     ])
-    let candidateQuery: string | null = null
+    let orderedQuery: string | null = null
     server.use(
-      http.get(`${API_BASE}/daily-reports/product-candidates`, ({ request }) => {
-        candidateQuery = new URL(request.url).searchParams.get("raw_text")
-        return HttpResponse.json([
-          { product_id: 100, name: "ピン φ6×20", score: 0.82 },
-          { product_id: 101, name: "ピン φ6×25", score: 0.6 },
-        ])
+      http.get(`${API_BASE}/daily-reports/customer-ordered-products`, ({ request }) => {
+        orderedQuery = new URL(request.url).searchParams.get("customer_id")
+        return HttpResponse.json([orderedProduct({ product_id: 100, name: "ピン φ6×20" })])
       }),
     )
 
@@ -213,7 +229,7 @@ describe("UnmatchedNameList", () => {
       await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×20」に対応付ける" }),
     )
 
-    expect(candidateQuery).toBe("ピン6x20")
+    expect(orderedQuery).toBe("10")
     expect(posts).toEqual([])
     const dialog = await screen.findByRole("alertdialog")
     expect(within(dialog).getByText("ピン φ6×20")).toBeInTheDocument()
@@ -229,35 +245,119 @@ describe("UnmatchedNameList", () => {
     )
   })
 
-  it("別名を登録しても、他の行の類似候補は再検索しない（PR #498 レビュー）", async () => {
+  it("受注の製品は日報の品名に近い順に3件まで行に並べ、残りは「受注の製品」から選べる", async () => {
+    mockQueue([
+      unmatched({ kind: "product", raw_text: "シャフト S-12", customer_raw: "顧客A", customer_id: 10 }),
+    ])
+    server.use(
+      // API は希望納期の近い順。行では品名（品番）の近い順に並べ直す
+      http.get(`${API_BASE}/daily-reports/customer-ordered-products`, () =>
+        HttpResponse.json([
+          orderedProduct({ product_id: 1, name: "ピン φ6×20", nearest_deadline: "2026-12-01" }),
+          orderedProduct({ product_id: 2, name: "カラー", code: "C-3", order_number: "A-002" }),
+          orderedProduct({ product_id: 3, name: "シャフト", code: "S-12", order_number: "A-003" }),
+          orderedProduct({ product_id: 4, name: "シャフト 長", order_number: "A-004" }),
+        ]),
+      ),
+    )
+
+    render(<Queue kind="product" canEdit />)
+
+    const inline = await screen.findAllByRole("button", { name: /^「シャフト S-12」を「.+」に対応付ける$/ })
+    expect(inline.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "「シャフト S-12」を「シャフト」に対応付ける",
+      "「シャフト S-12」を「シャフト 長」に対応付ける",
+      "「シャフト S-12」を「ピン φ6×20」に対応付ける",
+    ])
+    // 受注の情報を添える。全製品の似ている製品・受注の有無のバッジは行に出さない
+    expect(within(inline[0]).getByText("A-003・数量 100・希望納期 2026/12/05")).toBeInTheDocument()
+    expect(screen.queryByText(/受注あり|受注なし/)).not.toBeInTheDocument()
+
+    await openPicker("「シャフト S-12」の製品を選択")
+    const group = await screen.findByRole("group", { name: "受注の製品" })
+    expect(within(group).getAllByRole("option")).toHaveLength(1)
+    expect(within(group).getByRole("option", { name: /カラー/ })).toHaveTextContent("A-002")
+  })
+
+  it("受注の製品が無い顧客の行には候補を出さず、他の製品から選べる", async () => {
+    mockQueue([
+      unmatched({ kind: "product", raw_text: "ピン6x20", customer_raw: "顧客A", customer_id: 10 }),
+    ])
+
+    render(<Queue kind="product" canEdit />)
+
+    expect(await screen.findByRole("combobox", { name: "「ピン6x20」の製品を選択" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /に対応付ける$/ })).not.toBeInTheDocument()
+  })
+
+  it("似ている製品（全製品）は「他の製品から選択」を開いたときだけ検索し、受注の有無を添える", async () => {
+    const posts = mockQueue([
+      unmatched({ kind: "product", raw_text: "ピン6x20", customer_raw: "顧客A", customer_id: 10 }),
+    ])
+    const candidateRequests: (string | null)[] = []
+    server.use(
+      http.get(`${API_BASE}/daily-reports/product-candidates`, ({ request }) => {
+        candidateRequests.push(new URL(request.url).searchParams.get("customer_id"))
+        return HttpResponse.json([
+          { product_id: 100, name: "ピン φ6×20", score: 0.82, open_order_count: 2 },
+          { product_id: 101, name: "ピン φ6×25", score: 0.6, open_order_count: 0 },
+        ])
+      }),
+    )
+
+    render(<Queue kind="product" canEdit />)
+    await screen.findByRole("combobox", { name: "「ピン6x20」の製品を選択" })
+    expect(candidateRequests).toEqual([])
+
+    await openPicker("「ピン6x20」の製品を選択")
+    const group = await screen.findByRole("group", { name: "似ている製品" })
+    expect(await within(group).findByRole("option", { name: /ピン φ6×20/ })).toHaveTextContent(
+      "受注あり 2注文",
+    )
+    expect(within(group).getByRole("option", { name: /ピン φ6×25/ })).toHaveTextContent("受注なし")
+    expect(candidateRequests).toEqual(["10"])
+
+    await userEvent.click(within(group).getByRole("option", { name: /ピン φ6×25/ }))
+    await confirmDialog("登録する")
+    await waitFor(() =>
+      expect(posts[0].body).toEqual({ raw_text: "ピン6x20", customer_id: 10, product_id: 101 }),
+    )
+  })
+
+  it("別名を登録しても、受注の製品は取り直さず、顧客単位で1回だけ取得する（PR #498 レビュー）", async () => {
     const posts = mockQueue([
       unmatched({ kind: "product", raw_text: "ピンA", customer_raw: "顧客A", customer_id: 10 }),
       unmatched({ kind: "product", raw_text: "ピンB", customer_raw: "顧客A", customer_id: 10 }),
     ])
-    const candidateRequests: string[] = []
+    const orderedRequests: string[] = []
+    let candidateRequested = false
     server.use(
-      http.get(`${API_BASE}/daily-reports/product-candidates`, ({ request }) => {
-        const rawText = new URL(request.url).searchParams.get("raw_text")!
-        candidateRequests.push(rawText)
-        return HttpResponse.json([{ product_id: 100, name: `${rawText} 製品`, score: 0.8 }])
+      http.get(`${API_BASE}/daily-reports/customer-ordered-products`, ({ request }) => {
+        orderedRequests.push(new URL(request.url).searchParams.get("customer_id")!)
+        return HttpResponse.json([orderedProduct({ product_id: 100, name: "ピン 製品" })])
+      }),
+      http.get(`${API_BASE}/daily-reports/product-candidates`, () => {
+        candidateRequested = true
+        return HttpResponse.json([])
       }),
     )
 
     render(<Queue kind="product" canEdit />)
     await userEvent.click(
-      await screen.findByRole("button", { name: "「ピンA」を「ピンA 製品」に対応付ける" }),
+      await screen.findByRole("button", { name: "「ピンA」を「ピン 製品」に対応付ける" }),
     )
 
     await confirmDialog("登録する")
     await waitFor(() => expect(posts).toHaveLength(1))
-    // 登録後に未照合一覧は取り直す（ピンA が消える）が、候補の検索は行ごとに1回のまま
+    // 登録後に未照合一覧は取り直す（ピンA が消える）が、受注の製品は同じ顧客の行で共有して1回のまま
     await waitFor(() => expect(screen.queryByText("ピンA")).not.toBeInTheDocument())
     expect(screen.getByText("ピンB")).toBeInTheDocument()
-    expect(candidateRequests.sort()).toEqual(["ピンA", "ピンB"])
+    expect(orderedRequests).toEqual(["10"])
+    expect(candidateRequested).toBe(false)
   })
 
   it("顧客先が決まっていない製品は候補を出さず、理由を行ごとに繰り返さない（見出しに1回だけ、#707）", async () => {
-    let candidateRequested = false
+    let requested = false
     mockQueue([
       unmatched({
         kind: "product",
@@ -268,7 +368,11 @@ describe("UnmatchedNameList", () => {
     ])
     server.use(
       http.get(`${API_BASE}/daily-reports/product-candidates`, () => {
-        candidateRequested = true
+        requested = true
+        return HttpResponse.json([])
+      }),
+      http.get(`${API_BASE}/daily-reports/customer-ordered-products`, () => {
+        requested = true
         return HttpResponse.json([])
       }),
     )
@@ -280,7 +384,7 @@ describe("UnmatchedNameList", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
     // 対象外にはできる
     expect(screen.getByRole("button", { name: "「ピン6x20」を対象外にする" })).toBeInTheDocument()
-    expect(candidateRequested).toBe(false)
+    expect(requested).toBe(false)
   })
 
   it("「対象外」にした表記は一覧から消え、お知らせから元に戻せる", async () => {
@@ -393,45 +497,46 @@ describe("UnmatchedNameList", () => {
     })
 
     function mockOrderApis() {
-      let candidateCustomerId: string | null = null
       server.use(
-        http.get(`${API_BASE}/daily-reports/product-candidates`, ({ request }) => {
-          candidateCustomerId = new URL(request.url).searchParams.get("customer_id")
-          return HttpResponse.json([
-            {
+        http.get(`${API_BASE}/daily-reports/customer-ordered-products`, () =>
+          HttpResponse.json([
+            orderedProduct({
               product_id: 100,
               name: "ピン φ6×20",
-              score: 0.82,
-              open_order_count: 2,
+              order_count: 2,
               nearest_deadline: "2026-12-05",
-            },
+            }),
+          ]),
+        ),
+        http.get(`${API_BASE}/daily-reports/product-candidates`, () =>
+          HttpResponse.json([
             { product_id: 101, name: "ピン φ6×25", score: 0.6, open_order_count: 0 },
-          ])
-        }),
+            { product_id: 102, name: "ピン φ8×30", score: 0.5, open_order_count: 0 },
+          ]),
+        ),
         http.get(`${API_BASE}/daily-reports/customer-open-orders`, () =>
           HttpResponse.json(ORDERS),
         ),
       )
-      return () => candidateCustomerId
     }
 
-    it("似ている製品に受注の有無を出し、受注なしでも選べる", async () => {
+    /** 「他の製品から選択」の「似ている製品」から選ぶ */
+    async function pickSimilar(name: string) {
+      await openPicker("「ピン6x20」の製品を選択")
+      const group = await screen.findByRole("group", { name: "似ている製品" })
+      await userEvent.click(await within(group).findByRole("option", { name: new RegExp(name) }))
+    }
+
+    it("受注が複数ある製品は、注文の数と直近の希望納期を添える", async () => {
       mockQueue([PRODUCT_ROW])
-      const customerId = mockOrderApis()
+      mockOrderApis()
 
       render(<Queue kind="product" canEdit />)
 
-      const withOrders = await screen.findByRole("button", {
+      const button = await screen.findByRole("button", {
         name: "「ピン6x20」を「ピン φ6×20」に対応付ける",
       })
-      const withoutOrders = screen.getByRole("button", {
-        name: "「ピン6x20」を「ピン φ6×25」に対応付ける",
-      })
-      expect(customerId()).toBe("10")
-      expect(within(withOrders).getByText("受注あり 2注文")).toBeInTheDocument()
-      expect(withOrders).toHaveAttribute("title", expect.stringContaining("2026/12/05"))
-      expect(within(withoutOrders).getByText("受注なし")).toBeInTheDocument()
-      expect(withoutOrders).toBeEnabled()
+      expect(within(button).getByText("2注文・直近の希望納期 2026/12/05")).toBeInTheDocument()
     })
 
     it("確認ダイアログに、その製品の確定済み・生産中の受注を出す", async () => {
@@ -459,10 +564,8 @@ describe("UnmatchedNameList", () => {
       mockOrderApis()
 
       render(<Queue kind="product" canEdit />)
-      // 製品101 の受注は下書きのみ（承認前）
-      await userEvent.click(
-        await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ6×25」に対応付ける" }),
-      )
+      // 製品101 の受注は下書きのみ（承認前）なので受注の製品には出ず、似ている製品から選ぶ
+      await pickSimilar("ピン φ6×25")
 
       const dialog = await screen.findByRole("alertdialog")
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
@@ -475,17 +578,10 @@ describe("UnmatchedNameList", () => {
 
     it("受注が1つも無い製品は、受注が無いことを1文で伝える", async () => {
       mockQueue([PRODUCT_ROW])
-      server.use(
-        http.get(`${API_BASE}/daily-reports/product-candidates`, () =>
-          HttpResponse.json([{ product_id: 102, name: "ピン φ8×30", score: 0.5, open_order_count: 0 }]),
-        ),
-        http.get(`${API_BASE}/daily-reports/customer-open-orders`, () => HttpResponse.json(ORDERS)),
-      )
+      mockOrderApis()
 
       render(<Queue kind="product" canEdit />)
-      await userEvent.click(
-        await screen.findByRole("button", { name: "「ピン6x20」を「ピン φ8×30」に対応付ける" }),
-      )
+      await pickSimilar("ピン φ8×30")
 
       const dialog = await screen.findByRole("alertdialog")
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
@@ -514,7 +610,7 @@ describe("UnmatchedNameList", () => {
       expect(within(dialog).getByRole("button", { name: "登録する" })).toBeEnabled()
     })
 
-    it("行の展開部に顧客の未出荷の受注を一覧で出す", async () => {
+    it("行の展開部には明細だけを出し、受注の一覧は行の候補と重ねない", async () => {
       mockQueue([PRODUCT_ROW])
       mockOrderApis()
       server.use(
@@ -524,31 +620,9 @@ describe("UnmatchedNameList", () => {
       render(<Queue kind="product" canEdit />)
       await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
 
-      expect(await screen.findByText("この顧客の未出荷の受注（2注文）")).toBeInTheDocument()
-      expect(screen.getByText("A-001")).toBeInTheDocument()
-      // 注文番号が無い受注は顧客の注文番号を出す。承認前かは状態の列で分かるので別の印は付けない
-      expect(screen.getByText("PO-9")).toBeInTheDocument()
-      expect(screen.getByText("下書き")).toBeInTheDocument()
-      expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
-    })
-
-    it("顧客先が決まっていない行の展開部では受注を取得しない", async () => {
-      mockQueue([{ ...PRODUCT_ROW, customer_id: null, customer_raw: "未登録の顧客" }])
-      let requested = false
-      server.use(
-        http.get(`${API_BASE}/daily-reports/name-entries`, () => HttpResponse.json([])),
-        http.get(`${API_BASE}/daily-reports/customer-open-orders`, () => {
-          requested = true
-          return HttpResponse.json([])
-        }),
-      )
-
-      render(<Queue kind="product" canEdit />)
-      await userEvent.click(await screen.findByRole("button", { name: "ピン6x20" }))
-
       await waitFor(() => expect(screen.queryByText("読み込み中...")).not.toBeInTheDocument())
       expect(screen.queryByText(/この顧客の未出荷の受注/)).not.toBeInTheDocument()
-      expect(requested).toBe(false)
+      expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
     })
   })
 

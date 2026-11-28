@@ -150,6 +150,33 @@ class TestDailyReportNameMatchingRouter:
     def test_customer_open_orders_requires_customer_id(self):
         assert client.get("/daily-reports/customer-open-orders").status_code == 422
 
+    def test_customer_ordered_products(self, mock_client):
+        products = [
+            {
+                "product_id": 10,
+                "name": "ピン φ6×20",
+                "code": "P-620",
+                "order_count": 2,
+                "nearest_deadline": "2026-12-05",
+                "order_number": "A-001",
+                "customer_order_no": None,
+                "quantity": 500,
+            }
+        ]
+        with patch(
+            f"{ROUTER}.list_unstarted_ordered_products", return_value=products
+        ) as s:
+            response = client.get(
+                "/daily-reports/customer-ordered-products?customer_id=7"
+            )
+
+        assert response.status_code == 200
+        assert response.json() == products
+        s.assert_called_once_with(mock_client, TENANT, 7)
+
+    def test_customer_ordered_products_requires_customer_id(self):
+        assert client.get("/daily-reports/customer-ordered-products").status_code == 422
+
     # --- 設備の別名 -----------------------------------------------------------
 
     def test_create_equipment_alias(self, mock_client):

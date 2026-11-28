@@ -52,33 +52,6 @@ export function OpenOrdersTable({ orders }: { orders: CustomerOpenOrder[] }) {
 }
 
 /**
- * 行の展開部: 顧客先が決まっている製品の行に、その顧客の未出荷の受注を一覧で見せる (Issue #646)。
- * 類似度の低い候補しかないとき、人が見て対応付け先を選ぶための材料。表示だけで自動確定はしない。
- */
-export function CustomerOpenOrdersPanel({ customerId }: { customerId: number }) {
-  const { data: orders, isLoading, isError } = useCustomerOpenOrders(customerId)
-  return (
-    <div className="space-y-1 border-t">
-      <p className="px-3 pt-2 text-xs font-medium text-muted-foreground">
-        この顧客の未出荷の受注
-        {orders && `（${orders.length.toLocaleString()}注文）`}
-      </p>
-      {isLoading ? (
-        <p className="px-3 pb-2 text-sm text-muted-foreground">読み込み中...</p>
-      ) : isError || !orders ? (
-        <p className="px-3 pb-2 text-sm text-destructive">受注を取得できませんでした</p>
-      ) : orders.length === 0 ? (
-        <p className="px-3 pb-2 text-sm text-muted-foreground">未出荷の受注はありません</p>
-      ) : (
-        <div className="max-h-60 overflow-y-auto">
-          <OpenOrdersTable orders={orders} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
  * 確認ダイアログ: 選んだ製品の、その顧客の確定済み・生産中の受注を出す (Issue #646)。
  * 0件なら何が起きているかを1文で出す（登録自体は止めない。その後の行き先は #706）。
  * 承認前の受注しかないときは、受注が無いときと分けて伝える（Issue #702）

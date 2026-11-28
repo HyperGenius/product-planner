@@ -430,6 +430,7 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
 |---|---|
 | `GET /daily-reports/unmatched-names?kind=` | 照合できなかった表記の一覧（`kind` / `raw_text` / `entry_count` / `last_work_date`。製品は `customer_raw` と、その照合結果 `customer_id`）。出現件数の多い順（同数は最終出現日の新しい順） |
 | `GET /daily-reports/product-candidates?raw_text=&customer_id=` | pg_trgm の類似候補（`product_id` / `name` / `score`）。自動確定の結果は返さない。`customer_id` を渡すと候補ごとにその顧客の割り付け対象（`confirmed` / `in_progress`）の受注件数 `open_order_count` と最寄りの希望納期 `nearest_deadline` を付ける（Issue #646。表示だけで並び・採否には使わない。省略時は両方とも返さない） |
+| `GET /daily-reports/customer-ordered-products?customer_id=` | 顧客の割り付けの候補（`confirmed` / `in_progress`）の受注のうち、`order_process_progress` の行がすべて未着手（良品数0）の受注を製品ごとにまとめて返す（Issue #704）。`product_id` / `name` / `code` / `order_count` / `nearest_deadline` と、代表の受注（希望納期の近い受注）の `order_number` / `customer_order_no` / `quantity`。進捗の行が無い受注（日報で追う工程が無い製品・再計算前）は含めない。並びは希望納期の近い順で、日報の品名に近い順の並べ替えは画面側（[daily-report-hub.md](daily-report-hub.md#①の行の候補issue-704)） |
 | `GET /daily-reports/customer-open-orders?customer_id=` | 顧客の未出荷の受注（`draft` / `pending_approval` / `confirmed` / `in_progress`、製品ありのみ）を希望納期の近い順に返す（Issue #646）。`order_number` / `customer_order_no` / `product_name` / `quantity` / `desired_deadline`（DB 列は `orders.deadline_date`、無ければ `confirmed_deadline`）/ `status` / `allocatable`（割り付けの候補か） |
 | `GET` / `POST /daily-reports/name-aliases/equipment`、`PATCH` / `DELETE .../{alias_id}` | 設備の別名。body は `raw_text` / `equipment_id` |
 | `GET` / `POST /daily-reports/name-aliases/process`、`PATCH` / `DELETE .../{alias_id}` | 工程の別名。body は `raw_text` / `process_names`（重複・空白は除去。マスタに無い工程名は 422） |
@@ -461,26 +462,25 @@ DB から切り離した純粋なロジック。マスタと辞書のスナッ�
   一覧の上辺にも引く。未照合キューでは件数0の種別を薄くする。ページは `h-[calc(100dvh-6.75rem)]` の縦 flex（生産スケジュール画面と同じ決め打ち）で、
   見出し・タブ・種別カードは固定、行リスト（`KIND_PANEL_CLASS`）だけが `overflow-y-auto` でスクロールする
 - 設備・顧客は検索付きのコンボボックス（設備は呼称＝`equipmentDisplayName()` と台帳番号）、工程は**複数選択**して「決定」（1:N）
-- 製品は pg_trgm の類似候補（`GET /daily-reports/product-candidates`）の上位3件を行内のボタンで出し、**押すだけで対応付ける**。
-  それ以外は「他の製品から選択」（類似候補＋有効な製品すべて）。候補での自動確定はしない（#488 の方針）。
-  顧客先が未照合の行は候補を取得せず「先に顧客を対応付けてください」、顧客先が空欄の行は「登録できません」を出す
-  （どちらも「対象外」にはできる）
+- 製品は、その顧客の受注のうち日報の実績がまだ結び付いていない受注の製品（`GET /daily-reports/customer-ordered-products`）を
+  日報の品名に近い順に上位3件、行内のボタンで出し、**押すだけで対応付ける**（Issue #704。それまでは全製品の pg_trgm の類似候補の上位3件）。
+  それ以外は「他の製品から選択」（受注の製品の残り＋似ている製品＋有効な製品すべて）。候補での自動確定はしない（#488 の方針）。
+  顧客先が決まっていない行は候補を出さず、前提のページにまとめる（#703 / #707）
 - **製品の受注状況の表示（Issue #646）**: 受注の無い製品に対応付けても割り付けの候補が無く実績は未割当に残るので、登録前に気づけるようにする。
   数える受注は割り付けの候補と同じ条件（`CANDIDATE_ORDER_STATUSES`）。**表示専用で、類似度や受注の有無で自動確定・並べ替えはしない**（#488）。
-  - 候補ボタンに「受注あり N件」「受注なし」のバッジ（受注なしでも選べる）。ツールチップに最寄りの希望納期
+  - 似ている製品に「受注あり N注文」「受注なし」を添える（受注なしでも選べる）。#704 からはピッカーの「似ている製品」の中だけ
   - 確認ダイアログ（`ProductOrderStatus`）に、選んだ製品の、その顧客の割り付け対象の受注表（注文番号・数量・希望納期・状態）。
     0件なら「割り付け先がないため、実績は未割当に残ります」と警告する（登録は止めない）。受注の取得に失敗したときは警告を出さない
-  - 行の展開部（`CustomerOpenOrdersPanel`）に、顧客先が照合済みの行だけ、その顧客の未出荷の受注を一覧で出す（割り付け対象外には印）。
-    類似度の低い候補しかないときに人が見て選ぶための材料
-  - 顧客の受注は `useCustomerOpenOrders(customerId)` で顧客単位に1リクエスト取り、ダイアログと展開部と同じ顧客の行で共有する。
+  - 行の展開部の「この顧客の未出荷の受注」（`CustomerOpenOrdersPanel`）は、行内に受注の製品を出すようにしたので #704 で外した
+  - 顧客の受注は `useCustomerOpenOrders(customerId)` で顧客単位に1リクエスト取り、ダイアログと同じ顧客の行で共有する。
     クエリキーは `["daily-report-customer-open-orders", customerId]` で `["daily-report-names"]` の外（登録のたびに行数分再取得しない。PR #498）
 - 操作できるのは `order_handler` / `president` / `platform_admin`（`DAILY_REPORT_NAME_EDITOR_ROLES`、Backend の
   `_ALIAS_EDITOR_ROLES` と揃える）。それ以外のロールには閲覧のみで操作ボタンを出さない
 - 登録・変更・削除・対象外の後は `["daily-report-names"]` 配下のクエリ（未照合一覧・登録済みの一覧・対象外の一覧）を
   まとめて無効化する。製品の別名を変えたときは製品マスタの別名履歴（`["products"]`）も無効化する
-- 製品の類似候補は未照合の製品の行ごとに取得する（押すだけで対応付けられるよう行内に出すため）。候補は商品名と製品マスタ
-  だけで決まり別名・対象外の登録では変わらないので、クエリキーを `["daily-report-product-candidates", raw_text]` と
-  `["daily-report-names"]` の外に置き、登録のたびに行数分の類似検索（pg_trgm）を再実行しないようにしている。
+- 製品の類似候補（全製品の pg_trgm）は、製品のピッカーを開いたときだけ行ごとに取得する（#704 までは行内に出すため行ごとに常に取得していた）。
+  候補は商品名と製品マスタだけで決まり別名・対象外の登録では変わらないので、クエリキーを `["daily-report-product-candidates", raw_text]` と
+  `["daily-report-names"]` の外に置き、登録のたびに類似検索（pg_trgm）を再実行しないようにしている。
   `staleTime` は5分（タブの切り替えでも再検索しない。製品マスタの変更は最大5分遅れて候補に反映される）
 
 ### 「対象外」の持ち方

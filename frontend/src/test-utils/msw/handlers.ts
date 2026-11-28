@@ -93,8 +93,12 @@ export const handlers = [
   http.get(`${API_BASE}/daily-reports/order-progress`, () =>
     HttpResponse.json({ computed_at: null, items: [] }),
   ),
-  // 日報の名寄せ（製品）の確認ダイアログ・行の展開部が引く顧客の未出荷受注（Issue #646）。既定は受注なし
+  // 日報の名寄せ（製品）の確認ダイアログが引く顧客の未出荷受注（Issue #646）。既定は受注なし
   http.get(`${API_BASE}/daily-reports/customer-open-orders`, () => HttpResponse.json([])),
+  // 日報の名寄せ（製品）の行が引く、実績の結び付いていない受注の製品（Issue #704）と、
+  // 製品のピッカーを開くと引く似ている製品（全製品）。既定はどちらもなし
+  http.get(`${API_BASE}/daily-reports/product-candidates`, () => HttpResponse.json([])),
+  http.get(`${API_BASE}/daily-reports/customer-ordered-products`, () => HttpResponse.json([])),
   // 受注詳細の工程の進捗（Issue #491）。引き当てのダイアログも使う（Issue #673）。既定は未集計
   http.get(`${API_BASE}/orders/:orderId/progress`, ({ params }) =>
     HttpResponse.json({ order_id: Number(params.orderId), computed_at: null, processes: [] }),
