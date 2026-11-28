@@ -6,6 +6,7 @@ import type {
 } from "@/types/daily-report-progress"
 import type { UnmatchedName } from "@/types/daily-report-names"
 import type { StockEstimates } from "@/types/daily-report-stock"
+import { groupProductsByCustomerRaw, type CustomerRawGroups } from "@/lib/daily-report-name-utils"
 
 /**
  * 日報の実績（仮称）のハブの振り分け（Issue #707、Epic #701）。
@@ -108,14 +109,17 @@ export const DAILY_REPORT_PROCESS_NAME_META: DailyReportWorkMeta = {
 export type DailyReportPrerequisiteKind = "customer" | "product"
 
 /**
- * 前提の見出しと単位。
- * - customer: アプリに未登録の日報の顧客先
- * - product: 顧客先が決まっていない日報の製品（顧客先が未登録・空欄・対象外）
+ * 前提の見出しと単位（Issue #703）。
+ * - customer: アプリに未登録の日報の顧客先。その顧客先の製品は顧客先のまとまりの中に出し、別に数えない
+ * - product: 顧客先が空欄・対象外の日報の製品（顧客を選べないので、対象外にだけできる）
  */
 export const DAILY_REPORT_PREREQUISITE_META: Record<DailyReportPrerequisiteKind, DailyReportWorkMeta> = {
-  customer: { label: "日報の顧客先", unit: "件" },
-  product: { label: "顧客先が決まっていない日報の製品", unit: "品名" },
+  customer: { label: "日報の顧客先", unit: "顧客先" },
+  product: { label: "顧客先が空欄・対象外の日報の製品", unit: "品名" },
 }
+
+/** 前提のまとまりの中の製品の単位（顧客先の見出しに出す） */
+export const DAILY_REPORT_PREREQUISITE_PRODUCT_UNIT = "品名"
 
 /** 参考: 作り置き（推定）。推定は (製品, 工程) ごとに出るので、製品の数で数える */
 export const DAILY_REPORT_STOCK_META: DailyReportWorkMeta = {
@@ -212,8 +216,9 @@ export function groupProcessProducts(groups: readonly UnallocatedGroup[]): Proce
 }
 
 export interface DailyReportWorklistCounts {
-  /** 表記の一覧が届いていない間は null */
+  /** 表記の一覧が届いていない間は null。未登録の顧客先の数（前提のページのまとまりの数） */
   customer: number | null
+  /** 顧客先が空欄・対象外の日報の製品の数（未登録の顧客先の製品は数えない） */
   prerequisiteProduct: number | null
   products: number | null
   processNames: number | null
@@ -228,6 +233,8 @@ export interface DailyReportWorklist {
     customers: UnmatchedName[]
     /** 顧客先が決まっていない日報の製品 */
     products: UnmatchedName[]
+    /** 上の2つを顧客先ごとにまとめたもの（前提のページの一覧。Issue #703） */
+    groups: CustomerRawGroups
   }
   /** ① 日報の製品をつなぐ */
   products: UnmatchedName[]
@@ -257,7 +264,7 @@ export function classifyDailyReportWorklist(
   sources: DailyReportWorklistSources,
 ): DailyReportWorklist {
   const worklist: DailyReportWorklist = {
-    prerequisite: { customers: [], products: [] },
+    prerequisite: { customers: [], products: [], groups: { unregistered: [], unresolved: [] } },
     products: [],
     processes: { names: [], products: [] },
     unordered: [],
@@ -290,6 +297,11 @@ export function classifyDailyReportWorklist(
     }
   }
 
+  worklist.prerequisite.groups = groupProductsByCustomerRaw(
+    worklist.prerequisite.customers,
+    worklist.prerequisite.products,
+  )
+
   const processGroups: UnallocatedGroup[] = []
   for (const group of sources.coverage?.groups ?? []) {
     if (UNALLOCATED_CATEGORY_PLACEMENT[group.category] === "processes") processGroups.push(group)
@@ -298,8 +310,11 @@ export function classifyDailyReportWorklist(
   worklist.processes.products = groupProcessProducts(processGroups)
 
   if (sources.unmatchedNames) {
-    worklist.counts.customer = worklist.prerequisite.customers.length
-    worklist.counts.prerequisiteProduct = worklist.prerequisite.products.length
+    worklist.counts.customer = worklist.prerequisite.groups.unregistered.length
+    worklist.counts.prerequisiteProduct = worklist.prerequisite.groups.unresolved.reduce(
+      (sum, group) => sum + group.products.length,
+      0,
+    )
     worklist.counts.products = worklist.products.length
     worklist.counts.processNames = worklist.processes.names.length
   }

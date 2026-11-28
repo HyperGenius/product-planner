@@ -12,7 +12,7 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 | URL | 中身 | 件数の単位 |
 |---|---|---|
 | `/master/daily-reports` | ハブ（前提バナー・作業のキュー①②③・参考） | － |
-| `/master/daily-reports/customers` | 前提: アプリに未登録の日報の顧客先・顧客先が決まっていない日報の製品 | 顧客先は「件」、製品は「品名」 |
+| `/master/daily-reports/customers` | 前提: アプリに未登録の日報の顧客先ごとのまとまり（その顧客先の製品を含む）・顧客先が空欄・対象外の日報の製品（#703） | まとまりは「顧客先」、空欄・対象外の製品は「品名」 |
 | `/master/daily-reports/products` | ① 日報の製品をつなぐ | 品名（(顧客先, 商品名) の組） |
 | `/master/daily-reports/processes` | ② 製品の工程を日報に合わせる（製品の行＋工程マスタに無い日報の工程名） | 製品（工程名は「工程名」で別に数える） |
 | `/master/daily-reports/unordered` | ③ 受注の無い製造を確かめる | 件（(製品, 工程名, 理由) のまとまり） |
@@ -53,7 +53,7 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 |---|---|---|
 | 顧客先 | 前提 | 顧客先が決まらないと製品を結び付けられない（製品の別名は顧客単位） |
 | 製品（顧客先が決まっている） | ① | |
-| 製品（顧客先が未登録・空欄・対象外） | 前提 | ①②③には数えない |
+| 製品（顧客先が未登録・空欄・対象外） | 前提 | ①②③には数えない。未登録の顧客先の製品はその顧客先のまとまりに入れて別に数えず、空欄・対象外の顧客先の製品だけを「品名」で数える（#703） |
 | 工程 | ② | 表記→工程名はテナント共通。#708 で製品単位の入口にするまで②のページに一覧を置く |
 | 設備 | 対象外 | 割り付けに使わない。#709 で設備マスタ側へ移すまで、登録済みの対応付けのページの「日報の設備」タブに置く |
 
@@ -68,6 +68,26 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 - ③のページの絞り込みの既定は「すべて」（見出しの件数と行数を一致させる）。「要確認」等で絞れる
 - 照合状況の割り付け済み・未割当・未照合の割合は、ハブの参考「受注に結び付いた実績」に3色のバーで出す（振り分けの対象ではない）
 
+### 前提のページの顧客先のまとまり（Issue #703）
+
+前提の表記は `groupProductsByCustomerRaw()`（`lib/daily-report-name-utils.ts`）で顧客先の表記ごとにまとめ、
+`classifyDailyReportWorklist()` の `prerequisite.groups` に入れる。ページ（`components/daily-report-names/customer-raw-groups.tsx`）は
+このまとまりだけを描く。
+
+| まとまり | 中身 | 操作 | 件数 |
+|---|---|---|---|
+| `unregistered`（未登録の顧客先） | 顧客先の表記＋その顧客先の製品（製品が無い顧客先も出す） | 顧客先に [顧客を選択]・対象外。製品は対象外だけ | バナー・見出しの「n顧客先」＝まとまりの数 |
+| `ignored`（対象外にした顧客先） | 未登録の顧客先の一覧に無い顧客先の製品 | 製品は対象外だけ | 「顧客先が空欄・対象外の日報の製品」の「n品名」 |
+| `blank`（顧客先が空欄） | `customer_raw` が null の製品 | 製品は対象外だけ | 同上 |
+
+- 顧客先は割り付けで受注の顧客と比べるので、製品の行が無い顧客先もまとまりとして出して数える
+- 製品の顧客先が未登録の一覧に無い（`customer_id` が null）のは、バックエンドの `list_unmatched_names()` が対象外にした顧客先を返さないため
+- 顧客を選ぶと、確認ダイアログ（#645）を経て `POST /daily-reports/name-aliases/customer` で顧客の別名を登録する。`["daily-report-names"]` の
+  無効化で一覧を取り直すと、その顧客先の製品は `customer_id` が付いて①へ移る。トーストは「顧客先「…」を顧客Aに結び付けました」＋
+  「n品名を製品に結び付けられるようになりました」（品名の数は登録前のまとまりから数える。0品名なら出さない）と、①のページへ移るアクション
+- まとまりの中の製品の行には顧客先（見出しに出している）も、結び付けられない理由の文章も出さない
+- 行の部品は `UnmatchedNameRow` を使い回す（`showCustomerRaw={false}`・見出しの品名の数 `summary`・トーストを差し替える `onMapped`）
+
 ## 件数の表示
 
 - `useDailyReportWorklist(months)`（`hooks/use-daily-report-worklist.ts`）をハブと各ページで共有する。件数は `WorkCount`（`lib/work-count.ts`。
@@ -79,7 +99,7 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 
 UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guidelines.md)）に従い、仕組み・判定条件・期間・反映のタイミングはヘルプ
 （`components/daily-reports/daily-report-help.tsx`）に書く。行ごとに繰り返していた「顧客先「…」を先に「顧客」で対応付けてください」は出さず、
-前提のページの見出し（顧客先が決まっていない日報の製品）に1回だけ置く。
+前提のページで顧客先ごとにまとめ、顧客先は見出しに1回だけ出す（#703）。
 
 ### 行・ダイアログの文言（Issue #702）
 
@@ -117,4 +137,6 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
 - 画面に出さない語: `DAILY_REPORT_FORBIDDEN_UI_TEXT`（`test-utils/daily-report.ts`。送品の消し込みの `FORBIDDEN_UI_TEXT` に
   「割り付け・未割当・類似度・キュー」を足したもの）を、ハブ・各ページ（`pages.test.tsx`）・表記の行・対象外・登録済みの対応付けのテストで検査する
 - ハブ・各ページ・旧 URL: `app/master/daily-reports/pages.test.tsx`
+- 前提のページのまとまり: `lib/daily-report-name-utils.test.ts`（`groupProductsByCustomerRaw()`）・
+  `components/daily-report-names/customer-raw-groups.test.tsx`（顧客を選ぶと①へ移り、トーストで知らせる）
 - 見た目: `e2e/daily-report-hub.spec.ts`（API は `page.route()` の固定応答。スクリーンショットは `frontend/test-results/daily-report-hub/`）

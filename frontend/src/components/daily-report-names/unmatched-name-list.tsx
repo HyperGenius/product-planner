@@ -81,7 +81,22 @@ interface PendingOperation {
   variables: AliasVariables | null
 }
 
-export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEdit: boolean }) {
+export function UnmatchedNameRow({
+  item,
+  canEdit,
+  showCustomerRaw = true,
+  summary,
+  onMapped,
+}: {
+  item: UnmatchedName
+  canEdit: boolean
+  /** 製品の顧客先を行に出すか（顧客先のまとまりの中では見出しに出すので false。Issue #703） */
+  showCustomerRaw?: boolean
+  /** 明細の数の横に添える件数（顧客先のまとまりの見出しの「3品名」等） */
+  summary?: string
+  /** 対応付けの登録に成功したとき。渡すと既定のトーストの代わりに呼ぶ */
+  onMapped?: (targetLabel: string) => void
+}) {
   const [expanded, setExpanded] = React.useState(false)
   const [pending, setPending] = React.useState<PendingOperation | null>(null)
   const createAlias = useCreateNameAlias()
@@ -122,10 +137,12 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
   const confirm = () => {
     if (!pending) return
     if (pending.variables) {
+      const targetLabel = pending.view.type === "map" ? pending.view.targetLabel : ""
       createAlias.mutate(pending.variables, {
         onSuccess: () => {
           setPending(null)
-          toast.success(`「${item.raw_text}」を対応付けました`)
+          if (onMapped) onMapped(targetLabel)
+          else toast.success(`「${item.raw_text}」を対応付けました`)
         },
         onError: onError("対応付けに失敗しました"),
       })
@@ -172,11 +189,12 @@ export function UnmatchedNameRow({ item, canEdit }: { item: UnmatchedName; canEd
           )}
           <span className="break-all">{item.raw_text}</span>
         </button>
-        {item.kind === "product" && (
+        {item.kind === "product" && showCustomerRaw && (
           <span className="text-xs text-muted-foreground">
             顧客先: {item.customer_raw ?? "（空欄）"}
           </span>
         )}
+        {summary && <span className="text-sm font-medium tabular-nums">{summary}</span>}
         <span className="text-sm tabular-nums">{item.entry_count.toLocaleString()}明細</span>
         <span className="text-xs text-muted-foreground">
           最終 {formatWorkDate(item.last_work_date)}

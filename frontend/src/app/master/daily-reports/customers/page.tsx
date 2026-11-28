@@ -1,6 +1,9 @@
 "use client"
 
-import { UnmatchedNameList } from "@/components/daily-report-names/unmatched-name-list"
+import {
+  UnregisteredCustomerGroups,
+  UnresolvedCustomerGroups,
+} from "@/components/daily-report-names/customer-raw-groups"
 import {
   DailyReportPageLayout,
   ListStatus,
@@ -13,17 +16,19 @@ import { DAILY_REPORT_PREREQUISITE_META } from "@/lib/daily-report-worklist-util
 import { formatWorkCount } from "@/lib/work-count"
 
 /**
- * 日報の実績の前提: 日報の顧客先（Issue #707）
+ * 日報の実績の前提: 日報の顧客先（Issue #707 / #703）
  * URL: /master/daily-reports/customers
  *
- * アプリに未登録の日報の顧客先と、顧客先が決まっていない日報の製品。顧客先ごとにまとめた一覧は #703。
- * 行は `classifyDailyReportWorklist()` の前提で、ハブのバナーの件数と一致する
+ * アプリに未登録の日報の顧客先ごとに、その顧客先の製品をまとめて出す（顧客を選ぶと製品は①へ移る）。
+ * まとまりの数はハブのバナーの件数と一致する（`classifyDailyReportWorklist()` の `prerequisite.groups`）。
+ * 顧客先が空欄・対象外にした顧客先の製品は、顧客を選べないので別のまとまりにする（#products）
  */
 export default function DailyReportCustomersPage() {
   const { worklist, counts, names, coverage, computedAt } = useDailyReportWorklist()
   const canEdit = useCanEditDailyReportNames()
   const customerMeta = DAILY_REPORT_PREREQUISITE_META.customer
   const productMeta = DAILY_REPORT_PREREQUISITE_META.product
+  const { unregistered, unresolved } = worklist.prerequisite.groups
 
   return (
     <DailyReportPageLayout
@@ -37,14 +42,12 @@ export default function DailyReportCustomersPage() {
         <ListStatus isLoading={names.isLoading} isError={names.isError} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-4">
-          <UnmatchedNameList
-            items={worklist.prerequisite.customers}
-            kind="customer"
+          <UnregisteredCustomerGroups
+            groups={unregistered}
             canEdit={canEdit}
             emptyMessage="アプリに未登録の顧客先はありません"
-            scroll={false}
           />
-          {worklist.prerequisite.products.length > 0 && (
+          {unresolved.length > 0 && (
             <section id="products" aria-labelledby="prerequisite-products" className="space-y-2">
               <h2 id="prerequisite-products" className="text-base font-semibold">
                 {productMeta.label}
@@ -52,13 +55,7 @@ export default function DailyReportCustomersPage() {
                   {formatWorkCount(counts.prerequisiteProduct, productMeta.unit)}
                 </span>
               </h2>
-              <UnmatchedNameList
-                items={worklist.prerequisite.products}
-                kind="product"
-                canEdit={canEdit}
-                emptyMessage=""
-                scroll={false}
-              />
+              <UnresolvedCustomerGroups groups={unresolved} canEdit={canEdit} />
             </section>
           )}
         </div>
