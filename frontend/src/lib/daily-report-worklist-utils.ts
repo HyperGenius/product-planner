@@ -4,7 +4,7 @@ import type {
   UnallocatedCategory,
   UnallocatedGroup,
 } from "@/types/daily-report-progress"
-import type { UnmatchedName } from "@/types/daily-report-names"
+import type { ProductProcessMismatch, UnmatchedName } from "@/types/daily-report-names"
 import type { StockEstimates } from "@/types/daily-report-stock"
 import { groupProductsByCustomerRaw, type CustomerRawGroups } from "@/lib/daily-report-name-utils"
 
@@ -12,7 +12,7 @@ import { groupProductsByCustomerRaw, type CustomerRawGroups } from "@/lib/daily-
  * 日報の実績（仮称）のハブの振り分け（Issue #707、Epic #701）。
  *
  * 日報の表記（`GET /daily-reports/unmatched-names`）と未割当の実績のまとめ（`GET /daily-reports/coverage` の `groups`）を
- * 「次に何をするか」で振り分ける。どの表記・まとめも、前提・① 日報の製品をつなぐ・② 製品の工程を日報に合わせる・
+ * 「次に何をするか」で振り分ける。②の行は製品の工程ルートと日報の工程が合わない製品（`GET /daily-reports/product-processes`、#708）。どの表記・まとめも、前提・① 日報の製品をつなぐ・② 製品の工程を日報に合わせる・
  * ③ 受注の無い製造を確かめる・対象外の**どれか1か所にだけ**置く（送品の消し込みの #691 と同じ考え方）。
  *
  * ハブの件数と各ページの行は、必ず `classifyDailyReportWorklist()` の結果から出す（別々に数えない）。
@@ -99,12 +99,6 @@ export const DAILY_REPORT_WORK_META: Record<DailyReportWorkKind, DailyReportWork
   unordered: { label: "受注の無い製造を確かめる", unit: "件" },
 }
 
-/** ②のうち、工程マスタに無い日報の工程名（表記→工程名はテナント共通なので製品に属さない。#708 まで） */
-export const DAILY_REPORT_PROCESS_NAME_META: DailyReportWorkMeta = {
-  label: "日報の工程名",
-  unit: "工程名",
-}
-
 /** 前提の種類 */
 export type DailyReportPrerequisiteKind = "customer" | "product"
 
@@ -138,7 +132,7 @@ export const DAILY_REPORT_ALIASES_LABEL = "登録済みの対応付け・対象�
  * 日報の表記の行き先。
  * - 顧客先: 前提（顧客先が決まらないと製品を結び付けられない）
  * - 製品: 顧客先が決まっていれば①、決まっていなければ前提
- * - 工程: ②（#708 で製品単位の入口にするまで、表記→工程名の一覧を②に置く）
+ * - 工程: ②（製品の比較の画面の右の「工程名に結び付かない表記」に出す。#708）
  * - 設備: 対象外（割り付けに使わない。#709 で設備マスタ側へ移す。それまでは登録済みの対応付けのページに置く）
  */
 export function placeUnmatchedName(
@@ -157,7 +151,8 @@ export function placeUnmatchedName(
 }
 
 /**
- * 未割当の分類の行き先。工程に関する未割当（製品の工程ルートに無い工程・日報で追わない工程の実績）は②、
+ * 未割当の分類の行き先。工程に関する未割当（製品の工程ルートに無い工程・日報で追わない工程の実績）は②
+ * （製品の比較の画面の右だけの工程・日報で追わない工程の行に出る。#708）、
  * それ以外は今の分類のまま③に置く（どの理由を③に残すかは #706 で本番のデータを見てから決める）
  */
 export const UNALLOCATED_CATEGORY_PLACEMENT: Record<
@@ -176,54 +171,15 @@ export const UNALLOCATED_CATEGORY_PLACEMENT: Record<
   no_work_date: "unordered",
 }
 
-/** ②の製品の1行（工程に関する未割当のまとめを製品ごとに集めたもの） */
-export interface ProcessProductRow {
-  product_id: number
-  product_name: string | null
-  product_code: string | null
-  /** 製品に工程ルートが1件でもあるか（無ければ工程を登録する） */
-  product_has_routings: boolean
-  qty: number
-  row_count: number
-  /** 日報に出てきた工程名（数量の多い順） */
-  process_names: string[]
-  /** 元のまとめ（数量の多い順） */
-  groups: UnallocatedGroup[]
-}
-
-/** 工程に関する未割当のまとめを製品ごとに集める（数量の多い順） */
-export function groupProcessProducts(groups: readonly UnallocatedGroup[]): ProcessProductRow[] {
-  const byProduct = new Map<number, ProcessProductRow>()
-  for (const group of groups) {
-    const row = byProduct.get(group.product_id) ?? {
-      product_id: group.product_id,
-      product_name: group.product_name,
-      product_code: group.product_code,
-      product_has_routings: group.product_has_routings,
-      qty: 0,
-      row_count: 0,
-      process_names: [],
-      groups: [],
-    }
-    row.qty += group.qty
-    row.row_count += group.row_count
-    // groups は数量の多い順に来るので、そのまま足せば工程名も数量の多い順になる
-    if (!row.process_names.includes(group.process_name)) row.process_names.push(group.process_name)
-    row.groups.push(group)
-    byProduct.set(group.product_id, row)
-  }
-  return [...byProduct.values()].sort((a, b) => b.qty - a.qty || a.product_id - b.product_id)
-}
-
 export interface DailyReportWorklistCounts {
   /** 表記の一覧が届いていない間は null。未登録の顧客先の数（前提のページのまとまりの数） */
   customer: number | null
   /** 顧客先が空欄・対象外の日報の製品の数（未登録の顧客先の製品は数えない） */
   prerequisiteProduct: number | null
   products: number | null
-  processNames: number | null
-  /** 照合状況が届いていない間は null */
+  /** 製品の工程の突き合わせが届いていない間は null */
   processProducts: number | null
+  /** 照合状況が届いていない間は null */
   unordered: number | null
 }
 
@@ -238,12 +194,17 @@ export interface DailyReportWorklist {
   }
   /** ① 日報の製品をつなぐ */
   products: UnmatchedName[]
-  /** ② 製品の工程を日報に合わせる */
+  /**
+   * ② 製品の工程を日報に合わせる。ページの行・件数は `products`（工程ルートと日報の工程が合わない製品）。
+   * 工程の表記・工程に関する未割当は製品の比較の画面に含まれるので、別の行にしない（#708）
+   */
   processes: {
-    /** 工程マスタに無い日報の工程名 */
+    /** 工程ルートと日報の工程が合わない製品（合わない工程の明細の多い順） */
+    products: ProductProcessMismatch[]
+    /** 工程マスタに無い日報の工程の表記（製品の比較の右に出る） */
     names: UnmatchedName[]
-    /** 工程ルートと日報の工程が合わない製品・工程ルートが無い製品 */
-    products: ProcessProductRow[]
+    /** 工程に関する未割当のまとめ（製品の比較の右だけの工程・日報で追わない工程に出る） */
+    unallocated: UnallocatedGroup[]
   }
   /** ③ 受注の無い製造を確かめる（数量の多い順） */
   unordered: UnallocatedGroup[]
@@ -257,6 +218,8 @@ export interface DailyReportWorklistSources {
   unmatchedNames?: readonly UnmatchedName[]
   /** `GET /daily-reports/coverage` */
   coverage?: DailyReportCoverage
+  /** `GET /daily-reports/product-processes`（合わない工程の明細の多い順） */
+  productProcesses?: readonly ProductProcessMismatch[]
 }
 
 /** 日報の表記と未割当のまとめを、分類ルール表どおりに振り分ける */
@@ -266,14 +229,13 @@ export function classifyDailyReportWorklist(
   const worklist: DailyReportWorklist = {
     prerequisite: { customers: [], products: [], groups: { unregistered: [], unresolved: [] } },
     products: [],
-    processes: { names: [], products: [] },
+    processes: { products: [], names: [], unallocated: [] },
     unordered: [],
     excluded: { names: [] },
     counts: {
       customer: null,
       prerequisiteProduct: null,
       products: null,
-      processNames: null,
       processProducts: null,
       unordered: null,
     },
@@ -302,12 +264,14 @@ export function classifyDailyReportWorklist(
     worklist.prerequisite.products,
   )
 
-  const processGroups: UnallocatedGroup[] = []
   for (const group of sources.coverage?.groups ?? []) {
-    if (UNALLOCATED_CATEGORY_PLACEMENT[group.category] === "processes") processGroups.push(group)
-    else worklist.unordered.push(group)
+    if (UNALLOCATED_CATEGORY_PLACEMENT[group.category] === "processes") {
+      worklist.processes.unallocated.push(group)
+    } else {
+      worklist.unordered.push(group)
+    }
   }
-  worklist.processes.products = groupProcessProducts(processGroups)
+  worklist.processes.products = [...(sources.productProcesses ?? [])]
 
   if (sources.unmatchedNames) {
     worklist.counts.customer = worklist.prerequisite.groups.unregistered.length
@@ -316,10 +280,11 @@ export function classifyDailyReportWorklist(
       0,
     )
     worklist.counts.products = worklist.products.length
-    worklist.counts.processNames = worklist.processes.names.length
+  }
+  if (sources.productProcesses) {
+    worklist.counts.processProducts = worklist.processes.products.length
   }
   if (sources.coverage) {
-    worklist.counts.processProducts = worklist.processes.products.length
     worklist.counts.unordered = worklist.unordered.length
   }
   return worklist

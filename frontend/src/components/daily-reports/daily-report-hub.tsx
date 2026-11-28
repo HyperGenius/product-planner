@@ -9,7 +9,6 @@ import { allocatedRatio, formatPercent, ratio } from "@/lib/daily-report-coverag
 import {
   DAILY_REPORT_ALIASES_LABEL,
   DAILY_REPORT_PREREQUISITE_META,
-  DAILY_REPORT_PROCESS_NAME_META,
   DAILY_REPORT_STOCK_META,
   DAILY_REPORT_WORK_META,
   dailyReportPageHref,
@@ -130,48 +129,24 @@ export function DailyReportWorkQueue({ counts }: { counts: DailyReportWorkCounts
   return (
     <nav aria-label="日報の実績の作業">
       <ol className="flex flex-col gap-2">
-        {STEPS.map((step) => {
-          const extra =
-            step.kind === "processes" ? processNameExtra(counts.processNames) : undefined
-          return (
-            <li key={step.kind} className="flex">
-              <QueueStepLink step={step} count={stepCounts[step.kind]} extra={extra} />
-            </li>
-          )
-        })}
+        {STEPS.map((step) => (
+          <li key={step.kind} className="flex">
+            <QueueStepLink step={step} count={stepCounts[step.kind]} />
+          </li>
+        ))}
       </ol>
     </nav>
   )
 }
 
-/** ②に一緒に置く、工程マスタに無い日報の工程名（製品と単位が違うので足さずに並べる） */
-function processNameExtra(count: WorkCount): WorkCount | undefined {
-  if (count.isError || count.value === null || count.value === 0) return undefined
-  return count
-}
-
-function QueueStepLink({
-  step,
-  count,
-  extra,
-}: {
-  step: QueueStep
-  count: WorkCount
-  /** ②の工程名の件数（0件なら undefined） */
-  extra?: WorkCount
-}) {
+function QueueStepLink({ step, count }: { step: QueueStep; count: WorkCount }) {
   const meta = DAILY_REPORT_WORK_META[step.kind]
-  const done = !count.isError && count.value === 0 && extra === undefined
+  const done = !count.isError && count.value === 0
   const text = formatWorkCount(count, meta.unit)
-  const extraText = extra
-    ? `${DAILY_REPORT_PROCESS_NAME_META.label} ${formatWorkCount(extra, DAILY_REPORT_PROCESS_NAME_META.unit)}`
-    : null
   return (
     <Link
       href={dailyReportPageHref(step.page)}
-      aria-label={[`${step.no} ${meta.label}`, done ? "済み" : text, extraText]
-        .filter(Boolean)
-        .join(" ")}
+      aria-label={`${step.no} ${meta.label} ${done ? "済み" : text}`}
       className={cn(
         "flex w-full items-center gap-3 rounded-lg border bg-card text-left transition-colors hover:bg-accent",
         done ? "bg-muted/40 px-4 py-2" : "px-4 py-3",
@@ -199,24 +174,19 @@ function QueueStepLink({
         )}
       </span>
       {!done && (
-        <span className="flex shrink-0 flex-col items-end gap-0.5">
-          <span
-            className={cn(
-              "text-2xl font-bold tabular-nums",
-              count.isError && "text-sm font-normal text-red-600",
-            )}
-          >
-            {count.isError || count.value === null ? (
-              text
-            ) : (
-              <>
-                {count.value}
-                <span className="ml-0.5 text-sm font-normal">{meta.unit}</span>
-              </>
-            )}
-          </span>
-          {extraText && (
-            <span className="text-xs tabular-nums text-muted-foreground">{extraText}</span>
+        <span
+          className={cn(
+            "shrink-0 text-2xl font-bold tabular-nums",
+            count.isError && "text-sm font-normal text-red-600",
+          )}
+        >
+          {count.isError || count.value === null ? (
+            text
+          ) : (
+            <>
+              {count.value}
+              <span className="ml-0.5 text-sm font-normal">{meta.unit}</span>
+            </>
           )}
         </span>
       )}

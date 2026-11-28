@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test"
 
 /**
- * 日報の実績のハブと各ページ（Issue #707）の見た目を撮る。
+ * 日報の実績のハブと各ページ（Issue #707）・製品の工程の比較（Issue #708）の見た目を撮る。
  *
  * 前提:
  * - Supabase (supabase start) と frontend (npm run dev) がローカルで起動していること
@@ -98,6 +98,31 @@ const COVERAGE = {
   ],
 }
 
+// ② 工程ルートと日報の工程が合わない製品（Issue #708）
+const PRODUCT_PROCESSES = [
+  { product_id: 102, product_name: "シャフトB", product_code: "DW-102", has_routings: false, mismatch_count: 2, entry_count: 16 },
+  { product_id: 103, product_name: "カバーC", product_code: "DW-103", has_routings: true, mismatch_count: 3, entry_count: 9 },
+]
+
+const COMPARISON = {
+  product_id: 103,
+  product_name: "カバーC",
+  product_code: "DW-103",
+  has_routings: true,
+  mismatch_count: 3,
+  routings: [
+    { routing_id: 1, sequence_order: 1, process_name: "プレス", untracked: false, raws: [{ raw_text: "ﾌﾟﾚｽ加工", entry_count: 15, last_work_date: "2026-11-21" }, { raw_text: "プレス", entry_count: 2, last_work_date: "2026-11-02" }] },
+    { routing_id: 2, sequence_order: 2, process_name: "曲げ", untracked: false, raws: [] },
+    { routing_id: 3, sequence_order: 3, process_name: "検査", untracked: true, raws: [{ raw_text: "検査", entry_count: 2, last_work_date: "2026-11-20" }] },
+  ],
+  off_routing: [
+    { process_name: "溶接", untracked: false, raws: [{ raw_text: "溶接", entry_count: 5, last_work_date: "2026-11-19" }] },
+  ],
+  unmatched: [
+    { raw_text: "ﾊﾞﾚﾙ研磨", entry_count: 2, last_work_date: "2026-11-15", other_product_count: 3 },
+  ],
+}
+
 const STOCK = {
   computed_at: "2026-11-25T00:15:00Z",
   items: [
@@ -108,7 +133,10 @@ const STOCK = {
 }
 
 /** localhost:8000 の API をすべて固定応答にする（知らないパスは空の一覧） */
-async function mockApi(page: Page, overrides: { names?: unknown[]; coverage?: unknown } = {}) {
+async function mockApi(
+  page: Page,
+  overrides: { names?: unknown[]; coverage?: unknown; productProcesses?: unknown[] } = {},
+) {
   await page.route(/^http:\/\/localhost:8000\//, (route: Route) => {
     const path = new URL(route.request().url()).pathname
     const json = (body: unknown) => route.fulfill({ json: body })
@@ -118,6 +146,9 @@ async function mockApi(page: Page, overrides: { names?: unknown[]; coverage?: un
     if (path === "/daily-reports/unmatched-names") return json(overrides.names ?? UNMATCHED_NAMES)
     if (path === "/daily-reports/coverage") return json(overrides.coverage ?? COVERAGE)
     if (path === "/daily-reports/stock-estimates") return json(STOCK)
+    if (path === "/daily-reports/product-processes") return json(overrides.productProcesses ?? PRODUCT_PROCESSES)
+    if (path === "/daily-reports/product-processes/103") return json(COMPARISON)
+    if (path === "/daily-reports/process-names") return json(["プレス", "曲げ", "溶接", "検査", "研磨"])
     return json([])
   })
 }
@@ -149,7 +180,7 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
   test("ハブ: 前提バナー・作業のキュー・参考", async ({ page }) => {
     await open(page, "/master/daily-reports")
     await expect(page.getByRole("link", { name: "① 日報の製品をつなぐ 3品名" })).toBeVisible({ timeout: 30000 })
-    await expect(page.getByRole("link", { name: "② 製品の工程を日報に合わせる 2製品 日報の工程名 1工程名" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "② 製品の工程を日報に合わせる 2製品" })).toBeVisible()
     await expect(page.getByRole("link", { name: "③ 受注の無い製造を確かめる 4件" })).toBeVisible()
     await expect(page.getByRole("region", { name: "先に片付けること" })).toContainText(
       "日報の顧客先のうち2顧客先がアプリに未登録です",
@@ -164,6 +195,7 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
     await open(page, "/master/daily-reports", {
       names: [unmatched("equipment", "200t 3号機")],
       coverage: { ...COVERAGE, groups: COVERAGE.groups.filter((g) => g.category !== "no_routing_process" && g.category !== "untracked_process") },
+      productProcesses: [],
     })
     await expect(page.getByRole("link", { name: "① 日報の製品をつなぐ 済み" })).toBeVisible({ timeout: 30000 })
     await expect(page.getByRole("link", { name: "② 製品の工程を日報に合わせる 済み" })).toBeVisible()
@@ -200,9 +232,26 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
 
   test("② 製品の工程を日報に合わせる", async ({ page }) => {
     await open(page, "/master/daily-reports/processes")
-    await expect(page.getByTestId("process-product-row")).toHaveCount(2, { timeout: 30000 })
+    await expect(page.getByTestId("product-process-row")).toHaveCount(2, { timeout: 30000 })
     await expect(page.getByRole("heading", { level: 1 })).toContainText("2製品")
     await screenshot(page, "processes-1920")
+  })
+
+  test("② 製品の工程の比較（一覧から開く、#708）", async ({ page }) => {
+    await open(page, "/master/daily-reports/processes")
+    await page.getByTestId("product-process-row").filter({ hasText: "カバーC" }).click({ timeout: 30000 })
+    await expect(page).toHaveURL(/\/master\/daily-reports\/processes\/103$/)
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("カバーC（DW-103）")
+    const press = page.getByRole("listitem", { name: "1 プレス" })
+    await expect(press).toContainText("ﾌﾟﾚｽ加工")
+    // 左右に並ぶ（工程マスタの工程と、それに結び付く日報の表記が同じ行の高さにある）
+    // 日報の表記にも「プレス」があるので、左（工程マスタ）の1つ目を取る
+    const left = await press.getByText("プレス", { exact: true }).first().boundingBox()
+    const right = await press.getByText("ﾌﾟﾚｽ加工").boundingBox()
+    expect(left && right && Math.abs(left.y - right.y) < 8 && right.x > left.x).toBeTruthy()
+    await expect(page.getByRole("listitem", { name: "2 曲げ" }).getByRole("button", { name: "日報で追わない工程にする" })).toBeVisible()
+    await expect(page.getByRole("listitem", { name: "溶接" }).getByRole("button", { name: "この製品の工程に足す" })).toBeVisible()
+    await screenshot(page, "process-comparison-1920")
   })
 
   test("③ 受注の無い製造を確かめる", async ({ page }) => {
@@ -232,7 +281,7 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
     await expect(page).toHaveURL(/\/master\/daily-reports$/, { timeout: 30000 })
   })
 
-  test("ハブ・前提・② をタブレット横向き（1180×820）で", async ({ page }) => {
+  test("ハブ・前提・②・製品の工程の比較をタブレット横向き（1180×820）で", async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 820 })
     await open(page, "/master/daily-reports")
     await expect(page.getByRole("link", { name: /^① 日報の製品をつなぐ/ })).toBeVisible({ timeout: 30000 })
@@ -241,7 +290,10 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
     await expect(page.getByRole("region", { name: "顧客先「見本商事」" })).toBeVisible({ timeout: 30000 })
     await screenshot(page, "customers-tablet")
     await page.goto("/master/daily-reports/processes")
-    await expect(page.getByTestId("process-product-row")).toHaveCount(2, { timeout: 30000 })
+    await expect(page.getByTestId("product-process-row")).toHaveCount(2, { timeout: 30000 })
     await screenshot(page, "processes-tablet")
+    await page.goto("/master/daily-reports/processes/103")
+    await expect(page.getByRole("listitem", { name: "1 プレス" })).toBeVisible({ timeout: 30000 })
+    await screenshot(page, "process-comparison-tablet")
   })
 })

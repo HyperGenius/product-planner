@@ -165,3 +165,67 @@ class NameEntryResponse(BaseModel):
     processed_qty: int | None = None
     defect_qty: int | None = None
     good_qty: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# 製品の工程ルートと日報の工程の突き合わせ（Issue #708）
+# ---------------------------------------------------------------------------
+
+
+class ProductProcessMismatchResponse(BaseModel):
+    """② 製品の工程を日報に合わせる の1行（工程ルートと日報の工程が合わない製品）。"""
+
+    product_id: int
+    product_name: str | None
+    product_code: str | None
+    # 工程ルートが1件でもあるか（無ければ日報の工程はすべて工程ルートに無い工程になる）
+    has_routings: bool
+    # 合わない工程の数（工程名に結び付かない表記・工程ルートに無い工程名・日報で追わないのに実績がある工程）
+    mismatch_count: int
+    # 合わない工程の日報の明細の数
+    entry_count: int
+
+
+class ProcessRawResponse(BaseModel):
+    """日報の工程の表記（製品1つ分）。"""
+
+    raw_text: str
+    entry_count: int
+    last_work_date: date | None
+
+
+class RoutingProcessRowResponse(BaseModel):
+    """左: 工程ルートの工程と、それに結び付く日報の表記（結び付く表記が無ければ左だけの工程）。"""
+
+    routing_id: int
+    sequence_order: int
+    process_name: str
+    # 日報で追わない工程（#681）
+    untracked: bool
+    raws: list[ProcessRawResponse]
+
+
+class OffRoutingProcessRowResponse(BaseModel):
+    """右だけ: 工程名には結び付くが、この製品の工程ルートに無い工程。"""
+
+    process_name: str
+    untracked: bool
+    raws: list[ProcessRawResponse]
+
+
+class UnmatchedProcessRawResponse(ProcessRawResponse):
+    """右だけ: 工程名に結び付かない日報の表記。"""
+
+    # 同じ表記を日報で使っている他の製品の数（工程の別名はテナント共通）
+    other_product_count: int
+
+
+class ProductProcessComparisonResponse(BaseModel):
+    product_id: int
+    product_name: str | None
+    product_code: str | None
+    has_routings: bool
+    mismatch_count: int
+    routings: list[RoutingProcessRowResponse]
+    off_routing: list[OffRoutingProcessRowResponse]
+    unmatched: list[UnmatchedProcessRawResponse]

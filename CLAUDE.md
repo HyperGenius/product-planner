@@ -286,6 +286,14 @@ cd backend && ruff check . && mypy .
     別名だけ失敗したら製品は残してダイアログを閉じる（再度押すと同じ製品を作ろうとする）。類似製品の警告の「この製品に結び付ける」（`SimilarProductsWarning` の
     `onSelect`）は登録せず確認ダイアログ（#645）へ移す。作成ダイアログは**開いている行の分だけ描画する**（中の類似製品の警告が初期値の品名で行ごとに問い合わせる）。
     図番の初期値 `guessProductCode()` は送品の照合と同じ「数字5桁以上が1つだけ」。製品の作成はロールの制限が無く、別名のロールの部分集合なので `canEdit` だけで出す
+  - **②の製品単位の工程の突き合わせ（Issue #708）**: `GET /daily-reports/product-processes`（一覧）・`/{product_id}`（左右の比較）。明細は RPC
+    `daily_report_product_process_stats`（(顧客先, 商品名, 工程の表記) ごとの集計、`p_since` で期間）で読み、純粋関数 `daily_report_product_processes` で
+    照合・突き合わせる（保存しない）。照合の単位は割り付けと揃える（工程名は前後の空白を除く・同じ工程名の行は `sequence_order` の最小の行）ので、
+    割り付けの規則を変えたらここも合わせる。**工程ルートだけにある工程は「合わない」に数えない**（#681。画面でも印を付けず操作だけ置く）。ハブの②の件数は
+    この一覧の製品の数で、工程の表記・工程に関する未割当は `classifyDailyReportWorklist()` で②に置くが別の行・件数にしない。クエリキーは
+    `["daily-report-names"]` 配下（1リクエストなので可）で、工程ルート・日報で追わない工程を変えたら `useInvalidateProductProcesses()` を呼ぶ
+    （工程ルートのフックは製品の画面と共有なので②側で呼ぶ）。`ProductRoutingsDialog` は `initialProcessName`・`onSaved` を受け取る。比較のページの
+    テストは `next/navigation` のモックに `useParams` が要る。詳細は [docs/features/daily-report-hub.md](docs/features/daily-report-hub.md#-製品の工程を日報に合わせるissue-708)
   - 行ごとに発火するクエリ（製品の類似候補）は、ミューテーション後にまとめて無効化するクエリキー（`["daily-report-names"]`）の
     **配下に置かない**。配下に置くと登録1回ごとに行数分の pg_trgm 検索が再実行される（PR #498 Copilotレビュー）
 - **日報の実績の割り付けと進捗（Issue #490）**: 計算は純粋関数 `daily_report_allocator.allocate_actuals()`、DB 入出力は

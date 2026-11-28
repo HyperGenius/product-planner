@@ -23,6 +23,7 @@ from app.routers.cron import (
 )
 from app.routers.daily_reports import (
     daily_report_names_router,
+    daily_report_product_process_router,
     daily_report_progress_router,
     daily_report_stock_assignment_router,
     daily_report_stock_router,
@@ -84,6 +85,7 @@ app.include_router(customer_router)
 app.include_router(customer_contact_router)
 app.include_router(customer_extraction_prompt_router)
 app.include_router(daily_report_names_router)
+app.include_router(daily_report_product_process_router)
 app.include_router(daily_report_progress_router)
 app.include_router(daily_report_stock_router)
 app.include_router(daily_report_stock_assignment_router)

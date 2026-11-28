@@ -12,6 +12,8 @@ import type {
   NameKind,
   OrderedProductCandidate,
   ProductCandidate,
+  ProductProcessComparison,
+  ProductProcessMismatch,
   UnmatchedName,
 } from "@/types/daily-report-names"
 
@@ -126,6 +128,52 @@ export function useCustomerOrderedProducts(customerId: number | null) {
     enabled: customerId !== null,
     staleTime: 60 * 1000,
   })
+}
+
+/**
+ * 製品の工程ルートと日報の工程の突き合わせ（Issue #708）。照合結果は保存されず参照のたびに求めるので、
+ * 工程の別名・対象外の登録（`DAILY_REPORT_NAMES_QUERY_KEY` の無効化）で取り直す。一覧も比較も1リクエストなので
+ * 配下に置いてよい（行ごとに発火するクエリではない。PR #498）。工程ルート・日報で追わない工程を変えたら
+ * `useInvalidateProductProcesses()` で取り直す
+ */
+export const PRODUCT_PROCESSES_QUERY_KEY = [...DAILY_REPORT_NAMES_QUERY_KEY, "product-processes"]
+
+function monthsQuery(months: number | null): string {
+  return months === null ? "" : `?${new URLSearchParams({ months: String(months) })}`
+}
+
+/** 工程ルートと日報の工程が合わない製品（ハブの②）。`months` は加工日の期間（null はすべて） */
+export function useProductProcesses(months: number | null) {
+  return useQuery<ProductProcessMismatch[]>({
+    queryKey: [...PRODUCT_PROCESSES_QUERY_KEY, "list", months],
+    queryFn: () =>
+      apiClient<ProductProcessMismatch[]>(`${BASE}/product-processes${monthsQuery(months)}`),
+  })
+}
+
+/** 製品1つの工程ルート（左）と日報の工程（右）の比較 */
+export function useProductProcessComparison(productId: number | null, months: number | null) {
+  return useQuery<ProductProcessComparison>({
+    queryKey: [...PRODUCT_PROCESSES_QUERY_KEY, "detail", productId, months],
+    queryFn: () =>
+      apiClient<ProductProcessComparison>(
+        `${BASE}/product-processes/${productId}${monthsQuery(months)}`,
+      ),
+    enabled: productId !== null,
+  })
+}
+
+/**
+ * 工程ルート・日報で追わない工程を変えた後に、突き合わせとマスタの工程名（別名の対応付け先）を取り直す。
+ * 工程ルートのフック（`use-process-routings.ts`）は製品の画面と共有するので、②の画面から呼ぶ
+ */
+export function useInvalidateProductProcesses() {
+  const queryClient = useQueryClient()
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: PRODUCT_PROCESSES_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: [...DAILY_REPORT_NAMES_QUERY_KEY, "process-names"] }),
+    ])
 }
 
 /** マスタの工程名の一覧（工程の別名の対応付け先） */

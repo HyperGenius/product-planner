@@ -148,3 +148,63 @@ export interface IgnoredName {
   created_by: string
   created_at: string
 }
+
+// ---------------------------------------------------------------------------
+// 製品の工程ルートと日報の工程の突き合わせ（Issue #708）
+// Backend `models/daily_report_names.py` の ProductProcess* と揃える
+// ---------------------------------------------------------------------------
+
+/** ② 製品の工程を日報に合わせる の1行（`GET /daily-reports/product-processes`） */
+export interface ProductProcessMismatch {
+  product_id: number
+  product_name: string | null
+  product_code: string | null
+  /** 工程ルートが1件でもあるか */
+  has_routings: boolean
+  /** 合わない工程の数 */
+  mismatch_count: number
+  /** 合わない工程の日報の明細の数 */
+  entry_count: number
+}
+
+/** 日報の工程の表記（製品1つ分） */
+export interface ProcessRaw {
+  raw_text: string
+  entry_count: number
+  last_work_date: string | null
+}
+
+/** 左: 工程ルートの工程と、それに結び付く日報の表記 */
+export interface RoutingProcessRow {
+  routing_id: number
+  sequence_order: number
+  process_name: string
+  /** 日報で追わない工程（#681） */
+  untracked: boolean
+  raws: ProcessRaw[]
+}
+
+/** 右だけ: 工程名には結び付くが、この製品の工程ルートに無い工程 */
+export interface OffRoutingProcessRow {
+  process_name: string
+  untracked: boolean
+  raws: ProcessRaw[]
+}
+
+/** 右だけ: 工程名に結び付かない日報の表記 */
+export interface UnmatchedProcessRaw extends ProcessRaw {
+  /** 同じ表記を日報で使っている他の製品の数（工程の別名はテナント共通） */
+  other_product_count: number
+}
+
+/** 製品1つの比較（`GET /daily-reports/product-processes/{product_id}`） */
+export interface ProductProcessComparison {
+  product_id: number
+  product_name: string | null
+  product_code: string | null
+  has_routings: boolean
+  mismatch_count: number
+  routings: RoutingProcessRow[]
+  off_routing: OffRoutingProcessRow[]
+  unmatched: UnmatchedProcessRaw[]
+}

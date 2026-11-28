@@ -99,6 +99,8 @@ export const handlers = [
   // 製品のピッカーを開くと引く似ている製品（全製品）。既定はどちらもなし
   http.get(`${API_BASE}/daily-reports/product-candidates`, () => HttpResponse.json([])),
   http.get(`${API_BASE}/daily-reports/customer-ordered-products`, () => HttpResponse.json([])),
+  // 日報の実績のハブの②の件数（工程ルートと日報の工程が合わない製品、Issue #708）。既定はなし
+  http.get(`${API_BASE}/daily-reports/product-processes`, () => HttpResponse.json([])),
   // 受注詳細の工程の進捗（Issue #491）。引き当てのダイアログも使う（Issue #673）。既定は未集計
   http.get(`${API_BASE}/orders/:orderId/progress`, ({ params }) =>
     HttpResponse.json({ order_id: Number(params.orderId), computed_at: null, processes: [] }),

@@ -10,7 +10,7 @@ import type {
   UnallocatedActual,
   UnallocatedGroup,
 } from "@/types/daily-report-progress"
-import type { UnmatchedName } from "@/types/daily-report-names"
+import type { ProductProcessMismatch, UnmatchedName } from "@/types/daily-report-names"
 import LegacyCoveragePage from "../daily-report-coverage/page"
 import LegacyNamesPage from "../daily-report-names/page"
 import DailyReportAliasesPage from "./aliases/page"
@@ -107,19 +107,37 @@ const COVERAGE: Coverage = {
   ],
 }
 
+/** ② 工程ルートと日報の工程が合わない製品（Issue #708） */
+const PRODUCT_PROCESSES: ProductProcessMismatch[] = [
+  {
+    product_id: 1,
+    product_name: "テスト製品A",
+    product_code: "P-001",
+    has_routings: false,
+    mismatch_count: 2,
+    entry_count: 12,
+  },
+]
+
 function mockSources({
   names = NAMES,
   coverage = COVERAGE,
-}: { names?: UnmatchedName[]; coverage?: Coverage } = {}) {
+  productProcesses = PRODUCT_PROCESSES,
+}: { names?: UnmatchedName[]; coverage?: Coverage; productProcesses?: ProductProcessMismatch[] } = {}) {
   const coverageRequests: URL[] = []
+  const productProcessRequests: URL[] = []
   server.use(
     http.get(`${API_BASE}/daily-reports/unmatched-names`, () => HttpResponse.json(names)),
     http.get(`${API_BASE}/daily-reports/coverage`, ({ request }) => {
       coverageRequests.push(new URL(request.url))
       return HttpResponse.json(coverage)
     }),
+    http.get(`${API_BASE}/daily-reports/product-processes`, ({ request }) => {
+      productProcessRequests.push(new URL(request.url))
+      return HttpResponse.json(productProcesses)
+    }),
   )
-  return coverageRequests
+  return Object.assign(coverageRequests, { productProcessRequests })
 }
 
 const getPageHeading = () => screen.getByRole("heading", { level: 1 })
@@ -174,7 +192,7 @@ describe("日報の実績のハブ（Issue #707）", () => {
     await waitFor(() =>
       expect(within(queue).getAllByRole("link").map((l) => l.getAttribute("aria-label"))).toEqual([
         "① 日報の製品をつなぐ 2品名",
-        "② 製品の工程を日報に合わせる 1製品 日報の工程名 1工程名",
+        "② 製品の工程を日報に合わせる 1製品",
         "③ 受注の無い製造を確かめる 2件",
       ]),
     )
@@ -185,6 +203,7 @@ describe("日報の実績のハブ（Issue #707）", () => {
     ])
     // ②③は既定の期間（直近3か月）で数える
     expect(requests[0].searchParams.get("months")).toBe("3")
+    expect(requests.productProcessRequests[0].searchParams.get("months")).toBe("3")
 
     const banner = screen.getByRole("region", { name: "先に片付けること" })
     expect(banner).toHaveTextContent("日報の顧客先のうち1顧客先がアプリに未登録です")
@@ -226,6 +245,7 @@ describe("日報の実績のハブ（Issue #707）", () => {
     mockSources({
       names: [name({ kind: "equipment", raw_text: "200t 1号機", customer_raw: null, customer_id: null })],
       coverage: { ...COVERAGE, groups: [] },
+      productProcesses: [],
     })
     render(<DailyReportHubPage />)
 
@@ -327,41 +347,38 @@ describe("日報の実績の各ページ（Issue #707）", () => {
     expect(rows.map((r) => r.textContent)).toEqual(["ピンA", "ピンB"])
   })
 
-  it("②: 工程を合わせる製品と、工程マスタに無い日報の工程名を出し、製品から工程管理を開ける", async () => {
-    server.use(
-      http.get(`${API_BASE}/process-routings`, () => HttpResponse.json([])),
-      http.get(`${API_BASE}/equipment-groups`, () => HttpResponse.json([])),
-    )
+  it("②: 工程ルートと日報の工程が合わない製品を、ハブと同じ件数で出し、製品の比較へ移る（#708）", async () => {
     mockSources()
     render(<DailyReportProcessesPage />)
 
     await waitFor(() =>
       expect(getPageHeading()).toHaveTextContent("② 製品の工程を日報に合わせる1製品"),
     )
-    const [row] = await screen.findAllByTestId("process-product-row")
+    const [row] = await screen.findAllByTestId("product-process-row")
+    expect(row).toHaveAttribute("href", "/master/daily-reports/processes/1")
     expect(within(row).getByText("テスト製品A（P-001）")).toBeInTheDocument()
     expect(within(row).getByText("工程ルートなし")).toBeInTheDocument()
-    expect(within(row).getByText("日報の工程: 溶接")).toBeInTheDocument()
-    const names = screen.getByRole("region", { name: /日報の工程名/ })
-    expect(within(names).getByRole("button", { name: "ﾌﾟﾚｽ加工" })).toBeInTheDocument()
-
-    const button = within(row).getByRole("button", { name: "工程を登録" })
-    await waitFor(() => expect(button).toBeEnabled())
-    await userEvent.click(button)
-    expect(
-      await screen.findByRole("dialog", { name: "工程管理 - テスト製品A" }),
-    ).toBeInTheDocument()
+    expect(row).toHaveTextContent("合わない工程 2")
+    expect(row).toHaveTextContent("12明細")
+    // 旧名寄せの「工程」（工程マスタに無い日報の工程名の一覧）は製品の比較に移した
+    expect(screen.queryByRole("button", { name: "ﾌﾟﾚｽ加工" })).toBeNull()
   })
 
-  it("②: 製品の行を開くと、工程名・理由ごとのまとめを出す", async () => {
-    mockSources()
+  it("②: 期間を変えると取り直し、製品の比較へ期間を持ち越す", async () => {
+    const requests = mockSources()
     render(<DailyReportProcessesPage />)
 
-    const [row] = await screen.findAllByTestId("process-product-row")
-    await userEvent.click(within(row).getByRole("button", { name: /テスト製品A/ }))
-    expect(
-      within(row).getByText("この製品の工程に「溶接」がありません。実際の工程順は？"),
-    ).toBeInTheDocument()
+    await screen.findAllByTestId("product-process-row")
+    await userEvent.click(screen.getByRole("button", { name: "すべて" }))
+    await waitFor(() =>
+      expect(requests.productProcessRequests.at(-1)?.searchParams.has("months")).toBe(false),
+    )
+    await waitFor(() =>
+      expect(screen.getAllByTestId("product-process-row")[0]).toHaveAttribute(
+        "href",
+        "/master/daily-reports/processes/1?months=all",
+      ),
+    )
   })
 
   it("③: 工程に関する未割当を除いたまとめを、既定は「すべて」で出す（ハブと同じ件数）", async () => {
