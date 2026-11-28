@@ -24,8 +24,16 @@ export type PendingNameAction =
       targetLabel: string
       /** 製品のときだけ。選んだ製品の、その顧客の受注状況を見せる (Issue #646) */
       productRef?: { customerId: number; productId: number }
+      /** 工程のときだけ。同じ表記を日報で使っている他の製品の数（工程の別名はテナント共通。Issue #708） */
+      otherProductCount?: number
     }
-  | { type: "ignore"; kind: NameKind; rawText: string; customerRaw?: string | null }
+  | {
+      type: "ignore"
+      kind: NameKind
+      rawText: string
+      customerRaw?: string | null
+      otherProductCount?: number
+    }
 
 interface ConfirmMappingDialogProps {
   pending: PendingNameAction | null
@@ -80,6 +88,11 @@ export function ConfirmMappingDialog({
                     )}
                   </div>
                 </div>
+              )}
+              {pending?.otherProductCount !== undefined && pending.otherProductCount > 0 && (
+                <p className="text-sm text-foreground">
+                  この表記は他に{pending.otherProductCount}製品の日報でも使われています
+                </p>
               )}
               {pending?.type === "map" && pending.productRef && (
                 <ProductOrderStatus

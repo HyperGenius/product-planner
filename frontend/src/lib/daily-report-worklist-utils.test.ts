@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest"
 import { CATEGORY_ORDER, unallocatedGroupKey } from "@/lib/daily-report-coverage-utils"
 import { unmatchedNameKey } from "@/lib/daily-report-name-utils"
 import type { DailyReportCoverage, UnallocatedGroup } from "@/types/daily-report-progress"
-import type { UnmatchedName } from "@/types/daily-report-names"
+import type { ProductProcessMismatch, UnmatchedName } from "@/types/daily-report-names"
 import {
   DAILY_REPORT_HUB_HREF,
   UNALLOCATED_CATEGORY_PLACEMENT,
   classifyDailyReportWorklist,
   countStockProducts,
   dailyReportHrefFromLegacyCoverageHash,
-  groupProcessProducts,
   placeUnmatchedName,
   type DailyReportWorklist,
 } from "./daily-report-worklist-utils"
@@ -72,9 +71,10 @@ function placedKeys(worklist: DailyReportWorklist): string[] {
     ),
     ...worklist.prerequisite.groups.unresolved.flatMap((g) => g.products.map(unmatchedNameKey)),
     ...worklist.products.map(unmatchedNameKey),
+    // 工程の表記・工程に関する未割当は②の製品の比較に含まれる（#708）
     ...worklist.processes.names.map(unmatchedNameKey),
     ...worklist.excluded.names.map(unmatchedNameKey),
-    ...worklist.processes.products.flatMap((row) => row.groups.map(unallocatedGroupKey)),
+    ...worklist.processes.unallocated.map(unallocatedGroupKey),
     ...worklist.unordered.map(unallocatedGroupKey),
   ]
 }
@@ -138,6 +138,26 @@ const GROUPS: UnallocatedGroup[] = [
   group({ product_id: 6, category: "stocked", reason: "before_order_date", qty: 3 }),
 ]
 
+/** ② 工程ルートと日報の工程が合わない製品（`GET /daily-reports/product-processes`、#708） */
+const PRODUCT_PROCESSES: ProductProcessMismatch[] = [
+  {
+    product_id: 2,
+    product_name: "テスト製品B",
+    product_code: null,
+    has_routings: false,
+    mismatch_count: 2,
+    entry_count: 12,
+  },
+  {
+    product_id: 3,
+    product_name: "テスト製品C",
+    product_code: null,
+    has_routings: true,
+    mismatch_count: 1,
+    entry_count: 4,
+  },
+]
+
 describe("placeUnmatchedName", () => {
   it("顧客先は前提、顧客先が決まった製品は①・決まっていない製品は前提、工程は②、設備は対象外", () => {
     expect(placeUnmatchedName({ kind: "customer", customer_id: null })).toBe("prerequisite")
@@ -160,6 +180,7 @@ describe("classifyDailyReportWorklist", () => {
     const worklist = classifyDailyReportWorklist({
       unmatchedNames: NAMES,
       coverage: coverage(GROUPS),
+      productProcesses: PRODUCT_PROCESSES,
     })
     expectEachPlacedOnce(NAMES, GROUPS, worklist)
   })
@@ -168,12 +189,12 @@ describe("classifyDailyReportWorklist", () => {
     const worklist = classifyDailyReportWorklist({
       unmatchedNames: NAMES,
       coverage: coverage(GROUPS),
+      productProcesses: PRODUCT_PROCESSES,
     })
     expect(worklist.counts).toEqual({
       customer: 2,
       prerequisiteProduct: 1,
       products: 3,
-      processNames: 1,
       processProducts: 2,
       unordered: 4,
     })
@@ -191,6 +212,8 @@ describe("classifyDailyReportWorklist", () => {
     expect(worklist.prerequisite.groups.unresolved.map((g) => g.type)).toEqual(["blank"])
     expect(worklist.counts.products).toBe(worklist.products.length)
     expect(worklist.counts.processProducts).toBe(worklist.processes.products.length)
+    // ②の行は製品の工程の突き合わせのまま（並びも API のまま）
+    expect(worklist.processes.products.map((p) => p.product_id)).toEqual([2, 3])
     expect(worklist.counts.unordered).toBe(worklist.unordered.length)
     expect(worklist.products.map((n) => [n.raw_text, n.customer_raw])).toEqual([
       ["ピンA", "顧客A"],
@@ -205,43 +228,34 @@ describe("classifyDailyReportWorklist", () => {
       customer: 2,
       prerequisiteProduct: 1,
       products: 3,
-      processNames: 1,
       processProducts: null,
       unordered: null,
     })
     expect(classifyDailyReportWorklist({ coverage: coverage(GROUPS) }).counts).toMatchObject({
       customer: null,
       products: null,
-      processProducts: 2,
+      processProducts: null,
       unordered: 4,
     })
+    expect(
+      classifyDailyReportWorklist({ productProcesses: PRODUCT_PROCESSES }).counts,
+    ).toMatchObject({ processProducts: 2, unordered: null })
   })
 
   it("何も無ければ件数は0", () => {
     expect(
-      classifyDailyReportWorklist({ unmatchedNames: [], coverage: coverage([]) }).counts,
+      classifyDailyReportWorklist({
+        unmatchedNames: [],
+        coverage: coverage([]),
+        productProcesses: [],
+      }).counts,
     ).toEqual({
       customer: 0,
       prerequisiteProduct: 0,
       products: 0,
-      processNames: 0,
       processProducts: 0,
       unordered: 0,
     })
-  })
-})
-
-describe("groupProcessProducts", () => {
-  it("工程に関する未割当を製品ごとに集め、数量の多い順に並べる", () => {
-    const rows = groupProcessProducts(
-      GROUPS.filter((g) => UNALLOCATED_CATEGORY_PLACEMENT[g.category] === "processes"),
-    )
-    expect(
-      rows.map((r) => [r.product_id, r.product_has_routings, r.qty, r.process_names, r.groups.length]),
-    ).toEqual([
-      [2, false, 80, ["溶接", "プレス"], 2],
-      [3, true, 45, ["プレス", "検査"], 2],
-    ])
   })
 })
 

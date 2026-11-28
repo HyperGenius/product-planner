@@ -4,8 +4,8 @@
 利用者が**次に何をするか**の順に並べた1つのハブにまとめた。「名寄せ」は仮称で、ページ名はハブの名前（仮称「日報の実績」）にする。
 構成の前例は送品の消し込みのハブ（#692 / #693、[shipment-file-import.md](shipment-file-import.md)）。
 
-Backend は変更していない。ハブは既存の API（`GET /daily-reports/unmatched-names`・`GET /daily-reports/coverage`・
-`GET /daily-reports/stock-estimates`）の結果をフロントで振り分ける。どれも1回ずつしか呼ばないので、件数だけの API は足していない。
+ハブは既存の API（`GET /daily-reports/unmatched-names`・`GET /daily-reports/coverage`・`GET /daily-reports/stock-estimates`）と、
+②の製品の一覧（`GET /daily-reports/product-processes`、#708）の結果をフロントで振り分ける。どれも1回ずつしか呼ばないので、件数だけの API は足していない。
 
 ## ページと URL
 
@@ -14,7 +14,8 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 | `/master/daily-reports` | ハブ（前提バナー・作業のキュー①②③・参考） | － |
 | `/master/daily-reports/customers` | 前提: アプリに未登録の日報の顧客先ごとのまとまり（その顧客先の製品を含む）・顧客先が空欄・対象外の日報の製品（#703） | まとまりは「顧客先」、空欄・対象外の製品は「品名」 |
 | `/master/daily-reports/products` | ① 日報の製品をつなぐ | 品名（(顧客先, 商品名) の組） |
-| `/master/daily-reports/processes` | ② 製品の工程を日報に合わせる（製品の行＋工程マスタに無い日報の工程名） | 製品（工程名は「工程名」で別に数える） |
+| `/master/daily-reports/processes` | ② 製品の工程を日報に合わせる（工程ルートと日報の工程が合わない製品、#708） | 製品 |
+| `/master/daily-reports/processes/[productId]` | ② 製品1つの工程ルート（左）と日報の工程（右）の比較（#708）。`?months=` は一覧の期間を持ち越す | － |
 | `/master/daily-reports/unordered` | ③ 受注の無い製造を確かめる | 件（(製品, 工程名, 理由) のまとまり） |
 | `/master/daily-reports/stock` | 参考: 作り置き（推定） | 製品（推定は (製品, 工程) ごとに出るので製品の数） |
 | `/master/daily-reports/aliases` | 参考: 登録済みの対応付け・対象外・日報の設備（管理のためのページ） | － |
@@ -54,15 +55,15 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 | 顧客先 | 前提 | 顧客先が決まらないと製品を結び付けられない（製品の別名は顧客単位） |
 | 製品（顧客先が決まっている） | ① | |
 | 製品（顧客先が未登録・空欄・対象外） | 前提 | ①②③には数えない。未登録の顧客先の製品はその顧客先のまとまりに入れて別に数えず、空欄・対象外の顧客先の製品だけを「品名」で数える（#703） |
-| 工程 | ② | 表記→工程名はテナント共通。#708 で製品単位の入口にするまで②のページに一覧を置く |
+| 工程 | ② | 製品の比較の右の「工程名に結び付かない表記」に出す（別の行・件数にしない。#708）。その表記を使う明細の製品が結び付いていなければ①が先 |
 | 設備 | 対象外 | 割り付けに使わない。#709 で設備マスタ側へ移すまで、登録済みの対応付けのページの「日報の設備」タブに置く |
 
 ### 未割当のまとめ（`GET /daily-reports/coverage` の `groups`）
 
 | 分類 | 行き先 |
 |---|---|
-| `no_routing_process`（工程ルートに無い工程・工程ルートが無い製品） | ②（製品ごとにまとめる。`groupProcessProducts()`） |
-| `untracked_process`（日報で追わない工程に実績がある） | ②（直す先が同じ製品の工程ルートのため） |
+| `no_routing_process`（工程ルートに無い工程・工程ルートが無い製品） | ②（製品の比較の右だけの工程に出る。#708） |
+| `untracked_process`（日報で追わない工程に実績がある） | ②（製品の比較の「日報で追わない」工程の行に出る） |
 | それ以外（`other_customer_order` / `unapproved_order` / `closed_order_only` / `no_order` / `before_order_date` / `stocked` / `exceeds_order_qty` / `no_work_date`） | ③（今の分類のまま。どれを残すかは #706 で本番のデータを見て決める） |
 
 - ③のページの絞り込みの既定は「すべて」（見出しの件数と行数を一致させる）。「要確認」等で絞れる
@@ -93,7 +94,7 @@ Backend は変更していない。ハブは既存の API（`GET /daily-reports/
 - `useDailyReportWorklist(months)`（`hooks/use-daily-report-worklist.ts`）をハブと各ページで共有する。件数は `WorkCount`（`lib/work-count.ts`。
   送品の消し込みと共通）で、取得中は「－」、失敗は「取得できませんでした」にし、途中の件数を出さない
 - 作業が0件のキューは消さずに小さく「済み」と出す（名寄せは一巡すると開く頻度が下がるので、一巡したことが分かるように）
-- ②は製品と工程名の単位が違うので足さず、「2製品」の下に「日報の工程名 1工程名」と並べる
+- ②は製品の数だけ（#707 の「日報の工程名 n工程名」は、工程の表記を製品の比較に移したので外した。#708）
 
 ## 文言
 
@@ -184,6 +185,58 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
 - 作った製品には受注も工程ルートも無い。工程ルートは次の集計の後に②（工程ルートが無い製品）で合わせ、受注が無い実績は③に出る（#706 と同じ扱い）。
   トーストから工程の登録へはつながない（②が受け持つ）
 
+## ② 製品の工程を日報に合わせる（Issue #708）
+
+工程の名寄せを**製品単位の入口**にした。②のページは工程ルートと日報の工程が合わない製品の一覧で、製品を選ぶと
+`/master/daily-reports/processes/[productId]` で左に工程マスタの工程（工程ルートの順）、右に日報に出てくるその製品の工程を並べる。
+旧名寄せの「工程」タブ（工程マスタに無い日報の工程名の一覧）と照合状況の「工程マスタ未登録」の役割を引き継ぎ、ハブの②から
+工程名の件数（旧画面への入口）を外した。工程の別名（表記→工程名）の単位はテナント共通のまま。
+
+### API
+
+| エンドポイント | 中身 |
+|---|---|
+| `GET /daily-reports/product-processes?months=` | 合わない製品（`product_id`・品名・`has_routings`・`mismatch_count`＝合わない工程の数・`entry_count`＝合わない工程の明細の数）。合わない工程の明細の多い順 |
+| `GET /daily-reports/product-processes/{product_id}?months=` | 比較。`routings`（工程ルートの行＋結び付く表記）・`off_routing`（工程名に結び付くが工程ルートに無い工程）・`unmatched`（工程名に結び付かない表記＋同じ表記を使う他の製品の数 `other_product_count`）。製品がテナントに無ければ 404 |
+
+- ルーターは `routers/daily_reports/product_processes.py`、DB 入出力は `services/daily_report_product_process_service.py`、
+  突き合わせは純粋関数 `services/daily_report_product_processes.py`
+- 明細を全件読まず、RPC `daily_report_product_process_stats(p_tenant_id, p_since)` で (顧客先, 商品名, 工程の表記) ごとに集計してから
+  `DailyReportNameMatcher` で照合する（`daily_report_name_stats` と同じ考え方。製品の別名は顧客単位なので顧客先も組に含める）。
+  照合は表記の単位で決まるので、同じ組の照合はキャッシュして1回にする
+- 照合結果は保存せず参照のたびに求める（#488）。工程の別名・工程ルート・日報で追わない工程の変更は次の参照で反映され、割り付けの再計算を待たない
+- 期間は照合状況と同じく加工日が直近 `months` か月（今月を含む、JST）。加工日の無い明細は常に含める
+- 書き込みは既存の API（工程の別名・対象外・`PUT /process-routings`・`POST /untracked-process-names`）をそのまま使い、新しい書き込み API は無い
+
+### 合わない（`mismatch_count`）
+
+| 右の表記・左の工程 | 合わない工程に数えるか | 操作 | ロール |
+|---|---|---|---|
+| 工程名に結び付かない表記（「対象外」にした表記は除く） | 表記ごとに1 | [工程名を選ぶ]（`ProcessPicker`）・[対象外] | `DAILY_REPORT_NAME_EDITOR_ROLES` |
+| 工程名に結び付くが、この製品の工程ルートに無い工程（工程ルートが無い製品は日報の工程がすべてこれ） | 工程名ごとに1 | [この製品の工程に足す]（工程名を入れた `ProductRoutingsDialog`） | 制限なし（工程ルートの編集と同じ） |
+| 日報で追わない工程なのに日報に実績がある工程ルートの工程 | 工程ごとに1 | [日報で追う工程に戻す] | `UNTRACKED_PROCESS_EDITOR_ROLES` |
+| 工程ルートだけにあって日報に出てこない工程 | **数えない**（検査など日報に書かない工程がある。#681。本番のデータを見て決め直す） | [日報で追わない工程にする] | `UNTRACKED_PROCESS_EDITOR_ROLES` |
+| 工程ルートが無い | （日報の工程がすべて右だけになる） | [工程を登録する] | 制限なし |
+
+- 照合の単位は割り付け（`daily_report_allocator`）と揃える: 工程名は前後の空白を除いて比べ、同じ製品に同じ工程名の行が複数あれば
+  `sequence_order` の最も小さい行に結び付ける。1つの表記が複数の工程名を指す（「カシメ、仕上げ加工」）ときは、それぞれの行に並べる
+- 明細の数は表記ごとに1回だけ数える（2つの工程を指す表記を2回足さない）
+- 日報の商品名が製品に結び付いていない明細は①に置くので、ここには出さない
+
+### 画面
+
+- 左右に並べるかは本文の幅で決める（`@container` ＋ `@[44rem]:`）。狭いときは行ごとに「工程マスタ」「日報」の小見出しを付けて縦に並べる
+- 合わない行（右だけの行・日報で追わないのに実績がある行）は左の線で示し、`data-mismatch` を付ける。左だけの行は数えないので印を付けず、操作だけ置く
+- 工程の別名の確認ダイアログ（`ConfirmMappingDialog` の `otherProductCount`）に「この表記は他にn製品の日報でも使われています」を出す。
+  製品ごとに別の工程を指す実態が見つかったら別名の単位を見直す（別 Issue）
+- 登録後のトースト: 結び付けた工程名がこの製品の工程ルートにすべてあるとき・工程ルートに足したとき・日報で追わない工程の設定を変えたときは
+  説明に「工程マスタと日報の行が揃いました」を付ける（`allInRouting()`、`lib/product-process-utils.ts`）
+- `ProductRoutingsDialog` に `initialProcessName`（追加のフォームに入れておく工程名）と `onSaved`（渡すと保存のトーストは呼び出し側が出す）を足した
+- クエリキーは `["daily-report-names", "product-processes", ...]`（一覧・比較とも1リクエストなので配下に置き、工程の別名・対象外の登録でまとめて取り直す）。
+  工程ルート・日報で追わない工程の変更後は `useInvalidateProductProcesses()`（突き合わせとマスタの工程名を取り直す）を呼ぶ。工程ルートのダイアログを閉じたときも呼ぶ
+  （ダイアログの中の「日報で追わない」の切り替えを反映する）
+- 比較のページの URL の製品 ID・期間は外部入力として `parseProductIdParam()`・`parsePeriodParam()` で検証する
+
 ## テスト
 
 - 振り分け: `lib/daily-report-worklist-utils.test.ts`
@@ -196,4 +249,8 @@ UI文言ガイドライン（[docs/ui-writing-guidelines.md](../ui-writing-guide
   `components/daily-report-names/customer-raw-groups.test.tsx`（顧客を選ぶと①へ移り、トーストで知らせる）
 - ①の行から製品を登録する（#705）: `components/products/create-product-dialog.test.tsx`・`components/similar-products-warning.test.tsx`・
   `components/daily-report-names/unmatched-name-list.test.tsx`・`lib/product-code-utils.test.ts`
+- ② 製品の工程（#708）: Backend `__tests__/unit/services/test_daily_report_product_processes.py`（突き合わせ）・
+  `test_daily_report_product_process_service.py`（DB 入出力）・`__tests__/api/routers/daily_reports/test_daily_report_product_process_router.py`・
+  integration `test_daily_report_name_matching.py` の `TestDailyReportProductProcessStats`（RPC）。Frontend `lib/product-process-utils.test.ts`・
+  `app/master/daily-reports/processes/[productId]/page.test.tsx`（左右の並び・ロールごとの操作・確認と揃ったトースト）
 - 見た目: `e2e/daily-report-hub.spec.ts`（API は `page.route()` の固定応答。スクリーンショットは `frontend/test-results/daily-report-hub/`）

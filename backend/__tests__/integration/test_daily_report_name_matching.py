@@ -642,3 +642,91 @@ class TestCustomerOrderedProducts:
                 "quantity": 10,
             }
         ]
+
+
+@pytest.mark.integration
+class TestDailyReportProductProcessStats:
+    """RPC daily_report_product_process_stats と製品単位の工程の突き合わせ (Issue #708)。"""
+
+    def test_aggregates_by_customer_product_process(self, admin_db, tenants):
+        own = tenants["own"]
+        _insert_entries(admin_db, own, ENTRY_ROWS)
+        _insert_entries(admin_db, tenants["other"], ENTRY_ROWS)
+
+        stats = _rows(
+            admin_db.rpc(
+                "daily_report_product_process_stats", {"p_tenant_id": own["id"]}
+            ).execute()
+        )
+        assert sorted(
+            (
+                s["customer_raw"],
+                s["product_raw"],
+                s["process_raw"],
+                s["entry_count"],
+                s["last_work_date"],
+            )
+            for s in stats
+        ) == [
+            ("サンプル工業", "ピン6x20", "カシメ", 1, "2026-09-01"),
+            ("サンプル工業", "短いピン", "カシメ加工", 1, "2026-09-02"),
+            ("未登録の顧客", "短いピン", "カシメ加工", 1, "2026-09-05"),
+        ]
+
+        since = _rows(
+            admin_db.rpc(
+                "daily_report_product_process_stats",
+                {"p_tenant_id": own["id"], "p_since": "2026-09-02"},
+            ).execute()
+        )
+        assert sorted(s["customer_raw"] for s in since) == [
+            "サンプル工業",
+            "未登録の顧客",
+        ]
+
+    def test_lists_products_whose_processes_do_not_match(self, admin_db, tenants):
+        from app.services.daily_report_product_process_service import (
+            get_product_process_comparison,
+            list_mismatched_product_processes,
+        )
+
+        own = tenants["own"]
+        # 製品名で結び付く明細に、工程ルート（カシメ）に無い工程名と工程名に結び付かない表記を足す
+        _insert_entries(
+            admin_db,
+            own,
+            [
+                [
+                    "2026.09.01",
+                    "サンプル工業",
+                    "ピン φ6×20",
+                    "カシメ",
+                    "80t 3号機",
+                    10,
+                    0,
+                ],
+                [
+                    "2026.09.02",
+                    "サンプル工業",
+                    "ピン φ6×20",
+                    "バレル研磨",
+                    "80t 3号機",
+                    5,
+                    0,
+                ],
+            ],
+        )
+
+        rows = list_mismatched_product_processes(admin_db, own["id"], None)
+        assert [
+            (r["product_id"], r["mismatch_count"], r["entry_count"]) for r in rows
+        ] == [(own["product_id"], 1, 1)]
+        comparison = get_product_process_comparison(
+            admin_db, own["id"], own["product_id"], None
+        )
+        assert comparison is not None
+        assert [
+            (r["process_name"], [raw["raw_text"] for raw in r["raws"]])
+            for r in comparison["routings"]
+        ] == [("カシメ", ["カシメ"])]
+        assert [u["raw_text"] for u in comparison["unmatched"]] == ["バレル研磨"]

@@ -65,6 +65,13 @@ interface ProductRoutingsDialogProps {
   product: Product | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** 開いたときに追加のフォームへ入れておく工程名（日報の工程を製品の工程に足す。Issue #708） */
+  initialProcessName?: string
+  /**
+   * 「変更を保存」が成功したとき。渡すと保存のトーストは呼び出し側が出す
+   * （日報の工程と揃ったかを知らせる。Issue #708）
+   */
+  onSaved?: (routings: ProcessRouting[]) => void
 }
 
 /** モーダル内でのみ扱うローカル下書き工程。id が負値の場合は未保存の新規工程を表す。 */
@@ -109,6 +116,8 @@ export function ProductRoutingsDialog({
   product,
   open,
   onOpenChange,
+  initialProcessName,
+  onSaved,
 }: ProductRoutingsDialogProps) {
   // ローカル下書き状態
   const [draftRoutings, setDraftRoutings] = useState<DraftRouting[]>([])
@@ -174,8 +183,9 @@ export function ProductRoutingsDialog({
       .map(toDraft)
     setDraftRoutings(drafts)
     setBaselineRoutings(drafts)
+    if (initialProcessName) setProcessName(initialProcessName)
     initializedRef.current = true
-  }, [open, routings])
+  }, [open, routings, initialProcessName])
 
   const isDirty = serializeDrafts(draftRoutings) !== serializeDrafts(baselineRoutings)
 
@@ -380,7 +390,8 @@ export function ProductRoutingsDialog({
         .map(toDraft)
       setDraftRoutings(drafts)
       setBaselineRoutings(drafts)
-      toast.success("変更を保存しました")
+      if (onSaved) onSaved(result)
+      else toast.success("変更を保存しました")
     } catch (error) {
       toast.error("変更の保存に失敗しました")
       console.error(error)
