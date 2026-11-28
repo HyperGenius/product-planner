@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { ApiError } from "@/lib/api-client"
+import type { UnmatchedName } from "@/types/daily-report-names"
 import {
   formatWorkDate,
+  groupProductsByCustomerRaw,
   nameMutationErrorMessage,
   unmatchedNameKey,
 } from "./daily-report-name-utils"
@@ -75,5 +77,78 @@ describe("nameMutationErrorMessage", () => {
 
   it("その他は固定文言", () => {
     expect(nameMutationErrorMessage(new Error("boom"), fallback)).toBe(fallback)
+  })
+})
+
+describe("groupProductsByCustomerRaw（Issue #703）", () => {
+  function name(overrides: Partial<UnmatchedName>): UnmatchedName {
+    return {
+      kind: "product",
+      raw_text: "ピンA",
+      customer_raw: null,
+      customer_id: null,
+      entry_count: 1,
+      last_work_date: "2026-11-01",
+      ...overrides,
+    }
+  }
+  const customer = (raw: string, entryCount = 1) =>
+    name({ kind: "customer", raw_text: raw, entry_count: entryCount })
+
+  it("未登録の顧客先ごとに、その顧客先の製品をまとめる（顧客先・製品とも受け取った順）", () => {
+    const groups = groupProductsByCustomerRaw(
+      [customer("顧客X", 20), customer("顧客Y", 5)],
+      [
+        name({ raw_text: "ピン1", customer_raw: "顧客Y" }),
+        name({ raw_text: "ピン2", customer_raw: "顧客X" }),
+        name({ raw_text: "ピン3", customer_raw: "顧客Y" }),
+      ],
+    )
+    expect(
+      groups.unregistered.map((g) => [g.customerRaw, g.products.map((p) => p.raw_text)]),
+    ).toEqual([
+      ["顧客X", ["ピン2"]],
+      ["顧客Y", ["ピン1", "ピン3"]],
+    ])
+    expect(groups.unresolved).toEqual([])
+  })
+
+  it("製品の行が無い顧客先もまとまりとして出す", () => {
+    const groups = groupProductsByCustomerRaw([customer("顧客X")], [])
+    expect(groups.unregistered).toHaveLength(1)
+    expect(groups.unregistered[0].customer.raw_text).toBe("顧客X")
+    expect(groups.unregistered[0].products).toEqual([])
+  })
+
+  it("顧客先が空欄の製品・未登録の一覧に無い（対象外にした）顧客先の製品は、顧客を選べないまとまりにする", () => {
+    const groups = groupProductsByCustomerRaw(
+      [customer("顧客X")],
+      [
+        name({ raw_text: "ピン1", customer_raw: null }),
+        name({ raw_text: "ピン2", customer_raw: "社内" }),
+        name({ raw_text: "ピン3", customer_raw: "顧客X" }),
+        name({ raw_text: "ピン4", customer_raw: "社内" }),
+        name({ raw_text: "ピン5", customer_raw: null }),
+      ],
+    )
+    expect(groups.unregistered.map((g) => g.products.map((p) => p.raw_text))).toEqual([["ピン3"]])
+    // 対象外にした顧客先 → 空欄の順
+    expect(
+      groups.unresolved.map((g) => [g.type, g.customerRaw, g.products.map((p) => p.raw_text)]),
+    ).toEqual([
+      ["ignored", "社内", ["ピン2", "ピン4"]],
+      ["blank", null, ["ピン1", "ピン5"]],
+    ])
+  })
+
+  it("どの製品もどれか1つのまとまりにだけ入る", () => {
+    const products = [
+      name({ raw_text: "ピン1", customer_raw: "顧客X" }),
+      name({ raw_text: "ピン1", customer_raw: null }),
+      name({ raw_text: "ピン1", customer_raw: "社内" }),
+    ]
+    const groups = groupProductsByCustomerRaw([customer("顧客X")], products)
+    const placed = [...groups.unregistered, ...groups.unresolved].flatMap((g) => g.products)
+    expect(placed.map(unmatchedNameKey).sort()).toEqual(products.map(unmatchedNameKey).sort())
   })
 })

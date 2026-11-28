@@ -19,7 +19,7 @@ import { DAILY_REPORT_HUB_TITLE } from "@/lib/daily-report-worklist-utils"
  * 件数は `classifyDailyReportWorklist()` の結果から出し、各作業の一覧は専用のページ（`/master/daily-reports/<page>`）に置く。
  * ページの行も同じ結果から出すので件数と一致する。
  *
- * - 前提バナー: アプリに未登録の日報の顧客先・顧客先が決まっていない日報の製品があるときだけ出す
+ * - 前提バナー: アプリに未登録の日報の顧客先・顧客先が空欄・対象外の日報の製品があるときだけ出す
  * - ① 日報の製品をつなぐ（products）・② 製品の工程を日報に合わせる（processes）・③ 受注の無い製造を確かめる（unordered）
  * - 参考: 作り置き（stock）・結び付いた割合・登録済みの対応付け・対象外（aliases）
  *

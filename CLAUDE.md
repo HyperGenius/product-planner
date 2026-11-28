@@ -265,6 +265,10 @@ cd backend && ruff check . && mypy .
     設備は割り付けに使わないのでハブに数えない（#709 まで登録済みの対応付けのページのタブ）。件数の型・表示は送品の消し込みと共通の
     `lib/work-count.ts`。ページの外枠は `DailyReportPageLayout`、説明は `DailyReportHelp`。マスタのタブはハブ配下のページでも選択中にする
     （`app/master/layout.tsx`）。詳細は [docs/features/daily-report-hub.md](docs/features/daily-report-hub.md)
+  - **前提のページの顧客先のまとまり（Issue #703）**: 顧客先が決まっていない製品は `groupProductsByCustomerRaw()`（`lib/daily-report-name-utils.ts`）で
+    未登録の顧客先ごと・空欄・対象外にした顧客先にまとめ、`classifyDailyReportWorklist()` の `prerequisite.groups` から描く。前提の件数は
+    「未登録の顧客先の数（＝まとまりの数、製品の無い顧客先も数える）」と「空欄・対象外の顧客先の製品の数」で、未登録の顧客先の製品は別に数えない。
+    行は `UnmatchedNameRow` を使い回し、まとまりでトーストを変えるときは `register` を直接呼ばず `onMapped` で差し替える（確認ダイアログは経由したまま）
   - **日報の実績の文言（Issue #702）**: 画面に出さない語は `DAILY_REPORT_FORBIDDEN_UI_TEXT`（`test-utils/daily-report.ts`。送品の
     `FORBIDDEN_UI_TEXT` ＋「割り付け・未割当・類似度・キュー」）で、ページ・部品のテストで本文を検査する。反映のタイミング・結び付けの単位・
     並び順・対象外の戻し方は `DailyReportHelp` に置き、行・ダイアログに戻さない。件数の単位は表記の行が「明細」、受注が「注文」。

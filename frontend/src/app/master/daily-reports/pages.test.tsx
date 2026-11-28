@@ -67,6 +67,7 @@ function group(overrides: Partial<UnallocatedGroup>): UnallocatedGroup {
 const NAMES: UnmatchedName[] = [
   name({ kind: "customer", raw_text: "顧客X", customer_raw: null, customer_id: null }),
   name({ raw_text: "ピンX", customer_raw: "顧客X", customer_id: null }),
+  name({ raw_text: "ピンZ", customer_raw: null, customer_id: null }),
   name({ raw_text: "ピンA", entry_count: 30 }),
   name({ raw_text: "ピンB", entry_count: 5 }),
   name({ kind: "process", raw_text: "ﾌﾟﾚｽ加工", customer_raw: null, customer_id: null }),
@@ -186,8 +187,9 @@ describe("日報の実績のハブ（Issue #707）", () => {
     expect(requests[0].searchParams.get("months")).toBe("3")
 
     const banner = screen.getByRole("region", { name: "先に片付けること" })
-    expect(banner).toHaveTextContent("日報の顧客先1件がアプリに未登録です")
-    expect(banner).toHaveTextContent("顧客先が決まっていない日報の製品が1品名あります")
+    expect(banner).toHaveTextContent("日報の顧客先のうち1顧客先がアプリに未登録です")
+    // 未登録の顧客先の製品（ピンX）は顧客先のまとまりの中に出すので、ここでは空欄の製品だけを数える（#703）
+    expect(banner).toHaveTextContent("顧客先が空欄・対象外の日報の製品が1品名あります")
     expect(within(banner).getByRole("link", { name: "顧客を選ぶ" })).toHaveAttribute(
       "href",
       "/master/daily-reports/customers",
@@ -302,15 +304,17 @@ describe("日報の実績の各ページ（Issue #707）", () => {
     expect(document.body.textContent).not.toMatch(DAILY_REPORT_FORBIDDEN_UI_TEXT)
   })
 
-  it("前提: 未登録の顧客先と、顧客先が決まっていない製品を分けて出す（バナーと同じ件数）", async () => {
+  it("前提: 未登録の顧客先ごとに製品をまとめ、空欄の製品は別に出す（バナーと同じ件数、#703）", async () => {
     mockSources()
     render(<DailyReportCustomersPage />)
 
-    await waitFor(() => expect(getPageHeading()).toHaveTextContent("日報の顧客先1件"))
-    expect(await screen.findByRole("button", { name: "顧客X" })).toBeInTheDocument()
-    const products = screen.getByRole("region", { name: /顧客先が決まっていない日報の製品/ })
-    expect(within(products).getByRole("heading")).toHaveTextContent("1品名")
-    expect(within(products).getByRole("button", { name: "ピンX" })).toBeInTheDocument()
+    await waitFor(() => expect(getPageHeading()).toHaveTextContent("日報の顧客先1顧客先"))
+    const customer = await screen.findByRole("region", { name: "顧客先「顧客X」" })
+    expect(within(customer).getByRole("button", { name: "顧客X" })).toBeInTheDocument()
+    expect(within(customer).getByRole("button", { name: "ピンX" })).toBeInTheDocument()
+    const products = screen.getByRole("region", { name: /顧客先が空欄・対象外の日報の製品/ })
+    expect(within(products).getByRole("heading", { level: 2 })).toHaveTextContent("1品名")
+    expect(within(products).getByRole("button", { name: "ピンZ" })).toBeInTheDocument()
   })
 
   it("①: 顧客先が決まった日報の製品だけを、ハブと同じ件数で出す", async () => {

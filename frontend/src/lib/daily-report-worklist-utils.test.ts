@@ -66,8 +66,11 @@ function coverage(groups: UnallocatedGroup[]): DailyReportCoverage {
 /** 振り分けた先（前提・①②③・対象外）を、表記・まとめのキーの一覧にする */
 function placedKeys(worklist: DailyReportWorklist): string[] {
   return [
-    ...worklist.prerequisite.customers.map(unmatchedNameKey),
-    ...worklist.prerequisite.products.map(unmatchedNameKey),
+    // 前提のページは顧客先のまとまりで出す（Issue #703）
+    ...worklist.prerequisite.groups.unregistered.flatMap((g) =>
+      [g.customer, ...g.products].map(unmatchedNameKey),
+    ),
+    ...worklist.prerequisite.groups.unresolved.flatMap((g) => g.products.map(unmatchedNameKey)),
     ...worklist.products.map(unmatchedNameKey),
     ...worklist.processes.names.map(unmatchedNameKey),
     ...worklist.excluded.names.map(unmatchedNameKey),
@@ -161,19 +164,31 @@ describe("classifyDailyReportWorklist", () => {
     expectEachPlacedOnce(NAMES, GROUPS, worklist)
   })
 
-  it("件数は各ページの行の数（前提は顧客先と製品を分けて数え、②は製品の数）", () => {
+  it("件数は各ページの行の数（前提は顧客先のまとまりと空欄の製品を分けて数え、②は製品の数）", () => {
     const worklist = classifyDailyReportWorklist({
       unmatchedNames: NAMES,
       coverage: coverage(GROUPS),
     })
     expect(worklist.counts).toEqual({
       customer: 2,
-      prerequisiteProduct: 2,
+      prerequisiteProduct: 1,
       products: 3,
       processNames: 1,
       processProducts: 2,
       unordered: 4,
     })
+    expect(worklist.counts.customer).toBe(worklist.prerequisite.groups.unregistered.length)
+    // 未登録の顧客先の製品（ピンX）はまとまりの中に出し、別に数えない。数えるのは空欄（ピンZ）だけ
+    expect(
+      worklist.prerequisite.groups.unregistered.map((g) => [
+        g.customerRaw,
+        g.products.map((p) => p.raw_text),
+      ]),
+    ).toEqual([
+      ["顧客X", ["ピンX"]],
+      ["顧客Y", []],
+    ])
+    expect(worklist.prerequisite.groups.unresolved.map((g) => g.type)).toEqual(["blank"])
     expect(worklist.counts.products).toBe(worklist.products.length)
     expect(worklist.counts.processProducts).toBe(worklist.processes.products.length)
     expect(worklist.counts.unordered).toBe(worklist.unordered.length)
@@ -188,7 +203,7 @@ describe("classifyDailyReportWorklist", () => {
   it("届いていないデータの件数は null（途中の件数を出さない）", () => {
     expect(classifyDailyReportWorklist({ unmatchedNames: NAMES }).counts).toEqual({
       customer: 2,
-      prerequisiteProduct: 2,
+      prerequisiteProduct: 1,
       products: 3,
       processNames: 1,
       processProducts: null,

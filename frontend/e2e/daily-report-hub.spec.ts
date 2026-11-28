@@ -42,6 +42,7 @@ const UNMATCHED_NAMES = [
   unmatched("customer", "テスト工業(株)", { entry_count: 4 }),
   // 顧客先が決まっていない製品（前提）
   unmatched("product", "ブラケット改", { customer_raw: "見本商事", entry_count: 8 }),
+  unmatched("product", "試作品", { entry_count: 1 }),
   // ① 顧客先が決まっている製品
   unmatched("product", "ﾌﾞﾗｹｯﾄA", { customer_raw: "サンプル", customer_id: 1, entry_count: 20 }),
   unmatched("product", "シャフト B-2", { customer_raw: "サンプル", customer_id: 1, entry_count: 9 }),
@@ -151,7 +152,7 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
     await expect(page.getByRole("link", { name: "② 製品の工程を日報に合わせる 2製品 日報の工程名 1工程名" })).toBeVisible()
     await expect(page.getByRole("link", { name: "③ 受注の無い製造を確かめる 4件" })).toBeVisible()
     await expect(page.getByRole("region", { name: "先に片付けること" })).toContainText(
-      "日報の顧客先2件がアプリに未登録です",
+      "日報の顧客先のうち2顧客先がアプリに未登録です",
     )
     await expect(page.getByRole("link", { name: "作り置き（推定） 2製品" })).toBeVisible()
     // マスタのタブは1つにまとまり、選択中になる
@@ -174,7 +175,13 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
     await open(page, "/master/daily-reports")
     await page.getByRole("link", { name: "顧客を選ぶ" }).click({ timeout: 30000 })
     await expect(page).toHaveURL(/\/master\/daily-reports\/customers$/)
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("2件")
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("2顧客先")
+    // 未登録の顧客先ごとに製品をまとめる（#703）
+    const group = page.getByRole("region", { name: "顧客先「見本商事」" })
+    await expect(group).toContainText("1品名")
+    await expect(group.getByRole("list", { name: "日報の製品" })).toContainText("ブラケット改")
+    await expect(page.getByRole("region", { name: "顧客先「テスト工業(株)」" })).toContainText("0品名")
+    await expect(page.getByRole("region", { name: "顧客先が空欄", exact: true })).toContainText("試作品")
     await screenshot(page, "customers-1920")
   })
 
@@ -225,11 +232,14 @@ test.describe("日報の実績のハブと各ページ（Issue #707）", () => {
     await expect(page).toHaveURL(/\/master\/daily-reports$/, { timeout: 30000 })
   })
 
-  test("ハブ・② をタブレット横向き（1180×820）で", async ({ page }) => {
+  test("ハブ・前提・② をタブレット横向き（1180×820）で", async ({ page }) => {
     await page.setViewportSize({ width: 1180, height: 820 })
     await open(page, "/master/daily-reports")
     await expect(page.getByRole("link", { name: /^① 日報の製品をつなぐ/ })).toBeVisible({ timeout: 30000 })
     await screenshot(page, "hub-tablet")
+    await page.goto("/master/daily-reports/customers")
+    await expect(page.getByRole("region", { name: "顧客先「見本商事」" })).toBeVisible({ timeout: 30000 })
+    await screenshot(page, "customers-tablet")
     await page.goto("/master/daily-reports/processes")
     await expect(page.getByTestId("process-product-row")).toHaveCount(2, { timeout: 30000 })
     await screenshot(page, "processes-tablet")

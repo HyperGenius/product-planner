@@ -85,7 +85,7 @@ export function DailyReportPrerequisiteBanner({ counts }: { counts: DailyReportW
     >
       {customers > 0 && (
         <BannerLine
-          text={`${DAILY_REPORT_PREREQUISITE_META.customer.label}${customers}${DAILY_REPORT_PREREQUISITE_META.customer.unit}がアプリに未登録です`}
+          text={`${DAILY_REPORT_PREREQUISITE_META.customer.label}のうち${customers}${DAILY_REPORT_PREREQUISITE_META.customer.unit}がアプリに未登録です`}
         >
           <Button asChild size="sm" variant="outline" className="bg-white">
             <Link href={href}>顧客を選ぶ</Link>
